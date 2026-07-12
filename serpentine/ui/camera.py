@@ -10,6 +10,16 @@ from ..utils.math3d import look_at, normalize, perspective
 
 Z_UP = np.array([0.0, 0.0, 1.0])
 
+# cinema sensor presets: (width, height) in millimetres
+SENSORS = {
+    "Super35": (24.89, 18.66),
+    "FullFrame": (36.0, 24.0),
+    "Alexa LF": (36.70, 25.54),
+    "Super16": (12.52, 7.42),
+    "65mm": (52.48, 23.01),
+    "IMAX": (70.41, 52.63),
+}
+
 
 class Camera:
     def __init__(self):
@@ -18,6 +28,21 @@ class Camera:
         self.azimuth = math.radians(-60.0)     # around +Z from +X
         self.elevation = math.radians(30.0)    # from XY plane
         self.fov = 45.0
+        self.sensor_name = "Super35"
+
+    @property
+    def sensor(self) -> tuple[float, float]:
+        return SENSORS.get(self.sensor_name, SENSORS["Super35"])
+
+    @property
+    def focal_length(self) -> float:
+        """Lens focal length (mm) equivalent to the current vertical fov."""
+        h = self.sensor[1]
+        return h / (2.0 * math.tan(math.radians(self.fov) / 2))
+
+    def set_focal_length(self, mm: float):
+        h = self.sensor[1]
+        self.fov = math.degrees(2.0 * math.atan(h / (2.0 * float(mm))))
 
     # -- pose ---------------------------------------------------------------
 

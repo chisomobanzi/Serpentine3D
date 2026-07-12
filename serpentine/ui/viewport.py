@@ -266,6 +266,7 @@ class Viewport(QOpenGLWidget):
         self.snaps = SnapIndex(scene, config)
         self._active_snap = None            # (point, kind) under cursor
         self.snap_base = None               # reference point for perp snap
+        self.frame_aspect = None            # cinema frame guide (e.g. 2.39)
         self.grid_snap = bool(config.get("grid_snap")) if config else False
         self.grid_snap_step = (float(config.get("grid_snap_step",
                                                 default=1.0))
@@ -413,6 +414,7 @@ class Viewport(QOpenGLWidget):
         self._draw_control_points(mvp)
         self.gumball.paint(mvp)
         self._draw_axis_triad(view, w, h)
+        self._draw_frame_guides(w, h)
         self._draw_selection_box(w, h)
 
     def _paint_technical(self, w, h):
@@ -728,6 +730,58 @@ class Viewport(QOpenGLWidget):
         self._preview.update(corners)
         self._draw_lines(self._preview, np.eye(4, dtype=np.float32),
                          color, 1.0)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+
+    def _draw_frame_guides(self, w, h):
+        """Cinema aspect-ratio frame guides with dimmed letterbox."""
+        if not self.frame_aspect:
+            return
+        margin = 0.04
+        avail_w = w * (1 - 2 * margin)
+        avail_h = h * (1 - 2 * margin)
+        if avail_w / avail_h > self.frame_aspect:
+            fh = avail_h
+            fw = fh * self.frame_aspect
+        else:
+            fw = avail_w
+            fh = fw / self.frame_aspect
+        x0, x1 = (w - fw) / 2, (w + fw) / 2
+        y0, y1 = (h - fh) / 2, (h + fh) / 2
+
+        def ndc(px, py):
+            return (2 * px / w - 1, 1 - 2 * py / h, 0.0)
+
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        # dim outside the frame
+        quads = [
+            (0, 0, w, y0), (0, y1, w, h),
+            (0, y0, x0, y1), (x1, y0, w, y1),
+        ]
+        for (qx0, qy0, qx1, qy1) in quads:
+            a, b = ndc(qx0, qy0), ndc(qx1, qy0)
+            c, d = ndc(qx1, qy1), ndc(qx0, qy1)
+            tris = np.array([a, b, c, a, c, d], np.float32)
+            self._preview.update(tris)
+            self._set_line_uniforms(np.eye(4, dtype=np.float32),
+                                    (0.02, 0.02, 0.03, 0.55))
+            GL.glBindVertexArray(self._preview.vao)
+            GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
+        # frame outline + centre cross
+        corners = [ndc(x0, y0), ndc(x1, y0), ndc(x1, y1), ndc(x0, y1)]
+        segs = []
+        for i in range(4):
+            segs.append(np.array([corners[i], corners[(i + 1) % 4]]))
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        cross = min(fw, fh) * 0.03
+        segs.append(np.array([ndc(cx - cross, cy), ndc(cx + cross, cy)]))
+        segs.append(np.array([ndc(cx, cy - cross), ndc(cx, cy + cross)]))
+        pts = np.concatenate(segs).astype(np.float32)
+        self._preview.update(pts)
+        self._set_line_uniforms(np.eye(4, dtype=np.float32),
+                                (0.95, 0.85, 0.55, 0.9))
+        self._line_width(1.4)
+        GL.glBindVertexArray(self._preview.vao)
+        GL.glDrawArrays(GL.GL_LINES, 0, len(pts))
         GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _draw_axis_triad(self, view, w, h):

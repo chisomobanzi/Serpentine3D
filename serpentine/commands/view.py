@@ -264,6 +264,8 @@ def cmd_namedview(ctx):
             "distance": cam.distance,
             "azimuth": cam.azimuth,
             "elevation": cam.elevation,
+            "fov": cam.fov,
+            "sensor": cam.sensor_name,
         }
         ctx.scene.notify()
         ctx.echo(f"Saved view '{name}'.")
@@ -278,6 +280,8 @@ def cmd_namedview(ctx):
         cam.distance = v["distance"]
         cam.azimuth = v["azimuth"]
         cam.elevation = v["elevation"]
+        cam.fov = v.get("fov", cam.fov)
+        cam.sensor_name = v.get("sensor", cam.sensor_name)
         vp.update()
         ctx.echo(f"Restored view '{name}'.")
     elif action == "Delete":
