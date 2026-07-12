@@ -106,6 +106,15 @@ def command(name: str, aliases: tuple = (), label: str = "",
     return wrap
 
 
+def add_alias(alias: str, target: str):
+    """Register a user alias at runtime (overrides built-ins)."""
+    _ALIASES[alias.lower().strip()] = target.lower().strip()
+
+
+def remove_alias(alias: str):
+    _ALIASES.pop(alias.lower().strip(), None)
+
+
 def resolve(name: str) -> CommandDef | None:
     key = name.lower().strip()
     if key in _REGISTRY:

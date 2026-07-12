@@ -77,7 +77,9 @@ class SerpApi:
             fd, path = tempfile.mkstemp(suffix=".png", prefix="serp_")
             os.close(fd)
         if full_window:
-            img = self.window.grab().toImage()
+            from PySide6.QtWidgets import QApplication
+            target = QApplication.activeModalWidget() or self.window
+            img = target.grab().toImage()
         else:
             img = self.viewport.grabFramebuffer()
         if width:

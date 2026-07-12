@@ -211,19 +211,23 @@ class Viewport(QOpenGLWidget):
     cvEditBegan = Signal()                  # control-point drag started
     escapePressed = Signal()
 
-    def __init__(self, scene, selection, parent=None):
+    def __init__(self, scene, selection, config=None, parent=None):
         super().__init__(parent)
         self.scene = scene
         self.selection = selection
+        self.config = config
         self.camera = Camera()
         self.display_mode = "shaded"        # shaded | wireframe | ghosted
         self.grid_visible = True
         self.point_mode = False             # command wants a point click
         from ..core.snaps import SnapIndex
-        self.snaps = SnapIndex(scene)
+        self.snaps = SnapIndex(scene, config)
         self._active_snap = None            # (point, kind) under cursor
-        self.grid_snap = False
-        self.grid_snap_step = 1.0
+        self.snap_base = None               # reference point for perp snap
+        self.grid_snap = bool(config.get("grid_snap")) if config else False
+        self.grid_snap_step = (float(config.get("grid_snap_step",
+                                                default=1.0))
+                               if config else 1.0)
         self.cv_enabled: set[str] = set()   # objects showing control points
         self._cv_cache: dict = {}
         self._cv_drag = None                # (obj_id, index, plane_pt, normal)
@@ -260,7 +264,11 @@ class Viewport(QOpenGLWidget):
         GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, False, 0,
                                  ctypes.c_void_p(0))
         GL.glBindVertexArray(0)
-        self._build_grid()
+        extent = (int(self.config.get("display", "grid_extent", default=100))
+                  if self.config else 100)
+        major = (int(self.config.get("display", "grid_major", default=10))
+                 if self.config else 10)
+        self._build_grid(extent=extent, major=major)
         self._preview = _LineBatch(np.zeros((0, 3), np.float32), dynamic=True)
         # forward-compatible core contexts reject widths > 1.0 regardless of
         # the advertised range, so probe rather than trust the query
@@ -278,6 +286,17 @@ class Viewport(QOpenGLWidget):
         GL.glEnable(GL.GL_MULTISAMPLE)
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+
+    def set_grid_params(self, extent: int, major: int):
+        """Rebuild the grid with new dimensions (needs a live GL context)."""
+        self._grid_params = (int(extent), int(major))
+        if self._grid is not None:
+            self.makeCurrent()
+            for batch in self._grid.values():
+                batch.release()
+            self._build_grid(extent=int(extent), major=int(major))
+            self.doneCurrent()
+            self.update()
 
     def _build_grid(self, extent: int = 100, step: int = 1, major: int = 10):
         minor, majors = [], []
@@ -450,16 +469,9 @@ class Viewport(QOpenGLWidget):
             self._draw_lines(self._preview, mvp,
                              (*theme.SELECTION_COLOR, 0.9), 1.6)
         if snap is not None:
-            # white square marker at the snap point
-            c = np.asarray(snap[0], np.float32)
-            right, up = self.camera.right_up()
-            r = (right * size * 0.9).astype(np.float32)
-            u = (up * size * 0.9).astype(np.float32)
-            corners = [c - r - u, c + r - u, c + r + u, c - r + u]
-            square = np.concatenate([
-                np.stack([corners[i], corners[(i + 1) % 4]])
-                for i in range(4)]).astype(np.float32)
-            self._preview.update(square)
+            segs = _snap_marker(snap[1], np.asarray(snap[0], np.float32),
+                                *self.camera.right_up(), size * 0.95)
+            self._preview.update(segs)
             self._draw_lines(self._preview, mvp, (1.0, 1.0, 1.0, 0.95), 2.0)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
@@ -581,7 +593,7 @@ class Viewport(QOpenGLWidget):
     def world_point_at(self, px: float, py: float):
         """Point for the pixel: object snap if near one, else CPlane (z=0)."""
         snap = self.snaps.find(self.camera, px, py, self.width(),
-                               self.height())
+                               self.height(), base_point=self.snap_base)
         if snap is not None:
             self._active_snap = snap
             return snap[0]
@@ -664,11 +676,14 @@ class Viewport(QOpenGLWidget):
             self._last_mouse = pos
         dx = pos.x() - self._last_mouse.x()
         dy = pos.y() - self._last_mouse.y()
-        if ev.buttons() & Qt.MouseButton.MiddleButton:
+        if ev.buttons() & self._nav_button():
+            speed = (float(self.config.get("mouse", "orbit_speed",
+                                           default=1.0))
+                     if self.config else 1.0)
             if ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 self.camera.pan(dx, dy, self.height())
             else:
-                self.camera.orbit(dx, dy)
+                self.camera.orbit(dx * speed, dy * speed)
             self.update()
         elif self._cv_drag is not None:
             obj_id, index, plane_pt, normal = self._cv_drag
@@ -791,8 +806,20 @@ class Viewport(QOpenGLWidget):
                 best = (obj_id, i, tuple(pts[i]))
         return best
 
+    def _nav_button(self) -> Qt.MouseButton:
+        """The mouse button used for orbit/pan (configurable)."""
+        name = (self.config.get("mouse", "orbit_button", default="middle")
+                if self.config else "middle")
+        return (Qt.MouseButton.RightButton if name == "right"
+                else Qt.MouseButton.MiddleButton)
+
     def wheelEvent(self, ev):
         steps = ev.angleDelta().y() / 120.0
+        if self.config:
+            if self.config.get("mouse", "invert_scroll", default=False):
+                steps = -steps
+            steps *= float(self.config.get("mouse", "zoom_speed",
+                                           default=1.0))
         self.camera.zoom(steps)
         self.update()
 
@@ -801,6 +828,41 @@ class Viewport(QOpenGLWidget):
             self.escapePressed.emit()
         else:
             super().keyPressEvent(ev)
+
+
+def _snap_marker(kind: str, c: np.ndarray, right: np.ndarray,
+                 up: np.ndarray, s: float) -> np.ndarray:
+    """Distinct marker glyph per snap type, as GL_LINES vertex pairs."""
+    r = (right * s).astype(np.float32)
+    u = (up * s).astype(np.float32)
+    c = c.astype(np.float32)
+
+    def loop(pts):
+        return [np.stack([pts[i], pts[(i + 1) % len(pts)]])
+                for i in range(len(pts))]
+
+    if kind == "end":                     # square
+        segs = loop([c - r - u, c + r - u, c + r + u, c - r + u])
+    elif kind == "mid":                   # triangle
+        segs = loop([c - r - u, c + r - u, c + u])
+    elif kind == "center":                # octagon ~ circle
+        pts = []
+        for k in range(8):
+            a = k * np.pi / 4
+            pts.append(c + r * np.cos(a) + u * np.sin(a))
+        segs = loop(pts)
+    elif kind == "quad":                  # diamond
+        segs = loop([c - r, c - u, c + r, c + u])
+    elif kind == "int":                   # X
+        segs = [np.stack([c - r - u, c + r + u]),
+                np.stack([c - r + u, c + r - u])]
+    elif kind == "perp":                  # perpendicular glyph
+        segs = [np.stack([c - r - u, c + r - u]),
+                np.stack([c - u, c + u])]
+    else:                                 # near: slash
+        segs = [np.stack([c - r - u, c + r + u]),
+                np.stack([c - r, c + r])]
+    return np.concatenate(segs).astype(np.float32)
 
 
 def _point_segment_dist2(p: np.ndarray, a: np.ndarray,

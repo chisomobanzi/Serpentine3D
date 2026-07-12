@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QMainWindow, QMessageBox,
-    QToolBar,
+    QToolBar, QVBoxLayout, QWidget,
 )
 
 from . import commands as cmd_pkg
@@ -38,18 +38,28 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
 
         # core state
+        from .utils.config import Config
+        self.cfg = Config()
         self.scene = Scene()
         self.selection = SelectionManager(self.scene)
         self.history = History(self.scene)
 
         # widgets
-        self.viewport = Viewport(self.scene, self.selection)
+        self.viewport = Viewport(self.scene, self.selection, config=self.cfg)
         self.setCentralWidget(self.viewport)
 
+        from .ui.osnap_bar import OsnapBar
         self.command_line = CommandLine()
+        self.osnap_bar = OsnapBar(self.viewport, self.cfg)
+        cmd_container = QWidget()
+        cmd_layout = QVBoxLayout(cmd_container)
+        cmd_layout.setContentsMargins(0, 0, 0, 0)
+        cmd_layout.setSpacing(0)
+        cmd_layout.addWidget(self.command_line)
+        cmd_layout.addWidget(self.osnap_bar)
         cmd_dock = QDockWidget("Command", self)
         cmd_dock.setObjectName("commandDock")
-        cmd_dock.setWidget(self.command_line)
+        cmd_dock.setWidget(cmd_container)
         cmd_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         cmd_dock.setTitleBarWidget(_EmptyTitleBar())
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, cmd_dock)
@@ -93,6 +103,9 @@ class MainWindow(QMainWindow):
 
         self._build_toolbar()
         self._build_menus()
+        self._user_shortcuts: list = []
+        self.apply_user_aliases()
+        self.apply_user_shortcuts()
         self._update_status()
         self.command_line.echo("Serpentine — type a command to begin "
                                "(line, circle, box, extrude, loft, ...)")
@@ -193,6 +206,9 @@ class MainWindow(QMainWindow):
         self._action(m_view, "Toggle Grid", "F7",
                      lambda: self.run_command("grid"))
 
+        m_tools = mb.addMenu("&Tools")
+        self._action(m_tools, "Settings...", "Ctrl+,", self._show_settings)
+
         m_help = mb.addMenu("&Help")
         self._action(m_help, "Commands", None, self._show_commands)
         self._action(m_help, "About", None, self._about)
@@ -235,10 +251,16 @@ class MainWindow(QMainWindow):
         self.command_line.set_prompt(self.processor.prompt_text())
         if isinstance(req, PointReq):
             self.viewport.set_point_mode(True)
+            base = req.rubber_from
+            if base is None and req.rubber_pts:
+                base = req.rubber_pts[-1]
+            self.viewport.snap_base = base
             self._refresh_rubber(None)
         else:
             self.viewport.set_point_mode(False)
+            self.viewport.snap_base = None
             self.viewport.set_preview(None)
+        self.osnap_bar.refresh()
         self._update_status()
 
     def _on_object_clicked(self, obj_id: str, modifiers):
@@ -399,6 +421,39 @@ class MainWindow(QMainWindow):
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Export failed", str(exc))
 
+    # ------------------------------------------------------------- settings
+
+    def _show_settings(self):
+        from .ui.settings_dialog import SettingsDialog
+        SettingsDialog(self).exec()
+
+    def apply_user_aliases(self):
+        from .commands import base as cmd_base
+        current = self.cfg.get("aliases", default={}) or {}
+        previous = getattr(self, "_applied_aliases", {})
+        for alias in previous:
+            if alias not in current:
+                cmd_base.remove_alias(alias)
+        for alias, target in current.items():
+            cmd_base.add_alias(alias, target)
+        self._applied_aliases = dict(current)
+
+    def apply_user_shortcuts(self):
+        from PySide6.QtGui import QShortcut
+        for sc in self._user_shortcuts:
+            sc.setParent(None)
+            sc.deleteLater()
+        self._user_shortcuts = []
+        for key, command in (self.cfg.get("shortcuts",
+                                          default={}) or {}).items():
+            seq = QKeySequence(key)
+            if seq.isEmpty():
+                continue
+            sc = QShortcut(seq, self)
+            sc.activated.connect(
+                lambda c=command: self.run_command(c))
+            self._user_shortcuts.append(sc)
+
     # ------------------------------------------------------------------ misc
 
     def _show_commands(self):
@@ -424,7 +479,22 @@ class MainWindow(QMainWindow):
         name = os.path.basename(path) if path else "untitled"
         self.setWindowTitle(f"{name} — {APP_TITLE}")
 
+    def _match_user_shortcut(self, ev) -> bool:
+        try:
+            pressed = QKeySequence(ev.keyCombination())
+        except Exception:
+            return False
+        for key, cmd in (self.cfg.get("shortcuts", default={}) or {}).items():
+            seq = QKeySequence(key)
+            if not seq.isEmpty() and seq.matches(pressed) == \
+                    QKeySequence.SequenceMatch.ExactMatch:
+                self.run_command(cmd)
+                return True
+        return False
+
     def keyPressEvent(self, ev):
+        if self._match_user_shortcut(ev):
+            return
         # fallback for env without a WM where QAction shortcuts don't fire
         if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
             handlers = {
