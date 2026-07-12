@@ -23,6 +23,7 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 serp = "serpentine.app:main"
 serp-mcp = "serpentine.mcp_server.server:main"
+serp-batch = "serpentine.batch:main"
 
 [build-system]
 requires = ["setuptools>=68"]

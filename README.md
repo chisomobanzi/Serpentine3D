@@ -45,13 +45,15 @@ construction plane. `Tab` completes command names, `Up`/`Down` recall history,
 
 | | Commands |
 |---|---|
-| **Curves** | `line` `polyline` `curve` (interpolated NURBS) `circle` `arc` `ellipse` `rectangle` |
-| **Surfaces** | `extrude` `revolve` `loft` `sweep1` `sweep2` `planarsrf` |
-| **Solids** | `box` `sphere` `cylinder` `cone` `torus` |
+| **Curves** | `line` `polyline` `curve` (interpolated NURBS) `circle` `arc` `ellipse` `rectangle` `helix` `textobject` `blendcrv` `project` `pull` `intersect` |
+| **Surfaces** | `extrude` `revolve` `loft` `sweep1` `sweep2` `planarsrf` `patch`/`networksrf` `offsetsrf` `unrollsrf` |
+| **Solids** | `box` `sphere` `cylinder` `cone` `torus` `filletedge` `chamferedge` `shell` `cap` `contour` `booleansplit` |
 | **Booleans** | `booleanunion` `booleandifference` `booleanintersection` |
 | **Transform** | `move` `copy` `rotate` `scale` `scalenu` `mirror` `array` |
 | **Edit** | `join` `explode` `trim` `split` `offset` `fillet` `rebuild` `pointson`/`pointsoff` (control points, curves *and* surfaces) `delete` `hide` `show` `rename` `undo` `redo` |
 | **Select** | `selall` `selnone` `selcrv` `selsrf` `selsolid` `sellayer` `selname` `sellast` `invert` `isolate` `unisolate` |
+| **Organise** | `group`/`ungroup` `lock`/`unlockall` `block` `insert` `blocklist` `count` |
+| **Camera** | `camera` (lens mm, cinema sensors, placement, 2.39/1.85 frame guides) `units` `cplane` |
 | **Array** | `array` (grid) `arraypolar` `arraypath` (along a curve) |
 | **Analysis** | `distance` `length` `area` `volume` `curvature` `zebra` (stripe continuity analysis) |
 | **View** | `top` `front` `right` `perspective` `zoomextents` `wireframe` `shaded` `ghosted` `grid` `snap` |
@@ -106,6 +108,34 @@ in 2D, print to PDF — without leaving the app:
   zoom; shaded details are embedded as rendered images. Layouts save/load
   with the `.serp` file.
 
+### The gumball
+
+Select anything and a **gumball** appears: drag the arrows to move along
+an axis, the pads to move in a plane, the circles to rotate (Shift snaps
+to 15°), the square knobs to scale along an axis (Shift = uniform).
+Alt-drag moves a copy. Escape cancels a drag. `gumball` toggles it.
+
+### Units
+
+`units` sets the document units (mm/cm/m/in/**feet-and-inches**) with an
+optional model rescale. Every prompt then accepts unit input — `3'6"`,
+`2' 4 1/2"`, `30cm`, `1.5in` — and coordinates support polar entry
+(`10<45`) and Shift-ortho constraint while picking.
+
+### Scripting & automation
+
+- **Python console** (Tools menu, Ctrl+`): the live scene, geometry
+  builders and the full API in an interactive session.
+- **`serpentine.scripting.Document`**: the same power headless —
+  `doc.add(geo.make_box(...))`, `doc.run("filletedge", [...])`,
+  `doc.export("part.step")`.
+- **`serp-batch script.py`**: run scripts from the command line / CI
+  with `doc`, `geo` and `args` predefined. No display needed.
+- **Autosave & crash recovery**: every 5 minutes (configurable); on
+  launch after a crash Serpentine offers to restore the autosave.
+- Drop a `~/.config/serpentine/template.serp` to start every new
+  document from your own template (units, layers, title blocks).
+
 ### Settings
 
 **Tools → Settings** (Ctrl+,) — five flat pages, changes apply instantly:
@@ -127,7 +157,11 @@ Settings live in `~/.config/serpentine/settings.json`.
 | `.serp` | ✓ | ✓ | Native: JSON scene + embedded binary BREP |
 | `.step` / `.stp` | ✓ | ✓ | Exact BREP exchange via OCCT |
 | `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps/surfaces import as untrimmed NURBS faces, export as meshes; layers preserved |
-| `.obj` | ✓ | ✓ | Tessellated mesh |
+| `.obj` | ✓ | ✓ | Tessellated mesh with `.mtl` colours |
+| `.dxf` | ✓ | ✓ | Curves/meshes with layers; layout sheets export at paper scale |
+| `.svg` | ✓ | ✓ | Paths import as curves (béziers exact); layouts export as vector SVG |
+| `.glb` | | ✓ | Binary glTF with materials (Unreal/Blender/web) |
+| `.usda` | | ✓ | USD for virtual-production pipelines |
 
 ## MCP server (AI integration)
 

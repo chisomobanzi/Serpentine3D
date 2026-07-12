@@ -263,6 +263,8 @@ class MainWindow(QMainWindow):
                      lambda: self.run_command("exportpdf"))
 
         m_tools = mb.addMenu("&Tools")
+        self._action(m_tools, "Python Console", "Ctrl+`",
+                     self._toggle_console)
         self._action(m_tools, "Settings...", "Ctrl+,", self._show_settings)
 
         m_help = mb.addMenu("&Help")
@@ -604,6 +606,18 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- settings
 
+    def _toggle_console(self):
+        if not hasattr(self, "_console_dock"):
+            from .ui.console import PythonConsole
+            self._console_dock = QDockWidget("Python", self)
+            self._console_dock.setObjectName("pythonDock")
+            self._console_dock.setWidget(PythonConsole(self))
+            self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea,
+                               self._console_dock)
+        else:
+            self._console_dock.setVisible(
+                not self._console_dock.isVisible())
+
     def _show_settings(self):
         from .ui.settings_dialog import SettingsDialog
         SettingsDialog(self).exec()
@@ -735,6 +749,15 @@ def main():
         from .rpc import RpcServer
         window._rpc = RpcServer(window)
         window._rpc.start()
+
+    template = os.path.expanduser("~/.config/serpentine/template.serp")
+    if os.path.exists(template):
+        try:
+            fileio.import_file(window.scene, template)
+            window.mark_saved()
+            window.command_line.echo("Started from template.serp.")
+        except Exception:                                     # noqa: BLE001
+            pass
 
     window.show()
     window.offer_recovery()
