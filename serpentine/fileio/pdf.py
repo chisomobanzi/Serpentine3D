@@ -65,7 +65,7 @@ def _paint_layout(painter: QPainter, window, layout, k: float):
 
     # dimensions
     for dim in layout.dims:
-        _paint_dim(painter, dim, layout, k, pt)
+        _paint_dim(painter, dim, layout, k, pt, window.scene)
 
 
 def _paint_detail_vector(painter, layout_view, detail, layout, k):
@@ -112,7 +112,7 @@ def _paint_detail_raster(painter, window, detail, layout, k):
     painter.drawImage(target, img)
 
 
-def _paint_dim(painter, dim, layout, k, pt):
+def _paint_dim(painter, dim, layout, k, pt, scene=None):
     a = np.array([dim.x1, dim.y1])
     b = np.array([dim.x2, dim.y2])
     d = b - a
@@ -138,7 +138,9 @@ def _paint_dim(painter, dim, layout, k, pt):
         line(tip, tip + w + perp)
         line(tip, tip + w - perp)
     mid = (a + b) / 2 + n * (dim.offset + 2.0)
-    text = dim.text or f"{length * dim.scale_denom:g}"
+    measured = length * dim.scale_denom
+    text = dim.text or (scene.format_length(measured) if scene
+                        else f"{measured:g}")
     font = QFont("sans")
     font.setPixelSize(int(3.2 * k))
     painter.setFont(font)

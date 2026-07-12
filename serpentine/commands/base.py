@@ -15,6 +15,7 @@ clicks, or the MCP bridge — the command code never knows the difference.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -44,6 +45,11 @@ class NumberReq(Req):
     prompt: str
     default: float | None = None
     minimum: float | None = None
+
+
+@dataclass
+class LengthReq(NumberReq):
+    """A length in document units — accepts 3'6", 30cm, 1.5in, etc."""
 
 
 @dataclass
@@ -163,19 +169,45 @@ class CommandContext:
 
 # --------------------------------------------------------------- input parsing
 
-def parse_point(text: str, last_point: Point | None = None) -> Point | None:
-    """Parse 'x,y[,z]' absolute or '@dx,dy[,dz]' relative coordinates."""
+def parse_point(text: str, last_point: Point | None = None,
+                units: str = "mm", cplane=None) -> Point | None:
+    """Parse coordinates: 'x,y[,z]' absolute, '@dx,dy[,dz]' relative, or
+    'dist<angle' polar (relative to the last point, on the CPlane).
+
+    Each coordinate accepts unit expressions (3'6", 30cm, 1.5in)."""
+    from ..utils.units import parse_length
     text = text.strip()
+
+    # polar: distance<angle_degrees (CPlane XY, from last point)
+    if "<" in text:
+        dist_s, _, ang_s = text.partition("<")
+        dist = parse_length(dist_s, units)
+        try:
+            ang = math.radians(float(ang_s.strip()))
+        except ValueError:
+            return None
+        if dist is None:
+            return None
+        base = last_point or (0.0, 0.0, 0.0)
+        if cplane is not None:
+            u, v, w = cplane.from_world(base)
+            return cplane.to_world(u + dist * math.cos(ang),
+                                   v + dist * math.sin(ang), w)
+        return (base[0] + dist * math.cos(ang),
+                base[1] + dist * math.sin(ang), base[2])
+
     relative = text.startswith("@")
     if relative:
         text = text[1:]
     parts = [p.strip() for p in text.replace(";", ",").split(",")]
     if len(parts) not in (2, 3):
         return None
-    try:
-        vals = [float(p) for p in parts]
-    except ValueError:
-        return None
+    vals = []
+    for p in parts:
+        v = parse_length(p, units)
+        if v is None:
+            return None
+        vals.append(v)
     if len(vals) == 2:
         vals.append(0.0)
     if relative:
@@ -195,17 +227,27 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
         for opt in req.extra_options:
             if text and opt.lower().startswith(text.lower()):
                 return True, opt
-        pt = parse_point(text, ctx.last_point)
+        pt = parse_point(text, ctx.last_point, ctx.scene.units, ctx.cplane)
         if pt is None:
-            return False, "Expected coordinates like 3,4,0 (or @1,0 relative)"
+            return False, ("Expected coordinates like 3,4,0 "
+                           "(@1,0 relative, 10<45 polar, units like 3'6\")")
         return True, pt
+    if isinstance(req, LengthReq):
+        if not text and req.default is not None:
+            return True, req.default
+        from ..utils.units import parse_length
+        v = parse_length(text, ctx.scene.units)
+        if v is None:
+            return False, "Expected a length (e.g. 250, 3'6\", 30cm)"
+        if req.minimum is not None and v < req.minimum:
+            return False, f"Value must be >= {req.minimum}"
+        return True, v
     if isinstance(req, NumberReq):
         if not text and req.default is not None:
             return True, req.default
         try:
             v = float(text)
         except ValueError:
-            # allow a point-pair style distance? keep simple
             return False, "Expected a number"
         if req.minimum is not None and v < req.minimum:
             return False, f"Value must be >= {req.minimum}"
@@ -229,8 +271,11 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
     if isinstance(req, OptionReq):
         if not text and req.default is not None:
             return True, req.default
+        for opt in req.options:                    # exact match first
+            if text and opt.lower() == text.lower():
+                return True, opt
         for opt in req.options:
-            if opt.lower().startswith(text.lower()) and text:
+            if text and opt.lower().startswith(text.lower()):
                 return True, opt
         return False, f"Options: {', '.join(req.options)}"
     return False, "Unsupported input"

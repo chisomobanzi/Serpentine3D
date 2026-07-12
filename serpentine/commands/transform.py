@@ -1,7 +1,7 @@
 """Transform commands: move, copy, rotate, scale, mirror, array."""
 
 from ..core import geometry as g
-from .base import IntReq, NumberReq, OptionReq, PointReq, SelectReq, command
+from .base import IntReq, LengthReq, NumberReq, OptionReq, PointReq, SelectReq, command
 
 
 @command("move", aliases=("m",))
@@ -133,10 +133,10 @@ def cmd_array(ctx):
     objs = yield SelectReq("Select objects to array")
     nx = yield IntReq("Count X", default=2, minimum=1)
     ny = yield IntReq("Count Y", default=1, minimum=1)
-    dx = yield NumberReq("Spacing X", default=10.0)
+    dx = yield LengthReq("Spacing X", default=10.0)
     dy = 0.0
     if ny > 1:
-        dy = yield NumberReq("Spacing Y", default=10.0)
+        dy = yield LengthReq("Spacing Y", default=10.0)
     n = 0
     for i in range(nx):
         for j in range(ny):

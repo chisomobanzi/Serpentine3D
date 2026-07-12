@@ -340,3 +340,33 @@ def test_sellayer_and_selname(env):
     proc.run("selname")
     proc.provide_text("crate")
     assert len(sel.ids) == 2
+
+
+def test_feet_inches_input(env):
+    scene, sel, hist, ctx, proc = env
+    scene.units = "ft"
+    proc.run("circle")
+    proc.provide_text("0,0,0")
+    proc.provide_text("3'6\"")           # radius = 3.5 ft
+    import math
+    assert g.curve_length(scene.all()[0].shape) == pytest.approx(
+        2 * math.pi * 3.5, rel=1e-6)
+    # coordinates with units + polar input
+    proc.run("line")
+    proc.provide_text("1',2',0")
+    proc.provide_text("10<0")            # 10 ft along +X
+    mn, mx = g.bbox(scene.all()[1].shape)
+    assert mn[0] == pytest.approx(1) and mx[0] == pytest.approx(11)
+    assert mn[1] == pytest.approx(2)
+
+
+def test_units_command_rescale(env):
+    scene, sel, hist, ctx, proc = env
+    scene.add(g.make_box((0, 0, 0), 1000, 1000, 1000))   # 1m box in mm
+    proc.run("units")
+    proc.provide_text("m")
+    proc.provide_text("Yes")             # rescale
+    assert scene.units == "m"
+    assert g.volume(scene.all()[0].shape) == pytest.approx(1.0, rel=1e-6)
+    proc.run("undo")
+    assert g.volume(scene.all()[0].shape) == pytest.approx(1e9, rel=1e-6)

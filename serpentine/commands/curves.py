@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..core import geometry as g
-from .base import NumberReq, OptionReq, PointReq, command
+from .base import LengthReq, NumberReq, OptionReq, PointReq, command
 
 
 def _rubber(pts):
@@ -61,7 +61,7 @@ def cmd_curve(ctx):
 @command("circle", aliases=("c", "ci"))
 def cmd_circle(ctx):
     center = yield PointReq("Center of circle")
-    r = yield NumberReq("Radius", minimum=1e-9)
+    r = yield LengthReq("Radius", minimum=1e-9)
     obj = ctx.scene.add(g.make_circle(center, r,
                                       normal=tuple(ctx.cplane.normal)))
     ctx.echo(f"Created {obj.name} (r={r:g}).")
@@ -79,8 +79,8 @@ def cmd_arc(ctx):
 @command("ellipse", aliases=("el",))
 def cmd_ellipse(ctx):
     center = yield PointReq("Center of ellipse")
-    r1 = yield NumberReq("Major radius", minimum=1e-9)
-    r2 = yield NumberReq("Minor radius", minimum=1e-9)
+    r1 = yield LengthReq("Major radius", minimum=1e-9)
+    r2 = yield LengthReq("Minor radius", minimum=1e-9)
     obj = ctx.scene.add(g.make_ellipse(center, r1, r2))
     ctx.echo(f"Created {obj.name}.")
 

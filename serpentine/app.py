@@ -41,6 +41,10 @@ class MainWindow(QMainWindow):
         from .utils.config import Config
         self.cfg = Config()
         self.scene = Scene()
+        from .utils.units import UNITS
+        default_units = self.cfg.get("default_units", default="mm")
+        if default_units in UNITS:
+            self.scene.units = default_units
         self.selection = SelectionManager(self.scene)
         self.history = History(self.scene)
 
@@ -558,7 +562,7 @@ class MainWindow(QMainWindow):
         layer = self.scene.layers.current.name
         self.statusBar().showMessage(
             f"{n} object(s)  ·  {sel} selected  ·  layer: {layer}  ·  "
-            f"{mode}  ·  MMB orbit / Shift+MMB pan / scroll zoom")
+            f"{mode}  ·  units: {self.scene.units}")
         path = getattr(self.ctx, "current_path", None)
         name = os.path.basename(path) if path else "untitled"
         self.setWindowTitle(f"{name} — {APP_TITLE}")

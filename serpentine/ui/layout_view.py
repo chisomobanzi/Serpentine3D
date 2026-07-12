@@ -303,7 +303,8 @@ class LayoutView:
                 continue
             n = np.array([-d[1], d[0]]) / length
             mid = (a + b) / 2 + n * (dim.offset + 2.5)
-            text = dim.text or f"{length * dim.scale_denom:g}"
+            text = dim.text or self.vp.scene.format_length(
+                length * dim.scale_denom)
             sx, sy = self.paper_to_screen(mid[0], mid[1])
             painter.setPen(QPen(QColor(40, 60, 110)))
             painter.setFont(QFont("sans", max(int(3.2 * self.px_per_mm), 7)))

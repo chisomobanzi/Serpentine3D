@@ -47,6 +47,7 @@ class Scene:
         self.revision = 0               # bumped on every change notification
         self.named_views: dict = {}     # name -> camera params
         self.layouts: list = []         # drafting sheets (core/layout.py)
+        self.units: str = "mm"          # document units (utils/units.py)
 
     # -- notification --
     def add_listener(self, fn):
@@ -125,7 +126,12 @@ class Scene:
         self.layers = LayerManager()
         self.named_views = {}
         self.layouts = []
+        # units are a user preference as much as a document property: keep
         self.notify()
+
+    def format_length(self, value: float) -> str:
+        from ..utils.units import format_length
+        return format_length(value, self.units)
 
     def bbox(self) -> tuple[tuple, tuple] | None:
         objs = self.visible_objects()

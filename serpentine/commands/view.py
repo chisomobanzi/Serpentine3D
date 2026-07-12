@@ -136,12 +136,41 @@ def cmd_pointsoff(ctx):
 
 # --- analysis ----------------------------------------------------------------
 
+@command("units", mutates=False)
+def cmd_units(ctx):
+    """Set document units; optionally rescale the model to keep real size."""
+    from .base import OptionReq
+    from ..utils.units import TO_MM, UNIT_LABELS, UNITS
+    current = ctx.scene.units
+    choice = yield OptionReq(
+        f"Document units (currently {UNIT_LABELS[current]})",
+        options=["mm", "cm", "m", "in", "ft"], default=current)
+    if choice == current:
+        ctx.echo(f"Units unchanged ({UNIT_LABELS[current]}).")
+        return
+    factor = TO_MM[current] / TO_MM[choice]
+    rescale = "No"
+    if ctx.scene.all():
+        rescale = yield OptionReq(
+            f"Scale model by {factor:g} so objects keep their real size?",
+            options=["Yes", "No"], default="Yes")
+    ctx.scene.units = choice
+    if rescale == "Yes":
+        ctx.history.checkpoint("units rescale")
+        for o in ctx.scene.all():
+            ctx.scene.replace_shape(
+                o.id, g.scale(o.shape, (0, 0, 0), factor))
+    ctx.scene.notify()
+    ctx.echo(f"Document units: {UNIT_LABELS[choice]}."
+             + (" Model rescaled." if rescale == "Yes" else ""))
+
+
 @command("distance", aliases=("dist",), mutates=False)
 def cmd_distance(ctx):
     p1 = yield PointReq("First point")
     p2 = yield PointReq("Second point", rubber_from=p1)
     d = sum((b - a) ** 2 for a, b in zip(p1, p2)) ** 0.5
-    ctx.echo(f"Distance: {d:.4f}")
+    ctx.echo(f"Distance: {ctx.scene.format_length(d)}")
 
 
 @command("area", mutates=False)
@@ -149,21 +178,21 @@ def cmd_area(ctx):
     objs = yield SelectReq("Select surfaces or solids",
                            kinds=("surface", "solid"))
     total = sum(g.surface_area(o.shape) for o in objs)
-    ctx.echo(f"Area: {total:.4f}")
+    ctx.echo(f"Area: {total:.4f} {ctx.scene.units}²")
 
 
 @command("volume", aliases=("vol",), mutates=False)
 def cmd_volume(ctx):
     objs = yield SelectReq("Select solids", kinds=("solid",))
     total = sum(g.volume(o.shape) for o in objs)
-    ctx.echo(f"Volume: {total:.4f}")
+    ctx.echo(f"Volume: {total:.4f} {ctx.scene.units}³")
 
 
 @command("length", aliases=("len",), mutates=False)
 def cmd_length(ctx):
     objs = yield SelectReq("Select curves", kinds=("curve",))
     total = sum(g.curve_length(o.shape) for o in objs)
-    ctx.echo(f"Length: {total:.4f}")
+    ctx.echo(f"Length: {ctx.scene.format_length(total)}")
 
 
 @command("curvature", mutates=False)

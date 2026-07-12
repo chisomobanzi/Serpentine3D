@@ -27,8 +27,8 @@ def cmd_join(ctx):
 def cmd_offset(ctx):
     objs = yield SelectReq("Select curve to offset", kinds=("curve",),
                            max_count=1)
-    from .base import NumberReq
-    dist = yield NumberReq("Offset distance (negative for other side)")
+    from .base import LengthReq, NumberReq
+    dist = yield LengthReq("Offset distance (negative for other side)")
     new_shape = g.offset_curve(objs[0].shape, dist)
     obj = ctx.scene.add(new_shape, layer_id=objs[0].layer_id)
     ctx.echo(f"Offset -> {obj.name}.")
@@ -40,8 +40,8 @@ def cmd_fillet(ctx):
                         max_count=1)
     b = yield SelectReq("Select second curve", kinds=("curve",),
                         max_count=1, allow_preselected=False)
-    from .base import NumberReq, PointReq
-    radius = yield NumberReq("Fillet radius", minimum=1e-9)
+    from .base import LengthReq, NumberReq, PointReq
+    radius = yield LengthReq("Fillet radius", minimum=1e-9)
     corner = yield PointReq("Point near the corner to fillet")
     ea, arc, eb = g.fillet_curves(a[0].shape, b[0].shape, radius, corner)
     joined = g.join_curves([ea, arc, eb])

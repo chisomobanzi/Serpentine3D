@@ -129,14 +129,16 @@ class PropertiesPanel(QWidget):
             self.scene.update(obj.id, color=None)
 
     def _measures(self, obj) -> str:
+        fmt = self.scene.format_length
+        u = self.scene.units
         try:
             if obj.kind == "curve":
-                return f"Length: {g.curve_length(obj.shape):.3f}"
+                return f"Length: {fmt(g.curve_length(obj.shape))}"
             if obj.kind == "surface":
-                return f"Area: {g.surface_area(obj.shape):.3f}"
+                return f"Area: {g.surface_area(obj.shape):.3f} {u}²"
             if obj.kind == "solid":
-                return (f"Volume: {g.volume(obj.shape):.3f}\n"
-                        f"Area: {g.surface_area(obj.shape):.3f}")
+                return (f"Volume: {g.volume(obj.shape):.3f} {u}³\n"
+                        f"Area: {g.surface_area(obj.shape):.3f} {u}²")
         except Exception:
             pass
         return "—"

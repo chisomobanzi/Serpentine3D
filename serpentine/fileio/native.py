@@ -17,6 +17,7 @@ def save_scene(scene, path: str):
         "format": "serpentine",
         "version": FORMAT_VERSION,
         "named_views": scene.named_views,
+        "units": scene.units,
         "layouts": layouts_to_json(scene.layouts),
         "layers": [
             {
@@ -71,6 +72,7 @@ def load_scene(scene, path: str):
     current = doc.get("current_layer", "default")
     layers.current_id = id_map.get(current, "default")
     scene.named_views = dict(doc.get("named_views", {}))
+    scene.units = doc.get("units", scene.units)
     from ..core.layout import layouts_from_json
     scene.layouts = layouts_from_json(doc.get("layouts", []))
 

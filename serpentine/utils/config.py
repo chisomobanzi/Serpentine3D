@@ -28,6 +28,7 @@ DEFAULTS = {
     },
     "grid_snap": False,
     "grid_snap_step": 1.0,
+    "default_units": "mm",
     "aliases": {},                     # alias -> command name
     "shortcuts": {},                   # key sequence -> command name
     "display": {
