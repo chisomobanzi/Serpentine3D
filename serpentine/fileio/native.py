@@ -11,7 +11,50 @@ from ..core import geometry
 from ..core.layers import Layer
 
 
-def save_scene(scene, path: str):
+FORMAT_VERSION = 2
+
+
+def _write_container(doc: dict, path: str, thumbnail: bytes | None):
+    """.serp v2: a zip with document.json, meta.json and a thumbnail."""
+    import datetime
+    import zipfile
+    meta = {
+        "format": "serpentine",
+        "version": FORMAT_VERSION,
+        "saved": datetime.datetime.now().isoformat(timespec="seconds"),
+        "objects": len(doc.get("objects", [])),
+        "layouts": len(doc.get("layouts", [])),
+    }
+    tmp = path + ".tmp"
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("meta.json", json.dumps(meta, indent=1))
+        z.writestr("document.json", json.dumps(doc))
+        if thumbnail:
+            z.writestr("thumbnail.png", thumbnail)
+    import os
+    os.replace(tmp, path)          # atomic: a crash never corrupts the file
+
+
+def read_meta(path: str) -> dict | None:
+    """Container metadata without loading geometry (None for v1 files)."""
+    import zipfile
+    if not zipfile.is_zipfile(path):
+        return None
+    with zipfile.ZipFile(path) as z:
+        return json.loads(z.read("meta.json"))
+
+
+def read_thumbnail(path: str) -> bytes | None:
+    import zipfile
+    if not zipfile.is_zipfile(path):
+        return None
+    with zipfile.ZipFile(path) as z:
+        if "thumbnail.png" in z.namelist():
+            return z.read("thumbnail.png")
+    return None
+
+
+def save_scene(scene, path: str, thumbnail: bytes | None = None):
     from ..core.layout import layouts_to_json
     doc = {
         "format": "serpentine",
@@ -30,6 +73,7 @@ def save_scene(scene, path: str):
         },
         "layouts": layouts_to_json(scene.layouts),
         "annot_styles": {k: dict(v) for k, v in scene.annot_styles.items()},
+        "history_records": scene.history_records,
         "layers": [
             {
                 "id": layer.id,
@@ -62,14 +106,23 @@ def save_scene(scene, path: str):
             for obj in scene.all()
         ],
     }
-    with open(path, "w") as f:
-        json.dump(doc, f)
+    _write_container(doc, path, thumbnail)
 
 
 def load_scene(scene, path: str):
-    """Replace scene contents with the file's contents."""
-    with open(path) as f:
-        doc = json.load(f)
+    """Replace scene contents with the file's contents (v1 JSON or
+    v2 zip container)."""
+    import zipfile
+    if zipfile.is_zipfile(path):          # v2 container
+        with zipfile.ZipFile(path) as z:
+            doc = json.loads(z.read("document.json"))
+    else:                                 # v1: bare JSON
+        with open(path) as f:
+            doc = json.load(f)
+    _load_doc(scene, doc)
+
+
+def _load_doc(scene, doc: dict):
     if doc.get("format") != "serpentine":
         raise ValueError("Not a Serpentine file")
 
@@ -105,6 +158,7 @@ def load_scene(scene, path: str):
     scene.layouts = layouts_from_json(doc.get("layouts", []))
     scene.annot_styles = {k: dict(v) for k, v in
                           doc.get("annot_styles", {}).items()}
+    scene.history_records = list(doc.get("history_records", []))
 
     for od in doc.get("objects", []):
         if od.get("mesh"):

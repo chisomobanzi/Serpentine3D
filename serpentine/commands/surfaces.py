@@ -29,7 +29,13 @@ def cmd_extrude(ctx):
         "Extrusion distance", default=10.0, choices=choices,
         preview_fn=lambda d: g.make_compound(_make(d, cap=False)))
     cap = closed and ctx.opt("Cap", "Yes") == "Yes"
+    both = ctx.opt("BothSides", "No") == "Yes"
     made = [ctx.scene.add(s) for s in _make(dist, cap)]
+    if ctx.scene.record_history and not both:
+        for c, o in zip(curves, made):
+            ctx.scene.add_record("extrude", [c.id], o.id,
+                                 direction=list(direction),
+                                 dist=float(dist), cap=cap)
     ctx.echo(f"Extruded {len(made)} object(s): "
              + ", ".join(o.name for o in made))
 
@@ -44,6 +50,10 @@ def cmd_revolve(ctx):
     axis_dir = tuple(b - a for a, b in zip(p1, p2))
     srf = g.revolve(curves[0].shape, p1, axis_dir, angle)
     obj = ctx.scene.add(srf)
+    if ctx.scene.record_history:
+        ctx.scene.add_record("revolve", [curves[0].id], obj.id,
+                             origin=list(p1), axis=list(axis_dir),
+                             angle=float(angle))
     ctx.echo(f"Created {obj.name}.")
 
 
@@ -55,6 +65,9 @@ def cmd_loft(ctx):
     srf = g.loft([c.shape for c in curves],
                  ruled=(ctx.opt("Style", "Normal") == "Ruled"))
     obj = ctx.scene.add(srf)
+    if ctx.scene.record_history:
+        ctx.scene.add_record("loft", [c.id for c in curves], obj.id,
+                             ruled=(ctx.opt("Style", "Normal") == "Ruled"))
     ctx.echo(f"Lofted {len(curves)} curves into {obj.name}.")
 
 

@@ -49,14 +49,15 @@ def import_file(scene, path: str) -> int:
     raise ValueError(f"Unsupported import format: {ext}")
 
 
-def export_file(scene, path: str, only_ids: list | None = None):
+def export_file(scene, path: str, only_ids: list | None = None,
+                thumbnail: bytes | None = None):
     """Export scene (or subset) to a file, format by extension."""
     ext = os.path.splitext(path)[1].lower()
     objs = scene.all()
     if only_ids:
         objs = [o for o in objs if o.id in only_ids]
     if ext == ".serp":
-        native.save_scene(scene, path)
+        native.save_scene(scene, path, thumbnail=thumbnail)
         return
     if ext in (".step", ".stp"):
         step.export_step([o.shape for o in objs], path)

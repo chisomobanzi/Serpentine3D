@@ -254,3 +254,15 @@ def cmd_material(ctx):
         ctx.scene.update(o.id, material=mat)
     ctx.echo(f"{preset if preset != 'Custom' else 'Custom'} material on "
              f"{len(objs)} object(s) — see it with 'rendered'.")
+
+
+@command("recordhistory", aliases=("history",), mutates=False)
+def cmd_recordhistory(ctx):
+    """Toggle record history: loft/extrude/revolve outputs rebuild when
+    their input curves are edited."""
+    ctx.scene.record_history = not ctx.scene.record_history
+    n = len(ctx.scene.history_records)
+    state = "ON" if ctx.scene.record_history else "OFF"
+    ctx.echo(f"Record history {state}"
+             + (f" ({n} recorded object(s) stay live)." if n else "."))
+    yield from ()

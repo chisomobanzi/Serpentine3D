@@ -17,6 +17,20 @@ from .layers import LayerManager
 from .tessellate import DisplayMesh, tessellate
 
 
+def _rebuild_record(rec: dict, shapes: list):
+    op = rec["op"]
+    p = rec.get("params", {})
+    if op == "loft":
+        return geometry.loft(shapes, ruled=bool(p.get("ruled")))
+    if op == "extrude":
+        return geometry.extrude(shapes[0], tuple(p["direction"]),
+                                float(p["dist"]), cap=bool(p.get("cap")))
+    if op == "revolve":
+        return geometry.revolve(shapes[0], tuple(p["origin"]),
+                                tuple(p["axis"]), float(p["angle"]))
+    raise ValueError(f"Unknown history op '{op}'")
+
+
 _TESS_GUARD = threading.Lock()
 _TESS_LOCKS: dict[int, tuple] = {}      # id(shape) -> (shape, Lock)
 
@@ -79,6 +93,9 @@ class Scene:
         self.block_defs: dict = {}      # id -> {"name", "shapes": [TopoDS]}
         self.annot_styles: dict = {}    # name -> text/dim style overrides
         self.image_planes: list = []    # reference images (pictureframe)
+        self.record_history = False     # new surfaces remember their inputs
+        self.history_records: list = []   # {"op", "inputs", "output", ...}
+        self._regen_active = False
 
     # -- notification --
     def add_listener(self, fn, kinds: tuple | None = None):
@@ -125,8 +142,44 @@ class Scene:
         new = replace(old, shape=shape, kind=geometry.shape_kind(shape),
                       _mesh=None)
         self.objects[obj_id] = new
+        self._regenerate_dependents(obj_id)
         self.notify("objects")
         return new
+
+    def add_record(self, op: str, inputs: list, output: str, **params):
+        """Remember how an object was built (record history)."""
+        self.history_records.append({"op": op, "inputs": list(inputs),
+                                     "output": output, "params": params})
+
+    def _regenerate_dependents(self, changed_id: str):
+        """Rebuild recorded outputs whose inputs changed, transitively."""
+        if self._regen_active or not self.history_records:
+            return
+        self._regen_active = True
+        try:
+            queue = [changed_id]
+            seen = set()
+            while queue:
+                cid = queue.pop(0)
+                for rec in self.history_records:
+                    if cid not in rec["inputs"] or rec["output"] in seen:
+                        continue
+                    seen.add(rec["output"])
+                    old = self.objects.get(rec["output"])
+                    parents = [self.objects.get(i) for i in rec["inputs"]]
+                    if old is None or any(p is None for p in parents):
+                        continue
+                    try:
+                        shape = _rebuild_record(rec,
+                                                [p.shape for p in parents])
+                    except Exception:              # noqa: BLE001
+                        continue                   # keep the stale child
+                    self.objects[rec["output"]] = replace(
+                        old, shape=shape, kind=geometry.shape_kind(shape),
+                        _mesh=None)
+                    queue.append(rec["output"])
+        finally:
+            self._regen_active = False
 
     def update(self, obj_id: str, **fields) -> SceneObject:
         new = replace(self.objects[obj_id], **fields)
@@ -185,6 +238,7 @@ class Scene:
         self.block_defs = {}
         self.annot_styles = {}
         self.image_planes = []
+        self.history_records = []
         # units are a user preference as much as a document property: keep
         self.notify()
 
@@ -217,6 +271,7 @@ class Scene:
             "block_defs": {k: dict(v) for k, v in self.block_defs.items()},
             "annot_styles": {k: dict(v) for k, v in self.annot_styles.items()},
             "image_planes": copy.deepcopy(self.image_planes),
+            "history_records": copy.deepcopy(self.history_records),
         }
 
     def restore(self, snap: dict):
@@ -232,4 +287,6 @@ class Scene:
         self.annot_styles = {k: dict(v) for k, v in
                              snap.get("annot_styles", {}).items()}
         self.image_planes = copy.deepcopy(snap.get("image_planes", []))
+        self.history_records = copy.deepcopy(
+            snap.get("history_records", []))
         self.notify()
