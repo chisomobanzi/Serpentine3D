@@ -1,0 +1,44 @@
+"""File import/export."""
+
+import os
+
+from . import native, obj, step
+
+
+def import_file(scene, path: str) -> int:
+    """Import any supported file into the scene. Returns object count added."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".serp":
+        native.load_scene(scene, path)
+        return len(scene.all())
+    if ext in (".step", ".stp"):
+        shapes = step.import_step(path)
+        base = os.path.splitext(os.path.basename(path))[0]
+        for i, shape in enumerate(shapes, 1):
+            name = base if len(shapes) == 1 else f"{base} {i:02d}"
+            scene.add(shape, name=name)
+        return len(shapes)
+    if ext == ".obj":
+        named = obj.import_obj(path)
+        for name, shape in named:
+            scene.add(shape, name=name)
+        return len(named)
+    raise ValueError(f"Unsupported import format: {ext}")
+
+
+def export_file(scene, path: str, only_ids: list | None = None):
+    """Export scene (or subset) to a file, format by extension."""
+    ext = os.path.splitext(path)[1].lower()
+    objs = scene.all()
+    if only_ids:
+        objs = [o for o in objs if o.id in only_ids]
+    if ext == ".serp":
+        native.save_scene(scene, path)
+        return
+    if ext in (".step", ".stp"):
+        step.export_step([o.shape for o in objs], path)
+        return
+    if ext == ".obj":
+        obj.export_obj([(o.name, o.shape) for o in objs], path)
+        return
+    raise ValueError(f"Unsupported export format: {ext}")
