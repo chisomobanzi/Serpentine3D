@@ -510,7 +510,9 @@ class Viewport(QOpenGLWidget):
                tuple(round(float(c), 4) for c in cam.target))
         cached = getattr(self, "_tech_cache", None)
         if cached is None or cached[0] != key:
-            shapes = [o.shape for o in self.scene.visible_objects()]
+            from ..core.mesh import MeshShape
+            shapes = [o.shape for o in self.scene.visible_objects()
+                      if not isinstance(o.shape, MeshShape)]
             if shapes:
                 fwd = cam.target - cam.position
                 fwd = fwd / max(np.linalg.norm(fwd), 1e-12)

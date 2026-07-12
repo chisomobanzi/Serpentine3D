@@ -169,6 +169,9 @@ def _face_isocurves(face) -> list[np.ndarray]:
 
 
 def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
+    from .mesh import MeshShape, mesh_to_display
+    if isinstance(shape, MeshShape):
+        return mesh_to_display(shape)
     if deflection is None:
         deflection = _deflection_for(shape)
     if geometry.shape_kind(shape) != "curve":

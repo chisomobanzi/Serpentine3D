@@ -50,8 +50,11 @@ def save_scene(scene, path: str):
                 "locked": obj.locked,
                 "group": obj.group_id,
                 "block": obj.block_id,
-                "brep": base64.b64encode(
-                    geometry.shape_to_bytes(obj.shape)).decode("ascii"),
+                "brep": (None if obj.kind == "mesh" else
+                         base64.b64encode(geometry.shape_to_bytes(
+                             obj.shape)).decode("ascii")),
+                "mesh": (_mesh_to_json(obj.shape)
+                         if obj.kind == "mesh" else None),
             }
             for obj in scene.all()
         ],
@@ -97,7 +100,10 @@ def load_scene(scene, path: str):
     scene.layouts = layouts_from_json(doc.get("layouts", []))
 
     for od in doc.get("objects", []):
-        shape = geometry.shape_from_bytes(base64.b64decode(od["brep"]))
+        if od.get("mesh"):
+            shape = _mesh_from_json(od["mesh"])
+        else:
+            shape = geometry.shape_from_bytes(base64.b64decode(od["brep"]))
         obj = scene.add(shape, name=od["name"],
                         layer_id=id_map.get(od["layer"], "default"))
         updates = {}
@@ -113,3 +119,23 @@ def load_scene(scene, path: str):
             updates["block_id"] = od["block"]
         if updates:
             scene.update(obj.id, **updates)
+
+
+def _mesh_to_json(mesh) -> dict:
+    import numpy as np
+    return {
+        "v": base64.b64encode(
+            mesh.vertices.astype("<f4").tobytes()).decode("ascii"),
+        "t": base64.b64encode(
+            mesh.triangles.astype("<u4").tobytes()).decode("ascii"),
+    }
+
+
+def _mesh_from_json(data: dict):
+    import numpy as np
+    from ..core.mesh import MeshShape
+    v = np.frombuffer(base64.b64decode(data["v"]),
+                      dtype="<f4").reshape(-1, 3)
+    t = np.frombuffer(base64.b64decode(data["t"]),
+                      dtype="<u4").reshape(-1, 3)
+    return MeshShape(v, t)

@@ -251,8 +251,11 @@ def cmd_make2d(ctx):
         objs = [o for o in objs
                 if not ctx.scene.layers.get(o.layer_id).name.startswith(
                     "Make2D")]
+    from ..core.mesh import MeshShape
+    objs = [o for o in objs if not isinstance(o.shape, MeshShape)]
     if not objs:
-        ctx.echo("Nothing to project.")
+        ctx.echo("Nothing to project (meshes are skipped — "
+                 "use meshtobrep first).")
         return
     from ..core import hlr
     cam = ctx.viewport.camera

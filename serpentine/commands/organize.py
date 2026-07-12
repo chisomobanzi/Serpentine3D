@@ -128,3 +128,34 @@ def cmd_count(ctx):
         ctx.echo("Blocks: " + ", ".join(
             f"{n}× {b}" for b, n in sorted(by_block.items())))
     yield from ()
+
+
+@command("meshtobrep")
+def cmd_meshtobrep(ctx):
+    """Convert mesh objects into exact BREP shells (slow for big meshes)."""
+    objs = yield SelectReq("Select meshes to convert", kinds=("mesh",))
+    from ..core.mesh import brep_from_mesh
+    done = 0
+    for o in objs:
+        try:
+            ctx.scene.replace_shape(o.id, brep_from_mesh(o.shape))
+            done += 1
+        except g.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+    ctx.echo(f"Converted {done} mesh(es) to BREP.")
+
+
+@command("breptomesh", aliases=("meshify",))
+def cmd_breptomesh(ctx):
+    """Convert BREP objects into lightweight native meshes."""
+    objs = yield SelectReq("Select objects to mesh",
+                           kinds=("surface", "solid"))
+    from ..core.mesh import mesh_from_brep
+    done = 0
+    for o in objs:
+        try:
+            ctx.scene.replace_shape(o.id, mesh_from_brep(o.shape))
+            done += 1
+        except Exception as exc:                              # noqa: BLE001
+            ctx.echo(f"{o.name}: {exc}")
+    ctx.echo(f"Converted {done} object(s) to mesh.")

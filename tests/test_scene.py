@@ -132,3 +132,60 @@ def test_replace_shape_invalidates_mesh():
     assert m1.has_faces
     obj2 = scene.replace_shape(obj.id, g.make_box((0, 0, 0), 2, 2, 2))
     assert obj2.mesh is not m1
+
+
+def test_native_mesh_objects(tmp_path):
+    import numpy as np
+    from serpentine import fileio
+    from serpentine.core.mesh import MeshShape, brep_from_mesh
+
+    # unit cube mesh
+    v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
+                  [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float)
+    t = np.array([[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7],
+                  [0, 1, 5], [0, 5, 4], [2, 3, 7], [2, 7, 6],
+                  [1, 2, 6], [1, 6, 5], [3, 0, 4], [3, 4, 7]], np.uint32)
+    m = MeshShape(v, t)
+    assert g.volume(m) == pytest.approx(1.0)
+    assert g.surface_area(m) == pytest.approx(6.0)
+
+    scene = Scene()
+    obj = scene.add(m, name="Cube mesh")
+    assert obj.kind == "mesh"
+    dm = obj.mesh
+    assert dm.has_faces and len(dm.edge_segments) == 12   # feature edges
+
+    # transforms dispatch
+    moved = g.translate(m, (5, 0, 0))
+    assert g.bbox(moved)[0][0] == pytest.approx(5)
+    rot = g.rotate(m, (0, 0, 0), (0, 0, 1), 90)
+    assert g.volume(rot) == pytest.approx(1.0)
+    mir = g.mirror(m, (0, 0, 0), (1, 0, 0))
+    assert g.volume(mir) == pytest.approx(1.0)
+
+    # native save/load round trip
+    path = str(tmp_path / "meshes.serp")
+    fileio.export_file(scene, path)
+    loaded = Scene()
+    fileio.import_file(loaded, path)
+    assert loaded.all()[0].kind == "mesh"
+    assert g.volume(loaded.all()[0].shape) == pytest.approx(1.0)
+
+    # exports that tessellate work on meshes
+    fileio.export_file(scene, str(tmp_path / "m.glb"))
+    fileio.export_file(scene, str(tmp_path / "m.usda"))
+    fileio.export_file(scene, str(tmp_path / "m.obj"))
+
+    # to brep and back
+    shell = brep_from_mesh(m)
+    assert g.shape_kind(shell) in ("surface", "solid")
+
+
+def test_obj_import_is_mesh(tmp_path):
+    from serpentine import fileio
+    p = str(tmp_path / "tri.obj")
+    with open(p, "w") as f:
+        f.write("o T\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    scene = Scene()
+    fileio.import_file(scene, p)
+    assert scene.all()[0].kind == "mesh"

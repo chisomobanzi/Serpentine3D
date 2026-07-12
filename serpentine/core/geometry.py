@@ -1176,6 +1176,9 @@ def _apply_trsf(shape, trsf: gp_Trsf, copy: bool = True) -> TopoDS_Shape:
 
 
 def translate(shape, offset: Point) -> TopoDS_Shape:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        return shape.translated(offset)
     t = gp_Trsf()
     t.SetTranslation(_vec(offset))
     return _apply_trsf(shape, t)
@@ -1183,6 +1186,20 @@ def translate(shape, offset: Point) -> TopoDS_Shape:
 
 def rotate(shape, axis_point: Point, axis_dir: Point,
            angle_deg: float) -> TopoDS_Shape:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        import numpy as np
+        a = np.asarray(axis_dir, float)
+        a = a / np.linalg.norm(a)
+        ang = math.radians(float(angle_deg))
+        K = np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]],
+                      [-a[1], a[0], 0]])
+        R = np.eye(3) + math.sin(ang) * K + (1 - math.cos(ang)) * (K @ K)
+        o = np.asarray(axis_point, float)
+        m = np.eye(4)
+        m[:3, :3] = R
+        m[:3, 3] = o - R @ o
+        return shape.transformed(m)
     t = gp_Trsf()
     t.SetRotation(gp_Ax1(_pnt(axis_point), _dir(axis_dir)),
                   math.radians(float(angle_deg)))
@@ -1192,6 +1209,18 @@ def rotate(shape, axis_point: Point, axis_dir: Point,
 def scale(shape, center: Point, factor: float,
           factors: Point | None = None) -> TopoDS_Shape:
     """Uniform scale, or non-uniform when `factors=(sx,sy,sz)` given."""
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        import numpy as np
+        f = np.asarray(factors if factors is not None
+                       else (factor, factor, factor), float)
+        if np.any(np.abs(f) < 1e-12):
+            raise GeometryError("Scale factor cannot be zero")
+        c = np.asarray(center, float)
+        m = np.eye(4)
+        m[:3, :3] = np.diag(f)
+        m[:3, 3] = c - f * c
+        return shape.transformed(m)
     if factors is None:
         if factor == 0:
             raise GeometryError("Scale factor cannot be zero")
@@ -1232,22 +1261,40 @@ def scale_along_axis(shape, center: Point, axis: Point,
 
 
 def mirror(shape, plane_point: Point, plane_normal: Point) -> TopoDS_Shape:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        import numpy as np
+        n = np.asarray(plane_normal, float)
+        n = n / np.linalg.norm(n)
+        o = np.asarray(plane_point, float)
+        R = np.eye(3) - 2 * np.outer(n, n)
+        m = np.eye(4)
+        m[:3, :3] = R
+        m[:3, 3] = o - R @ o
+        return shape.transformed(m)
     t = gp_Trsf()
     t.SetMirror(gp_Ax2(_pnt(plane_point), _dir(plane_normal)))
     return _apply_trsf(shape, t)
 
 
 def copy_shape(shape) -> TopoDS_Shape:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        return shape.copy()
     return BRepBuilderAPI_Copy(shape).Shape()
 
 
 # --- interrogation ----------------------------------------------------------
 
 def shape_kind(shape) -> str:
-    """Classify as 'curve' | 'surface' | 'solid' | 'point' | 'compound'.
+    """Classify as 'curve' | 'surface' | 'solid' | 'mesh' | 'point' |
+    'compound'.
 
     Compounds are classified by their contents when uniform: a compound of
     solids behaves as a solid, of curves as a curve, and so on."""
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        return "mesh"
     st = shape.ShapeType()
     if st in (occ.EDGE, occ.WIRE):
         return "curve"
@@ -1284,6 +1331,9 @@ def unwrap_compound(shape) -> TopoDS_Shape:
 
 
 def bbox(shape) -> tuple[Point, Point]:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        return shape.bbox()
     box = Bnd_Box()
     occ.bbox_add(shape, box)
     if box.IsVoid():
@@ -1297,14 +1347,23 @@ def curve_length(shape) -> float:
 
 
 def surface_area(shape) -> float:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        return shape.area()
     return occ.surface_properties(shape).Mass()
 
 
 def volume(shape) -> float:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        return shape.volume()
     return occ.volume_properties(shape).Mass()
 
 
 def centroid(shape) -> Point:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        return shape.centroid()
     kind = shape_kind(shape)
     if kind == "solid":
         props = occ.volume_properties(shape)

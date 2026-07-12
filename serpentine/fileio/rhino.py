@@ -150,7 +150,7 @@ def _r3_surface_to_face(srf: r3.Surface):
     return BRepBuilderAPI_MakeFace(surf, 1e-6).Face()
 
 
-def _r3_mesh_to_shape(mesh: r3.Mesh):
+def _r3_mesh_to_shape(mesh: r3.Mesh, as_mesh: bool = True):
     verts = np.array([[v.X, v.Y, v.Z] for v in mesh.Vertices], float)
     tris = []
     for i in range(len(mesh.Faces)):
@@ -159,6 +159,9 @@ def _r3_mesh_to_shape(mesh: r3.Mesh):
         tris.append((a, b, c))
         if d != c:
             tris.append((a, c, d))
+    if as_mesh:
+        from ..core.mesh import MeshShape
+        return MeshShape(verts, np.asarray(tris, np.uint32))
     return _shell_from_triangles(verts, tris)
 
 

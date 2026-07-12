@@ -176,7 +176,9 @@ class LayoutView:
         if cached is not None and cached[0] == key:
             return cached[1]
         d, right, up = detail_direction(detail)
-        shapes = [o.shape for o in vp.scene.visible_objects()]
+        from ..core.mesh import MeshShape
+        shapes = [o.shape for o in vp.scene.visible_objects()
+                  if not isinstance(o.shape, MeshShape)]
         cut_polys = []
         if shapes and detail.section_offset is not None \
                 and not detail.perspective:

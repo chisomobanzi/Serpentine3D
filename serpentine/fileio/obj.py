@@ -53,8 +53,9 @@ def export_obj(named_shapes: list, path: str):
             f.write("\n".join(mtl_lines) + "\n")
 
 
-def import_obj(path: str) -> list[tuple[str, object]]:
-    """Returns [(name, TopoDS_Shape)] — one sewn shell per OBJ object."""
+def import_obj(path: str, as_mesh: bool = True) -> list:
+    """Returns [(name, shape)] — native MeshShape objects by default
+    (instant), or sewn BREP shells with as_mesh=False."""
     verts: list = []
     groups: dict[str, list] = {}
     current = "obj"
@@ -80,9 +81,18 @@ def import_obj(path: str) -> list[tuple[str, object]]:
     va = np.asarray(verts, float)
     out = []
     for name, tris in groups.items():
-        shell = _shell_from_triangles(va, tris)
-        if shell is not None:
-            out.append((name, shell))
+        if as_mesh:
+            from ..core.mesh import MeshShape
+            # compact vertices used by this group
+            t = np.asarray(tris, np.int64)
+            used = np.unique(t)
+            remap = np.zeros(len(va), np.int64)
+            remap[used] = np.arange(len(used))
+            out.append((name, MeshShape(va[used], remap[t])))
+        else:
+            shell = _shell_from_triangles(va, tris)
+            if shell is not None:
+                out.append((name, shell))
     return out
 
 
