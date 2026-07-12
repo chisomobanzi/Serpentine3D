@@ -117,6 +117,7 @@ class _GpuObject:
         self.mesh_id = id(mesh)
         self.tri_vao = self.tri_count = 0
         self.line_vao = self.line_count = 0
+        self.iso_vao = self.iso_count = 0
         self._buffers = []
         if mesh.has_faces:
             inter = np.hstack([mesh.vertices, mesh.normals]).astype(np.float32)
@@ -141,22 +142,29 @@ class _GpuObject:
                             GL.GL_STATIC_DRAW)
             self.tri_count = idx.size
         if len(mesh.edge_segments):
-            pts = mesh.edge_segments.reshape(-1, 3).astype(np.float32)
-            self.line_vao = GL.glGenVertexArrays(1)
-            GL.glBindVertexArray(self.line_vao)
-            vbo = GL.glGenBuffers(1)
-            self._buffers.append(vbo)
-            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
-            GL.glBufferData(GL.GL_ARRAY_BUFFER, pts.nbytes, pts,
-                            GL.GL_STATIC_DRAW)
-            GL.glEnableVertexAttribArray(0)
-            GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, 0,
-                                     ctypes.c_void_p(0))
-            self.line_count = len(pts)
+            self.line_vao, self.line_count = self._make_line_vao(
+                mesh.edge_segments)
+        if len(mesh.iso_segments):
+            self.iso_vao, self.iso_count = self._make_line_vao(
+                mesh.iso_segments)
         GL.glBindVertexArray(0)
 
+    def _make_line_vao(self, segments) -> tuple[int, int]:
+        pts = segments.reshape(-1, 3).astype(np.float32)
+        vao = GL.glGenVertexArrays(1)
+        GL.glBindVertexArray(vao)
+        vbo = GL.glGenBuffers(1)
+        self._buffers.append(vbo)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, pts.nbytes, pts,
+                        GL.GL_STATIC_DRAW)
+        GL.glEnableVertexAttribArray(0)
+        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, 0,
+                                 ctypes.c_void_p(0))
+        return vao, len(pts)
+
     def release(self):
-        for vao in (self.tri_vao, self.line_vao):
+        for vao in (self.tri_vao, self.line_vao, self.iso_vao):
             if vao:
                 GL.glDeleteVertexArrays(1, [vao])
         if self._buffers:
@@ -302,6 +310,7 @@ class Viewport(QOpenGLWidget):
         self._sync_gpu()
         self._draw_objects(mvp, view)
         self._draw_preview(mvp)
+        self._draw_axis_triad(view, w, h)
 
     def _set_line_uniforms(self, mvp, color):
         GL.glUseProgram(self._line_prog)
@@ -391,6 +400,19 @@ class Viewport(QOpenGLWidget):
                 self._line_width(2.2 if selected else 1.4)
                 GL.glBindVertexArray(gpu.line_vao)
                 GL.glDrawArrays(GL.GL_LINES, 0, gpu.line_count)
+
+            if gpu.iso_count:
+                if selected:
+                    iso_color = (*theme.SELECTION_COLOR, 0.55)
+                elif mode == "wireframe":
+                    iso_color = (*color, 0.55)
+                else:
+                    iso_color = (color[0] * 0.30, color[1] * 0.30,
+                                 color[2] * 0.30, 0.8)
+                self._set_line_uniforms(mvp, iso_color)
+                self._line_width(1.0)
+                GL.glBindVertexArray(gpu.iso_vao)
+                GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
         self._line_width(1.0)
 
     def _draw_preview(self, mvp):
@@ -411,6 +433,33 @@ class Viewport(QOpenGLWidget):
         self._draw_lines(self._preview, mvp, (*theme.SELECTION_COLOR, 0.9),
                          1.6)
         GL.glEnable(GL.GL_DEPTH_TEST)
+
+    def _draw_axis_triad(self, view, w, h):
+        """Small world-axis indicator in the bottom-left corner (NDC space)."""
+        rot = view[:3, :3]
+        size = 0.055
+        aspect = w / max(h, 1)
+        cx, cy = -0.92, -0.86
+        origin = np.array([cx, cy, 0.0], np.float32)
+        segs, colors = [], []
+        for axis, color in (((1, 0, 0), theme.GRID_AXIS_X),
+                            ((0, 1, 0), theme.GRID_AXIS_Y),
+                            ((0, 0, 1), (0.35, 0.55, 0.9, 0.9))):
+            d = rot @ np.asarray(axis, np.float32)
+            tip = origin + np.array([d[0] * size / aspect, d[1] * size, 0.0],
+                                    np.float32)
+            segs.append(np.stack([origin, tip]))
+            colors.append(color)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        identity = np.eye(4, dtype=np.float32)
+        for seg, color in zip(segs, colors):
+            self._preview.update(seg.astype(np.float32))
+            self._set_line_uniforms(identity, color)
+            self._line_width(2.0)
+            GL.glBindVertexArray(self._preview.vao)
+            GL.glDrawArrays(GL.GL_LINES, 0, 2)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        self._line_width(1.0)
 
     # ------------------------------------------------------------- public API
 

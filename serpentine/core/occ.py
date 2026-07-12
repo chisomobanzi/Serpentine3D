@@ -37,7 +37,10 @@ from OCP.BRepOffsetAPI import (
     BRepOffsetAPI_MakePipeShell,
 )
 from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
-from OCP.BRepAdaptor import BRepAdaptor_Curve
+from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+from OCP.BRepTopAdaptor import BRepTopAdaptor_FClass2d
+from OCP.TopAbs import TopAbs_State
+from OCP.gp import gp_Pnt2d
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.BRepGProp import BRepGProp
 from OCP.BRepBndLib import BRepBndLib

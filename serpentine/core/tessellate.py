@@ -25,6 +25,9 @@ class DisplayMesh:
     # edge polylines flattened to GL_LINES segment pairs: (K, 2, 3)
     edge_segments: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 2, 3), np.float32))
+    # isoparametric curves on curved faces (display only, not pickable)
+    iso_segments: np.ndarray = field(
+        default_factory=lambda: np.zeros((0, 2, 3), np.float32))
 
     @property
     def has_faces(self) -> bool:
@@ -88,17 +91,63 @@ def _edge_polyline(edge, deflection: float) -> np.ndarray | None:
         return None
 
 
+_ISO_FRACTIONS = (0.25, 0.5, 0.75)
+_ISO_SAMPLES = 48
+
+
+def _face_isocurves(face) -> list[np.ndarray]:
+    """Isoparametric polylines on a curved face, clipped to its trims."""
+    from ..core.occ import (
+        BRepAdaptor_Surface, BRepTopAdaptor_FClass2d, TopAbs_State, gp_Pnt2d,
+    )
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+
+    surf = BRepAdaptor_Surface(face)
+    if surf.GetType() == GeomAbs_SurfaceType.GeomAbs_Plane:
+        return []
+    u0, u1 = surf.FirstUParameter(), surf.LastUParameter()
+    v0, v1 = surf.FirstVParameter(), surf.LastVParameter()
+    if not all(np.isfinite([u0, u1, v0, v1])):
+        return []
+    classifier = BRepTopAdaptor_FClass2d(face, 1e-9)
+    inside = (TopAbs_State.TopAbs_IN, TopAbs_State.TopAbs_ON)
+
+    polylines = []
+    for direction in ("u", "v"):
+        for frac in _ISO_FRACTIONS:
+            run = []
+            for i in range(_ISO_SAMPLES + 1):
+                t = i / _ISO_SAMPLES
+                if direction == "u":
+                    u = u0 + (u1 - u0) * frac
+                    v = v0 + (v1 - v0) * t
+                else:
+                    u = u0 + (u1 - u0) * t
+                    v = v0 + (v1 - v0) * frac
+                if classifier.Perform(gp_Pnt2d(u, v)) in inside:
+                    p = surf.Value(u, v)
+                    run.append((p.X(), p.Y(), p.Z()))
+                else:
+                    if len(run) >= 2:
+                        polylines.append(np.asarray(run, np.float32))
+                    run = []
+            if len(run) >= 2:
+                polylines.append(np.asarray(run, np.float32))
+    return polylines
+
+
 def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
     if deflection is None:
         deflection = _deflection_for(shape)
     if geometry.shape_kind(shape) != "curve":
         BRepMesh_IncrementalMesh(shape, deflection, False, 0.35, True)
 
-    all_verts, all_norms, all_tris = [], [], []
+    all_verts, all_norms, all_tris, isos = [], [], [], []
     offset = 0
     exp = TopExp_Explorer(shape, occ.FACE)
     while exp.More():
-        fm = _face_mesh(occ.to_face(exp.Current()))
+        face = occ.to_face(exp.Current())
+        fm = _face_mesh(face)
         exp.Next()
         if fm is None:
             continue
@@ -107,6 +156,11 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         all_norms.append(norms)
         all_tris.append(tris + offset)
         offset += len(verts)
+        try:
+            for pts in _face_isocurves(face):
+                isos.append(np.stack([pts[:-1], pts[1:]], axis=1))
+        except Exception:
+            pass
 
     segments = []
     for edge in geometry.edges_of(shape):
@@ -122,4 +176,6 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         mesh.triangles = np.concatenate(all_tris)
     if segments:
         mesh.edge_segments = np.concatenate(segments).astype(np.float32)
+    if isos:
+        mesh.iso_segments = np.concatenate(isos).astype(np.float32)
     return mesh

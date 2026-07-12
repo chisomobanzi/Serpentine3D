@@ -31,12 +31,14 @@ class LayersPanel(QWidget):
         self.tree.itemClicked.connect(self._item_clicked)
         self.tree.itemDoubleClicked.connect(self._edit_item)
 
+        btn_style = ("QPushButton { padding: 2px; font-weight: bold; "
+                     "min-width: 26px; max-width: 26px; }")
         btn_add = QPushButton("+")
-        btn_add.setFixedWidth(28)
+        btn_add.setStyleSheet(btn_style)
         btn_add.setToolTip("New layer")
         btn_add.clicked.connect(self._new_layer)
         btn_del = QPushButton("−")
-        btn_del.setFixedWidth(28)
+        btn_del.setStyleSheet(btn_style)
         btn_del.setToolTip("Delete selected layer")
         btn_del.clicked.connect(self._delete_layer)
 

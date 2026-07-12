@@ -396,6 +396,32 @@ class SerpApi:
 
     # ------------------------------------------------------------------ misc
 
+    def viewport_info(self, project: list | None = None) -> dict:
+        """Debug/testing helper: viewport geometry, camera pose, and
+        optional world->screen projection of points."""
+        import numpy as np
+        from PySide6.QtCore import QPoint
+        vp = self.viewport
+        origin = vp.mapToGlobal(QPoint(0, 0))
+        cam = vp.camera
+        out = {
+            "origin": [origin.x(), origin.y()],
+            "size": [vp.width(), vp.height()],
+            "camera": {
+                "target": list(map(float, cam.target)),
+                "distance": cam.distance,
+                "azimuth": cam.azimuth,
+                "elevation": cam.elevation,
+            },
+            "display_mode": vp.display_mode,
+            "selected": [o.name for o in self.selection.objects()],
+        }
+        if project:
+            pts = np.asarray(project, float)
+            scr = cam.project(pts, vp.width(), vp.height())
+            out["projected"] = [[float(p[0]), float(p[1])] for p in scr]
+        return out
+
     def undo(self) -> dict:
         label = self.history.undo()
         return {"undone": label}
