@@ -52,6 +52,7 @@ class Scene:
         self.layouts: list = []         # drafting sheets (core/layout.py)
         self.units: str = "mm"          # document units (utils/units.py)
         self.block_defs: dict = {}      # id -> {"name", "shapes": [TopoDS]}
+        self.image_planes: list = []    # reference images (pictureframe)
 
     # -- notification --
     def add_listener(self, fn):
@@ -153,6 +154,7 @@ class Scene:
         self.named_views = {}
         self.layouts = []
         self.block_defs = {}
+        self.image_planes = []
         # units are a user preference as much as a document property: keep
         self.notify()
 
@@ -183,6 +185,7 @@ class Scene:
             "named_views": copy.deepcopy(self.named_views),
             "layouts": [lay.clone() for lay in self.layouts],
             "block_defs": {k: dict(v) for k, v in self.block_defs.items()},
+            "image_planes": copy.deepcopy(self.image_planes),
         }
 
     def restore(self, snap: dict):
@@ -195,4 +198,5 @@ class Scene:
         self.layouts = [lay.clone() for lay in snap.get("layouts", [])]
         self.block_defs = {k: dict(v) for k, v in
                            snap.get("block_defs", {}).items()}
+        self.image_planes = copy.deepcopy(snap.get("image_planes", []))
         self.notify()

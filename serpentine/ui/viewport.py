@@ -90,6 +90,24 @@ out vec4 frag;
 void main() { frag = uColor; }
 """
 
+TEX_VERT = """
+#version 330 core
+layout(location=0) in vec3 pos;
+layout(location=1) in vec2 uv;
+uniform mat4 uMVP;
+out vec2 vUV;
+void main() { gl_Position = uMVP * vec4(pos, 1.0); vUV = uv; }
+"""
+
+TEX_FRAG = """
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uTex;
+uniform float uAlpha;
+out vec4 frag;
+void main() { frag = vec4(texture(uTex, vUV).rgb, uAlpha); }
+"""
+
 BG_VERT = """
 #version 330 core
 layout(location=0) in vec2 pos;
@@ -296,6 +314,21 @@ class Viewport(QOpenGLWidget):
         self._mesh_prog = _compile(MESH_VERT, MESH_FRAG)
         self._line_prog = _compile(LINE_VERT, LINE_FRAG)
         self._bg_prog = _compile(BG_VERT, BG_FRAG)
+        self._tex_prog = _compile(TEX_VERT, TEX_FRAG)
+        self._tex_vao = GL.glGenVertexArrays(1)
+        GL.glBindVertexArray(self._tex_vao)
+        self._tex_vbo = GL.glGenBuffers(1)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._tex_vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, 6 * 5 * 4, None,
+                        GL.GL_DYNAMIC_DRAW)
+        GL.glEnableVertexAttribArray(0)
+        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, 20,
+                                 ctypes.c_void_p(0))
+        GL.glEnableVertexAttribArray(1)
+        GL.glVertexAttribPointer(1, 2, GL.GL_FLOAT, False, 20,
+                                 ctypes.c_void_p(12))
+        GL.glBindVertexArray(0)
+        self._image_textures = {}
         quad = np.array([-1, -1, 1, -1, -1, 1, 1, 1], np.float32)
         self._bg_vao = GL.glGenVertexArrays(1)
         GL.glBindVertexArray(self._bg_vao)
@@ -408,6 +441,7 @@ class Viewport(QOpenGLWidget):
 
         if self.grid_visible:
             self._draw_grid(mvp)
+        self._draw_image_planes(mvp)
         self._sync_gpu()
         self._draw_objects(mvp, view)
         self._draw_preview(mvp)
@@ -516,6 +550,65 @@ class Viewport(QOpenGLWidget):
         self._line_width(width)
         GL.glBindVertexArray(batch.vao)
         GL.glDrawArrays(GL.GL_LINES, 0, batch.count)
+
+    def _texture_for(self, path: str):
+        entry = self._image_textures.get(path)
+        if entry is not None:
+            return entry
+        from PySide6.QtGui import QImage
+        img = QImage(path)
+        if img.isNull():
+            self._image_textures[path] = (0, 1.0)
+            return self._image_textures[path]
+        img = img.convertToFormat(QImage.Format.Format_RGBA8888)
+        img = img.mirrored(False, True)
+        tex = GL.glGenTextures(1)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
+        ptr = img.constBits()
+        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, img.width(),
+                        img.height(), 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE,
+                        bytes(ptr))
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER,
+                           GL.GL_LINEAR)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER,
+                           GL.GL_LINEAR)
+        aspect = img.width() / max(img.height(), 1)
+        self._image_textures[path] = (tex, aspect)
+        return self._image_textures[path]
+
+    def _draw_image_planes(self, mvp):
+        planes = getattr(self.scene, "image_planes", [])
+        if not planes:
+            return
+        for plane in planes:
+            tex, _ = self._texture_for(plane["path"])
+            if not tex:
+                continue
+            o = np.asarray(plane["origin"], np.float32)
+            u = np.asarray(plane["u"], np.float32)
+            v = np.asarray(plane["v"], np.float32)
+            quad = np.array([
+                [*o, 0, 0], [*(o + u), 1, 0], [*(o + u + v), 1, 1],
+                [*o, 0, 0], [*(o + u + v), 1, 1], [*(o + v), 0, 1],
+            ], np.float32)
+            GL.glUseProgram(self._tex_prog)
+            GL.glUniformMatrix4fv(
+                GL.glGetUniformLocation(self._tex_prog, "uMVP"), 1,
+                GL.GL_TRUE, mvp)
+            GL.glUniform1f(
+                GL.glGetUniformLocation(self._tex_prog, "uAlpha"),
+                float(plane.get("alpha", 1.0)))
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
+            GL.glUniform1i(
+                GL.glGetUniformLocation(self._tex_prog, "uTex"), 0)
+            GL.glBindVertexArray(self._tex_vao)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._tex_vbo)
+            GL.glBufferData(GL.GL_ARRAY_BUFFER, quad.nbytes, quad,
+                            GL.GL_DYNAMIC_DRAW)
+            GL.glDepthMask(False)
+            GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
+            GL.glDepthMask(True)
 
     def _draw_grid(self, mvp):
         # grid geometry lives in plane-local XY; transform by the CPlane

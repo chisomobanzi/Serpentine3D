@@ -23,6 +23,12 @@ def import_file(scene, path: str) -> int:
         for name, shape in named:
             scene.add(shape, name=name)
         return len(named)
+    if ext == ".dxf":
+        from . import dxf as dxf_mod
+        return dxf_mod.import_dxf(scene, path)
+    if ext == ".svg":
+        from . import svg as svg_mod
+        return svg_mod.import_svg(scene, path)
     if ext == ".3dm":
         from . import rhino
         items = rhino.import_3dm(path)
@@ -56,10 +62,23 @@ def export_file(scene, path: str, only_ids: list | None = None):
         step.export_step([o.shape for o in objs], path)
         return
     if ext == ".obj":
-        obj.export_obj([(o.name, o.shape) for o in objs], path)
+        obj.export_obj([(o.name, o.shape, scene.color_of(o))
+                        for o in objs], path)
         return
     if ext == ".3dm":
         from . import rhino
         rhino.export_3dm(scene, path, only_ids=only_ids)
+        return
+    if ext == ".dxf":
+        from . import dxf as dxf_mod
+        dxf_mod.export_dxf(scene, path, only_ids=only_ids)
+        return
+    if ext == ".glb":
+        from . import gltf
+        gltf.export_glb(scene, path, only_ids=only_ids)
+        return
+    if ext in (".usda", ".usd"):
+        from . import usd
+        usd.export_usda(scene, path, only_ids=only_ids)
         return
     raise ValueError(f"Unsupported export format: {ext}")

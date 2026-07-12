@@ -314,3 +314,49 @@ def cmd_gumball(ctx):
     _vp(ctx).update()
     ctx.echo(f"Gumball {'on' if gb.enabled else 'off'}.")
     yield from ()
+
+
+@command("pictureframe", aliases=("picture",))
+def cmd_pictureframe(ctx):
+    """Place a reference image in the model (trace over photos/plans)."""
+    from .base import OptionReq, PointReq, TextReq
+    action = "Add"
+    if ctx.scene.image_planes:
+        action = yield OptionReq("Picture frame",
+                                 options=["Add", "RemoveAll"], default="Add")
+    if action == "RemoveAll":
+        n = len(ctx.scene.image_planes)
+        ctx.scene.image_planes = []
+        ctx.scene.notify()
+        ctx.echo(f"Removed {n} picture frame(s).")
+        return
+    import os
+    path = yield TextReq("Image path (.png/.jpg)")
+    path = os.path.abspath(os.path.expanduser(path.strip()))
+    if not os.path.exists(path):
+        ctx.echo(f"File not found: {path}")
+        return
+    c1 = yield PointReq("First corner")
+    c2 = yield PointReq("Opposite corner (width; height follows the "
+                        "image aspect)", rubber_from=c1)
+    from PySide6.QtGui import QImage
+    img = QImage(path)
+    if img.isNull():
+        ctx.echo("Could not read the image.")
+        return
+    aspect = img.height() / max(img.width(), 1)
+    cp = ctx.cplane
+    u1, v1, w1 = cp.from_world(c1)
+    u2, v2, _ = cp.from_world(c2)
+    width = u2 - u1
+    height = abs(width) * aspect * (1 if v2 >= v1 else -1)
+    origin = cp.to_world(u1, v1, w1)
+    u_vec = tuple(a - b for a, b in zip(cp.to_world(u2, v1, w1), origin))
+    v_vec = tuple(a - b for a, b in zip(
+        cp.to_world(u1, v1 + height, w1), origin))
+    ctx.scene.image_planes.append({
+        "path": path, "origin": list(origin), "u": list(u_vec),
+        "v": list(v_vec), "alpha": 1.0,
+    })
+    ctx.scene.notify()
+    ctx.echo(f"Picture frame placed ({os.path.basename(path)}).")

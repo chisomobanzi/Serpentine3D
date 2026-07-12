@@ -164,3 +164,64 @@ def test_surface_control_points():
     assert g.shape_kind(moved) == "surface"
     pts2, _ = g.surface_control_points(moved)
     assert pts2[0] == pytest.approx((10, 10, 10))
+
+
+def test_dxf_roundtrip(scene, tmp_path):
+    path = str(tmp_path / "out.dxf")
+    fileio.export_file(scene, path)
+    loaded = Scene()
+    n = fileio.import_file(loaded, path)
+    assert n >= 1                       # the circle curve at minimum
+    curves = [o for o in loaded.all() if o.kind == "curve"]
+    assert len(curves) >= 1
+    assert g.curve_length(curves[0].shape) == pytest.approx(
+        g.curve_length(scene.find_by_name("Profile").shape), rel=1e-3)
+
+
+def test_svg_import(tmp_path):
+    svg_path = str(tmp_path / "in.svg")
+    with open(svg_path, "w") as f:
+        f.write('''<svg xmlns="http://www.w3.org/2000/svg">
+<circle cx="50" cy="50" r="20"/>
+<rect x="0" y="0" width="30" height="20"/>
+<path d="M 0 0 L 100 0 C 120 0 120 40 100 40"/>
+</svg>''')
+    scene = Scene()
+    n = fileio.import_file(scene, svg_path)
+    assert n >= 3
+    kinds = {o.kind for o in scene.all()}
+    assert kinds == {"curve"}
+
+
+def test_glb_export(scene, tmp_path):
+    import json, struct
+    path = str(tmp_path / "out.glb")
+    fileio.export_file(scene, path)
+    with open(path, "rb") as f:
+        magic, ver, total = struct.unpack("<III", f.read(12))
+        assert magic == 0x46546C67 and ver == 2
+        jlen, jtype = struct.unpack("<II", f.read(8))
+        doc = json.loads(f.read(jlen))
+    assert len(doc["meshes"]) == 2       # box + sphere (curve skipped)
+    assert doc["asset"]["generator"] == "Serpentine"
+    assert len(doc["materials"]) == 2
+
+
+def test_usda_export(scene, tmp_path):
+    path = str(tmp_path / "out.usda")
+    fileio.export_file(scene, path)
+    text = open(path).read()
+    assert text.startswith("#usda 1.0")
+    assert 'def Mesh' in text
+    assert 'upAxis = "Z"' in text
+    assert text.count("def Mesh") == 2
+
+
+def test_obj_mtl_colors(scene, tmp_path):
+    path = str(tmp_path / "colored.obj")
+    box = scene.find_by_name("Box A")
+    scene.update(box.id, color=(1.0, 0.0, 0.0))
+    fileio.export_file(scene, path)
+    assert "usemtl" in open(path).read()
+    mtl = open(str(tmp_path / "colored.mtl")).read()
+    assert "Kd 1 0 0" in mtl

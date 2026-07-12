@@ -18,6 +18,7 @@ def save_scene(scene, path: str):
         "version": FORMAT_VERSION,
         "named_views": scene.named_views,
         "units": scene.units,
+        "image_planes": scene.image_planes,
         "block_defs": {
             bid: {
                 "name": bd["name"],
@@ -85,6 +86,7 @@ def load_scene(scene, path: str):
     layers.current_id = id_map.get(current, "default")
     scene.named_views = dict(doc.get("named_views", {}))
     scene.units = doc.get("units", scene.units)
+    scene.image_planes = list(doc.get("image_planes", []))
     for bid, bd in doc.get("block_defs", {}).items():
         scene.block_defs[bid] = {
             "name": bd["name"],

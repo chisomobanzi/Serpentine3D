@@ -550,3 +550,41 @@ def cmd_detailsection(ctx):
     ctx.scene.notify()
     ctx.echo(f"Section cut at {offset:g} — geometry in front of the plane "
              "is removed, cut faces hatched.")
+
+
+@command("exportdxf", mutates=False)
+def cmd_exportdxf(ctx):
+    """Export the active layout sheet (or the model) to DXF."""
+    import os
+    lay = _active_layout(ctx)
+    path = yield TextReq("DXF path",
+                         default=f"~/{lay.name if lay else 'model'}.dxf")
+    path = os.path.abspath(os.path.expanduser(path.strip()))
+    if not path.endswith(".dxf"):
+        path += ".dxf"
+    if lay is not None:
+        from ..fileio.dxf import export_layout_dxf
+        export_layout_dxf(_window(ctx), lay, path)
+        ctx.echo(f"Exported sheet '{lay.name}' to {path} (paper mm; "
+                 "VISIBLE/HIDDEN/ANNOT layers).")
+    else:
+        from .. import fileio
+        fileio.export_file(ctx.scene, path)
+        ctx.echo(f"Exported model to {path}.")
+
+
+@command("exportsvg", mutates=False)
+def cmd_exportsvg(ctx):
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Switch to a layout to export it as SVG.")
+        return
+        yield  # pragma: no cover
+    import os
+    path = yield TextReq("SVG path", default=f"~/{lay.name}.svg")
+    path = os.path.abspath(os.path.expanduser(path.strip()))
+    if not path.endswith(".svg"):
+        path += ".svg"
+    from ..fileio.svg import export_layout_svg
+    export_layout_svg(_window(ctx), lay, path)
+    ctx.echo(f"Exported sheet '{lay.name}' to {path}.")

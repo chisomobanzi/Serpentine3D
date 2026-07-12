@@ -13,6 +13,8 @@ dependencies = [
     "PyOpenGL>=3.1",
     "mcp>=1.0",
     "rhino3dm>=8.0",
+    "ezdxf>=1.1",
+    "svgelements>=1.9",
 ]
 
 [project.optional-dependencies]

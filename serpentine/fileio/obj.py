@@ -13,16 +13,31 @@ from ..core import geometry, occ
 from ..core.tessellate import tessellate
 
 
-def export_obj(named_shapes: list[tuple[str, object]], path: str):
-    """named_shapes: [(name, TopoDS_Shape), ...]"""
+def export_obj(named_shapes: list, path: str):
+    """named_shapes: [(name, TopoDS_Shape)] or [(name, shape, color)]"""
+    import os
     lines = ["# Serpentine OBJ export"]
+    mtl_lines = []
+    mtl_path = os.path.splitext(path)[0] + ".mtl"
+    has_colors = any(len(t) > 2 for t in named_shapes)
+    if has_colors:
+        lines.append(f"mtllib {os.path.basename(mtl_path)}")
     v_offset = 1
-    for name, shape in named_shapes:
+    for entry in named_shapes:
+        name, shape = entry[0], entry[1]
+        color = entry[2] if len(entry) > 2 else None
         mesh = tessellate(shape)
         if not mesh.has_faces:
             continue
         safe = name.replace(" ", "_")
         lines.append(f"o {safe}")
+        if color is not None:
+            mtl_lines.extend([
+                f"newmtl {safe}_mat",
+                f"Kd {color[0]:.4g} {color[1]:.4g} {color[2]:.4g}",
+                "Ka 0 0 0", "Ks 0.05 0.05 0.05", "Ns 32", "",
+            ])
+            lines.append(f"usemtl {safe}_mat")
         for v in mesh.vertices:
             lines.append(f"v {v[0]:.8g} {v[1]:.8g} {v[2]:.8g}")
         for n in mesh.normals:
@@ -33,6 +48,9 @@ def export_obj(named_shapes: list[tuple[str, object]], path: str):
         v_offset += len(mesh.vertices)
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
+    if has_colors and mtl_lines:
+        with open(mtl_path, "w") as f:
+            f.write("\n".join(mtl_lines) + "\n")
 
 
 def import_obj(path: str) -> list[tuple[str, object]]:
