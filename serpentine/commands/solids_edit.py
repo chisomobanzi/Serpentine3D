@@ -4,6 +4,17 @@ from ..core import geometry as g
 from .base import LengthReq, OptionReq, SelectReq, command
 
 
+def _parse_radius(ctx, text):
+    from ..utils.units import parse_length
+    text = text.strip()
+    if "," in text:
+        a, _, b = text.partition(",")
+        ra = parse_length(a, ctx.scene.units)
+        rb = parse_length(b, ctx.scene.units)
+        return (ra, rb) if ra and rb else None
+    return parse_length(text, ctx.scene.units)
+
+
 def _subobject_edge_map(ctx):
     """{obj_id: [edge shapes]} from the current sub-object selection."""
     out = {}
@@ -25,10 +36,25 @@ def cmd_filletedge(ctx):
     otherwise fillets every edge of the selected solids."""
     picked = _subobject_edge_map(ctx)
     if picked:
-        radius = yield LengthReq("Fillet radius", minimum=1e-9)
+        chain = yield OptionReq("Extend picks to smooth chains?",
+                                options=["No", "Yes"], default="No")
+        from .base import TextReq
+        r_text = yield TextReq("Fillet radius (or start,end for variable)",
+                               default="1")
+        radius = _parse_radius(ctx, r_text)
+        if radius is None:
+            ctx.echo("Could not parse the radius.")
+            return
         done = 0
         for obj_id, edges in picked.items():
             obj = ctx.scene.get(obj_id)
+            if chain == "Yes":
+                all_edges = g.edges_of(obj.shape)
+                idx_set = set()
+                for (oid, kind, idx) in ctx.selection.subobjects:
+                    if oid == obj_id and kind == "edge":
+                        idx_set.update(g.edge_chain(obj.shape, idx))
+                edges = [all_edges[i] for i in sorted(idx_set)]
             try:
                 ctx.scene.replace_shape(
                     obj_id, g.fillet_edges(obj.shape, radius, edges=edges))
@@ -36,7 +62,7 @@ def cmd_filletedge(ctx):
             except g.GeometryError as exc:
                 ctx.echo(f"{obj.name}: {exc}")
         ctx.selection.clear()
-        ctx.echo(f"Filleted {done} picked edge(s) at r={radius:g}.")
+        ctx.echo(f"Filleted {done} edge(s).")
         return
     objs = yield SelectReq("Select solids to fillet (Ctrl+Shift-click "
                            "edges beforehand to fillet specific ones)",

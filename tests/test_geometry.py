@@ -1,5 +1,7 @@
 import math
 
+import numpy as np
+
 import pytest
 
 from serpentine.core import geometry as g
@@ -455,3 +457,88 @@ def test_text_curves():
         mn, mx = g.bbox(c)
         mins = np.minimum(mins, mn); maxs = np.maximum(maxs, mx)
     assert 7 < (maxs[1] - mins[1]) < 14     # roughly requested height
+
+
+def test_deform_twist_curve():
+    from serpentine.core import deform
+    line = g.make_line((5, 0, 0), (5, 0, 10))
+    fn = deform.twist_fn((0, 0, 0), (0, 0, 1), 90.0, 10.0)
+    twisted = deform.deform_shape(line, fn)
+    mn, mx = g.bbox(twisted)
+    # the top of the line rotates 90 degrees: x=5 -> y=5
+    assert mx[1] == pytest.approx(5, abs=0.15)
+    assert g.curve_length(twisted) > 10
+
+
+def test_deform_taper_surface():
+    from serpentine.core import deform
+    rect = g.make_rectangle((-5, -5, 0), (5, 5, 0))
+    solidish = g.extrude(rect, (0, 0, 1), 10, cap=False)
+    fn = deform.taper_fn((0, 0, 0), (0, 0, 1), 0.5, 10.0)
+    tapered = deform.deform_shape(solidish, fn)
+    mn, mx = g.bbox(tapered)
+    assert mx[0] == pytest.approx(5, abs=0.1)     # base stays
+    # top width should be ~5 (half of 10): probe with a section
+    levels = g.contour(tapered, (0, 0, 1), 9.0)
+    top_curves = levels[-1][1]
+    tmn = np.array([np.inf] * 3); tmx = -tmn
+    for c in top_curves:
+        cmn, cmx = g.bbox(c)
+        tmn = np.minimum(tmn, cmn); tmx = np.maximum(tmx, cmx)
+    assert (tmx[0] - tmn[0]) == pytest.approx(5.5, abs=0.4)
+
+
+def test_deform_bend_curve():
+    from serpentine.core import deform
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    fn = deform.bend_fn((0, 0, 0), (1, 0, 0), 90.0, 10.0)
+    bent = deform.deform_shape(line, fn)
+    # arc length preserved-ish
+    assert g.curve_length(bent) == pytest.approx(10, rel=0.02)
+    mn, mx = g.bbox(bent)
+    assert mx[2] > 2      # curls upward
+
+
+def test_flow_along_curve():
+    from serpentine.core import deform
+    target = g.make_arc_3pt((0, 0, 0), (10, 6, 0), (20, 0, 0))
+    box_curve = g.make_rectangle((0, -1, 0), (20, 1, 0))
+    fn = deform.flow_fn((0, 0, 0), (20, 0, 0), target)
+    flowed = deform.deform_shape(box_curve, fn)
+    mn, mx = g.bbox(flowed)
+    assert mx[1] > 5      # follows the arc upward
+
+
+def test_extend_and_match():
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    longer = g.extend_curve(line, 5.0, "end")
+    assert g.curve_length(longer) == pytest.approx(15, rel=1e-3)
+    both = g.extend_curve(longer, 2.0, "start")
+    assert g.curve_length(both) == pytest.approx(17, rel=1e-3)
+
+    a = g.make_interp_curve([(0, 0, 0), (5, 2, 0), (9, 1, 0)])
+    b = g.make_line((10, 0, 0), (20, 0, 0))
+    matched = g.match_curve(a, b, "tangent")
+    # end of a now touches start of b
+    import numpy as np
+    pts = g.sample_curve(matched, 32)
+    end = np.asarray(pts[-1])
+    assert np.linalg.norm(end - np.array([10, 0, 0])) < 1e-6
+
+
+def test_edge_chain_and_variable_fillet():
+    # a rounded-rect extrusion: side edges form tangent chains
+    rect = g.make_rectangle((0, 0, 0), (20, 10, 0))
+    l1 = g.make_line((0, 0, 0), (10, 0, 0))
+    l2 = g.make_line((10, 0, 0), (10, 10, 0))
+    ea, arc, eb = g.fillet_curves(l1, l2, 3.0, (10, 0, 0))
+    joined = g.join_curves([ea, arc, eb])
+    # chain from the arc should include both lines (tangent continuation)
+    idx_arc = 1
+    chain = g.edge_chain(joined, idx_arc)
+    assert len(chain) == 3
+
+    box = g.make_box((0, 0, 0), 10, 10, 10)
+    var = g.fillet_edges(box, (1.0, 3.0), edges=[g.edges_of(box)[0]])
+    assert g.shape_kind(var) == "solid"
+    assert 900 < g.volume(var) < 1000

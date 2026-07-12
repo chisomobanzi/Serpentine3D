@@ -310,10 +310,57 @@ def fillet_curves(edge_a, edge_b, radius: float,
     return ea_out, arc, eb_out
 
 
-def fillet_edges(shape, radius: float, edges: list | None = None,
+def edge_chain(shape, edge_index: int, angle_tol_deg: float = 20.0) -> list:
+    """Indices of edges forming a tangent-continuous chain with the given
+    edge (shared vertices with aligned tangents)."""
+    import numpy as np
+    edges = edges_of(shape)
+    if not (0 <= edge_index < len(edges)):
+        raise GeometryError("Edge index out of range")
+
+    def end_data(edge):
+        ad = occ.edge_adaptor(edge)
+        out = []
+        for t in (ad.FirstParameter(), ad.LastParameter()):
+            p = gp_Pnt()
+            v = gp_Vec()
+            ad.D1(t, p, v)
+            tv = np.array([v.X(), v.Y(), v.Z()])
+            n = np.linalg.norm(tv)
+            out.append((np.array([p.X(), p.Y(), p.Z()]),
+                        tv / n if n > 1e-12 else tv))
+        return out
+
+    data = [end_data(e) for e in edges]
+    cos_tol = math.cos(math.radians(angle_tol_deg))
+    chain = {edge_index}
+    grew = True
+    while grew:
+        grew = False
+        for i in chain.copy():
+            for j in range(len(edges)):
+                if j in chain:
+                    continue
+                for (pi, ti) in data[i]:
+                    for (pj, tj) in data[j]:
+                        if (np.linalg.norm(pi - pj) < tol()
+                                and abs(float(np.dot(ti, tj))) > cos_tol):
+                            chain.add(j)
+                            grew = True
+    return sorted(chain)
+
+
+def fillet_edges(shape, radius, edges: list | None = None,
                  chamfer: bool = False) -> TopoDS_Shape:
-    """Fillet (or chamfer) edges of a solid. edges=None means all edges."""
-    if radius <= 0:
+    """Fillet (or chamfer) edges of a solid. edges=None means all edges.
+    `radius` may be a single value or (r_start, r_end) for a variable
+    fillet along each edge."""
+    r_pair = None
+    if isinstance(radius, (tuple, list)):
+        r_pair = (float(radius[0]), float(radius[1]))
+        if min(r_pair) <= 0:
+            raise GeometryError("Radii must be positive")
+    elif radius <= 0:
         raise GeometryError("Radius must be positive")
     if chamfer:
         from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer
@@ -325,7 +372,12 @@ def fillet_edges(shape, radius: float, edges: list | None = None,
     if not targets:
         raise GeometryError("No edges to fillet")
     for e in targets:
-        mk.Add(float(radius), e)
+        if r_pair and not chamfer:
+            mk.Add(r_pair[0], r_pair[1], e)
+        elif r_pair:
+            mk.Add(r_pair[0], r_pair[1], e)
+        else:
+            mk.Add(float(radius), e)
     mk.Build()
     if not mk.IsDone() or mk.Shape().IsNull():
         raise GeometryError(
@@ -664,6 +716,82 @@ def unroll_face(face) -> list:
     if not out:
         raise GeometryError("Unroll produced no boundary curves")
     return out
+
+
+def extend_curve(shape, length: float, end: str = "end") -> TopoDS_Shape:
+    """Extend a curve tangentially past its start or end (line extension)."""
+    import numpy as np
+    if length <= 0:
+        raise GeometryError("Extension length must be positive")
+    edges = edges_of(shape)
+    if not edges:
+        raise GeometryError("Not a curve")
+    edge = edges[-1] if end != "start" else edges[0]
+    ad = occ.edge_adaptor(edge)
+    t = ad.LastParameter() if end != "start" else ad.FirstParameter()
+    p = gp_Pnt()
+    v = gp_Vec()
+    ad.D1(t, p, v)
+    tangent = np.array([v.X(), v.Y(), v.Z()])
+    n = np.linalg.norm(tangent)
+    if n < 1e-12:
+        raise GeometryError("Degenerate tangent at the curve end")
+    tangent = tangent / n * float(length)
+    if end == "start":
+        tangent = -tangent
+    start_pt = (p.X(), p.Y(), p.Z())
+    tip = (p.X() + tangent[0], p.Y() + tangent[1], p.Z() + tangent[2])
+    ext = make_line(start_pt, tip)
+    return join_curves([shape, ext])
+
+
+def match_curve(a, b, continuity: str = "tangent") -> TopoDS_Shape:
+    """Move the end of curve `a` to meet the nearest end of curve `b`
+    with position (G0) or tangent (G1) continuity. Returns the new a."""
+    import numpy as np
+    bs = _edge_bspline(a)
+    ends_a = []
+    for t, is_start in ((bs.FirstParameter(), True),
+                        (bs.LastParameter(), False)):
+        p = gp_Pnt()
+        v = gp_Vec()
+        bs.D1(t, p, v)
+        ends_a.append((np.array([p.X(), p.Y(), p.Z()]), is_start))
+    bsb = _edge_bspline(b)
+    ends_b = []
+    for t, is_start in ((bsb.FirstParameter(), True),
+                        (bsb.LastParameter(), False)):
+        p = gp_Pnt()
+        v = gp_Vec()
+        bsb.D1(t, p, v)
+        ends_b.append((np.array([p.X(), p.Y(), p.Z()]),
+                       np.array([v.X(), v.Y(), v.Z()]), is_start))
+    best = None
+    for (pa, a_start) in ends_a:
+        for (pb, tb, b_start) in ends_b:
+            d = float(np.linalg.norm(pa - pb))
+            if best is None or d < best[0]:
+                best = (d, a_start, pb, tb, b_start)
+    _, a_start, pb, tb, b_start = best
+    n = bs.NbPoles()
+    if n < 2:
+        raise GeometryError("Curve has too few control points")
+    end_i = 1 if a_start else n
+    next_i = 2 if a_start else n - 1
+    bs.SetPole(end_i, _pnt(tuple(pb)))
+    if continuity == "tangent":
+        # direction of travel continuing out of b through the joint
+        t_join = tb / (np.linalg.norm(tb) or 1.0)
+        if b_start:
+            t_join = -t_join
+        cur = bs.Pole(next_i)
+        dist = float(np.linalg.norm(
+            np.array([cur.X(), cur.Y(), cur.Z()]) - pb)) or 1.0
+        if a_start:      # a leaves the joint along t_join
+            bs.SetPole(next_i, _pnt(tuple(pb + t_join * dist)))
+        else:            # a arrives at the joint along t_join
+            bs.SetPole(next_i, _pnt(tuple(pb - t_join * dist)))
+    return BRepBuilderAPI_MakeEdge(bs).Edge()
 
 
 def sweep2(profile, rail1, rail2) -> TopoDS_Shape:

@@ -27,11 +27,13 @@ uniform mat4 uView;
 out vec3 vNormal;
 out vec3 vPosView;
 out float vCurv;
+out float vWorldZ;
 void main() {
     gl_Position = uMVP * vec4(pos, 1.0);
     vNormal = mat3(uView) * nrm;
     vPosView = (uView * vec4(pos, 1.0)).xyz;
     vCurv = curv;
+    vWorldZ = nrm.z;
 }
 """
 
@@ -40,9 +42,12 @@ MESH_FRAG = """
 in vec3 vNormal;
 in vec3 vPosView;
 in float vCurv;
+in float vWorldZ;
 uniform vec3 uColor;
 uniform float uAlpha;
 uniform int uZebra;
+uniform int uDraft;         // 1 = draft-angle analysis
+uniform float uDraftCos;    // cos(90deg - required draft)
 uniform float uCurvRange;   // >0 enables curvature false-colour
 out vec4 frag;
 void main() {
@@ -58,6 +63,19 @@ void main() {
         vec3 cc = t < 0.5 ? mix(cold, flat_, t * 2.0)
                           : mix(flat_, hot, (t - 0.5) * 2.0);
         frag = vec4(cc * (0.45 + 0.55 * diff), uAlpha);
+        return;
+    }
+    if (uDraft == 1) {
+        // world-space normal ~ view-space transformed back is overkill:
+        // use the mesh normal via uView inverse-free trick — pass world
+        // normals: vNormal is view-space, so compare against view up of
+        // world +Z transformed. Instead we approximate with vWorldN.
+        float c = vWorldZ;                  // world normal z component
+        vec3 col;
+        if (c < -0.02)      col = vec3(0.85, 0.25, 0.2);    // undercut
+        else if (c < uDraftCos) col = vec3(0.3, 0.5, 0.9);  // needs draft
+        else                col = vec3(0.35, 0.8, 0.4);     // ok
+        frag = vec4(col * (0.45 + 0.55 * diff), uAlpha);
         return;
     }
     if (uZebra == 1) {
@@ -290,6 +308,8 @@ class Viewport(QOpenGLWidget):
                                                 default=1.0))
                                if config else 1.0)
         self.cv_enabled: set[str] = set()   # objects showing control points
+        self.comb_enabled: set[str] = set() # curvature combs on curves
+        self.draft_angle = 3.0              # draft analysis threshold (deg)
         self._cv_cache: dict = {}
         self._cv_drag = None                # (obj_id, index, plane_pt, normal)
         self._press_pos = None
@@ -446,6 +466,7 @@ class Viewport(QOpenGLWidget):
         self._draw_objects(mvp, view)
         self._draw_preview(mvp)
         self._draw_control_points(mvp)
+        self._draw_combs(mvp)
         self.gumball.paint(mvp)
         self._draw_axis_triad(view, w, h)
         self._draw_frame_guides(w, h)
@@ -664,7 +685,7 @@ class Viewport(QOpenGLWidget):
                       light_background=False):
         mode = mode_override or self.display_mode
         fill_alpha = {"shaded": 1.0, "ghosted": 0.35, "wireframe": 0.0,
-                      "zebra": 1.0, "curvature": 1.0}[mode]
+                      "zebra": 1.0, "curvature": 1.0, "draft": 1.0}[mode]
         curv_range = self._curvature_range() if mode == "curvature" else 0.0
         for obj in self.scene.visible_objects():
             gpu = self._gpu.get(obj.id)
@@ -697,6 +718,13 @@ class Viewport(QOpenGLWidget):
                 GL.glUniform1i(
                     GL.glGetUniformLocation(self._mesh_prog, "uZebra"),
                     1 if mode == "zebra" else 0)
+                import math as _math
+                GL.glUniform1i(
+                    GL.glGetUniformLocation(self._mesh_prog, "uDraft"),
+                    1 if mode == "draft" else 0)
+                GL.glUniform1f(
+                    GL.glGetUniformLocation(self._mesh_prog, "uDraftCos"),
+                    _math.sin(_math.radians(self.draft_angle)))
                 GL.glUniform1f(
                     GL.glGetUniformLocation(self._mesh_prog, "uCurvRange"),
                     curv_range)
@@ -830,6 +858,61 @@ class Viewport(QOpenGLWidget):
             self._draw_lines(self._preview, mvp, (1.0, 1.0, 1.0, 0.95), 2.0)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
+    def _draw_combs(self, mvp):
+        """Curvature combs: quills perpendicular to the curve, length
+        proportional to curvature."""
+        if not self.comb_enabled:
+            return
+        from ..core import geometry as _g
+        from OCP.BRepLProp import BRepLProp_CLProps
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        for obj_id in list(self.comb_enabled):
+            obj = self.scene.get(obj_id)
+            if obj is None or obj.kind != "curve":
+                self.comb_enabled.discard(obj_id)
+                continue
+            quills = []
+            envelope = []
+            max_k = 1e-12
+            samples = []
+            for edge in _g.edges_of(obj.shape):
+                ad = _g.occ.edge_adaptor(edge)
+                t0, t1 = ad.FirstParameter(), ad.LastParameter()
+                props = BRepLProp_CLProps(ad, 2, 1e-9)
+                for i in range(81):
+                    t = t0 + (t1 - t0) * i / 80
+                    props.SetParameter(t)
+                    p = props.Value()
+                    k = props.Curvature()
+                    n = _g.gp_Dir()
+                    if k > 1e-12:
+                        try:
+                            props.Normal(n)
+                        except Exception:
+                            k = 0.0
+                    samples.append((np.array([p.X(), p.Y(), p.Z()]),
+                                    np.array([n.X(), n.Y(), n.Z()]), k))
+                    max_k = max(max_k, k)
+            scale = self.camera.distance * 0.12 / max_k
+            prev_tip = None
+            for (p, n, k) in samples:
+                tip = p - n * k * scale
+                quills.append(np.stack([p, tip]))
+                if prev_tip is not None:
+                    envelope.append(np.stack([prev_tip, tip]))
+                prev_tip = tip
+            for segs, color, width in (
+                    (quills, (0.9, 0.45, 0.85, 0.55), 1.0),
+                    (envelope, (0.9, 0.45, 0.85, 0.9), 1.4)):
+                if segs:
+                    arr = np.concatenate(segs).astype(np.float32)
+                    self._preview.update(arr)
+                    self._set_line_uniforms(mvp, color)
+                    self._line_width(width)
+                    GL.glBindVertexArray(self._preview.vao)
+                    GL.glDrawArrays(GL.GL_LINES, 0, len(arr))
+        GL.glEnable(GL.GL_DEPTH_TEST)
+
     def _draw_selection_box(self, w, h):
         if not self._box_active or self._press_pos is None \
                 or self._box_end is None:
@@ -952,7 +1035,7 @@ class Viewport(QOpenGLWidget):
 
     def set_display_mode(self, mode: str):
         if mode not in ("shaded", "wireframe", "ghosted", "zebra",
-                        "curvature", "technical"):
+                        "curvature", "technical", "draft"):
             raise ValueError(f"Unknown display mode '{mode}'")
         self.display_mode = mode
         self.update()
