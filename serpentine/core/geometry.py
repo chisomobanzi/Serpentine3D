@@ -309,6 +309,116 @@ def fillet_curves(edge_a, edge_b, radius: float,
     return ea_out, arc, eb_out
 
 
+def fillet_edges(shape, radius: float, edges: list | None = None,
+                 chamfer: bool = False) -> TopoDS_Shape:
+    """Fillet (or chamfer) edges of a solid. edges=None means all edges."""
+    if radius <= 0:
+        raise GeometryError("Radius must be positive")
+    if chamfer:
+        from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer
+        mk = BRepFilletAPI_MakeChamfer(shape)
+    else:
+        from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
+        mk = BRepFilletAPI_MakeFillet(shape)
+    targets = edges if edges is not None else edges_of(shape)
+    if not targets:
+        raise GeometryError("No edges to fillet")
+    for e in targets:
+        mk.Add(float(radius), e)
+    mk.Build()
+    if not mk.IsDone() or mk.Shape().IsNull():
+        raise GeometryError(
+            "Fillet failed — the radius is probably too large for "
+            "the smallest edges; try a smaller value")
+    return unwrap_compound(mk.Shape())
+
+
+def cap_holes(shape) -> TopoDS_Shape:
+    """Close planar openings of a surface/shell and solidify if possible."""
+    from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds
+    from .occ import (
+        BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeSolid,
+        BRepBuilderAPI_Sewing,
+    )
+    fb = ShapeAnalysis_FreeBounds(shape)
+    closed = fb.GetClosedWires()
+    caps = []
+    if closed is not None and not closed.IsNull():
+        exp = TopExp_Explorer(closed, occ.WIRE)
+        while exp.More():
+            wire = occ.to_wire(exp.Current())
+            exp.Next()
+            mk = BRepBuilderAPI_MakeFace(wire, True)
+            if mk.IsDone():
+                caps.append(mk.Face())
+    if not caps:
+        raise GeometryError("No closable planar openings found")
+    sew = BRepBuilderAPI_Sewing(1e-6)
+    sew.Add(shape)
+    for f in caps:
+        sew.Add(f)
+    sew.Perform()
+    sewn = sew.SewedShape()
+    # try to promote the closed shell to a solid
+    try:
+        exp = TopExp_Explorer(sewn, occ.SHELL)
+        if exp.More():
+            solid_mk = BRepBuilderAPI_MakeSolid(occ.to_shell(exp.Current()))
+            if solid_mk.IsDone():
+                solid = solid_mk.Solid()
+                if volume(solid) > 1e-12:
+                    return solid
+    except Exception:
+        pass
+    return sewn
+
+
+def intersect_shapes(a, b) -> list:
+    """Intersection curves between two shapes (surface/solid)."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+    sec = BRepAlgoAPI_Section(a, b)
+    sec.Build()
+    if not sec.IsDone():
+        raise GeometryError("Intersection failed")
+    edges = edges_of(sec.Shape())
+    if not edges:
+        raise GeometryError("The objects do not intersect")
+    return _curve_pieces(edges, [])
+
+
+def contour(shape, direction: Point = (0, 0, 1),
+            spacing: float = 10.0) -> list[tuple[float, list]]:
+    """Slice a shape into section curves at regular intervals.
+
+    Returns [(offset_along_direction, [curves]), ...]."""
+    import numpy as np
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+    from .occ import gp_Pln
+    if spacing <= 0:
+        raise GeometryError("Spacing must be positive")
+    d = np.asarray(direction, float)
+    d = d / np.linalg.norm(d)
+    (mn, mx) = bbox(shape)
+    corners = [np.array([x, y, z]) for x in (mn[0], mx[0])
+               for y in (mn[1], mx[1]) for z in (mn[2], mx[2])]
+    lo = min(float(np.dot(c, d)) for c in corners)
+    hi = max(float(np.dot(c, d)) for c in corners)
+    out = []
+    level = lo + spacing
+    while level < hi - 1e-6:
+        plane = gp_Pln(_pnt(tuple(d * level)), _dir(tuple(d)))
+        sec = BRepAlgoAPI_Section(shape, plane)
+        sec.Build()
+        if sec.IsDone():
+            edges = edges_of(sec.Shape())
+            if edges:
+                out.append((level - lo, _curve_pieces(edges, [])))
+        level += spacing
+    if not out:
+        raise GeometryError("No contours produced (check the spacing)")
+    return out
+
+
 def offset_surface(shape, distance: float) -> TopoDS_Shape:
     """Offset a surface/shell by a distance along its normals."""
     from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
@@ -784,7 +894,10 @@ def copy_shape(shape) -> TopoDS_Shape:
 # --- interrogation ----------------------------------------------------------
 
 def shape_kind(shape) -> str:
-    """Classify as 'curve' | 'surface' | 'solid' | 'point' | 'compound'."""
+    """Classify as 'curve' | 'surface' | 'solid' | 'point' | 'compound'.
+
+    Compounds are classified by their contents when uniform: a compound of
+    solids behaves as a solid, of curves as a curve, and so on."""
     st = shape.ShapeType()
     if st in (occ.EDGE, occ.WIRE):
         return "curve"
@@ -794,7 +907,30 @@ def shape_kind(shape) -> str:
         return "solid"
     if st == occ.VERTEX:
         return "point"
+    kinds = set()
+    from .occ import TopoDS_Iterator
+    it = TopoDS_Iterator(shape)
+    while it.More():
+        kinds.add(shape_kind(it.Value()))
+        it.Next()
+    if len(kinds) == 1:
+        return kinds.pop()
     return "compound"
+
+
+def unwrap_compound(shape) -> TopoDS_Shape:
+    """Strip single-child compound wrappers (some OCCT ops add them)."""
+    from .occ import TopoDS_Iterator
+    while shape.ShapeType() == occ.COMPOUND:
+        it = TopoDS_Iterator(shape)
+        children = []
+        while it.More():
+            children.append(it.Value())
+            it.Next()
+        if len(children) != 1:
+            break
+        shape = children[0]
+    return shape
 
 
 def bbox(shape) -> tuple[Point, Point]:

@@ -370,3 +370,50 @@ def test_units_command_rescale(env):
     assert g.volume(scene.all()[0].shape) == pytest.approx(1.0, rel=1e-6)
     proc.run("undo")
     assert g.volume(scene.all()[0].shape) == pytest.approx(1e9, rel=1e-6)
+
+
+def test_filletedge_and_contour_commands(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 10, 10, 30))
+    proc.run("filletedge")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    proc.provide_text("1")
+    assert 2800 < g.volume(scene.all()[0].shape) < 3000
+
+    proc.run("contour")
+    proc.click_object(scene.all()[0].id)
+    proc.finish_selection()
+    proc.provide_text("Z")
+    proc.provide_text("10")
+    contours = [o for o in scene.all() if o.kind == "curve"]
+    assert len(contours) >= 2
+    assert scene.layers.find_by_name("Contours") is not None
+
+
+def test_intersect_command(env):
+    scene, sel, hist, ctx, proc = env
+    a = scene.add(g.make_box((0, 0, 0), 10, 10, 10))
+    b = scene.add(g.make_sphere((10, 5, 5), 3))
+    proc.run("intersect")
+    proc.click_object(a.id)
+    proc.click_object(b.id)
+    curves = [o for o in scene.all() if o.kind == "curve"]
+    assert len(curves) >= 1
+
+
+def test_booleansplit_command(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 10, 10, 10))
+    line = g.make_line((5, -1, -1), (5, 11, -1))
+    cutter = scene.add(g.extrude(g.make_line((5, -5, -5), (5, 15, -5)),
+                                 (0, 0, 1), 25))
+    proc.run("booleansplit")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    proc.click_object(cutter.id)
+    proc.finish_selection()
+    solids = [o for o in scene.all() if o.kind == "solid"]
+    assert len(solids) == 2
+    for s in solids:
+        assert g.volume(s.shape) == pytest.approx(500, rel=1e-6)

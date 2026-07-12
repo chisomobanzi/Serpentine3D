@@ -348,3 +348,44 @@ def test_dash_segments_bounded():
     # zero-length segments skipped
     d3 = dash_segments(np.array([[1, 1, 0], [1, 1, 0]], float))
     assert len(d3) == 0
+
+
+def test_fillet_edges_solid():
+    box = g.make_box((0, 0, 0), 10, 10, 10)
+    filleted = g.fillet_edges(box, 1.0)
+    # rounded box: volume less than sharp box, more than r=1 inset
+    v = g.volume(filleted)
+    assert 900 < v < 1000
+
+
+def test_chamfer_edges_solid():
+    box = g.make_box((0, 0, 0), 10, 10, 10)
+    chamfered = g.fillet_edges(box, 1.0, chamfer=True)
+    assert 900 < g.volume(chamfered) < 1000
+
+
+def test_cap_holes():
+    # an open cylinder (surface of revolution) capped into a solid
+    line = g.make_line((5, 0, 0), (5, 0, 10))
+    tube = g.revolve(line, (0, 0, 0), (0, 0, 1), 360)
+    capped = g.cap_holes(tube)
+    assert g.shape_kind(capped) == "solid"
+    assert g.volume(capped) == pytest.approx(math.pi * 25 * 10, rel=1e-3)
+
+
+def test_intersect_shapes():
+    a = g.make_box((0, 0, 0), 10, 10, 10)
+    b = g.make_sphere((10, 5, 5), 3)
+    curves = g.intersect_shapes(a, b)
+    assert len(curves) >= 1
+    total = sum(g.curve_length(c) for c in curves)
+    assert total == pytest.approx(2 * math.pi * 3, rel=1e-2)
+
+
+def test_contour():
+    box = g.make_box((0, 0, 0), 10, 10, 30)
+    levels = g.contour(box, (0, 0, 1), 10.0)
+    assert len(levels) == 2
+    for _, curves in levels:
+        total = sum(g.curve_length(c) for c in curves)
+        assert total == pytest.approx(40, rel=1e-6)
