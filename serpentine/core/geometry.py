@@ -11,6 +11,7 @@ import os
 import tempfile
 
 from . import occ
+from .tolerance import tight, tol
 from .occ import (
     gp_Pnt, gp_Vec, gp_Dir, gp_Ax1, gp_Ax2, gp_Trsf, gp_GTrsf, gp_Circ,
     gp_Elips, gp_XYZ, gp_Mat,
@@ -60,7 +61,7 @@ def pnt_tuple(p: gp_Pnt) -> Point:
 # --- curves -----------------------------------------------------------------
 
 def make_line(p1: Point, p2: Point) -> TopoDS_Shape:
-    if _pnt(p1).Distance(_pnt(p2)) < 1e-9:
+    if _pnt(p1).Distance(_pnt(p2)) < tight():
         raise GeometryError("Line endpoints are coincident")
     return BRepBuilderAPI_MakeEdge(_pnt(p1), _pnt(p2)).Edge()
 
@@ -70,10 +71,10 @@ def make_polyline(points: list[Point], closed: bool = False) -> TopoDS_Shape:
         raise GeometryError("Polyline needs at least 2 points")
     wire = BRepBuilderAPI_MakeWire()
     pts = [_pnt(p) for p in points]
-    if closed and pts[0].Distance(pts[-1]) > 1e-9:
+    if closed and pts[0].Distance(pts[-1]) > tight():
         pts.append(pts[0])
     for a, b in zip(pts, pts[1:]):
-        if a.Distance(b) < 1e-9:
+        if a.Distance(b) < tight():
             continue
         wire.Add(BRepBuilderAPI_MakeEdge(a, b).Edge())
     if not wire.IsDone():
@@ -124,7 +125,7 @@ def make_interp_curve(points: list[Point], closed: bool = False) -> TopoDS_Shape
     arr = TColgp_HArray1OfPnt(1, len(points))
     for i, p in enumerate(points, start=1):
         arr.SetValue(i, _pnt(p))
-    interp = GeomAPI_Interpolate(arr, closed, 1e-7)
+    interp = GeomAPI_Interpolate(arr, closed, tol() * 0.01)
     interp.Perform()
     if not interp.IsDone():
         raise GeometryError("Curve interpolation failed")
@@ -211,7 +212,7 @@ def is_closed_curve(shape) -> bool:
         ad = occ.edge_adaptor(occ.to_edge(shape))
         p0 = ad.Value(ad.FirstParameter())
         p1 = ad.Value(ad.LastParameter())
-        return p0.Distance(p1) < 1e-7
+        return p0.Distance(p1) < tol() * 0.1
     if st == occ.WIRE:
         return occ.to_wire(shape).Closed()
     return False
@@ -245,7 +246,7 @@ def revolve(shape, axis_point: Point, axis_dir: Point,
 def loft(profiles: list, solid: bool = False, ruled: bool = False) -> TopoDS_Shape:
     if len(profiles) < 2:
         raise GeometryError("Loft needs at least 2 profile curves")
-    lofter = BRepOffsetAPI_ThruSections(solid, ruled, 1e-6)
+    lofter = BRepOffsetAPI_ThruSections(solid, ruled, tol() * 0.01)
     for p in profiles:
         lofter.AddWire(occ.to_wire(to_wire(p)))
     lofter.Build()
@@ -333,6 +334,43 @@ def fillet_edges(shape, radius: float, edges: list | None = None,
     return unwrap_compound(mk.Shape())
 
 
+def face_normal(face) -> Point:
+    """Outward normal of a (near-)planar face, respecting orientation."""
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    from OCP.TopAbs import TopAbs_Orientation
+    surf = BRepAdaptor_Surface(face)
+    if surf.GetType() != GeomAbs_SurfaceType.GeomAbs_Plane:
+        raise GeometryError("Face is not planar")
+    d = surf.Plane().Axis().Direction()
+    n = (d.X(), d.Y(), d.Z())
+    if face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED:
+        n = (-n[0], -n[1], -n[2])
+    return n
+
+
+def push_pull(shape, face_index: int, distance: float) -> TopoDS_Shape:
+    """SketchUp-style push/pull: extrude a planar face of a solid outward
+    (positive) or carve it inward (negative)."""
+    faces = faces_of(shape)
+    if not (0 <= face_index < len(faces)):
+        raise GeometryError("Face index out of range")
+    face = faces[face_index]
+    n = face_normal(face)
+    if abs(distance) < tight():
+        raise GeometryError("Distance is zero")
+    d = float(distance)
+    vec = gp_Vec(n[0], n[1], n[2]).Multiplied(abs(d))
+    if d < 0:
+        vec = gp_Vec(-n[0], -n[1], -n[2]).Multiplied(abs(d))
+    prism = BRepPrimAPI_MakePrism(face, vec).Shape()
+    if d > 0:
+        result = boolean_union(shape, prism)
+    else:
+        result = boolean_difference(shape, prism)
+    return unwrap_compound(result)
+
+
 def cap_holes(shape) -> TopoDS_Shape:
     """Close planar openings of a surface/shell and solidify if possible."""
     from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds
@@ -353,7 +391,7 @@ def cap_holes(shape) -> TopoDS_Shape:
                 caps.append(mk.Face())
     if not caps:
         raise GeometryError("No closable planar openings found")
-    sew = BRepBuilderAPI_Sewing(1e-6)
+    sew = BRepBuilderAPI_Sewing(tol())
     sew.Add(shape)
     for f in caps:
         sew.Add(f)
@@ -423,7 +461,7 @@ def offset_surface(shape, distance: float) -> TopoDS_Shape:
     """Offset a surface/shell by a distance along its normals."""
     from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
     mk = BRepOffsetAPI_MakeOffsetShape()
-    mk.PerformByJoin(shape, float(distance), 1e-6)
+    mk.PerformByJoin(shape, float(distance), tol())
     if not mk.IsDone() or mk.Shape().IsNull():
         raise GeometryError("Offset surface failed")
     return mk.Shape()
@@ -437,7 +475,7 @@ def shell_solid(shape, thickness: float) -> TopoDS_Shape:
         raise GeometryError("Shell needs a closed solid")
     mk = BRepOffsetAPI_MakeThickSolid()
     mk.MakeThickSolidByJoin(shape, TopTools_ListOfShape(),
-                            -abs(float(thickness)), 1e-6)
+                            -abs(float(thickness)), tol())
     if not mk.IsDone() or mk.Shape().IsNull():
         raise GeometryError("Shell failed (thickness may exceed the "
                             "solid's smallest feature)")
@@ -651,7 +689,7 @@ def _curve_pieces(edges: list, cutters: list) -> list:
     def on_cutter(p: gp_Pnt) -> bool:
         v = BRepBuilderAPI_MakeVertex(p).Vertex()
         for c in cutters:
-            if BRepExtrema_DistShapeShape(v, c).Value() < 1e-6:
+            if BRepExtrema_DistShapeShape(v, c).Value() < tol():
                 return True
         return False
 
@@ -818,7 +856,7 @@ def move_surface_control_point(shape, flat_index: int,
         raise GeometryError("Control point index out of range")
     i, j = divmod(flat_index, nv)
     bs.SetPole(i + 1, j + 1, _pnt(new_point))
-    mk = BRepBuilderAPI_MakeFace(bs, 1e-6)
+    mk = BRepBuilderAPI_MakeFace(bs, tol())
     if not mk.IsDone():
         raise GeometryError("Surface rebuild failed")
     return mk.Face()

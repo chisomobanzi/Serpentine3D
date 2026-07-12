@@ -7,6 +7,7 @@ class SelectionManager:
     def __init__(self, scene):
         self.scene = scene
         self._ids: list[str] = []      # ordered
+        self.subobjects: list = []     # [(obj_id, "edge"|"face", index)]
         self._listeners: list = []
 
     def add_listener(self, fn):
@@ -30,7 +31,20 @@ class SelectionManager:
 
     def set(self, ids: list[str]):
         self._ids = [i for i in ids if i in self.scene.objects]
+        self.subobjects = []
         self._notify()
+
+    def toggle_subobject(self, obj_id: str, kind: str, index: int):
+        entry = (obj_id, kind, index)
+        if entry in self.subobjects:
+            self.subobjects.remove(entry)
+        else:
+            self.subobjects.append(entry)
+        self._notify()
+
+    def subobjects_of(self, obj_id: str, kind: str) -> list[int]:
+        return [i for (oid, k, i) in self.subobjects
+                if oid == obj_id and k == kind]
 
     def toggle(self, obj_id: str):
         if obj_id in self._ids:
@@ -44,6 +58,7 @@ class SelectionManager:
         self._notify()
 
     def clear(self):
-        if self._ids:
+        if self._ids or self.subobjects:
             self._ids = []
+            self.subobjects = []
             self._notify()

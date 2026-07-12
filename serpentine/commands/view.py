@@ -360,3 +360,15 @@ def cmd_pictureframe(ctx):
     })
     ctx.scene.notify()
     ctx.echo(f"Picture frame placed ({os.path.basename(path)}).")
+
+
+@command("tolerance", mutates=False)
+def cmd_tolerance(ctx):
+    """Show or set the document's absolute modelling tolerance."""
+    from .base import LengthReq
+    from ..core.tolerance import set_tolerance, tol
+    value = yield LengthReq(
+        f"Absolute tolerance (currently {ctx.scene.format_length(tol())})",
+        default=tol(), minimum=1e-9)
+    set_tolerance(float(value))
+    ctx.echo(f"Modelling tolerance: {ctx.scene.format_length(value)}.")

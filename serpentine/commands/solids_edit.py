@@ -4,9 +4,42 @@ from ..core import geometry as g
 from .base import LengthReq, OptionReq, SelectReq, command
 
 
+def _subobject_edge_map(ctx):
+    """{obj_id: [edge shapes]} from the current sub-object selection."""
+    out = {}
+    for (obj_id, kind, idx) in ctx.selection.subobjects:
+        if kind != "edge":
+            continue
+        obj = ctx.scene.get(obj_id)
+        if obj is None:
+            continue
+        edges = g.edges_of(obj.shape)
+        if 0 <= idx < len(edges):
+            out.setdefault(obj_id, []).append(edges[idx])
+    return out
+
+
 @command("filletedge", aliases=("fe",))
 def cmd_filletedge(ctx):
-    objs = yield SelectReq("Select solids to fillet",
+    """Fillet edges. Ctrl+Shift-click edges first to fillet only those;
+    otherwise fillets every edge of the selected solids."""
+    picked = _subobject_edge_map(ctx)
+    if picked:
+        radius = yield LengthReq("Fillet radius", minimum=1e-9)
+        done = 0
+        for obj_id, edges in picked.items():
+            obj = ctx.scene.get(obj_id)
+            try:
+                ctx.scene.replace_shape(
+                    obj_id, g.fillet_edges(obj.shape, radius, edges=edges))
+                done += len(edges)
+            except g.GeometryError as exc:
+                ctx.echo(f"{obj.name}: {exc}")
+        ctx.selection.clear()
+        ctx.echo(f"Filleted {done} picked edge(s) at r={radius:g}.")
+        return
+    objs = yield SelectReq("Select solids to fillet (Ctrl+Shift-click "
+                           "edges beforehand to fillet specific ones)",
                            kinds=("solid", "surface"))
     radius = yield LengthReq("Fillet radius", minimum=1e-9)
     done = 0
@@ -22,6 +55,22 @@ def cmd_filletedge(ctx):
 
 @command("chamferedge", aliases=("che",))
 def cmd_chamferedge(ctx):
+    picked = _subobject_edge_map(ctx)
+    if picked:
+        dist = yield LengthReq("Chamfer distance", minimum=1e-9)
+        done = 0
+        for obj_id, edges in picked.items():
+            obj = ctx.scene.get(obj_id)
+            try:
+                ctx.scene.replace_shape(
+                    obj_id, g.fillet_edges(obj.shape, dist, edges=edges,
+                                           chamfer=True))
+                done += len(edges)
+            except g.GeometryError as exc:
+                ctx.echo(f"{obj.name}: {exc}")
+        ctx.selection.clear()
+        ctx.echo(f"Chamfered {done} picked edge(s) at {dist:g}.")
+        return
     objs = yield SelectReq("Select solids to chamfer",
                            kinds=("solid", "surface"))
     dist = yield LengthReq("Chamfer distance", minimum=1e-9)
@@ -112,3 +161,33 @@ def cmd_booleansplit(ctx):
             total += 1
         ctx.scene.remove(t.id)
     ctx.echo(f"Split into {total} piece(s).")
+
+
+@command("pushpull", aliases=("pp", "moveface"))
+def cmd_pushpull(ctx):
+    """SketchUp-style push/pull on a planar face.
+
+    Ctrl+Shift-click a face first, then run pushpull with a distance:
+    positive pushes the face outward, negative carves inward."""
+    faces = [(oid, idx) for (oid, kind, idx) in ctx.selection.subobjects
+             if kind == "face"]
+    if not faces:
+        ctx.echo("Ctrl+Shift-click a planar face first, then run pushpull.")
+        return
+        yield  # pragma: no cover
+    dist = yield LengthReq("Distance (positive = outward, negative = cut)")
+    done = 0
+    for obj_id, idx in faces:
+        obj = ctx.scene.get(obj_id)
+        if obj is None:
+            continue
+        try:
+            ctx.scene.replace_shape(
+                obj_id, g.push_pull(obj.shape, idx, dist))
+            done += 1
+        except g.GeometryError as exc:
+            ctx.echo(f"{obj.name}: {exc}")
+    ctx.selection.clear()
+    if done:
+        ctx.echo(f"Push/pulled {done} face(s) by "
+                 f"{ctx.scene.format_length(dist)}.")

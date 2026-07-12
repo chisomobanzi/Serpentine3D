@@ -482,3 +482,42 @@ def test_block_persistence(env, tmp_path):
     assert len(loaded.block_defs) == 1
     assert loaded.all()[0].block_id
     assert loaded.all()[0].locked
+
+
+def test_subobject_filletedge_and_pushpull(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 10, 10, 10))
+
+    # fillet only edge 0
+    sel.toggle_subobject(box.id, "edge", 0)
+    proc.run("filletedge")
+    proc.provide_text("1")
+    v = g.volume(scene.all()[0].shape)
+    # one rounded edge: 10x10x10 minus one quarter-round strip
+    expected = 1000 - (1 - 3.14159 / 4) * 1 * 10
+    assert v == pytest.approx(expected, rel=1e-3)
+    assert sel.subobjects == []
+
+    # push a face outward by 5: find the +X face index
+    shape = scene.all()[0].shape
+    import numpy as np
+    faces = g.faces_of(shape)
+    xmax_idx = max(range(len(faces)),
+                   key=lambda i: g.centroid(faces[i])[0])
+    v0 = g.volume(shape)
+    sel.toggle_subobject(box.id, "face", xmax_idx)
+    proc.run("pushpull")
+    proc.provide_text("5")
+    v1 = g.volume(scene.all()[0].shape)
+    assert v1 > v0 + 400          # roughly +500 minus the filleted strip
+
+    # carve inward
+    shape = scene.all()[0].shape
+    faces = g.faces_of(shape)
+    xmax_idx = max(range(len(faces)),
+                   key=lambda i: g.centroid(faces[i])[0])
+    sel.toggle_subobject(box.id, "face", xmax_idx)
+    proc.run("pushpull")
+    proc.provide_text("-3")
+    v2 = g.volume(scene.all()[0].shape)
+    assert v2 < v1

@@ -724,6 +724,32 @@ class Viewport(QOpenGLWidget):
                 GL.glBindVertexArray(gpu.line_vao)
                 GL.glDrawArrays(GL.GL_LINES, 0, gpu.line_count)
 
+            subs = self.selection.subobjects_of(obj.id, "edge") \
+                if self.selection.subobjects else []
+            if subs and len(obj.mesh.edge_of_segment):
+                mask = np.isin(obj.mesh.edge_of_segment, subs)
+                if mask.any():
+                    segs = obj.mesh.edge_segments[mask].reshape(-1, 3)
+                    self._preview.update(segs.astype(np.float32))
+                    self._set_line_uniforms(mvp,
+                                            (*theme.SELECTION_COLOR, 1.0))
+                    self._line_width(3.0)
+                    GL.glDisable(GL.GL_DEPTH_TEST)
+                    GL.glBindVertexArray(self._preview.vao)
+                    GL.glDrawArrays(GL.GL_LINES, 0, len(segs))
+                    GL.glEnable(GL.GL_DEPTH_TEST)
+            fsubs = self.selection.subobjects_of(obj.id, "face") \
+                if self.selection.subobjects else []
+            if fsubs and len(obj.mesh.face_of_triangle):
+                mask = np.isin(obj.mesh.face_of_triangle, fsubs)
+                if mask.any():
+                    tris = obj.mesh.triangles[mask]
+                    pts = obj.mesh.vertices[tris.ravel()]
+                    self._preview.update(pts.astype(np.float32))
+                    self._set_line_uniforms(mvp,
+                                            (*theme.SELECTION_COLOR, 0.45))
+                    GL.glBindVertexArray(self._preview.vao)
+                    GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
             if gpu.iso_count:
                 if selected:
                     iso_color = (*theme.SELECTION_COLOR, 0.55)
@@ -1070,6 +1096,53 @@ class Viewport(QOpenGLWidget):
                 best_id = obj.id
         return best_id
 
+    def pick_subobject(self, px: float, py: float):
+        """(obj_id, "edge"|"face", index) under the pixel, or None."""
+        w, h = self.width(), self.height()
+        origin, direction = self.camera.ray_through(px, py, w, h)
+        # edges first (they are the smaller target)
+        best_edge = None
+        best_d2 = PICK_RADIUS_PX ** 2
+        for obj in self.scene.visible_objects():
+            if not self.scene.is_selectable(obj.id):
+                continue
+            mesh = obj.mesh
+            if not len(mesh.edge_segments):
+                continue
+            pts = mesh.edge_segments.reshape(-1, 3)
+            scr = self.camera.project(pts, w, h)
+            a, b = scr[0::2], scr[1::2]
+            d2 = _point_segment_dist2(np.array([px, py]), a[:, :2],
+                                      b[:, :2])
+            valid = (a[:, 2] > 0) & (b[:, 2] > 0)
+            d2[~valid] = np.inf
+            i = int(np.argmin(d2))
+            if d2[i] < best_d2 and len(mesh.edge_of_segment) > i:
+                best_d2 = d2[i]
+                best_edge = (obj.id, "edge", int(mesh.edge_of_segment[i]))
+        if best_edge is not None:
+            return best_edge
+        # faces by nearest ray-triangle hit
+        best_face = None
+        best_t = np.inf
+        for obj in self.scene.visible_objects():
+            if not self.scene.is_selectable(obj.id):
+                continue
+            mesh = obj.mesh
+            if not mesh.has_faces or not len(mesh.face_of_triangle):
+                continue
+            tris = mesh.triangles
+            t = ray_triangle_hits(origin, direction,
+                                  mesh.vertices[tris[:, 0]].astype(float),
+                                  mesh.vertices[tris[:, 1]].astype(float),
+                                  mesh.vertices[tris[:, 2]].astype(float))
+            i = int(np.argmin(t))
+            if np.isfinite(t[i]) and t[i] < best_t:
+                best_t = t[i]
+                best_face = (obj.id, "face",
+                             int(mesh.face_of_triangle[i]))
+        return best_face
+
     # ---------------------------------------------------------------- events
 
     def mouseDoubleClickEvent(self, ev):
@@ -1211,6 +1284,15 @@ class Viewport(QOpenGLWidget):
             pos = ev.position()
             self._press_pos = None
             if self.point_mode:
+                return
+            mods = ev.modifiers()
+            if (mods & Qt.KeyboardModifier.ControlModifier
+                    and mods & Qt.KeyboardModifier.ShiftModifier
+                    and self.space == "model"):
+                hit = self.pick_subobject(pos.x(), pos.y())
+                if hit is not None:
+                    self.selection.toggle_subobject(*hit)
+                    self.update()
                 return
             picked = self.pick_object(pos.x(), pos.y())
             if picked:

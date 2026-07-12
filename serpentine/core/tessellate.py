@@ -31,6 +31,11 @@ class DisplayMesh:
     # signed mean curvature per vertex (for curvature analysis display)
     curvature: np.ndarray = field(
         default_factory=lambda: np.zeros(0, np.float32))
+    # sub-object topology maps: segment -> edge index, triangle -> face index
+    edge_of_segment: np.ndarray = field(
+        default_factory=lambda: np.zeros(0, np.int32))
+    face_of_triangle: np.ndarray = field(
+        default_factory=lambda: np.zeros(0, np.int32))
 
     @property
     def has_faces(self) -> bool:
@@ -170,10 +175,13 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         BRepMesh_IncrementalMesh(shape, deflection, False, 0.35, True)
 
     all_verts, all_norms, all_tris, all_curv, isos = [], [], [], [], []
+    tri_face_ids = []
     offset = 0
+    face_index = -1
     exp = TopExp_Explorer(shape, occ.FACE)
     while exp.More():
         face = occ.to_face(exp.Current())
+        face_index += 1
         fm = _face_mesh(face)
         exp.Next()
         if fm is None:
@@ -183,6 +191,7 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         all_norms.append(norms)
         all_tris.append(tris + offset)
         all_curv.append(curv)
+        tri_face_ids.append(np.full(len(tris), face_index, np.int32))
         offset += len(verts)
         try:
             for pts in _face_isocurves(face):
@@ -191,11 +200,13 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
             pass
 
     segments = []
-    for edge in geometry.edges_of(shape):
+    seg_edge_ids = []
+    for edge_index, edge in enumerate(geometry.edges_of(shape)):
         pts = _edge_polyline(edge, deflection)
         if pts is not None and len(pts) >= 2:
             seg = np.stack([pts[:-1], pts[1:]], axis=1)
             segments.append(seg)
+            seg_edge_ids.append(np.full(len(seg), edge_index, np.int32))
 
     mesh = DisplayMesh()
     if all_verts:
@@ -203,8 +214,10 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         mesh.normals = np.concatenate(all_norms)
         mesh.triangles = np.concatenate(all_tris)
         mesh.curvature = np.concatenate(all_curv).astype(np.float32)
+        mesh.face_of_triangle = np.concatenate(tri_face_ids)
     if segments:
         mesh.edge_segments = np.concatenate(segments).astype(np.float32)
+        mesh.edge_of_segment = np.concatenate(seg_edge_ids)
     if isos:
         mesh.iso_segments = np.concatenate(isos).astype(np.float32)
     return mesh
