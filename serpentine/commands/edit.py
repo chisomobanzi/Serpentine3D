@@ -217,3 +217,40 @@ def cmd_layer(ctx):
             layers.rename(layer.id, new)
             ctx.echo(f"Renamed layer to '{new}'.")
     ctx.scene.notify()
+
+
+_MATERIAL_PRESETS = {
+    "Matte":   {"metallic": 0.0, "roughness": 0.9, "opacity": 1.0},
+    "Plastic": {"metallic": 0.0, "roughness": 0.35, "opacity": 1.0},
+    "Metal":   {"metallic": 1.0, "roughness": 0.25, "opacity": 1.0},
+    "Glass":   {"metallic": 0.0, "roughness": 0.05, "opacity": 0.35},
+}
+
+
+@command("material", aliases=("mat",))
+def cmd_material(ctx):
+    """Assign a look (metallic/roughness/opacity) for rendered display
+    and GLB/USD export."""
+    objs = yield SelectReq("Select objects for the material")
+    preset = yield OptionReq(
+        "Material", options=[*_MATERIAL_PRESETS, "Custom", "Remove"],
+        default="Matte")
+    if preset == "Remove":
+        for o in objs:
+            ctx.scene.update(o.id, material=None)
+        ctx.echo(f"Cleared material on {len(objs)} object(s).")
+        return
+    if preset == "Custom":
+        metallic = yield NumberReq("Metallic (0-1)", default=0.0, minimum=0.0)
+        roughness = yield NumberReq("Roughness (0-1)", default=0.5,
+                                    minimum=0.0)
+        opacity = yield NumberReq("Opacity (0-1)", default=1.0, minimum=0.05)
+        mat = {"metallic": min(float(metallic), 1.0),
+               "roughness": min(float(roughness), 1.0),
+               "opacity": min(float(opacity), 1.0)}
+    else:
+        mat = dict(_MATERIAL_PRESETS[preset])
+    for o in objs:
+        ctx.scene.update(o.id, material=mat)
+    ctx.echo(f"{preset if preset != 'Custom' else 'Custom'} material on "
+             f"{len(objs)} object(s) — see it with 'rendered'.")

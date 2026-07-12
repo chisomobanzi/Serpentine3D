@@ -34,6 +34,7 @@ def export_usda(scene, path: str, only_ids: list | None = None):
         "{",
     ]
     used = set()
+    mat_blocks = []
     for obj in objs:
         mesh = tessellate(obj.shape)
         if not mesh.has_faces:
@@ -47,8 +48,11 @@ def export_usda(scene, path: str, only_ids: list | None = None):
                         for v in mesh.vertices)
         counts = ", ".join("3" for _ in mesh.triangles)
         indices = ", ".join(str(int(i)) for t in mesh.triangles for i in t)
+        m = obj.material or {}
         lines.extend([
-            f'    def Mesh "{name}"',
+            f'    def Mesh "{name}" (',
+            f'        prepend apiSchemas = ["MaterialBindingAPI"]',
+            "    )",
             "    {",
             f"        point3f[] points = [{pts}]",
             f"        int[] faceVertexCounts = [{counts}]",
@@ -56,8 +60,37 @@ def export_usda(scene, path: str, only_ids: list | None = None):
             f"        color3f[] primvars:displayColor = "
             f"[({color[0]:.4g}, {color[1]:.4g}, {color[2]:.4g})]",
             '        uniform token subdivisionScheme = "none"',
+            f"        rel material:binding = "
+            f"</Serpentine/Materials/{name}_mat>",
             "    }",
         ])
+        mat_blocks.append((name, color, m))
+    if mat_blocks:
+        lines.append('    def Scope "Materials"')
+        lines.append("    {")
+        for name, color, m in mat_blocks:
+            lines.extend([
+                f'        def Material "{name}_mat"',
+                "        {",
+                "            token outputs:surface.connect = "
+                f"</Serpentine/Materials/{name}_mat/pbr.outputs:surface>",
+                f'            def Shader "pbr"',
+                "            {",
+                '                uniform token info:id = '
+                '"UsdPreviewSurface"',
+                f"                color3f inputs:diffuseColor = "
+                f"({color[0]:.4g}, {color[1]:.4g}, {color[2]:.4g})",
+                f"                float inputs:metallic = "
+                f"{float(m.get('metallic', 0.0)):.3g}",
+                f"                float inputs:roughness = "
+                f"{float(m.get('roughness', 0.8)):.3g}",
+                f"                float inputs:opacity = "
+                f"{float(m.get('opacity', 1.0)):.3g}",
+                "                token outputs:surface",
+                "            }",
+                "        }",
+            ])
+        lines.append("    }")
     lines.append("}")
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")

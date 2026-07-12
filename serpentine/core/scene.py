@@ -46,6 +46,7 @@ class SceneObject:
     group_id: str | None = None        # objects sharing an id select together
     block_id: str | None = None        # instance of a block definition
     color: tuple[float, float, float] | None = None   # None -> layer color
+    material: dict | None = None       # {"metallic","roughness","opacity"}
     _mesh: DisplayMesh | None = field(default=None, repr=False, compare=False)
 
     @property

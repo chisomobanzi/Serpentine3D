@@ -49,6 +49,7 @@ def save_scene(scene, path: str):
                 "layer": obj.layer_id,
                 "visible": obj.visible,
                 "color": list(obj.color) if obj.color else None,
+                "material": dict(obj.material) if obj.material else None,
                 "locked": obj.locked,
                 "group": obj.group_id,
                 "block": obj.block_id,
@@ -117,6 +118,8 @@ def load_scene(scene, path: str):
             updates["visible"] = False
         if od.get("color"):
             updates["color"] = tuple(od["color"])
+        if od.get("material"):
+            updates["material"] = dict(od["material"])
         if od.get("locked"):
             updates["locked"] = True
         if od.get("group"):

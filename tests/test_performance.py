@@ -121,3 +121,37 @@ def test_background_tessellation_of_heavy_shapes():
     # a small shape stays on the synchronous path
     small = scene.add(g.make_box((0, 0, 0), 1, 1, 1))
     assert not vp._schedule_tess(small)
+
+
+def test_materials_persist_and_export(tmp_path):
+    from serpentine import fileio
+    scene = Scene()
+    obj = scene.add(g.make_sphere((0, 0, 0), 5))
+    scene.update(obj.id, material={"metallic": 1.0, "roughness": 0.2,
+                                   "opacity": 0.5})
+    path = str(tmp_path / "mat.serp")
+    fileio.export_file(scene, path)
+    loaded = Scene()
+    fileio.import_file(loaded, path)
+    assert loaded.all()[0].material["metallic"] == 1.0
+
+    # GLB carries the PBR factors and blend mode
+    import json
+    import struct
+    glb = str(tmp_path / "mat.glb")
+    fileio.export_file(loaded, glb)
+    raw = open(glb, "rb").read()
+    jlen = struct.unpack("<I", raw[12:16])[0]
+    doc = json.loads(raw[20:20 + jlen])
+    mat = doc["materials"][0]
+    assert mat["pbrMetallicRoughness"]["metallicFactor"] == 1.0
+    assert mat["pbrMetallicRoughness"]["baseColorFactor"][3] == 0.5
+    assert mat["alphaMode"] == "BLEND"
+
+    # USD gets a bound UsdPreviewSurface
+    usda = str(tmp_path / "mat.usda")
+    fileio.export_file(loaded, usda)
+    text = open(usda).read()
+    assert "UsdPreviewSurface" in text
+    assert "inputs:metallic = 1" in text
+    assert "material:binding" in text

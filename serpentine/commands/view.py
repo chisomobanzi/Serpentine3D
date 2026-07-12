@@ -64,6 +64,37 @@ def cmd_ghosted(ctx):
     yield from ()
 
 
+@command("4view", aliases=("fourview", "quadview"), mutates=False)
+def cmd_4view(ctx):
+    """Split the model area into Top / Front / Right / Perspective."""
+    win = ctx.window
+    if win is None:
+        ctx.echo("Viewport layouts need the GUI.")
+    else:
+        win.set_view_layout("quad")
+        ctx.echo("Four viewports. '1view' returns to a single view.")
+    yield from ()
+
+
+@command("1view", aliases=("oneview", "singleview"), mutates=False)
+def cmd_1view(ctx):
+    win = ctx.window
+    if win is None:
+        ctx.echo("Viewport layouts need the GUI.")
+    else:
+        win.set_view_layout("single")
+        ctx.echo("Single viewport.")
+    yield from ()
+
+
+@command("rendered", aliases=("render",), mutates=False)
+def cmd_rendered(ctx):
+    """Environment-lit display with materials and a ground shadow."""
+    _vp(ctx).set_display_mode("rendered")
+    ctx.echo("Rendered display. Assign looks with 'material'.")
+    yield from ()
+
+
 @command("technical", aliases=("tech",), mutates=False)
 def cmd_technical(ctx):
     """Hidden-line technical display (parallel projection linework)."""

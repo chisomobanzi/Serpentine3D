@@ -60,11 +60,22 @@ class MainWindow(QMainWindow):
             "QTabBar::tab:selected { background: #4a3f28; color: #f0d9a8; }")
         self._tabs_updating = False
         self.space_tabs.currentChanged.connect(self._space_tab_changed)
+        from PySide6.QtWidgets import QGridLayout
+        self.aux_viewports: list = []           # Top/Front/Right in quad mode
+        self._view_grid = QWidget()
+        grid = QGridLayout(self._view_grid)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(2)
+        grid.addWidget(self.viewport, 0, 0, 2, 2)
+        grid.setRowStretch(0, 1)
+        grid.setRowStretch(1, 1)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
         central = QWidget()
         central_layout = QVBoxLayout(central)
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
-        central_layout.addWidget(self.viewport, 1)
+        central_layout.addWidget(self._view_grid, 1)
         central_layout.addWidget(self.space_tabs)
         self.setCentralWidget(central)
 
@@ -112,15 +123,7 @@ class MainWindow(QMainWindow):
         self.command_line.cancelled.connect(self._cancel)
         self.command_line.optionClicked.connect(self._on_option_chip)
         self.command_line.input.textEdited.connect(self._live_preview)
-        self.viewport.history = self.history
-        self.viewport.objectClicked.connect(self._on_object_clicked)
-        self.viewport.emptyClicked.connect(self._on_empty_clicked)
-        self.viewport.boxSelected.connect(self._on_box_selected)
-        self.viewport.pointPicked.connect(self._on_point_picked)
-        self.viewport.mouseWorldMoved.connect(self._on_mouse_world)
-        self.viewport.cvEditBegan.connect(
-            lambda: self.history.checkpoint("edit control point"))
-        self.viewport.escapePressed.connect(self._cancel)
+        self._wire_viewport(self.viewport)
         self.scene.add_listener(self._update_status)
         self.selection.add_listener(self._update_status)
         self.scene.add_listener(self._refresh_space_tabs)
@@ -150,6 +153,53 @@ class MainWindow(QMainWindow):
         self.command_line.echo("Serpentine — type a command to begin "
                                "(line, circle, box, extrude, loft, ...)")
         self.command_line.focus()
+
+    def _wire_viewport(self, vp):
+        vp.history = self.history
+        vp.objectClicked.connect(self._on_object_clicked)
+        vp.emptyClicked.connect(self._on_empty_clicked)
+        vp.boxSelected.connect(self._on_box_selected)
+        vp.pointPicked.connect(self._on_point_picked)
+        vp.mouseWorldMoved.connect(self._on_mouse_world)
+        vp.cvEditBegan.connect(
+            lambda: self.history.checkpoint("edit control point"))
+        vp.escapePressed.connect(self._cancel)
+
+    def all_viewports(self) -> list:
+        return [self.viewport] + [v for v in self.aux_viewports
+                                  if v.isVisible()]
+
+    def set_view_layout(self, mode: str):
+        """'single' or 'quad' (Top / Front / Right around Perspective)."""
+        grid = self._view_grid.layout()
+        if mode == "quad" and not self.aux_viewports:
+            import math
+            angles = [(-math.pi / 2, math.radians(89.9)),   # Top
+                      (-math.pi / 2, 0.0),                  # Front
+                      (0.0, 0.0)]                           # Right
+            for az, el in angles:
+                aux = Viewport(self.scene, self.selection, self.cfg)
+                aux.camera.azimuth = az
+                aux.camera.elevation = el
+                aux.cplane = self.viewport.cplane
+                self._wire_viewport(aux)
+                self.aux_viewports.append(aux)
+        if mode == "quad":
+            grid.removeWidget(self.viewport)
+            grid.addWidget(self.aux_viewports[0], 0, 0)   # top view
+            grid.addWidget(self.viewport, 0, 1)           # perspective
+            grid.addWidget(self.aux_viewports[1], 1, 0)   # front
+            grid.addWidget(self.aux_viewports[2], 1, 1)   # right
+            for aux in self.aux_viewports:
+                aux.show()
+                aux.zoom_extents()
+        else:
+            for aux in self.aux_viewports:
+                grid.removeWidget(aux)
+                aux.hide()
+            grid.removeWidget(self.viewport)
+            grid.addWidget(self.viewport, 0, 0, 2, 2)
+        self.viewport.update()
 
     # ------------------------------------------------------------ UI assembly
 
@@ -303,7 +353,8 @@ class MainWindow(QMainWindow):
             self.processor.cancel()
         else:
             self.selection.clear()
-        self.viewport.set_point_mode(False)
+        for vp in self.all_viewports():
+            vp.set_point_mode(False)
         self.command_line.set_prompt("Command")
 
     def show_help_browser(self):
@@ -332,16 +383,18 @@ class MainWindow(QMainWindow):
         self.command_line.set_options(self.processor.option_chips())
         self.viewport.set_ghost(None)
         if isinstance(req, PointReq):
-            self.viewport.set_point_mode(True)
             base = req.rubber_from
             if base is None and req.rubber_pts:
                 base = req.rubber_pts[-1]
-            self.viewport.snap_base = base
+            for vp in self.all_viewports():
+                vp.set_point_mode(True)
+                vp.snap_base = base
             self._refresh_rubber(None)
         else:
-            self.viewport.set_point_mode(False)
-            self.viewport.snap_base = None
-            self.viewport.set_preview(None)
+            for vp in self.all_viewports():
+                vp.set_point_mode(False)
+                vp.snap_base = None
+                vp.set_preview(None)
         self.osnap_bar.refresh()
         self._update_status()
 

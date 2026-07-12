@@ -63,14 +63,19 @@ def export_glb(scene, path: str, only_ids: list | None = None):
         i_acc = len(accessors) - 1
 
         color = scene.color_of(obj)
-        materials.append({
+        m = obj.material or {}
+        opacity = float(m.get("opacity", 1.0))
+        mat = {
             "name": f"{obj.name} material",
             "pbrMetallicRoughness": {
-                "baseColorFactor": [color[0], color[1], color[2], 1.0],
-                "metallicFactor": 0.0,
-                "roughnessFactor": 0.8,
+                "baseColorFactor": [color[0], color[1], color[2], opacity],
+                "metallicFactor": float(m.get("metallic", 0.0)),
+                "roughnessFactor": float(m.get("roughness", 0.8)),
             },
-        })
+        }
+        if opacity < 1.0:
+            mat["alphaMode"] = "BLEND"
+        materials.append(mat)
         meshes.append({
             "name": obj.name,
             "primitives": [{

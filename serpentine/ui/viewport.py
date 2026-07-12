@@ -49,6 +49,9 @@ uniform int uZebra;
 uniform int uDraft;         // 1 = draft-angle analysis
 uniform float uDraftCos;    // cos(90deg - required draft)
 uniform float uCurvRange;   // >0 enables curvature false-colour
+uniform int uRendered;      // 1 = environment-lit rendered mode
+uniform float uMetallic;
+uniform float uRoughness;
 out vec4 frag;
 void main() {
     vec3 n = normalize(vNormal);
@@ -86,6 +89,30 @@ void main() {
         float stripe = smoothstep(-0.06, 0.06, band);
         vec3 zebra = mix(vec3(0.06), vec3(0.95), stripe);
         frag = vec4(zebra * (0.55 + 0.45 * diff), uAlpha);
+        return;
+    }
+    if (uRendered == 1) {
+        // three-light studio: key from camera-up-left, cool fill, rim
+        vec3 key = normalize(vec3(-0.4, 0.35, 0.85));
+        vec3 fill = normalize(vec3(0.7, 0.1, 0.25));
+        vec3 kd = uColor * mix(1.0, 0.35, uMetallic);
+        float dk = max(dot(n, key), 0.0);
+        float df = max(dot(n, fill), 0.0);
+        // hemisphere ambient: bluish sky above, warm ground bounce
+        float hemi = n.y * 0.5 + 0.5;
+        vec3 amb = mix(vec3(0.16, 0.14, 0.12), vec3(0.20, 0.22, 0.26),
+                       hemi);
+        float gloss = mix(64.0, 6.0, clamp(uRoughness, 0.0, 1.0));
+        vec3 h = normalize(key + l);
+        float spec_i = pow(max(dot(n, h), 0.0), gloss)
+                       * mix(0.25, 0.9, uMetallic)
+                       * mix(1.0, 0.25, uRoughness);
+        vec3 spec_c = mix(vec3(1.0), uColor, uMetallic);
+        float fres = pow(1.0 - max(dot(n, l), 0.0), 3.0) * 0.25;
+        vec3 c = kd * (amb + vec3(0.95, 0.93, 0.88) * dk
+                       + vec3(0.25, 0.28, 0.34) * df)
+                 + spec_c * spec_i + vec3(fres);
+        frag = vec4(c, uAlpha);
         return;
     }
     vec3 base = uColor * (0.30 + 0.70 * diff);
@@ -821,9 +848,26 @@ class Viewport(QOpenGLWidget):
                       light_background=False):
         mode = mode_override or self.display_mode
         fill_alpha = {"shaded": 1.0, "ghosted": 0.35, "wireframe": 0.0,
-                      "zebra": 1.0, "curvature": 1.0, "draft": 1.0}[mode]
+                      "zebra": 1.0, "curvature": 1.0, "draft": 1.0,
+                      "rendered": 1.0}[mode]
         curv_range = self._curvature_range() if mode == "curvature" else 0.0
-        for obj in self.scene.visible_objects():
+        objects = self.scene.visible_objects()
+        translucent = mode == "ghosted" or any(
+            (o.material or {}).get("opacity", 1.0) < 1.0 for o in objects)
+        if translucent:
+            # translucency composits correctly back-to-front
+            eye = np.asarray(self.camera.position, float)
+
+            def _depth(o):
+                b = o.mesh.bounds() if o.mesh_ready else None
+                if b is None:
+                    return 0.0
+                centre = (np.asarray(b[0]) + np.asarray(b[1])) / 2
+                return -float(np.linalg.norm(centre - eye))
+            objects = sorted(objects, key=_depth)
+        if mode == "rendered":
+            self._draw_ground_shadow(mvp, objects)
+        for obj in objects:
             gpu = self._gpu.get(obj.id)
             if gpu is None:
                 pend = self._tess_pending.get(obj.id)
@@ -872,7 +916,22 @@ class Viewport(QOpenGLWidget):
                 GL.glUniform1f(
                     GL.glGetUniformLocation(self._mesh_prog, "uCurvRange"),
                     curv_range)
-                if mode == "ghosted":
+                m = obj.material or {}
+                opacity = float(m.get("opacity", 1.0))
+                GL.glUniform1i(
+                    GL.glGetUniformLocation(self._mesh_prog, "uRendered"),
+                    1 if mode == "rendered" else 0)
+                GL.glUniform1f(
+                    GL.glGetUniformLocation(self._mesh_prog, "uMetallic"),
+                    float(m.get("metallic", 0.0)))
+                GL.glUniform1f(
+                    GL.glGetUniformLocation(self._mesh_prog, "uRoughness"),
+                    float(m.get("roughness", 0.55)))
+                if opacity < 1.0:
+                    GL.glUniform1f(
+                        GL.glGetUniformLocation(self._mesh_prog, "uAlpha"),
+                        fill_alpha * opacity)
+                if mode == "ghosted" or opacity < 1.0:
                     GL.glDepthMask(False)
                 GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
                 GL.glPolygonOffset(1.0, 1.0)
@@ -934,6 +993,31 @@ class Viewport(QOpenGLWidget):
                 GL.glBindVertexArray(gpu.iso_vao)
                 GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
         self._line_width(1.0)
+
+    def _draw_ground_shadow(self, mvp, objects):
+        """Flatten object triangles onto z=0 as a soft dark stamp."""
+        squash = np.eye(4, dtype=np.float32)
+        squash[2, 2] = 0.0
+        squash[2, 3] = 0.01                 # hair above the plane
+        smvp = (mvp @ squash).astype(np.float32)
+        GL.glUseProgram(self._line_prog)
+        GL.glUniformMatrix4fv(
+            GL.glGetUniformLocation(self._line_prog, "uMVP"), 1, GL.GL_TRUE,
+            smvp)
+        GL.glUniform4f(GL.glGetUniformLocation(self._line_prog, "uColor"),
+                       0.02, 0.02, 0.03, 0.30)
+        GL.glDepthMask(False)
+        for obj in objects:
+            gpu = self._gpu.get(obj.id)
+            if gpu is None or not gpu.tri_count:
+                continue
+            b = obj.mesh.bounds() if obj.mesh_ready else None
+            if b is None or b[0][2] < -1e-6:
+                continue                    # below the plane: no stamp
+            GL.glBindVertexArray(gpu.tri_vao)
+            GL.glDrawElements(GL.GL_TRIANGLES, gpu.tri_count,
+                              GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
+        GL.glDepthMask(True)
 
     def _draw_edges(self, gpu, mvp, color, width: float):
         """Object edges at a given pixel width. Wide lines fall back to a
@@ -1236,7 +1320,7 @@ class Viewport(QOpenGLWidget):
 
     def set_display_mode(self, mode: str):
         if mode not in ("shaded", "wireframe", "ghosted", "zebra",
-                        "curvature", "technical", "draft"):
+                        "curvature", "technical", "draft", "rendered"):
             raise ValueError(f"Unknown display mode '{mode}'")
         self.display_mode = mode
         self.update()
