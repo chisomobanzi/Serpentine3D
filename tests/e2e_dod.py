@@ -265,6 +265,65 @@ def main():
     check("undo/redo", n1 == n0 and n2 == n0 + 1,
           f"{n0}->{n1}->{n2}")
 
+    # --- new tools: split/trim/sweep2 --------------------------------------
+    c.call("command", command="new", inputs=["Yes"])
+    c.call("create_curve", points=[[0, 0, 0], [10, 0, 0]], kind="line",
+           name="T")
+    c.call("create_curve", points=[[5, -5, 0], [5, 5, 0]], kind="line",
+           name="K")
+    c.call("command", command="split", inputs=["T", "", "K", ""])
+    n = c.call("scene_info")["object_count"]
+    check("split command", n == 3, f"{n} objects")
+
+    c.call("command", command="new", inputs=["Yes"])
+    c.call("create_curve", points=[[0, 0, 0], [20, 0, 0]], kind="line",
+           name="R1")
+    c.call("create_curve", points=[[0, 6, 0], [20, 6, 0]], kind="line",
+           name="R2")
+    c.call("create_curve", points=[[0, 0, 0], [0, 0, 4]], kind="line",
+           name="P")
+    c.call("command", command="sweep2", inputs=["R1", "R2", "P"])
+    kinds = [o["kind"] for o in c.call("scene_info")["objects"]]
+    check("sweep2 command", "surface" in kinds or "solid" in kinds,
+          f"kinds={kinds}")
+
+    # --- selection tools -----------------------------------------------------
+    c.call("command", command="new", inputs=["Yes"])
+    c.call("command", command="box", inputs=["0,0,0", "5,5,0", "5"])
+    c.call("create_curve", points=[[10, 0, 0], [15, 5, 0]], kind="line")
+    c.call("command", command="selcrv")
+    sel1 = c.call("scene_info")["selected"]
+    c.call("command", command="invert")
+    sel2 = c.call("scene_info")["selected"]
+    check("selcrv + invert", len(sel1) == 1 and sel2 == ["Solid 01"],
+          f"{sel1} -> {sel2}")
+    c.call("command", command="isolate", inputs=["Solid 01", ""])
+    vis = [o for o in c.call("scene_info")["objects"] if o["visible"]]
+    c.call("command", command="unisolate")
+    vis2 = [o for o in c.call("scene_info")["objects"] if o["visible"]]
+    check("isolate/unisolate", len(vis) == 1 and len(vis2) == 2)
+
+    # --- control points via API path ----------------------------------------
+    c.call("command", command="new", inputs=["Yes"])
+    c.call("create_curve", points=[[0, 0, 0], [5, 8, 0], [10, 0, 0]],
+           kind="control", name="CV")
+    r = c.call("command", command="pointson", inputs=["CV", ""])
+    check("pointson", any("Control points on" in m for m in r["messages"]))
+    c.call("command", command="pointsoff")
+
+    # --- 3dm round-trip -------------------------------------------------------
+    c.call("command", command="new", inputs=["Yes"])
+    c.call("command", command="circle", inputs=["0,0,0", "5"])
+    c.call("export_file", path="/tmp/serp_e2e/roundtrip.3dm")
+    c.call("command", command="new", inputs=["Yes"])
+    c.call("import_file", path="/tmp/serp_e2e/roundtrip.3dm")
+    length = c.call("measure", what="length",
+                    targets=[c.call("scene_info")["objects"][0]["name"]])
+    import math as _m
+    check("3dm round-trip exact circle",
+          abs(length["length"] - 2 * _m.pi * 5) < 1e-6,
+          f"len={length['length']:.6f}")
+
     # --- summary ---
     print()
     fails = [k for k, v in results.items() if v[0] == "FAIL"]

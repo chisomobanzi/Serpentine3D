@@ -84,6 +84,7 @@ class CommandLine(QWidget):
         self.input.textEdited.connect(self._reset_tab)
         self.input.upPressed.connect(self.history_prev)
         self.input.downPressed.connect(self.history_next)
+        self.input.escPressed.connect(self.input.clear)
         self.input.escPressed.connect(self.cancelled.emit)
 
         row = QHBoxLayout()

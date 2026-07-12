@@ -49,10 +49,13 @@ class Camera:
 
     def right_up(self) -> tuple[np.ndarray, np.ndarray]:
         fwd = normalize(self.target - self.position)
-        right = normalize(np.cross(fwd, Z_UP))
-        if np.linalg.norm(np.cross(fwd, Z_UP)) < 1e-6:
-            right = np.array([math.sin(self.azimuth),
-                              -math.cos(self.azimuth), 0.0])
+        cross = np.cross(fwd, Z_UP)
+        if np.linalg.norm(cross) < 1e-6:
+            # looking along Z: limit of cross(fwd, Z) as elevation -> pole
+            right = np.array([-math.sin(self.azimuth),
+                              math.cos(self.azimuth), 0.0])
+        else:
+            right = normalize(cross)
         up = np.cross(right, fwd)
         return right, up
 

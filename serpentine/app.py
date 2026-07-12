@@ -101,31 +101,38 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ UI assembly
 
     def _build_toolbar(self):
+        from .ui.icons import command_icon
         bar = QToolBar("Tools")
         bar.setObjectName("toolPalette")
         bar.setOrientation(Qt.Orientation.Vertical)
         bar.setMovable(False)
-        bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         groups = [
-            [("Line", "line"), ("Pline", "polyline"), ("Curve", "curve"),
-             ("Circle", "circle"), ("Arc", "arc"), ("Rect", "rectangle")],
+            [("Line", "line"), ("Polyline", "polyline"), ("Curve", "curve"),
+             ("Circle", "circle"), ("Arc", "arc"), ("Rectangle", "rectangle")],
             [("Extrude", "extrude"), ("Revolve", "revolve"),
-             ("Loft", "loft"), ("Planar", "planarsrf"),
-             ("Sweep", "sweep1")],
-            [("Box", "box"), ("Sphere", "sphere"), ("Cyl", "cylinder"),
+             ("Loft", "loft"), ("Planar surface", "planarsrf"),
+             ("Sweep 1 rail", "sweep1"), ("Sweep 2 rails", "sweep2")],
+            [("Box", "box"), ("Sphere", "sphere"), ("Cylinder", "cylinder"),
              ("Torus", "torus")],
             [("Move", "move"), ("Copy", "copy"), ("Rotate", "rotate"),
              ("Scale", "scale"), ("Mirror", "mirror")],
-            [("Union", "booleanunion"), ("Diff", "booleandifference"),
-             ("Inter", "booleanintersection")],
-            [("Join", "join"), ("Del", "delete")],
+            [("Boolean union", "booleanunion"),
+             ("Boolean difference", "booleandifference"),
+             ("Boolean intersection", "booleanintersection")],
+            [("Trim", "trim"), ("Split", "split"), ("Offset", "offset"),
+             ("Fillet", "fillet")],
+            [("Join", "join"), ("Explode", "explode"),
+             ("Control points", "pointson"), ("Delete", "delete")],
         ]
         for gi, group in enumerate(groups):
             if gi:
                 bar.addSeparator()
             for label, command in group:
+                icon = command_icon(command)
                 act = QAction(label, self)
-                act.setToolTip(command)
+                if icon is not None:
+                    act.setIcon(icon)
+                act.setToolTip(f"{label}  ({command})")
                 act.triggered.connect(
                     lambda checked=False, c=command: self.run_command(c))
                 bar.addAction(act)

@@ -46,11 +46,12 @@ construction plane. `Tab` completes command names, `Up`/`Down` recall history,
 | | Commands |
 |---|---|
 | **Curves** | `line` `polyline` `curve` (interpolated NURBS) `circle` `arc` `ellipse` `rectangle` |
-| **Surfaces** | `extrude` `revolve` `loft` `sweep1` `planarsrf` |
+| **Surfaces** | `extrude` `revolve` `loft` `sweep1` `sweep2` `planarsrf` |
 | **Solids** | `box` `sphere` `cylinder` `cone` `torus` |
 | **Booleans** | `booleanunion` `booleandifference` `booleanintersection` |
 | **Transform** | `move` `copy` `rotate` `scale` `scalenu` `mirror` `array` |
-| **Edit** | `join` `explode` `offset` `fillet` `delete` `hide` `show` `rename` `undo` `redo` |
+| **Edit** | `join` `explode` `trim` `split` `offset` `fillet` `pointson`/`pointsoff` (control points) `delete` `hide` `show` `rename` `undo` `redo` |
+| **Select** | `selall` `selnone` `selcrv` `selsrf` `selsolid` `sellayer` `selname` `sellast` `invert` `isolate` `unisolate` |
 | **Analysis** | `distance` `length` `area` `volume` |
 | **View** | `top` `front` `right` `perspective` `zoomextents` `wireframe` `shaded` `ghosted` `grid` `snap` |
 | **Layers** | `layer` (new/current/show/hide/rename) — or use the Layers panel |
@@ -64,9 +65,16 @@ Most commands have Rhino-compatible aliases (`l`, `pl`, `c`, `m`, `co`, `mi`, ..
 - **F1–F4** top/front/right/perspective · **Ctrl+E** zoom extents · **F7** grid
 - **Ctrl+Z / Ctrl+Y** undo/redo · **Ctrl+A** select all · **Delete** delete selection
 - **Ctrl+S / Ctrl+O / Ctrl+N** save/open/new
-- Click to select (Shift-click adds), click empty space to deselect
+- Click to select (Shift-click adds, Ctrl-click removes), click empty space
+  to deselect
+- **Box selection**: drag left-to-right for a *window* (fully enclosed,
+  gold box), right-to-left for a *crossing* (anything touched, white box);
+  Shift adds, Ctrl removes
+- **Control points**: `pointson` (F10) shows CVs on curves — drag a CV to
+  edit the curve live; `pointsoff` (F11) hides them
 - **Object snaps** (end/mid/center) are on by default while picking points —
-  a white square marks the snap; toggle with `snap`
+  a white square marks the snap; toggle with `snap`. `gridsnap` snaps
+  picked points to the grid
 - Launch with a file: `serp model.serp` (or any importable format)
 
 ## File formats
