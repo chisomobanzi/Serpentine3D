@@ -417,3 +417,68 @@ def test_booleansplit_command(env):
     assert len(solids) == 2
     for s in solids:
         assert g.volume(s.shape) == pytest.approx(500, rel=1e-6)
+
+
+def test_group_lock_block(env):
+    scene, sel, hist, ctx, proc = env
+    a = scene.add(g.make_box((0, 0, 0), 1, 1, 1), name="A")
+    b = scene.add(g.make_box((3, 0, 0), 1, 1, 1), name="B")
+    c = scene.add(g.make_box((6, 0, 0), 1, 1, 1), name="C")
+
+    # group A+B: expansion picks up both
+    proc.run("group")
+    proc.click_object(a.id)
+    proc.click_object(b.id)
+    proc.finish_selection()
+    expanded = scene.expand_group_ids([a.id])
+    assert set(expanded) == {a.id, b.id}
+
+    # lock C: unselectable, filters skip it
+    proc.run("lock")
+    proc.click_object(c.id)
+    proc.finish_selection()
+    assert not scene.is_selectable(c.id)
+    sel.select_all()
+    assert c.id not in sel.ids
+    proc.run("unlockall")
+    assert scene.is_selectable(c.id)
+
+    # block from A+B, then insert a second instance
+    proc.run("block")
+    proc.click_object(a.id)
+    proc.click_object(b.id)
+    proc.finish_selection()
+    proc.provide_text("Crate")
+    assert len(scene.block_defs) == 1
+    instances = [o for o in scene.all() if o.block_id]
+    assert len(instances) == 1
+
+    proc.run("insert")
+    proc.provide_text("Crate")
+    proc.provide_text("10,0,0")
+    instances = [o for o in scene.all() if o.block_id]
+    assert len(instances) == 2
+    mn, _ = g.bbox(instances[-1].shape)
+    assert mn[0] == pytest.approx(10, abs=1e-6)
+
+
+def test_block_persistence(env, tmp_path):
+    from serpentine import fileio
+    scene, sel, hist, ctx, proc = env
+    a = scene.add(g.make_box((0, 0, 0), 2, 2, 2))
+    proc.run("block")
+    proc.click_object(a.id)
+    proc.finish_selection()
+    proc.provide_text("Unit")
+    proc.run("lock")
+    proc.click_object(scene.all()[0].id)
+    proc.finish_selection()
+
+    path = str(tmp_path / "blocks.serp")
+    fileio.export_file(scene, path)
+    from serpentine.core.scene import Scene
+    loaded = Scene()
+    fileio.import_file(loaded, path)
+    assert len(loaded.block_defs) == 1
+    assert loaded.all()[0].block_id
+    assert loaded.all()[0].locked

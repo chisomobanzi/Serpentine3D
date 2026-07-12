@@ -577,6 +577,9 @@ class Viewport(QOpenGLWidget):
                 continue
             selected = self.selection.is_selected(obj.id)
             color = theme.SELECTION_COLOR if selected else self.scene.color_of(obj)
+            if obj.locked and not selected:
+                grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
+                color = (grey, grey, grey)
             line_color = color
             if light_background and not selected:
                 # dark linework on paper-white detail backgrounds
@@ -885,6 +888,8 @@ class Viewport(QOpenGLWidget):
         best_id, best_depth = None, np.inf
 
         for obj in self.scene.visible_objects():
+            if not self.scene.is_selectable(obj.id):
+                continue
             mesh = obj.mesh
             depth = np.inf
             hit = False
@@ -1071,6 +1076,8 @@ class Viewport(QOpenGLWidget):
         w, h = self.width(), self.height()
         picked = []
         for obj in self.scene.visible_objects():
+            if not self.scene.is_selectable(obj.id):
+                continue
             mesh = obj.mesh
             if len(mesh.edge_segments):
                 pts = mesh.edge_segments.reshape(-1, 3)

@@ -40,7 +40,7 @@ class SelectionManager:
         self._notify()
 
     def select_all(self):
-        self._ids = [o.id for o in self.scene.visible_objects()]
+        self._ids = [o.id for o in self.scene.selectable_objects()]
         self._notify()
 
     def clear(self):

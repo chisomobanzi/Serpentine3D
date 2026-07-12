@@ -18,6 +18,15 @@ def save_scene(scene, path: str):
         "version": FORMAT_VERSION,
         "named_views": scene.named_views,
         "units": scene.units,
+        "block_defs": {
+            bid: {
+                "name": bd["name"],
+                "shapes": [base64.b64encode(
+                    geometry.shape_to_bytes(s)).decode("ascii")
+                    for s in bd["shapes"]],
+            }
+            for bid, bd in scene.block_defs.items()
+        },
         "layouts": layouts_to_json(scene.layouts),
         "layers": [
             {
@@ -37,6 +46,9 @@ def save_scene(scene, path: str):
                 "layer": obj.layer_id,
                 "visible": obj.visible,
                 "color": list(obj.color) if obj.color else None,
+                "locked": obj.locked,
+                "group": obj.group_id,
+                "block": obj.block_id,
                 "brep": base64.b64encode(
                     geometry.shape_to_bytes(obj.shape)).decode("ascii"),
             }
@@ -73,6 +85,12 @@ def load_scene(scene, path: str):
     layers.current_id = id_map.get(current, "default")
     scene.named_views = dict(doc.get("named_views", {}))
     scene.units = doc.get("units", scene.units)
+    for bid, bd in doc.get("block_defs", {}).items():
+        scene.block_defs[bid] = {
+            "name": bd["name"],
+            "shapes": [geometry.shape_from_bytes(base64.b64decode(s))
+                       for s in bd["shapes"]],
+        }
     from ..core.layout import layouts_from_json
     scene.layouts = layouts_from_json(doc.get("layouts", []))
 
@@ -85,5 +103,11 @@ def load_scene(scene, path: str):
             updates["visible"] = False
         if od.get("color"):
             updates["color"] = tuple(od["color"])
+        if od.get("locked"):
+            updates["locked"] = True
+        if od.get("group"):
+            updates["group_id"] = od["group"]
+        if od.get("block"):
+            updates["block_id"] = od["block"]
         if updates:
             scene.update(obj.id, **updates)

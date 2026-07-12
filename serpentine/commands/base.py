@@ -428,6 +428,8 @@ class CommandProcessor:
 
     # -- selection request handling --
     def _matching(self, obj, req: SelectReq) -> bool:
+        if not self.ctx.scene.is_selectable(obj.id):
+            return False
         return not req.kinds or obj.kind in req.kinds
 
     def click_object(self, obj_id: str):

@@ -4,7 +4,7 @@ from .base import SelectReq, TextReq, command
 
 
 def _select_kind(ctx, kind: str, label: str):
-    ids = [o.id for o in ctx.scene.visible_objects() if o.kind == kind]
+    ids = [o.id for o in ctx.scene.selectable_objects() if o.kind == kind]
     ctx.selection.set(ids)
     ctx.echo(f"Selected {len(ids)} {label}.")
 
@@ -34,7 +34,7 @@ def cmd_sellayer(ctx):
     if layer is None:
         ctx.echo(f"No layer named '{name}'.")
         return
-    ids = [o.id for o in ctx.scene.visible_objects()
+    ids = [o.id for o in ctx.scene.selectable_objects()
            if o.layer_id == layer.id]
     ctx.selection.set(ids)
     ctx.echo(f"Selected {len(ids)} object(s) on '{layer.name}'.")
@@ -45,7 +45,7 @@ def cmd_selname(ctx):
     """Select objects whose name contains the given text."""
     text = yield TextReq("Name contains")
     needle = text.lower()
-    ids = [o.id for o in ctx.scene.visible_objects()
+    ids = [o.id for o in ctx.scene.selectable_objects()
            if needle in o.name.lower()]
     ctx.selection.set(ids)
     ctx.echo(f"Selected {len(ids)} object(s) matching '{text}'.")
@@ -65,7 +65,7 @@ def cmd_sellast(ctx):
 @command("invert", aliases=("selinv",), mutates=False)
 def cmd_invert(ctx):
     current = set(ctx.selection.ids)
-    ids = [o.id for o in ctx.scene.visible_objects()
+    ids = [o.id for o in ctx.scene.selectable_objects()
            if o.id not in current]
     ctx.selection.set(ids)
     ctx.echo(f"Selection inverted: {len(ids)} object(s).")

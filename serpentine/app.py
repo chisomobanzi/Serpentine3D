@@ -325,10 +325,17 @@ class MainWindow(QMainWindow):
             return
         additive = bool(modifiers & (Qt.KeyboardModifier.ShiftModifier
                                      | Qt.KeyboardModifier.ControlModifier))
+        ids = self.scene.expand_group_ids([obj_id])
         if additive:
-            self.selection.toggle(obj_id)
+            if self.selection.is_selected(obj_id):
+                self.selection.set([i for i in self.selection.ids
+                                    if i not in ids])
+            else:
+                self.selection.set(self.selection.ids
+                                   + [i for i in ids
+                                      if i not in self.selection.ids])
         else:
-            self.selection.set([obj_id])
+            self.selection.set(ids)
 
     def _on_empty_clicked(self, modifiers):
         if isinstance(self.processor.request, SelectReq):
@@ -342,6 +349,7 @@ class MainWindow(QMainWindow):
         if isinstance(self.processor.request, SelectReq):
             self.processor.box_objects(ids)
             return
+        ids = self.scene.expand_group_ids(ids)
         if modifiers & Qt.KeyboardModifier.ControlModifier:
             remaining = [i for i in self.selection.ids if i not in ids]
             self.selection.set(remaining)
