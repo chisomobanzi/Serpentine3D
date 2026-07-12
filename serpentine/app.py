@@ -110,6 +110,8 @@ class MainWindow(QMainWindow):
         # wiring
         self.command_line.submitted.connect(self._on_submit)
         self.command_line.cancelled.connect(self._cancel)
+        self.command_line.optionClicked.connect(self._on_option_chip)
+        self.command_line.input.textEdited.connect(self._live_preview)
         self.viewport.history = self.history
         self.viewport.objectClicked.connect(self._on_object_clicked)
         self.viewport.emptyClicked.connect(self._on_empty_clicked)
@@ -304,9 +306,31 @@ class MainWindow(QMainWindow):
         self.viewport.set_point_mode(False)
         self.command_line.set_prompt("Command")
 
+    def show_help_browser(self):
+        from .ui.help_browser import HelpBrowser
+        if getattr(self, "_help_browser", None) is None:
+            self._help_browser = HelpBrowser(self)
+        self._help_browser.show()
+        self._help_browser.raise_()
+
+    def _on_option_chip(self, name: str):
+        self.processor.set_option(name)
+        self._live_preview(self.command_line.input.text())
+        self.command_line.focus()
+
+    def _live_preview(self, text: str):
+        req = self.processor.request
+        if req is not None and getattr(req, "preview_fn", None) and \
+                text.strip():
+            self.viewport.set_ghost(self.processor.preview_shape(text))
+        else:
+            self.viewport.set_ghost(None)
+
     def _sync_command_state(self):
         req = self.processor.request
         self.command_line.set_prompt(self.processor.prompt_text())
+        self.command_line.set_options(self.processor.option_chips())
+        self.viewport.set_ghost(None)
         if isinstance(req, PointReq):
             self.viewport.set_point_mode(True)
             base = req.rubber_from
@@ -704,6 +728,9 @@ class MainWindow(QMainWindow):
             if fn:
                 fn()
                 return
+        if ev.key() == Qt.Key.Key_F1:
+            self.show_help_browser()
+            return
         if ev.key() == Qt.Key.Key_F10:
             self.run_command("pointson")
             return

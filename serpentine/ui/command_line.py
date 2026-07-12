@@ -5,7 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout,
+    QWidget,
 )
 
 from ..commands.base import completions
@@ -51,6 +52,7 @@ class CommandLine(QWidget):
 
     submitted = Signal(str)         # raw text the user entered
     cancelled = Signal()
+    optionClicked = Signal(str)     # option chip clicked -> cycle its value
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -87,11 +89,17 @@ class CommandLine(QWidget):
         self.input.escPressed.connect(self.input.clear)
         self.input.escPressed.connect(self.cancelled.emit)
 
+        self._chip_row = QHBoxLayout()
+        self._chip_row.setContentsMargins(0, 0, 0, 0)
+        self._chip_row.setSpacing(6)
+        self._chips: list[QPushButton] = []
+
         row = QHBoxLayout()
         row.setContentsMargins(8, 4, 8, 6)
         row.setSpacing(8)
         row.addWidget(self.prompt_label)
         row.addWidget(self.input, 1)
+        row.addLayout(self._chip_row)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -107,6 +115,31 @@ class CommandLine(QWidget):
 
     def set_prompt(self, text: str):
         self.prompt_label.setText(text)
+
+    def set_options(self, chips: list):
+        """Show clickable [Name=Value] chips; click cycles the value."""
+        want = [f"{n}={v}" for n, v in chips]
+        if want == [c.text() for c in self._chips]:
+            return
+        for c in self._chips:
+            self._chip_row.removeWidget(c)
+            c.deleteLater()
+        self._chips = []
+        for (name, _), label in zip(chips, want):
+            chip = QPushButton(label)
+            chip.setFlat(True)
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            chip.setToolTip(f"Click to change {name} (or type {name}=value)")
+            chip.setStyleSheet(
+                "QPushButton { color: #d8b44a; background: #26272b;"
+                " border: 1px solid #3a3b40; border-radius: 9px;"
+                " padding: 1px 10px; }"
+                "QPushButton:hover { border-color: #d8b44a; }")
+            chip.clicked.connect(
+                lambda _=False, n=name: self.optionClicked.emit(n))
+            self._chip_row.addWidget(chip)
+            self._chips.append(chip)
 
     def focus(self):
         self.input.setFocus()

@@ -28,6 +28,8 @@ Point = tuple[float, float, float]
 
 class Req:
     prompt: str = ""
+    choices: dict | None = None      # {"Cap": ["Yes","No"]} option chips
+    preview_fn = None                # callable(value) -> shape for ghosts
 
 
 @dataclass
@@ -38,6 +40,8 @@ class PointReq(Req):
     rubber_pts: list | None = None        # accumulated points (polyline preview)
     allow_empty: bool = False             # Enter with no input -> None (done)
     extra_options: tuple = ()             # typed keywords returned verbatim
+    choices: dict | None = None
+    preview_fn: object = None
 
 
 @dataclass
@@ -45,6 +49,8 @@ class NumberReq(Req):
     prompt: str
     default: float | None = None
     minimum: float | None = None
+    choices: dict | None = None
+    preview_fn: object = None
 
 
 @dataclass
@@ -79,6 +85,8 @@ class SelectReq(Req):
     max_count: int | None = None          # None = unlimited, finish with Enter
     kinds: tuple = ()                     # () = any; else e.g. ("curve",)
     allow_preselected: bool = True
+    choices: dict | None = None
+    preview_fn: object = None
 
 
 class CancelCommand(Exception):
@@ -151,6 +159,9 @@ class CommandContext:
         self.window = window
         self.last_point: Point | None = None
         self._echo_fns: list = []
+
+    def opt(self, name: str, default: str) -> str:
+        return getattr(self, "options", {}).get(name, default)
 
     @property
     def cplane(self):
@@ -305,6 +316,7 @@ class CommandProcessor:
         self.active: CommandDef | None = None
         self.request: Req | None = None
         self.last_command: str | None = None
+        self.command_options: dict = {}
         self._start_revision = 0
         self._select_buffer: list[str] = []
         self._listeners: list = []       # notified on state change
@@ -338,6 +350,8 @@ class CommandProcessor:
             self.ctx.history.checkpoint(cd.name)
         self.gen = cd.fn(self.ctx)
         self._select_buffer = []
+        self.command_options = {}
+        self.ctx.options = self.command_options
         self._advance(None)
         return True
 
@@ -411,9 +425,65 @@ class CommandProcessor:
             self.ctx.last_point = value
         self._advance(value)
 
+    def set_option(self, name: str, value: str | None = None):
+        """Set (or cycle) a persistent option of the running command."""
+        req = self.request
+        if req is None or not getattr(req, "choices", None):
+            return False
+        for opt_name, values in req.choices.items():
+            if opt_name.lower() == name.lower():
+                if value is None:            # cycle
+                    cur = self.command_options.get(opt_name, values[0])
+                    idx = (values.index(cur) + 1) % len(values) \
+                        if cur in values else 0
+                    value = values[idx]
+                else:
+                    matches = [v for v in values
+                               if v.lower().startswith(value.lower())]
+                    if not matches:
+                        return False
+                    value = matches[0]
+                self.command_options[opt_name] = value
+                self.ctx.echo(f"{opt_name}={value}")
+                self._notify()
+                return True
+        return False
+
+    def _try_option_text(self, text: str) -> bool:
+        req = self.request
+        if req is None or not getattr(req, "choices", None):
+            return False
+        text = text.strip()
+        if "=" in text:
+            name, _, value = text.partition("=")
+            return self.set_option(name.strip(), value.strip())
+        for opt_name in req.choices:
+            if opt_name.lower() == text.lower():
+                return self.set_option(opt_name)
+        return False
+
+    def option(self, name: str, default: str) -> str:
+        return self.command_options.get(name, default)
+
+    def preview_shape(self, text: str):
+        """Ghost shape for text being typed at the current request, or None."""
+        req = self.request
+        fn = getattr(req, "preview_fn", None) if req else None
+        if fn is None:
+            return None
+        ok, value = parse_value(req, text, self.ctx)
+        if not ok:
+            return None
+        try:
+            return fn(value)
+        except Exception:                                  # noqa: BLE001
+            return None
+
     def provide_text(self, text: str):
         """Feed typed text for the current request."""
         if not self.busy or self.request is None:
+            return
+        if text.strip() and self._try_option_text(text):
             return
         req = self.request
         if isinstance(req, SelectReq):
@@ -509,6 +579,14 @@ class CommandProcessor:
         self._advance(objs)
 
     # -- prompt for UI --
+    def option_chips(self) -> list:
+        """[(name, current_value)] for the active request's options."""
+        req = self.request
+        if req is None or not getattr(req, "choices", None):
+            return []
+        return [(n, self.command_options.get(n, v[0]))
+                for n, v in req.choices.items()]
+
     def prompt_text(self) -> str:
         if self.request is None:
             return "Command"

@@ -7,16 +7,29 @@ from .base import LengthReq, NumberReq, OptionReq, PointReq, SelectReq, command
 @command("extrude", aliases=("ext", "extrudecrv"))
 def cmd_extrude(ctx):
     curves = yield SelectReq("Select curves to extrude", kinds=("curve",))
-    dist = yield LengthReq("Extrusion distance", default=10.0)
-    cap_opt = "No"
-    if any(g.is_closed_curve(c.shape) for c in curves):
-        cap_opt = yield OptionReq("Cap closed curves to make solids?",
-                                  options=["Yes", "No"], default="Yes")
+    closed = any(g.is_closed_curve(c.shape) for c in curves)
     direction = tuple(ctx.cplane.normal)
-    made = []
-    for c in curves:
-        srf = g.extrude(c.shape, direction, dist, cap=(cap_opt == "Yes"))
-        made.append(ctx.scene.add(srf))
+
+    def _make(dist, cap):
+        both = ctx.opt("BothSides", "No") == "Yes"
+        out = []
+        for c in curves:
+            shape = c.shape
+            if both:
+                shape = g.translate(shape,
+                                    tuple(-d * dist for d in direction))
+            out.append(g.extrude(shape, direction,
+                                 dist * (2 if both else 1), cap=cap))
+        return out
+
+    choices = {"BothSides": ["No", "Yes"]}
+    if closed:
+        choices = {"Cap": ["Yes", "No"], **choices}
+    dist = yield LengthReq(
+        "Extrusion distance", default=10.0, choices=choices,
+        preview_fn=lambda d: g.make_compound(_make(d, cap=False)))
+    cap = closed and ctx.opt("Cap", "Yes") == "Yes"
+    made = [ctx.scene.add(s) for s in _make(dist, cap)]
     ctx.echo(f"Extruded {len(made)} object(s): "
              + ", ".join(o.name for o in made))
 
@@ -37,10 +50,10 @@ def cmd_revolve(ctx):
 @command("loft")
 def cmd_loft(ctx):
     curves = yield SelectReq("Select 2 or more profile curves in order",
-                             kinds=("curve",), min_count=2)
-    style = yield OptionReq("Loft style", options=["Normal", "Ruled"],
-                            default="Normal")
-    srf = g.loft([c.shape for c in curves], ruled=(style == "Ruled"))
+                             kinds=("curve",), min_count=2,
+                             choices={"Style": ["Normal", "Ruled"]})
+    srf = g.loft([c.shape for c in curves],
+                 ruled=(ctx.opt("Style", "Normal") == "Ruled"))
     obj = ctx.scene.add(srf)
     ctx.echo(f"Lofted {len(curves)} curves into {obj.name}.")
 
@@ -68,7 +81,12 @@ def cmd_sweep1(ctx):
 def cmd_offsetsrf(ctx):
     objs = yield SelectReq("Select surfaces to offset",
                            kinds=("surface", "solid"))
-    dist = yield LengthReq("Offset distance (negative flips side)")
+
+    def _preview(d):
+        return g.make_compound([g.offset_surface(o.shape, d) for o in objs])
+
+    dist = yield LengthReq("Offset distance (negative flips side)",
+                           preview_fn=_preview)
     made = []
     for o in objs:
         made.append(ctx.scene.add(g.offset_surface(o.shape, dist),

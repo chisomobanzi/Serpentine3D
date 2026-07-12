@@ -11,7 +11,7 @@ from PySide6.QtGui import QCursor, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication
 
-from ..utils.math3d import ray_plane, ray_triangle_hits
+from ..utils.math3d import (normalize, ray_plane, ray_plane_any, ray_triangle_hits)
 from . import theme
 from .camera import Camera
 
@@ -319,6 +319,7 @@ class Viewport(QOpenGLWidget):
         self._grid = None
         self._preview: _LineBatch | None = None
         self._preview_data = np.zeros((0, 3), np.float32)
+        self._ghost = None                     # DisplayMesh of pending result
         self._marker_points: list = []
         self._last_mouse = None
         self._mesh_prog = self._line_prog = self._bg_prog = 0
@@ -464,6 +465,7 @@ class Viewport(QOpenGLWidget):
         self._draw_image_planes(mvp)
         self._sync_gpu()
         self._draw_objects(mvp, view)
+        self._draw_ghost(mvp)
         self._draw_preview(mvp)
         self._draw_control_points(mvp)
         self._draw_combs(mvp)
@@ -1017,6 +1019,42 @@ class Viewport(QOpenGLWidget):
 
     # ------------------------------------------------------------- public API
 
+    def set_ghost(self, shape):
+        """Translucent preview of a pending command result (or None)."""
+        if shape is None:
+            if self._ghost is not None:
+                self._ghost = None
+                self.update()
+            return
+        try:
+            from ..core.tessellate import tessellate
+            self._ghost = tessellate(shape)
+        except Exception:                                  # noqa: BLE001
+            self._ghost = None
+        self.update()
+
+    def _draw_ghost(self, mvp):
+        dm = self._ghost
+        if dm is None or self._preview is None:
+            return
+        gold = theme.SELECTION_COLOR
+        if dm.has_faces and len(dm.triangles):
+            pts = dm.vertices[dm.triangles.ravel()]
+            self._preview.update(pts.astype(np.float32))
+            self._set_line_uniforms(mvp, (*gold, 0.22))
+            GL.glDepthMask(False)
+            GL.glBindVertexArray(self._preview.vao)
+            GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
+            GL.glDepthMask(True)
+        if len(dm.edge_segments):
+            segs = dm.edge_segments.reshape(-1, 3).astype(np.float32)
+            self._preview.update(segs)
+            self._set_line_uniforms(mvp, (*gold, 0.85))
+            self._line_width(1.6)
+            GL.glBindVertexArray(self._preview.vao)
+            GL.glDrawArrays(GL.GL_LINES, 0, len(segs))
+            self._line_width(1.0)
+
     def set_preview(self, segments: np.ndarray | None,
                     markers: list | None = None):
         """Segments: (K,2,3) rubber-band lines; markers: picked points."""
@@ -1479,10 +1517,52 @@ class Viewport(QOpenGLWidget):
             self.layout_view.wheel(steps, pos.x(), pos.y())
             self.update()
             return
+        pos = ev.position()
+        origin, direction = self.camera.ray_through(
+            pos.x(), pos.y(), self.width(), self.height())
+        anchor = ray_plane_any(
+            origin, direction, self.camera.target,
+            normalize(self.camera.target - self.camera.position))
+        before = self.camera.distance
         self.camera.zoom(steps)
+        if anchor is not None and (self.config is None or self.config.get(
+                "mouse", "zoom_to_cursor", default=True)):
+            f = self.camera.distance / before
+            self.camera.target = anchor + (self.camera.target - anchor) * f
         self.update()
 
+    _NUDGE_KEYS = {
+        Qt.Key.Key_Left: (-1, 0, 0), Qt.Key.Key_Right: (1, 0, 0),
+        Qt.Key.Key_Down: (0, -1, 0), Qt.Key.Key_Up: (0, 1, 0),
+        Qt.Key.Key_PageDown: (0, 0, -1), Qt.Key.Key_PageUp: (0, 0, 1),
+    }
+
+    def _nudge(self, direction) -> bool:
+        ids = [i for i in self.selection.ids
+               if (o := self.scene.get(i)) is not None and not o.locked]
+        if not ids:
+            return False
+        from ..core import geometry as g
+        step = self.grid_snap_step if self.grid_snap else 1.0
+        mods = QApplication.queryKeyboardModifiers()
+        if mods & Qt.KeyboardModifier.ShiftModifier:
+            step *= 10.0
+        if mods & Qt.KeyboardModifier.ControlModifier:
+            step *= 0.1
+        vec = (self.cplane.xdir * direction[0]
+               + self.cplane.ydir * direction[1]
+               + self.cplane.normal * direction[2]) * step
+        self.window_checkpoint("nudge")
+        for oid in ids:
+            obj = self.scene.get(oid)
+            self.scene.replace_shape(oid, g.translate(obj.shape, tuple(vec)))
+        self.update()
+        return True
+
     def keyPressEvent(self, ev):
+        d = self._NUDGE_KEYS.get(ev.key())
+        if d is not None and self.selection.ids and self._nudge(d):
+            return
         if ev.key() == Qt.Key.Key_Escape:
             if self.gumball.drag is not None:
                 self.gumball.cancel_drag()

@@ -522,3 +522,66 @@ def test_subobject_filletedge_and_pushpull(env):
     proc.provide_text("-3")
     v2 = g.volume(scene.all()[0].shape)
     assert v2 < v1
+
+
+def test_command_option_chips(env):
+    """Options are settable any time during a request, Rhino-style."""
+    scene, sel, hist, ctx, proc = env
+    c = scene.add(g.make_circle((0, 0, 0), 5))
+    proc.run("extrude")
+    proc.click_object(c.id)
+    proc.finish_selection()
+    chips = dict(proc.option_chips())
+    assert chips == {"Cap": "Yes", "BothSides": "No"}
+    proc.provide_text("BothSides=Yes")        # option text does not advance
+    proc.provide_text("cap=n")                # prefix match, case-insensitive
+    assert dict(proc.option_chips()) == {"Cap": "No", "BothSides": "Yes"}
+    assert proc.set_option("Cap")             # click = cycle
+    assert dict(proc.option_chips())["Cap"] == "Yes"
+    proc.provide_text("10")
+    assert not proc.busy
+    solid = scene.all()[-1]
+    (zmin, zmax) = (g.bbox(solid.shape)[0][2], g.bbox(solid.shape)[1][2])
+    assert zmin == pytest.approx(-10) and zmax == pytest.approx(10)
+    import math
+    assert g.volume(solid.shape) == pytest.approx(math.pi * 25 * 20,
+                                                  rel=1e-3)
+
+
+def test_command_live_preview(env):
+    scene, sel, hist, ctx, proc = env
+    c = scene.add(g.make_circle((0, 0, 0), 5))
+    proc.run("extrude")
+    proc.click_object(c.id)
+    proc.finish_selection()
+    ghost = proc.preview_shape("7")
+    assert ghost is not None
+    assert g.bbox(ghost)[1][2] == pytest.approx(7)
+    assert proc.preview_shape("not a number") is None
+    assert proc.busy                          # preview never advances
+    proc.cancel()
+
+
+def test_loft_style_option(env):
+    scene, sel, hist, ctx, proc = env
+    c1 = scene.add(g.make_circle((0, 0, 0), 5))
+    c2 = scene.add(g.make_circle((0, 0, 10), 3))
+    proc.run("loft")
+    proc.click_object(c1.id)
+    proc.click_object(c2.id)
+    proc.provide_text("Style=Ruled")
+    proc.finish_selection()
+    assert not proc.busy
+    assert scene.all()[-1].kind in ("surface", "solid")
+
+
+def test_help_command(env):
+    scene, sel, hist, ctx, proc = env
+    echoes = []
+    ctx.add_echo_listener(echoes.append)
+    proc.run("help")
+    proc.provide_text("extrude")
+    assert any("extrude" in e and "ext" in e for e in echoes)
+    proc.run("help")
+    proc.provide_text("")
+    assert any(e.startswith("Surfaces:") for e in echoes)
