@@ -38,7 +38,9 @@ DEFAULTS = {
 
 
 class Config:
-    def __init__(self, path: str = CONFIG_PATH):
+    def __init__(self, path: str | None = None):
+        if path is None:
+            path = os.environ.get("SERP_CONFIG", CONFIG_PATH)
         self.path = path
         self.data = copy.deepcopy(DEFAULTS)
         self.load()
