@@ -27,6 +27,22 @@ class PropertiesPanel(QWidget):
         self.layer_combo = QComboBox()
         self.layer_combo.currentIndexChanged.connect(self._change_layer)
 
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton
+        self.color_btn = QPushButton()
+        self.color_btn.setFixedSize(40, 22)
+        self.color_btn.setToolTip("Object colour override")
+        self.color_btn.clicked.connect(self._pick_color)
+        self.color_reset = QPushButton("By layer")
+        self.color_reset.setToolTip("Remove the override, use layer colour")
+        self.color_reset.clicked.connect(self._reset_color)
+        color_row = QHBoxLayout()
+        color_row.setContentsMargins(0, 0, 0, 0)
+        color_row.addWidget(self.color_btn)
+        color_row.addWidget(self.color_reset)
+        color_row.addStretch(1)
+        self.color_widget = QWidget()
+        self.color_widget.setLayout(color_row)
+
         self.kind_label = QLabel("—")
         self.measure_label = QLabel("—")
         self.measure_label.setWordWrap(True)
@@ -36,6 +52,7 @@ class PropertiesPanel(QWidget):
         form.setSpacing(6)
         form.addRow("Name", self.name_edit)
         form.addRow("Layer", self.layer_combo)
+        form.addRow("Colour", self.color_widget)
         form.addRow("Type", self.kind_label)
         form.addRow("Info", self.measure_label)
 
@@ -70,6 +87,8 @@ class PropertiesPanel(QWidget):
             self.name_edit.setText("")
             self.name_edit.setEnabled(False)
             self.layer_combo.setEnabled(False)
+            self.color_widget.setEnabled(False)
+            self.color_btn.setStyleSheet("")
             self.kind_label.setText("—")
             self.measure_label.setText("—")
         else:
@@ -82,7 +101,32 @@ class PropertiesPanel(QWidget):
                 self.layer_combo.setCurrentIndex(idx)
             self.kind_label.setText(obj.kind.capitalize())
             self.measure_label.setText(self._measures(obj))
+            self.color_widget.setEnabled(True)
+            color = self.scene.color_of(obj)
+            self.color_btn.setStyleSheet(
+                "QPushButton { background: rgb(%d,%d,%d); border: 1px solid"
+                " #55565e; }" % tuple(int(c * 255) for c in color))
+            self.color_reset.setEnabled(obj.color is not None)
         self._updating = False
+
+    def _pick_color(self):
+        obj = self._selected()
+        if obj is None:
+            return
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QColorDialog
+        current = QColor.fromRgbF(*self.scene.color_of(obj))
+        color = QColorDialog.getColor(current, self, "Object colour")
+        if color.isValid():
+            self.history.checkpoint("object colour")
+            self.scene.update(obj.id, color=(color.redF(), color.greenF(),
+                                             color.blueF()))
+
+    def _reset_color(self):
+        obj = self._selected()
+        if obj is not None and obj.color is not None:
+            self.history.checkpoint("object colour")
+            self.scene.update(obj.id, color=None)
 
     def _measures(self, obj) -> str:
         try:

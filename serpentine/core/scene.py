@@ -45,6 +45,8 @@ class Scene:
         self._counters = {}
         self._listeners: list = []
         self.revision = 0               # bumped on every change notification
+        self.named_views: dict = {}     # name -> camera params
+        self.layouts: list = []         # drafting sheets (core/layout.py)
 
     # -- notification --
     def add_listener(self, fn):
@@ -121,6 +123,8 @@ class Scene:
         self._order.clear()
         self._counters.clear()
         self.layers = LayerManager()
+        self.named_views = {}
+        self.layouts = []
         self.notify()
 
     def bbox(self) -> tuple[tuple, tuple] | None:
@@ -137,16 +141,22 @@ class Scene:
 
     # -- snapshot (undo/redo) --
     def snapshot(self) -> dict:
+        import copy
         return {
             "objects": {k: v.clone() for k, v in self.objects.items()},
             "order": list(self._order),
             "counters": dict(self._counters),
             "layers": self.layers.snapshot(),
+            "named_views": copy.deepcopy(self.named_views),
+            "layouts": [lay.clone() for lay in self.layouts],
         }
 
     def restore(self, snap: dict):
+        import copy
         self.objects = {k: v.clone() for k, v in snap["objects"].items()}
         self._order = list(snap["order"])
         self._counters = dict(snap["counters"])
         self.layers.restore(snap["layers"])
+        self.named_views = copy.deepcopy(snap.get("named_views", {}))
+        self.layouts = [lay.clone() for lay in snap.get("layouts", [])]
         self.notify()

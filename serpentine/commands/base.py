@@ -146,6 +146,13 @@ class CommandContext:
         self.last_point: Point | None = None
         self._echo_fns: list = []
 
+    @property
+    def cplane(self):
+        if self.viewport is not None:
+            return self.viewport.cplane
+        from ..core.cplane import CPlane
+        return CPlane()
+
     def add_echo_listener(self, fn):
         self._echo_fns.append(fn)
 

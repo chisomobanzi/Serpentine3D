@@ -309,6 +309,31 @@ def fillet_curves(edge_a, edge_b, radius: float,
     return ea_out, arc, eb_out
 
 
+def offset_surface(shape, distance: float) -> TopoDS_Shape:
+    """Offset a surface/shell by a distance along its normals."""
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
+    mk = BRepOffsetAPI_MakeOffsetShape()
+    mk.PerformByJoin(shape, float(distance), 1e-6)
+    if not mk.IsDone() or mk.Shape().IsNull():
+        raise GeometryError("Offset surface failed")
+    return mk.Shape()
+
+
+def shell_solid(shape, thickness: float) -> TopoDS_Shape:
+    """Hollow a solid with a uniform wall thickness (negative = inward)."""
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeThickSolid
+    from OCP.TopTools import TopTools_ListOfShape
+    if shape_kind(shape) != "solid":
+        raise GeometryError("Shell needs a closed solid")
+    mk = BRepOffsetAPI_MakeThickSolid()
+    mk.MakeThickSolidByJoin(shape, TopTools_ListOfShape(),
+                            -abs(float(thickness)), 1e-6)
+    if not mk.IsDone() or mk.Shape().IsNull():
+        raise GeometryError("Shell failed (thickness may exceed the "
+                            "solid's smallest feature)")
+    return mk.Shape()
+
+
 def sweep2(profile, rail1, rail2) -> TopoDS_Shape:
     """Sweep a profile along rail1, scaled/guided by rail2 (two-rail sweep)."""
     from .occ import BRepOffsetAPI_MakePipeShell

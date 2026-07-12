@@ -20,14 +20,17 @@ MESH_VERT = """
 #version 330 core
 layout(location=0) in vec3 pos;
 layout(location=1) in vec3 nrm;
+layout(location=2) in float curv;
 uniform mat4 uMVP;
 uniform mat4 uView;
 out vec3 vNormal;
 out vec3 vPosView;
+out float vCurv;
 void main() {
     gl_Position = uMVP * vec4(pos, 1.0);
     vNormal = mat3(uView) * nrm;
     vPosView = (uView * vec4(pos, 1.0)).xyz;
+    vCurv = curv;
 }
 """
 
@@ -35,15 +38,27 @@ MESH_FRAG = """
 #version 330 core
 in vec3 vNormal;
 in vec3 vPosView;
+in float vCurv;
 uniform vec3 uColor;
 uniform float uAlpha;
 uniform int uZebra;
+uniform float uCurvRange;   // >0 enables curvature false-colour
 out vec4 frag;
 void main() {
     vec3 n = normalize(vNormal);
     if (!gl_FrontFacing) n = -n;
     vec3 l = normalize(-vPosView);
     float diff = max(dot(n, l), 0.0);
+    if (uCurvRange > 0.0) {
+        float t = clamp(vCurv / uCurvRange * 0.5 + 0.5, 0.0, 1.0);
+        vec3 cold = vec3(0.15, 0.35, 0.9);
+        vec3 flat_ = vec3(0.25, 0.8, 0.35);
+        vec3 hot = vec3(0.95, 0.25, 0.2);
+        vec3 cc = t < 0.5 ? mix(cold, flat_, t * 2.0)
+                          : mix(flat_, hot, (t - 0.5) * 2.0);
+        frag = vec4(cc * (0.45 + 0.55 * diff), uAlpha);
+        return;
+    }
     if (uZebra == 1) {
         // stripes follow the reflection direction: any kink in the surface
         // shows as a jag in the stripes
@@ -131,7 +146,11 @@ class _GpuObject:
         self.iso_vao = self.iso_count = 0
         self._buffers = []
         if mesh.has_faces:
-            inter = np.hstack([mesh.vertices, mesh.normals]).astype(np.float32)
+            curv = mesh.curvature
+            if len(curv) != len(mesh.vertices):
+                curv = np.zeros(len(mesh.vertices), np.float32)
+            inter = np.hstack([mesh.vertices, mesh.normals,
+                               curv[:, None]]).astype(np.float32)
             self.tri_vao = GL.glGenVertexArrays(1)
             GL.glBindVertexArray(self.tri_vao)
             vbo = GL.glGenBuffers(1)
@@ -140,11 +159,14 @@ class _GpuObject:
             GL.glBufferData(GL.GL_ARRAY_BUFFER, inter.nbytes, inter,
                             GL.GL_STATIC_DRAW)
             GL.glEnableVertexAttribArray(0)
-            GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, 24,
+            GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, 28,
                                      ctypes.c_void_p(0))
             GL.glEnableVertexAttribArray(1)
-            GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, False, 24,
+            GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, False, 28,
                                      ctypes.c_void_p(12))
+            GL.glEnableVertexAttribArray(2)
+            GL.glVertexAttribPointer(2, 1, GL.GL_FLOAT, False, 28,
+                                     ctypes.c_void_p(24))
             ebo = GL.glGenBuffers(1)
             self._buffers.append(ebo)
             idx = mesh.triangles.astype(np.uint32)
@@ -231,6 +253,8 @@ class Viewport(QOpenGLWidget):
         self.display_mode = "shaded"        # shaded | wireframe | ghosted
         self.grid_visible = True
         self.point_mode = False             # command wants a point click
+        from ..core.cplane import CPlane
+        self.cplane = CPlane()
         from ..core.snaps import SnapIndex
         self.snaps = SnapIndex(scene, config)
         self._active_snap = None            # (point, kind) under cursor
@@ -377,12 +401,19 @@ class Viewport(QOpenGLWidget):
         GL.glDrawArrays(GL.GL_LINES, 0, batch.count)
 
     def _draw_grid(self, mvp):
+        # grid geometry lives in plane-local XY; transform by the CPlane
+        if not self.cplane.is_world_xy():
+            mvp = (mvp @ self.cplane.basis_matrix()).astype(np.float32)
         GL.glDepthMask(False)
         self._draw_lines(self._grid["minor"], mvp, theme.GRID_MINOR)
         self._draw_lines(self._grid["major"], mvp, theme.GRID_MAJOR)
         self._draw_lines(self._grid["axis_x"], mvp, theme.GRID_AXIS_X)
         self._draw_lines(self._grid["axis_y"], mvp, theme.GRID_AXIS_Y)
         GL.glDepthMask(True)
+
+    def set_cplane(self, cplane):
+        self.cplane = cplane
+        self.update()
 
     def _sync_gpu(self):
         live = set()
@@ -399,10 +430,31 @@ class Viewport(QOpenGLWidget):
             self._gpu[dead].release()
             del self._gpu[dead]
 
+    def _curvature_range(self) -> float:
+        """95th percentile of |curvature| across visible meshes (cached)."""
+        rev = self.scene.revision
+        cached = getattr(self, "_curv_range_cache", None)
+        if cached is not None and cached[0] == rev:
+            return cached[1]
+        vals = []
+        for obj in self.scene.visible_objects():
+            c = obj.mesh.curvature
+            if len(c):
+                vals.append(np.abs(c))
+        rng = 1.0
+        if vals:
+            allv = np.concatenate(vals)
+            nz = allv[allv > 1e-9]
+            if len(nz):
+                rng = float(np.percentile(nz, 95))
+        self._curv_range_cache = (rev, max(rng, 1e-9))
+        return self._curv_range_cache[1]
+
     def _draw_objects(self, mvp, view):
         mode = self.display_mode
         fill_alpha = {"shaded": 1.0, "ghosted": 0.35, "wireframe": 0.0,
-                      "zebra": 1.0}[mode]
+                      "zebra": 1.0, "curvature": 1.0}[mode]
+        curv_range = self._curvature_range() if mode == "curvature" else 0.0
         for obj in self.scene.visible_objects():
             gpu = self._gpu.get(obj.id)
             if gpu is None:
@@ -426,6 +478,9 @@ class Viewport(QOpenGLWidget):
                 GL.glUniform1i(
                     GL.glGetUniformLocation(self._mesh_prog, "uZebra"),
                     1 if mode == "zebra" else 0)
+                GL.glUniform1f(
+                    GL.glGetUniformLocation(self._mesh_prog, "uCurvRange"),
+                    curv_range)
                 if mode == "ghosted":
                     GL.glDepthMask(False)
                 GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
@@ -596,7 +651,8 @@ class Viewport(QOpenGLWidget):
             self.set_preview(None)
 
     def set_display_mode(self, mode: str):
-        if mode not in ("shaded", "wireframe", "ghosted", "zebra"):
+        if mode not in ("shaded", "wireframe", "ghosted", "zebra",
+                        "curvature"):
             raise ValueError(f"Unknown display mode '{mode}'")
         self.display_mode = mode
         self.update()
@@ -625,13 +681,13 @@ class Viewport(QOpenGLWidget):
         self._active_snap = None
         origin, direction = self.camera.ray_through(px, py, self.width(),
                                                     self.height())
-        hit = ray_plane(origin, direction, np.zeros(3),
-                        np.array([0.0, 0.0, 1.0]))
+        hit = ray_plane(origin, direction, self.cplane.origin,
+                        self.cplane.normal)
         if hit is None:
             return None
         if self.grid_snap:
-            step = self.grid_snap_step
-            hit = np.round(hit / step) * step
+            hit = np.asarray(
+                self.cplane.snap_to_grid(hit, self.grid_snap_step))
         return tuple(round(float(c), 9) for c in hit)
 
     def pick_object(self, px: float, py: float) -> str | None:

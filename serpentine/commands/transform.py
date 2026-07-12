@@ -37,10 +37,11 @@ def cmd_copy(ctx):
 def cmd_rotate(ctx):
     objs = yield SelectReq("Select objects to rotate")
     center = yield PointReq("Center of rotation")
-    angle = yield NumberReq("Angle in degrees (around Z)")
+    angle = yield NumberReq("Angle in degrees (around the CPlane normal)")
+    axis = tuple(ctx.cplane.normal)
     for o in objs:
         ctx.scene.replace_shape(
-            o.id, g.rotate(o.shape, center, (0, 0, 1), angle))
+            o.id, g.rotate(o.shape, center, axis, angle))
     ctx.echo(f"Rotated {len(objs)} object(s) by {angle:g} degrees.")
 
 
@@ -74,11 +75,14 @@ def cmd_mirror(ctx):
     p2 = yield PointReq("End of mirror line", rubber_from=p1)
     keep = yield OptionReq("Keep original?", options=["Yes", "No"],
                            default="Yes")
-    # mirror across the vertical plane through the picked line
-    line = (p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2])
-    normal = (-line[1], line[0], 0.0)
-    if abs(normal[0]) < 1e-12 and abs(normal[1]) < 1e-12:
-        normal = (1.0, 0.0, 0.0)
+    # mirror across the plane through the picked line, perpendicular to
+    # the construction plane
+    import numpy as np
+    line = np.subtract(p2, p1)
+    normal = np.cross(ctx.cplane.normal, line)
+    if np.linalg.norm(normal) < 1e-12:
+        normal = ctx.cplane.xdir
+    normal = tuple(float(c) for c in normal)
     for o in objs:
         mirrored = g.mirror(o.shape, p1, normal)
         if keep == "Yes":

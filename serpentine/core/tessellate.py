@@ -28,6 +28,9 @@ class DisplayMesh:
     # isoparametric curves on curved faces (display only, not pickable)
     iso_segments: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 2, 3), np.float32))
+    # signed mean curvature per vertex (for curvature analysis display)
+    curvature: np.ndarray = field(
+        default_factory=lambda: np.zeros(0, np.float32))
 
     @property
     def has_faces(self) -> bool:
@@ -40,7 +43,7 @@ def _deflection_for(shape) -> float:
     return max(diag * 0.002, 1e-4)
 
 
-def _face_mesh(face) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+def _face_mesh(face) -> tuple | None:
     loc = TopLoc_Location()
     tri = occ.triangulation(face, loc)
     if tri is None:
@@ -56,10 +59,34 @@ def _face_mesh(face) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     for i in range(1, m + 1):
         t = tri.Triangle(i)
         idx[i - 1] = (t.Value(1) - 1, t.Value(2) - 1, t.Value(3) - 1)
-    if face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED:
+    reversed_face = (face.Orientation()
+                     == TopAbs_Orientation.TopAbs_REVERSED)
+    if reversed_face:
         idx = idx[:, ::-1].copy()
     normals = _smooth_normals(verts, idx)
-    return verts.astype(np.float32), normals, idx
+    curv = _vertex_curvature(face, tri, n, reversed_face)
+    return verts.astype(np.float32), normals, idx, curv
+
+
+def _vertex_curvature(face, tri, n: int, reversed_face: bool) -> np.ndarray:
+    """Signed mean curvature at each triangulation vertex (0 on failure)."""
+    curv = np.zeros(n, np.float32)
+    if not tri.HasUVNodes():
+        return curv
+    try:
+        from OCP.BRepAdaptor import BRepAdaptor_Surface
+        from OCP.BRepLProp import BRepLProp_SLProps
+        surf = BRepAdaptor_Surface(face)
+        props = BRepLProp_SLProps(surf, 2, 1e-6)
+        sign = -1.0 if reversed_face else 1.0
+        for i in range(1, n + 1):
+            uv = tri.UVNode(i)
+            props.SetParameters(uv.X(), uv.Y())
+            if props.IsCurvatureDefined():
+                curv[i - 1] = sign * props.MeanCurvature()
+    except Exception:
+        pass
+    return curv
 
 
 def _smooth_normals(verts: np.ndarray, tris: np.ndarray) -> np.ndarray:
@@ -142,7 +169,7 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
     if geometry.shape_kind(shape) != "curve":
         BRepMesh_IncrementalMesh(shape, deflection, False, 0.35, True)
 
-    all_verts, all_norms, all_tris, isos = [], [], [], []
+    all_verts, all_norms, all_tris, all_curv, isos = [], [], [], [], []
     offset = 0
     exp = TopExp_Explorer(shape, occ.FACE)
     while exp.More():
@@ -151,10 +178,11 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         exp.Next()
         if fm is None:
             continue
-        verts, norms, tris = fm
+        verts, norms, tris, curv = fm
         all_verts.append(verts)
         all_norms.append(norms)
         all_tris.append(tris + offset)
+        all_curv.append(curv)
         offset += len(verts)
         try:
             for pts in _face_isocurves(face):
@@ -174,6 +202,7 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         mesh.vertices = np.concatenate(all_verts)
         mesh.normals = np.concatenate(all_norms)
         mesh.triangles = np.concatenate(all_tris)
+        mesh.curvature = np.concatenate(all_curv).astype(np.float32)
     if segments:
         mesh.edge_segments = np.concatenate(segments).astype(np.float32)
     if isos:

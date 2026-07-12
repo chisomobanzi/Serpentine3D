@@ -12,9 +12,10 @@ def cmd_extrude(ctx):
     if any(g.is_closed_curve(c.shape) for c in curves):
         cap_opt = yield OptionReq("Cap closed curves to make solids?",
                                   options=["Yes", "No"], default="Yes")
+    direction = tuple(ctx.cplane.normal)
     made = []
     for c in curves:
-        srf = g.extrude(c.shape, (0, 0, 1), dist, cap=(cap_opt == "Yes"))
+        srf = g.extrude(c.shape, direction, dist, cap=(cap_opt == "Yes"))
         made.append(ctx.scene.add(srf))
     ctx.echo(f"Extruded {len(made)} object(s): "
              + ", ".join(o.name for o in made))
@@ -61,6 +62,27 @@ def cmd_sweep1(ctx):
     srf = g.sweep1(profiles[0].shape, rails[0].shape)
     obj = ctx.scene.add(srf)
     ctx.echo(f"Created {obj.name}.")
+
+
+@command("offsetsrf")
+def cmd_offsetsrf(ctx):
+    objs = yield SelectReq("Select surfaces to offset",
+                           kinds=("surface", "solid"))
+    dist = yield NumberReq("Offset distance (negative flips side)")
+    made = []
+    for o in objs:
+        made.append(ctx.scene.add(g.offset_surface(o.shape, dist),
+                                  layer_id=o.layer_id))
+    ctx.echo(f"Offset {len(made)} surface(s).")
+
+
+@command("shell")
+def cmd_shell(ctx):
+    objs = yield SelectReq("Select solids to shell", kinds=("solid",))
+    thickness = yield NumberReq("Wall thickness", minimum=1e-9)
+    for o in objs:
+        ctx.scene.replace_shape(o.id, g.shell_solid(o.shape, thickness))
+    ctx.echo(f"Shelled {len(objs)} solid(s) with wall {thickness:g}.")
 
 
 @command("sweep2")

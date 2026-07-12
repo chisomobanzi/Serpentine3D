@@ -62,7 +62,8 @@ def cmd_curve(ctx):
 def cmd_circle(ctx):
     center = yield PointReq("Center of circle")
     r = yield NumberReq("Radius", minimum=1e-9)
-    obj = ctx.scene.add(g.make_circle(center, r))
+    obj = ctx.scene.add(g.make_circle(center, r,
+                                      normal=tuple(ctx.cplane.normal)))
     ctx.echo(f"Created {obj.name} (r={r:g}).")
 
 
@@ -88,5 +89,16 @@ def cmd_ellipse(ctx):
 def cmd_rectangle(ctx):
     c1 = yield PointReq("First corner")
     c2 = yield PointReq("Opposite corner", rubber_from=c1)
-    obj = ctx.scene.add(g.make_rectangle(c1, c2))
+    cp = ctx.cplane
+    if cp.is_world_xy():
+        obj = ctx.scene.add(g.make_rectangle(c1, c2))
+    else:
+        u1, v1, _ = cp.from_world(c1)
+        u2, v2, _ = cp.from_world(c2)
+        if abs(u2 - u1) < 1e-9 or abs(v2 - v1) < 1e-9:
+            from ..core.geometry import GeometryError
+            raise GeometryError("Degenerate rectangle")
+        pts = [cp.to_world(u1, v1), cp.to_world(u2, v1),
+               cp.to_world(u2, v2), cp.to_world(u1, v2)]
+        obj = ctx.scene.add(g.make_polyline(pts, closed=True))
     ctx.echo(f"Created {obj.name}.")

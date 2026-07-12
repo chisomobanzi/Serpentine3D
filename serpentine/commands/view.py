@@ -167,6 +167,89 @@ def cmd_curvature(ctx):
     ctx.echo(f"Curvature: {info['curvature']:.6f}   Radius: {r_text}")
 
 
+@command("cplane", mutates=False)
+def cmd_cplane(ctx):
+    """Reposition the construction plane (drawing plane + grid)."""
+    from .base import OptionReq
+    from ..core import cplane as cp
+    choice = yield OptionReq(
+        "Construction plane",
+        options=["World", "Front", "Back", "Right", "Left", "3Point"],
+        default="World")
+    vp = _vp(ctx)
+    if choice == "3Point":
+        origin = yield PointReq("CPlane origin")
+        xpt = yield PointReq("Point on the X axis", rubber_from=origin)
+        ypt = yield PointReq("Point in the plane (Y side)",
+                             rubber_from=origin)
+        try:
+            vp.set_cplane(cp.from_three_points(origin, xpt, ypt))
+        except ValueError as exc:
+            ctx.echo(f"CPlane failed: {exc}")
+            return
+    else:
+        vp.set_cplane(cp.PRESETS[choice.lower()]())
+    ctx.echo(f"Construction plane: {vp.cplane.name}. Drawing commands, "
+             "grid and picking now use this plane.")
+
+
+@command("curvatureanalysis", aliases=("curvmap",), mutates=False)
+def cmd_curvature_analysis(ctx):
+    vp = _vp(ctx)
+    if vp.display_mode == "curvature":
+        vp.set_display_mode("shaded")
+        ctx.echo("Curvature analysis off.")
+    else:
+        vp.set_display_mode("curvature")
+        ctx.echo("Curvature analysis on — blue concave, green flat, "
+                 "red convex (run again to turn off).")
+    yield from ()
+
+
+@command("namedview", aliases=("nv",), mutates=False)
+def cmd_namedview(ctx):
+    from .base import OptionReq, TextReq
+    action = yield OptionReq("Named view",
+                             options=["Save", "Restore", "List", "Delete"],
+                             default="Save")
+    views = ctx.scene.named_views
+    vp = _vp(ctx)
+    if action == "List":
+        ctx.echo("Named views: " + (", ".join(sorted(views))
+                                    if views else "(none)"))
+        return
+    name = yield TextReq("View name")
+    if action == "Save":
+        cam = vp.camera
+        views[name] = {
+            "target": [float(c) for c in cam.target],
+            "distance": cam.distance,
+            "azimuth": cam.azimuth,
+            "elevation": cam.elevation,
+        }
+        ctx.scene.notify()
+        ctx.echo(f"Saved view '{name}'.")
+    elif action == "Restore":
+        v = views.get(name)
+        if v is None:
+            ctx.echo(f"No view named '{name}'.")
+            return
+        import numpy as np
+        cam = vp.camera
+        cam.target = np.asarray(v["target"], float)
+        cam.distance = v["distance"]
+        cam.azimuth = v["azimuth"]
+        cam.elevation = v["elevation"]
+        vp.update()
+        ctx.echo(f"Restored view '{name}'.")
+    elif action == "Delete":
+        if views.pop(name, None) is not None:
+            ctx.scene.notify()
+            ctx.echo(f"Deleted view '{name}'.")
+        else:
+            ctx.echo(f"No view named '{name}'.")
+
+
 @command("zebra", mutates=False)
 def cmd_zebra(ctx):
     vp = _vp(ctx)
