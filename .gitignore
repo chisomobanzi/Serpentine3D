@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+*.serp
+*.step
+*.stp
+*.obj
+!tests/fixtures/*
+screenshots/

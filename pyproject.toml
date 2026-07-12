@@ -1,0 +1,32 @@
+[project]
+name = "serpentine"
+version = "0.1.0"
+description = "Open-source NURBS surface modeller for Linux with MCP integration"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Chisomo Banzi" }]
+requires-python = ">=3.10"
+dependencies = [
+    "cadquery-ocp>=7.9",
+    "PySide6>=6.6",
+    "numpy>=1.26",
+    "PyOpenGL>=3.1",
+    "mcp>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+serp = "serpentine.app:main"
+serp-mcp = "serpentine.mcp_server.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["serpentine*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
