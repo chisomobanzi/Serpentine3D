@@ -71,11 +71,15 @@ class SerpApi:
         }
 
     def screenshot(self, path: str | None = None, width: int | None = None,
-                   height: int | None = None) -> dict:
+                   height: int | None = None,
+                   full_window: bool = False) -> dict:
         if not path:
             fd, path = tempfile.mkstemp(suffix=".png", prefix="serp_")
             os.close(fd)
-        img = self.viewport.grabFramebuffer()
+        if full_window:
+            img = self.window.grab().toImage()
+        else:
+            img = self.viewport.grabFramebuffer()
         if width:
             from PySide6.QtCore import Qt as _Qt
             img = img.scaledToWidth(int(width),
