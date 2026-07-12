@@ -444,6 +444,190 @@ def shell_solid(shape, thickness: float) -> TopoDS_Shape:
     return mk.Shape()
 
 
+def patch_surface(curves: list, continuity: int = 0) -> TopoDS_Shape:
+    """Patch/network surface filling the given boundary curves."""
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeFilling
+    from OCP.GeomAbs import GeomAbs_Shape
+    cont = (GeomAbs_Shape.GeomAbs_C0 if continuity == 0
+            else GeomAbs_Shape.GeomAbs_C1)
+    mk = BRepOffsetAPI_MakeFilling()
+    n = 0
+    for c in curves:
+        for e in edges_of(c):
+            mk.Add(e, cont, True)
+            n += 1
+    if n < 2:
+        raise GeometryError("Patch needs at least 2 boundary edges")
+    try:
+        mk.Build()
+    except Exception as exc:
+        raise GeometryError(f"Patch failed: {exc}") from exc
+    if not mk.IsDone():
+        raise GeometryError("Patch failed — check that the curves form "
+                            "a reasonable boundary")
+    return unwrap_compound(mk.Shape())
+
+
+def blend_curves(a, b, continuity: str = "tangent") -> TopoDS_Shape:
+    """Blend curve between the nearest ends of two curves."""
+    import numpy as np
+    ends = []
+    for shape in (a, b):
+        edges = edges_of(shape)
+        if not edges:
+            raise GeometryError("Blend needs curves")
+        ad0 = occ.edge_adaptor(edges[0])
+        adN = occ.edge_adaptor(edges[-1])
+        for ad, t in ((ad0, ad0.FirstParameter()),
+                      (adN, adN.LastParameter())):
+            p = ad.Value(t)
+            v = gp_Vec()
+            pnt = gp_Pnt()
+            ad.D1(t, pnt, v)
+            ends.append((np.array([p.X(), p.Y(), p.Z()]),
+                         np.array([v.X(), v.Y(), v.Z()]),
+                         t == ad.FirstParameter()))
+    best = None
+    for ea in ends[:2]:
+        for eb in ends[2:]:
+            d = float(np.linalg.norm(ea[0] - eb[0]))
+            if best is None or d < best[0]:
+                best = (d, ea, eb)
+    _, (pa, ta, a_start), (pb, tb, b_start) = best
+    # outgoing tangents: leaving curve a, entering curve b
+    ta = -ta if a_start else ta
+    tb = tb if b_start else -tb
+    dist = float(np.linalg.norm(pb - pa))
+    if dist < 1e-9:
+        raise GeometryError("Curve ends coincide — nothing to blend")
+    from OCP.Geom import Geom_BezierCurve
+    if continuity == "position":
+        return make_line(tuple(pa), tuple(pb))
+    na = ta / (np.linalg.norm(ta) or 1.0)
+    nb = tb / (np.linalg.norm(tb) or 1.0)
+    poles = TColgp_Array1OfPnt(1, 4)
+    poles.SetValue(1, _pnt(tuple(pa)))
+    poles.SetValue(2, _pnt(tuple(pa + na * dist / 3)))
+    poles.SetValue(3, _pnt(tuple(pb - nb * dist / 3)))
+    poles.SetValue(4, _pnt(tuple(pb)))
+    return BRepBuilderAPI_MakeEdge(Geom_BezierCurve(poles)).Edge()
+
+
+def project_curve(curve, target, direction: Point) -> list:
+    """Project a curve onto a surface along a direction."""
+    from OCP.BRepProj import BRepProj_Projection
+    wire = occ.to_wire(to_wire(curve))
+    proj = BRepProj_Projection(wire, target, _dir(direction))
+    out = []
+    while proj.More():
+        out.append(proj.Current())
+        proj.Next()
+    if not out:
+        raise GeometryError("Projection missed the surface")
+    return out
+
+
+def pull_curve(curve, target) -> list:
+    """Pull a curve onto a surface along the surface normals."""
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_NormalProjection
+    proj = BRepOffsetAPI_NormalProjection(target)
+    proj.Add(occ.to_wire(to_wire(curve)))
+    proj.Build()
+    if not proj.IsDone():
+        raise GeometryError("Pull failed")
+    edges = edges_of(proj.Projection())
+    if not edges:
+        raise GeometryError("Pull produced nothing (curve may not face "
+                            "the surface)")
+    return _curve_pieces(edges, [])
+
+
+def make_helix(center: Point, radius: float, pitch: float, turns: float,
+               ccw: bool = True) -> TopoDS_Shape:
+    """Helical curve around the Z axis through `center`."""
+    if radius <= 0 or pitch <= 0 or turns <= 0:
+        raise GeometryError("Helix needs positive radius, pitch and turns")
+    from OCP.Geom import Geom_CylindricalSurface
+    from OCP.Geom2d import Geom2d_Line
+    from OCP.gp import gp_Ax3, gp_Dir2d, gp_Pnt2d
+    from OCP.BRepLib import BRepLib
+    ax = gp_Ax3(_pnt(center), _dir((0, 0, 1)))
+    surf = Geom_CylindricalSurface(ax, float(radius))
+    sign = 1.0 if ccw else -1.0
+    line2d = Geom2d_Line(gp_Pnt2d(0, 0), gp_Dir2d(sign * 2 * math.pi,
+                                                  float(pitch)))
+    length = math.hypot(2 * math.pi, pitch) * turns
+    edge = BRepBuilderAPI_MakeEdge(line2d, surf, 0.0, length).Edge()
+    BRepLib.BuildCurves3d_s(edge)
+    return edge
+
+
+def unroll_face(face) -> list:
+    """Develop a planar/cylindrical/conical face flat onto world XY.
+
+    Returns the developed boundary as curves (arc-length preserving)."""
+    import numpy as np
+    from OCP.BRepAdaptor import BRepAdaptor_Curve2d, BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+
+    faces = faces_of(face)
+    if len(faces) != 1:
+        raise GeometryError("Unroll one face at a time (explode first)")
+    f = faces[0]
+    surf = BRepAdaptor_Surface(f)
+    kind = surf.GetType()
+
+    if kind == GeomAbs_SurfaceType.GeomAbs_Plane:
+        def dev(u, v):
+            return (u, v)
+    elif kind == GeomAbs_SurfaceType.GeomAbs_Cylinder:
+        r = surf.Cylinder().Radius()
+
+        def dev(u, v):
+            return (u * r, v)
+    elif kind == GeomAbs_SurfaceType.GeomAbs_Cone:
+        cone = surf.Cone()
+        half = cone.SemiAngle()
+        r_ref = cone.RefRadius()
+        sin_h = math.sin(half)
+        if abs(sin_h) < 1e-12:
+            raise GeometryError("Degenerate cone")
+
+        def dev(u, v):
+            # slant distance from apex; flat angle compresses by sin(half)
+            s = r_ref / sin_h + v
+            theta = u * sin_h
+            return (s * math.sin(theta), -s * math.cos(theta))
+    else:
+        raise GeometryError(
+            "Only planar, cylindrical and conical faces can be unrolled "
+            "exactly (this face is freeform)")
+
+    out = []
+    for edge in edges_of(f):
+        try:
+            c2d = BRepAdaptor_Curve2d(occ.to_edge(edge), f)
+        except Exception:
+            continue
+        t0, t1 = c2d.FirstParameter(), c2d.LastParameter()
+        pts = []
+        for i in range(65):
+            t = t0 + (t1 - t0) * i / 64
+            uv = c2d.Value(t)
+            x, y = dev(uv.X(), uv.Y())
+            pts.append((x, y, 0.0))
+        # drop duplicate consecutive points
+        clean = [pts[0]]
+        for p in pts[1:]:
+            if math.dist(p, clean[-1]) > 1e-9:
+                clean.append(p)
+        if len(clean) >= 2:
+            out.append(make_polyline(clean))
+    if not out:
+        raise GeometryError("Unroll produced no boundary curves")
+    return out
+
+
 def sweep2(profile, rail1, rail2) -> TopoDS_Shape:
     """Sweep a profile along rail1, scaled/guided by rail2 (two-rail sweep)."""
     from .occ import BRepOffsetAPI_MakePipeShell

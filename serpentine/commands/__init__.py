@@ -2,7 +2,7 @@
 
 from . import (  # noqa: F401
     base, boolean, curves, drafting, edit, file, select, solids,
-    solids_edit, surfaces,
+    solids_edit, surfaces, surfaces2,
     transform,
     view,
 )

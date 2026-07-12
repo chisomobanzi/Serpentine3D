@@ -389,3 +389,69 @@ def test_contour():
     for _, curves in levels:
         total = sum(g.curve_length(c) for c in curves)
         assert total == pytest.approx(40, rel=1e-6)
+
+
+def test_patch_surface():
+    c1 = g.make_interp_curve([(0, 0, 0), (5, 0, 2), (10, 0, 0)])
+    c2 = g.make_interp_curve([(10, 0, 0), (10, 5, 3), (10, 10, 0)])
+    c3 = g.make_interp_curve([(10, 10, 0), (5, 10, 2), (0, 10, 0)])
+    c4 = g.make_interp_curve([(0, 10, 0), (0, 5, 3), (0, 0, 0)])
+    srf = g.patch_surface([c1, c2, c3, c4])
+    assert g.shape_kind(srf) == "surface"
+    assert g.surface_area(srf) > 100
+
+
+def test_blend_curves_tangent():
+    a = g.make_line((0, 0, 0), (10, 0, 0))
+    b = g.make_line((20, 5, 0), (30, 5, 0))
+    blend = g.blend_curves(a, b)
+    assert g.shape_kind(blend) == "curve"
+    # blend connects (10,0,0) to (20,5,0)
+    mn, mx = g.bbox(blend)
+    assert mn[0] == pytest.approx(10, abs=0.1)
+    assert mx[0] == pytest.approx(20, abs=0.1)
+
+
+def test_project_and_pull():
+    srf = g.extrude(g.make_line((0, 0, 5), (10, 0, 5)), (0, 1, 0), 10)
+    circle = g.make_circle((5, 5, 20), 2)
+    projected = g.project_curve(circle, srf, (0, 0, -1))
+    assert len(projected) >= 1
+    pulled = g.pull_curve(circle, srf)
+    assert len(pulled) >= 1
+
+
+def test_helix():
+    h = g.make_helix((0, 0, 0), 5, 2, 3)
+    mn, mx = g.bbox(h)
+    assert mx[2] == pytest.approx(6, rel=1e-3)      # 3 turns * pitch 2
+    expected = math.hypot(2 * math.pi * 5, 2) * 3
+    assert g.curve_length(h) == pytest.approx(expected, rel=1e-3)
+
+
+def test_unroll_cylinder():
+    line = g.make_line((5, 0, 0), (5, 0, 10))
+    cyl_face = g.faces_of(g.revolve(line, (0, 0, 0), (0, 0, 1), 360))[0]
+    curves = g.unroll_face(cyl_face)
+    assert len(curves) >= 2
+    import numpy as np
+    mins = np.full(3, np.inf); maxs = np.full(3, -np.inf)
+    for c in curves:
+        mn, mx = g.bbox(c)
+        mins = np.minimum(mins, mn); maxs = np.maximum(maxs, mx)
+    w = maxs[0] - mins[0]
+    h = maxs[1] - mins[1]
+    assert sorted([w, h])[1] == pytest.approx(2 * math.pi * 5, rel=1e-3)
+    assert sorted([w, h])[0] == pytest.approx(10, rel=1e-3)
+
+
+def test_text_curves():
+    from serpentine.core.text import text_curves
+    curves = text_curves("AB", height=10)
+    assert len(curves) >= 3        # A outer, A hole, B outer, B holes
+    import numpy as np
+    maxs = np.full(3, -np.inf); mins = np.full(3, np.inf)
+    for c in curves:
+        mn, mx = g.bbox(c)
+        mins = np.minimum(mins, mn); maxs = np.maximum(maxs, mx)
+    assert 7 < (maxs[1] - mins[1]) < 14     # roughly requested height
