@@ -491,6 +491,7 @@ def test_subobject_filletedge_and_pushpull(env):
     # fillet only edge 0
     sel.toggle_subobject(box.id, "edge", 0)
     proc.run("filletedge")
+    proc.provide_text("No")          # no chain expansion
     proc.provide_text("1")
     v = g.volume(scene.all()[0].shape)
     # one rounded edge: 10x10x10 minus one quarter-round strip
