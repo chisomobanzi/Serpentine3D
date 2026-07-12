@@ -75,6 +75,35 @@ def ray_triangle_hits(origin: np.ndarray, direction: np.ndarray,
     return t_out
 
 
+def ray_line_parameter(origin: np.ndarray, direction: np.ndarray,
+                       line_point: np.ndarray,
+                       line_dir: np.ndarray) -> float | None:
+    """Parameter t on the line (point + t*dir) closest to the ray.
+
+    None when the ray and line are (nearly) parallel."""
+    d = normalize(direction)
+    u = normalize(line_dir)
+    w = origin - line_point
+    b = float(np.dot(d, u))
+    denom = 1.0 - b * b
+    if abs(denom) < 1e-9:
+        return None
+    d0 = float(np.dot(d, w))
+    e = float(np.dot(u, w))
+    return (e - b * d0) / denom
+
+
+def ray_plane_any(origin: np.ndarray, direction: np.ndarray,
+                  plane_point: np.ndarray, plane_normal: np.ndarray):
+    """Ray-plane intersection allowing hits behind the origin (for
+    manipulation planes that may face away)."""
+    denom = np.dot(direction, plane_normal)
+    if abs(denom) < 1e-9:
+        return None
+    t = np.dot(plane_point - origin, plane_normal) / denom
+    return origin + t * direction
+
+
 def ray_plane(origin: np.ndarray, direction: np.ndarray,
               plane_point: np.ndarray, plane_normal: np.ndarray):
     denom = np.dot(direction, plane_normal)

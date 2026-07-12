@@ -299,3 +299,14 @@ def cmd_zebra(ctx):
         ctx.echo("Zebra analysis on — stripes reveal surface continuity "
                  "(run again to turn off).")
     yield from ()
+
+
+@command("gumball", mutates=False)
+def cmd_gumball(ctx):
+    gb = _vp(ctx).gumball
+    gb.enabled = not gb.enabled
+    if ctx.viewport.config is not None:
+        ctx.viewport.config.set("gumball", gb.enabled)
+    _vp(ctx).update()
+    ctx.echo(f"Gumball {'on' if gb.enabled else 'off'}.")
+    yield from ()

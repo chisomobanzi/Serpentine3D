@@ -110,6 +110,7 @@ class MainWindow(QMainWindow):
         # wiring
         self.command_line.submitted.connect(self._on_submit)
         self.command_line.cancelled.connect(self._cancel)
+        self.viewport.history = self.history
         self.viewport.objectClicked.connect(self._on_object_clicked)
         self.viewport.emptyClicked.connect(self._on_empty_clicked)
         self.viewport.boxSelected.connect(self._on_box_selected)

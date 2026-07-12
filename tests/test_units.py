@@ -67,3 +67,18 @@ def test_roundtrip():
 def test_convert():
     assert convert(1, "ft", "in") == pytest.approx(12)
     assert convert(1000, "mm", "m") == pytest.approx(1)
+
+
+def test_ray_line_parameter_direction():
+    import numpy as np
+    from serpentine.utils.math3d import ray_line_parameter
+    # camera above origin looking down at a point on the +X axis:
+    # the closest point on the X axis must have positive t
+    origin = np.array([0.0, 0.0, 10.0])
+    direction = np.array([0.5, 0.0, -1.0])
+    t = ray_line_parameter(origin, direction, np.zeros(3),
+                           np.array([1.0, 0.0, 0.0]))
+    assert t is not None and t > 4.0
+    # ray parallel to the line -> None
+    assert ray_line_parameter(origin, np.array([1.0, 0, 0]), np.zeros(3),
+                              np.array([1.0, 0, 0])) is None

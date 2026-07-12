@@ -259,6 +259,9 @@ class Viewport(QOpenGLWidget):
         from .layout_view import LayoutView
         self.space = "model"                # "model" | layout id
         self.layout_view = LayoutView(self)
+        from .gumball import Gumball
+        self.gumball = Gumball(self)
+        self.history = None                 # set by the main window
         from ..core.snaps import SnapIndex
         self.snaps = SnapIndex(scene, config)
         self._active_snap = None            # (point, kind) under cursor
@@ -408,6 +411,7 @@ class Viewport(QOpenGLWidget):
         self._draw_objects(mvp, view)
         self._draw_preview(mvp)
         self._draw_control_points(mvp)
+        self.gumball.paint(mvp)
         self._draw_axis_triad(view, w, h)
         self._draw_selection_box(w, h)
 
@@ -821,6 +825,14 @@ class Viewport(QOpenGLWidget):
 
     # -------------------------------------------------------------- picking
 
+    def window_checkpoint(self, label: str):
+        if self.history is not None:
+            self.history.checkpoint(label)
+
+    def window_discard_checkpoint(self):
+        if self.history is not None:
+            self.history.discard_checkpoint()
+
     def set_space(self, space: str):
         """Switch between model space and a layout (by id)."""
         self.space = space
@@ -855,6 +867,16 @@ class Viewport(QOpenGLWidget):
         if self.grid_snap:
             hit = np.asarray(
                 self.cplane.snap_to_grid(hit, self.grid_snap_step))
+        # ortho: Shift constrains to the dominant CPlane axis from the base
+        if (self.snap_base is not None
+                and QApplication.keyboardModifiers()
+                & Qt.KeyboardModifier.ShiftModifier):
+            bu, bv, bw = self.cplane.from_world(self.snap_base)
+            u, v, w = self.cplane.from_world(hit)
+            if abs(u - bu) >= abs(v - bv):
+                hit = np.asarray(self.cplane.to_world(u, bv, w))
+            else:
+                hit = np.asarray(self.cplane.to_world(bu, v, w))
         return tuple(round(float(c), 9) for c in hit)
 
     def pick_object(self, px: float, py: float) -> str | None:
@@ -920,6 +942,12 @@ class Viewport(QOpenGLWidget):
                 if self.layout_view.click_outside_exits(pos.x(), pos.y()):
                     self.update()
                 return
+            handle = self.gumball.hit_test(pos.x(), pos.y())
+            if handle is not None:
+                if self.gumball.begin_drag(handle, pos.x(), pos.y(),
+                                           ev.modifiers()):
+                    self.update()
+                    return
             cv = self._cv_hit(pos.x(), pos.y())
             if cv is not None:
                 obj_id, index, world = cv
@@ -958,6 +986,18 @@ class Viewport(QOpenGLWidget):
             else:
                 self.camera.orbit(dx * speed, dy * speed)
             self.update()
+        elif self.gumball.drag is not None:
+            label = self.gumball.drag_to(pos.x(), pos.y(), ev.modifiers())
+            if label:
+                from PySide6.QtWidgets import QMainWindow
+                win = self.window()
+                if isinstance(win, QMainWindow):
+                    win.statusBar().showMessage(label)
+            self.update()
+        elif (not ev.buttons() and self.space == "model"
+                and not self.point_mode):
+            if self.gumball.update_hover(pos.x(), pos.y()):
+                self.update()
         elif self._cv_drag is not None:
             obj_id, index, plane_pt, normal = self._cv_drag
             origin, direction = self.camera.ray_through(
@@ -996,6 +1036,10 @@ class Viewport(QOpenGLWidget):
             if (ev.button() == self._nav_button()
                     and self.display_mode == "technical"):
                 self.update()      # navigation ended: recompute HLR view
+            return
+        if self.gumball.drag is not None:
+            self.gumball.end_drag()
+            self.update()
             return
         if self._cv_drag is not None:
             self._cv_drag = None
@@ -1119,6 +1163,10 @@ class Viewport(QOpenGLWidget):
 
     def keyPressEvent(self, ev):
         if ev.key() == Qt.Key.Key_Escape:
+            if self.gumball.drag is not None:
+                self.gumball.cancel_drag()
+                self.update()
+                return
             self.escapePressed.emit()
         else:
             super().keyPressEvent(ev)

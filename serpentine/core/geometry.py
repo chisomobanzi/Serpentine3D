@@ -751,6 +751,26 @@ def scale(shape, center: Point, factor: float,
     return result.Shape()
 
 
+def scale_along_axis(shape, center: Point, axis: Point,
+                     factor: float) -> TopoDS_Shape:
+    """Non-uniform scale by `factor` along an arbitrary unit axis."""
+    import numpy as np
+    if abs(factor) < 1e-9:
+        raise GeometryError("Scale factor cannot be zero")
+    a = np.asarray(axis, float)
+    a = a / np.linalg.norm(a)
+    m = np.eye(3) + (float(factor) - 1.0) * np.outer(a, a)
+    c = np.asarray(center, float)
+    t = c - m @ c
+    g = gp_GTrsf()
+    g.SetVectorialPart(gp_Mat(*m.flatten()))
+    g.SetTranslationPart(gp_XYZ(*t))
+    result = BRepBuilderAPI_GTransform(shape, g, True)
+    if not result.IsDone():
+        raise GeometryError("Axis scale failed")
+    return result.Shape()
+
+
 def mirror(shape, plane_point: Point, plane_normal: Point) -> TopoDS_Shape:
     t = gp_Trsf()
     t.SetMirror(gp_Ax2(_pnt(plane_point), _dir(plane_normal)))
