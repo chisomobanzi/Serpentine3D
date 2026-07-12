@@ -23,6 +23,23 @@ def import_file(scene, path: str) -> int:
         for name, shape in named:
             scene.add(shape, name=name)
         return len(named)
+    if ext == ".3dm":
+        from . import rhino
+        items = rhino.import_3dm(path)
+        layer_map = {}
+        for name, shape, meta in items:
+            layer_id = None
+            lname = meta.get("name")
+            if lname:
+                if lname not in layer_map:
+                    existing = scene.layers.find_by_name(lname)
+                    if existing is None:
+                        existing = scene.layers.create(
+                            lname, meta.get("color"))
+                    layer_map[lname] = existing.id
+                layer_id = layer_map[lname]
+            scene.add(shape, name=name, layer_id=layer_id)
+        return len(items)
     raise ValueError(f"Unsupported import format: {ext}")
 
 
@@ -40,5 +57,9 @@ def export_file(scene, path: str, only_ids: list | None = None):
         return
     if ext == ".obj":
         obj.export_obj([(o.name, o.shape) for o in objs], path)
+        return
+    if ext == ".3dm":
+        from . import rhino
+        rhino.export_3dm(scene, path, only_ids=only_ids)
         return
     raise ValueError(f"Unsupported export format: {ext}")

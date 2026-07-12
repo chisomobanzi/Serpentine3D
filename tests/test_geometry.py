@@ -225,3 +225,69 @@ def test_snap_points():
     circle = g.make_circle((3, 3, 0), 2)
     kinds = {k for _, k in snap_points_for(circle)}
     assert "center" in kinds
+
+
+def test_split_curve_by_curve():
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    cutter = g.make_line((5, -5, 0), (5, 5, 0))
+    pieces = g.split_shape(line, [cutter])
+    assert len(pieces) == 2
+    lengths = sorted(g.curve_length(p) for p in pieces)
+    assert lengths == pytest.approx([5, 5])
+
+
+def test_split_circle_by_line():
+    circle = g.make_circle((0, 0, 0), 5)
+    cutter = g.make_line((-10, 0, 0), (10, 0, 0))
+    pieces = g.split_shape(circle, [cutter])
+    assert len(pieces) == 2
+    for p in pieces:
+        assert g.curve_length(p) == pytest.approx(math.pi * 5, rel=1e-3)
+
+
+def test_split_surface_by_curve():
+    rect = g.make_rectangle((0, 0, 0), (10, 10, 0))
+    face = g.planar_face(rect)
+    cutter = g.make_line((5, -2, 0), (5, 12, 0))
+    pieces = g.split_shape(face, [cutter])
+    assert len(pieces) == 2
+    areas = sorted(g.surface_area(p) for p in pieces)
+    assert areas == pytest.approx([50, 50], rel=1e-4)
+
+
+def test_split_no_intersection_raises():
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    cutter = g.make_line((0, 5, 0), (10, 5, 0))
+    with pytest.raises(g.GeometryError):
+        g.split_shape(line, [cutter])
+
+
+def test_sweep2():
+    profile = g.make_line((0, 0, 0), (0, 0, 3))
+    rail1 = g.make_line((0, 0, 0), (20, 0, 0))
+    rail2 = g.make_line((0, 5, 0), (20, 5, 0))
+    srf = g.sweep2(profile, rail1, rail2)
+    assert g.shape_kind(srf) in ("surface", "solid")
+    assert g.surface_area(srf) == pytest.approx(60, rel=1e-3)
+
+
+def test_control_points_roundtrip():
+    pts = [(0, 0, 0), (5, 5, 0), (10, 0, 0)]
+    curve = g.make_control_curve(pts, degree=2)
+    cvs = g.get_control_points(curve)
+    assert len(cvs) == 3
+    assert cvs[1] == pytest.approx((5, 5, 0))
+
+    moved = g.move_control_point(curve, 1, (5, 10, 0))
+    cvs2 = g.get_control_points(moved)
+    assert cvs2[1] == pytest.approx((5, 10, 0))
+    # ends unchanged
+    assert cvs2[0] == pytest.approx((0, 0, 0))
+
+
+def test_control_points_of_circle_via_conversion():
+    circle = g.make_circle((0, 0, 0), 5)
+    cvs = g.get_control_points(circle)
+    assert len(cvs) >= 7    # rational bspline circle representation
+    moved = g.move_control_point(circle, 0, (8, 0, 0))
+    assert g.shape_kind(moved) == "curve"

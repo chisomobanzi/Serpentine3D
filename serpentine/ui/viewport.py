@@ -205,8 +205,10 @@ class _LineBatch:
 class Viewport(QOpenGLWidget):
     objectClicked = Signal(str, object)     # object id, modifiers
     emptyClicked = Signal(object)           # modifiers
+    boxSelected = Signal(list, object)      # picked ids, modifiers
     pointPicked = Signal(object)            # (x, y, z) in point-input mode
     mouseWorldMoved = Signal(object)        # (x, y, z) while in point-input mode
+    cvEditBegan = Signal()                  # control-point drag started
     escapePressed = Signal()
 
     def __init__(self, scene, selection, parent=None):
@@ -220,6 +222,14 @@ class Viewport(QOpenGLWidget):
         from ..core.snaps import SnapIndex
         self.snaps = SnapIndex(scene)
         self._active_snap = None            # (point, kind) under cursor
+        self.grid_snap = False
+        self.grid_snap_step = 1.0
+        self.cv_enabled: set[str] = set()   # objects showing control points
+        self._cv_cache: dict = {}
+        self._cv_drag = None                # (obj_id, index, plane_pt, normal)
+        self._press_pos = None
+        self._box_end = None
+        self._box_active = False
         self._gpu: dict[str, _GpuObject] = {}
         self._grid = None
         self._preview: _LineBatch | None = None
@@ -313,7 +323,9 @@ class Viewport(QOpenGLWidget):
         self._sync_gpu()
         self._draw_objects(mvp, view)
         self._draw_preview(mvp)
+        self._draw_control_points(mvp)
         self._draw_axis_triad(view, w, h)
+        self._draw_selection_box(w, h)
 
     def _set_line_uniforms(self, mvp, color):
         GL.glUseProgram(self._line_prog)
@@ -451,6 +463,54 @@ class Viewport(QOpenGLWidget):
             self._draw_lines(self._preview, mvp, (1.0, 1.0, 1.0, 0.95), 2.0)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
+    def _draw_control_points(self, mvp):
+        if not self.cv_enabled:
+            return
+        size = self.camera.distance * 0.006
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        for obj_id in list(self.cv_enabled):
+            obj = self.scene.get(obj_id)
+            if obj is None:
+                self.cv_enabled.discard(obj_id)
+                continue
+            pts = self._cv_points(obj)
+            if pts is None or len(pts) < 2:
+                continue
+            # control polygon
+            poly = np.stack([pts[:-1], pts[1:]], axis=1).reshape(-1, 3)
+            self._preview.update(poly.astype(np.float32))
+            self._draw_lines(self._preview, mvp, (0.6, 0.62, 0.66, 0.5), 1.0)
+            # CV markers as crosses
+            segs = []
+            for p in pts:
+                p = p.astype(np.float32)
+                for axis in np.eye(3, dtype=np.float32)[:2] * size:
+                    segs.append(np.stack([p - axis, p + axis]))
+            self._preview.update(np.concatenate(segs).astype(np.float32))
+            self._draw_lines(self._preview, mvp, (1.0, 1.0, 1.0, 0.95), 2.0)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+
+    def _draw_selection_box(self, w, h):
+        if not self._box_active or self._press_pos is None \
+                or self._box_end is None:
+            return
+        def ndc(px, py):
+            return (2 * px / max(w, 1) - 1, 1 - 2 * py / max(h, 1), 0.0)
+        a = ndc(self._press_pos.x(), self._press_pos.y())
+        b = ndc(self._box_end.x(), self._box_end.y())
+        corners = np.array([
+            a, (b[0], a[1], 0), (b[0], a[1], 0), b,
+            b, (a[0], b[1], 0), (a[0], b[1], 0), a,
+        ], np.float32)
+        crossing = self._box_end.x() < self._press_pos.x()
+        color = ((0.9, 0.9, 0.9, 0.8) if crossing
+                 else (*theme.SELECTION_COLOR, 0.9))
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        self._preview.update(corners)
+        self._draw_lines(self._preview, np.eye(4, dtype=np.float32),
+                         color, 1.0)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+
     def _draw_axis_triad(self, view, w, h):
         """Small world-axis indicator in the bottom-left corner (NDC space)."""
         rot = view[:3, :3]
@@ -532,6 +592,9 @@ class Viewport(QOpenGLWidget):
                         np.array([0.0, 0.0, 1.0]))
         if hit is None:
             return None
+        if self.grid_snap:
+            step = self.grid_snap_step
+            hit = np.round(hit / step) * step
         return tuple(round(float(c), 9) for c in hit)
 
     def pick_object(self, px: float, py: float) -> str | None:
@@ -577,7 +640,6 @@ class Viewport(QOpenGLWidget):
 
     def mousePressEvent(self, ev):
         self._last_mouse = ev.position()
-        self._orbiting = False
         if ev.button() == Qt.MouseButton.LeftButton:
             pos = ev.position()
             if self.point_mode:
@@ -585,11 +647,16 @@ class Viewport(QOpenGLWidget):
                 if pt is not None:
                     self.pointPicked.emit(pt)
                 return
-            picked = self.pick_object(pos.x(), pos.y())
-            if picked:
-                self.objectClicked.emit(picked, ev.modifiers())
-            else:
-                self.emptyClicked.emit(ev.modifiers())
+            cv = self._cv_hit(pos.x(), pos.y())
+            if cv is not None:
+                obj_id, index, world = cv
+                fwd = (self.camera.target - self.camera.position)
+                fwd = fwd / max(np.linalg.norm(fwd), 1e-12)
+                self._cv_drag = (obj_id, index, np.asarray(world), fwd)
+                self.cvEditBegan.emit()
+                return
+            self._press_pos = pos
+            self._box_active = False
 
     def mouseMoveEvent(self, ev):
         pos = ev.position()
@@ -603,11 +670,126 @@ class Viewport(QOpenGLWidget):
             else:
                 self.camera.orbit(dx, dy)
             self.update()
+        elif self._cv_drag is not None:
+            obj_id, index, plane_pt, normal = self._cv_drag
+            origin, direction = self.camera.ray_through(
+                pos.x(), pos.y(), self.width(), self.height())
+            hit = ray_plane(origin, direction, plane_pt, normal)
+            if hit is not None:
+                from ..core import geometry as _g
+                obj = self.scene.get(obj_id)
+                if obj is not None:
+                    try:
+                        new_shape = _g.move_control_point(
+                            obj.shape, index, tuple(hit))
+                        self.scene.replace_shape(obj_id, new_shape)
+                        self._cv_drag = (obj_id, index, plane_pt, normal)
+                    except _g.GeometryError:
+                        pass
+        elif (self._press_pos is not None
+                and ev.buttons() & Qt.MouseButton.LeftButton):
+            if (abs(pos.x() - self._press_pos.x()) > 4
+                    or abs(pos.y() - self._press_pos.y()) > 4):
+                self._box_active = True
+                self._box_end = pos
+                self.update()
         elif self.point_mode:
             pt = self.world_point_at(pos.x(), pos.y())
             if pt is not None:
                 self.mouseWorldMoved.emit(pt)
         self._last_mouse = pos
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._cv_drag is not None:
+            self._cv_drag = None
+            return
+        if self._box_active and self._press_pos is not None:
+            x0, y0 = self._press_pos.x(), self._press_pos.y()
+            x1, y1 = self._box_end.x(), self._box_end.y()
+            crossing = x1 < x0            # drag right-to-left = crossing
+            ids = self._box_pick(x0, y0, x1, y1, crossing)
+            self._box_active = False
+            self._press_pos = None
+            self._box_end = None
+            self.boxSelected.emit(ids, ev.modifiers())
+            self.update()
+            return
+        if self._press_pos is not None:
+            pos = ev.position()
+            self._press_pos = None
+            if self.point_mode:
+                return
+            picked = self.pick_object(pos.x(), pos.y())
+            if picked:
+                self.objectClicked.emit(picked, ev.modifiers())
+            else:
+                self.emptyClicked.emit(ev.modifiers())
+
+    def _box_pick(self, x0, y0, x1, y1, crossing: bool) -> list[str]:
+        rect = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+        w, h = self.width(), self.height()
+        picked = []
+        for obj in self.scene.visible_objects():
+            mesh = obj.mesh
+            if len(mesh.edge_segments):
+                pts = mesh.edge_segments.reshape(-1, 3)
+            elif len(mesh.vertices):
+                pts = mesh.vertices
+            else:
+                continue
+            scr = self.camera.project(pts.astype(float), w, h)
+            valid = scr[:, 2] > 0
+            if not valid.any():
+                continue
+            inside = ((scr[:, 0] >= rect[0]) & (scr[:, 0] <= rect[2])
+                      & (scr[:, 1] >= rect[1]) & (scr[:, 1] <= rect[3])
+                      & valid)
+            if crossing:
+                if inside.any():
+                    picked.append(obj.id)
+            else:
+                if valid.all() and inside.all():
+                    picked.append(obj.id)
+        return picked
+
+    # -------------------------------------------------------- control points
+
+    def _cv_points(self, obj) -> np.ndarray | None:
+        from ..core import geometry as _g
+        entry = self._cv_cache.get(obj.id)
+        key = id(obj.mesh)
+        if entry is None or entry[0] != key:
+            try:
+                pts = np.asarray(_g.get_control_points(obj.shape), float)
+            except _g.GeometryError:
+                return None
+            entry = (key, pts)
+            self._cv_cache[obj.id] = entry
+        return entry[1]
+
+    def _cv_hit(self, px, py):
+        """(obj_id, index, world_pos) of a control point near the pixel."""
+        w, h = self.width(), self.height()
+        best = None
+        best_d2 = 8.0 ** 2
+        for obj_id in list(self.cv_enabled):
+            obj = self.scene.get(obj_id)
+            if obj is None:
+                self.cv_enabled.discard(obj_id)
+                continue
+            pts = self._cv_points(obj)
+            if pts is None or not len(pts):
+                continue
+            scr = self.camera.project(pts, w, h)
+            d2 = (scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2
+            d2[scr[:, 2] <= 0] = np.inf
+            i = int(np.argmin(d2))
+            if d2[i] < best_d2:
+                best_d2 = d2[i]
+                best = (obj_id, i, tuple(pts[i]))
+        return best
 
     def wheelEvent(self, ev):
         steps = ev.angleDelta().y() / 120.0

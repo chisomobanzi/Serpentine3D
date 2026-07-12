@@ -82,6 +82,46 @@ def cmd_snap(ctx):
     yield from ()
 
 
+@command("gridsnap", mutates=False)
+def cmd_gridsnap(ctx):
+    vp = _vp(ctx)
+    vp.grid_snap = not vp.grid_snap
+    ctx.echo(f"Grid snap {'on' if vp.grid_snap else 'off'} "
+             f"(step {vp.grid_snap_step:g}).")
+    yield from ()
+
+
+@command("pointson", aliases=("po",), mutates=False)
+def cmd_pointson(ctx):
+    """Show control points for selected curves (F10)."""
+    from ..core import geometry as gm
+    objs = yield SelectReq("Select curves to show control points",
+                           kinds=("curve",))
+    vp = _vp(ctx)
+    shown = 0
+    for o in objs:
+        try:
+            gm.get_control_points(o.shape)
+            vp.cv_enabled.add(o.id)
+            shown += 1
+        except gm.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+    vp.update()
+    if shown:
+        ctx.echo(f"Control points on for {shown} curve(s) — drag to edit, "
+                 "F11 to hide.")
+
+
+@command("pointsoff", aliases=("pf",), mutates=False)
+def cmd_pointsoff(ctx):
+    vp = _vp(ctx)
+    n = len(vp.cv_enabled)
+    vp.cv_enabled.clear()
+    vp.update()
+    ctx.echo(f"Control points off ({n} curve(s)).")
+    yield from ()
+
+
 # --- analysis ----------------------------------------------------------------
 
 @command("distance", aliases=("dist",), mutates=False)

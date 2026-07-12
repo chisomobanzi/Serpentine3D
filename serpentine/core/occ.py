@@ -31,7 +31,11 @@ from OCP.BRepPrimAPI import (
 )
 from OCP.BRepAlgoAPI import (
     BRepAlgoAPI_Fuse, BRepAlgoAPI_Cut, BRepAlgoAPI_Common,
+    BRepAlgoAPI_Splitter,
 )
+from OCP.TopTools import TopTools_ListOfShape, TopTools_HSequenceOfShape
+from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds
+from OCP.GeomConvert import GeomConvert
 from OCP.BRepOffsetAPI import (
     BRepOffsetAPI_ThruSections, BRepOffsetAPI_MakePipe,
     BRepOffsetAPI_MakePipeShell, BRepOffsetAPI_MakeOffset,

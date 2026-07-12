@@ -75,6 +75,7 @@ Most commands have Rhino-compatible aliases (`l`, `pl`, `c`, `m`, `co`, `mi`, ..
 |---|---|---|---|
 | `.serp` | ✓ | ✓ | Native: JSON scene + embedded binary BREP |
 | `.step` / `.stp` | ✓ | ✓ | Exact BREP exchange via OCCT |
+| `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps/surfaces import as untrimmed NURBS faces, export as meshes; layers preserved |
 | `.obj` | ✓ | ✓ | Tessellated mesh |
 
 ## MCP server (AI integration)

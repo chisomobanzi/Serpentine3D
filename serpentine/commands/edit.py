@@ -67,6 +67,40 @@ def cmd_explode(ctx):
         ctx.echo(f"Exploded into {total} object(s).")
 
 
+@command("split")
+def cmd_split(ctx):
+    targets = yield SelectReq("Select curve or surface to split",
+                              kinds=("curve", "surface", "solid"),
+                              max_count=1)
+    cutters = yield SelectReq("Select cutting objects",
+                              allow_preselected=False)
+    target = targets[0]
+    pieces = g.split_shape(target.shape, [c.shape for c in cutters])
+    for p in pieces:
+        ctx.scene.add(p, layer_id=target.layer_id)
+    ctx.scene.remove(target.id)
+    ctx.echo(f"Split {target.name} into {len(pieces)} pieces.")
+
+
+@command("trim", aliases=("tr",))
+def cmd_trim(ctx):
+    cutters = yield SelectReq("Select cutting objects")
+    targets = yield SelectReq("Select object to trim",
+                              kinds=("curve", "surface", "solid"),
+                              max_count=1, allow_preselected=False)
+    target = targets[0]
+    pieces = g.split_shape(target.shape, [c.shape for c in cutters])
+    added = [ctx.scene.add(p, layer_id=target.layer_id) for p in pieces]
+    ctx.scene.remove(target.id)
+    doomed = yield SelectReq(
+        "Select the piece(s) to trim away", allow_preselected=False)
+    kept = 0
+    for o in doomed:
+        ctx.scene.remove(o.id)
+    kept = sum(1 for a in added if ctx.scene.get(a.id))
+    ctx.echo(f"Trimmed {len(doomed)} piece(s); {kept} kept.")
+
+
 @command("hide")
 def cmd_hide(ctx):
     objs = yield SelectReq("Select objects to hide")

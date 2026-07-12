@@ -74,3 +74,57 @@ def test_export_selected_only(scene, tmp_path):
 def test_unsupported_format(scene, tmp_path):
     with pytest.raises(ValueError):
         fileio.export_file(scene, str(tmp_path / "x.xyz"))
+
+
+def test_3dm_roundtrip(tmp_path):
+    import math as _m
+    import rhino3dm as r3
+
+    # build a 3dm file with rhino3dm directly (as Rhino would)
+    model = r3.File3dm()
+    layer = r3.Layer()
+    layer.Name = "Rhino Layer"
+    layer.Color = (200, 100, 50, 255)
+    model.Layers.Add(layer)
+    attrs = r3.ObjectAttributes()
+    attrs.Name = "RhinoCircle"
+    attrs.LayerIndex = 0
+    circle = r3.Circle(r3.Point3d(0, 0, 0), 5.0)
+    model.Objects.AddCurve(circle.ToNurbsCurve(), attrs)
+    sphere = r3.Sphere(r3.Point3d(20, 0, 0), 3.0)
+    model.Objects.AddSphere(sphere, None)
+    path = str(tmp_path / "rhino_file.3dm")
+    assert model.Write(path, 8)
+
+    # import: circle must come in as an exact NURBS curve
+    scene = Scene()
+    n = fileio.import_file(scene, path)
+    assert n >= 1
+    circle_obj = scene.find_by_name("RhinoCircle")
+    assert circle_obj is not None
+    assert g.curve_length(circle_obj.shape) == pytest.approx(
+        2 * _m.pi * 5, rel=1e-6)
+    layer_names = {l.name for l in scene.layers.all()}
+    assert "Rhino Layer" in layer_names
+
+
+def test_3dm_export_and_reimport(scene, tmp_path):
+    path = str(tmp_path / "out.3dm")
+    fileio.export_file(scene, path)
+
+    # verify with rhino3dm directly
+    import rhino3dm as r3
+    model = r3.File3dm.Read(path)
+    assert model is not None
+    geos = [o.Geometry for o in model.Objects]
+    assert any(isinstance(gg, r3.Curve) for gg in geos)
+    assert any(isinstance(gg, r3.Mesh) for gg in geos)
+
+    # and re-import into serpentine
+    loaded = Scene()
+    n = fileio.import_file(loaded, path)
+    assert n >= 3
+    prof = loaded.find_by_name("Profile")
+    assert prof is not None
+    assert g.curve_length(prof.shape) == pytest.approx(
+        g.curve_length(scene.find_by_name("Profile").shape), rel=1e-6)

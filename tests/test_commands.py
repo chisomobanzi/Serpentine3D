@@ -254,3 +254,89 @@ def test_select_by_name_and_all(env):
     proc.finish_selection()
     assert len(scene.all()) == 1
     assert scene.all()[0].name == "Beta"
+
+
+def test_split_command(env):
+    scene, sel, hist, ctx, proc = env
+    line = scene.add(g.make_line((0, 0, 0), (10, 0, 0)))
+    cutter = scene.add(g.make_line((5, -5, 0), (5, 5, 0)))
+    proc.run("split")
+    proc.click_object(line.id)
+    proc.click_object(cutter.id)
+    proc.finish_selection()
+    curves = [o for o in scene.all() if o.id != cutter.id]
+    assert len(curves) == 2
+
+
+def test_trim_command(env):
+    scene, sel, hist, ctx, proc = env
+    line = scene.add(g.make_line((0, 0, 0), (10, 0, 0)), name="Target")
+    cutter = scene.add(g.make_line((5, -5, 0), (5, 5, 0)), name="Cutter")
+    proc.run("trim")
+    proc.click_object(cutter.id)
+    proc.finish_selection()
+    proc.click_object(line.id)
+    # pieces now exist; remove the shorter/left piece by name lookup
+    pieces = [o for o in scene.all() if o.id not in (cutter.id,)]
+    assert len(pieces) == 2
+    proc.click_object(pieces[0].id)
+    proc.finish_selection()
+    remaining = [o for o in scene.all() if o.id != cutter.id]
+    assert len(remaining) == 1
+    assert g.curve_length(remaining[0].shape) == pytest.approx(5)
+
+
+def test_sweep2_command(env):
+    scene, sel, hist, ctx, proc = env
+    r1 = scene.add(g.make_line((0, 0, 0), (20, 0, 0)))
+    r2 = scene.add(g.make_line((0, 5, 0), (20, 5, 0)))
+    prof = scene.add(g.make_line((0, 0, 0), (0, 0, 3)))
+    proc.run("sweep2")
+    proc.click_object(r1.id)
+    proc.click_object(r2.id)
+    proc.click_object(prof.id)
+    assert any(o.kind in ("surface", "solid") for o in scene.all())
+
+
+def test_selection_filter_commands(env):
+    scene, sel, hist, ctx, proc = env
+    scene.add(g.make_line((0, 0, 0), (5, 0, 0)))
+    scene.add(g.make_box((0, 0, 0), 1, 1, 1))
+    srf = scene.add(g.planar_face(g.make_circle((5, 5, 0), 2)))
+    proc.run("selcrv")
+    assert len(sel.ids) == 1
+    proc.run("selsolid")
+    assert len(sel.ids) == 1
+    proc.run("selsrf")
+    assert sel.ids == [srf.id]
+    proc.run("invert")
+    assert len(sel.ids) == 2
+    proc.run("sellast")
+    assert sel.ids == [srf.id]
+
+
+def test_isolate_unisolate(env):
+    scene, sel, hist, ctx, proc = env
+    a = scene.add(g.make_box((0, 0, 0), 1, 1, 1))
+    b = scene.add(g.make_box((5, 0, 0), 1, 1, 1))
+    c = scene.add(g.make_box((10, 0, 0), 1, 1, 1))
+    proc.run("isolate")
+    proc.click_object(a.id)
+    proc.finish_selection()
+    assert len(scene.visible_objects()) == 1
+    proc.run("unisolate")
+    assert len(scene.visible_objects()) == 3
+
+
+def test_sellayer_and_selname(env):
+    scene, sel, hist, ctx, proc = env
+    layer = scene.layers.create("Props")
+    scene.add(g.make_box((0, 0, 0), 1, 1, 1), name="Crate A",
+              layer_id=layer.id)
+    scene.add(g.make_box((3, 0, 0), 1, 1, 1), name="Crate B")
+    proc.run("sellayer")
+    proc.provide_text("Props")
+    assert len(sel.ids) == 1
+    proc.run("selname")
+    proc.provide_text("crate")
+    assert len(sel.ids) == 2

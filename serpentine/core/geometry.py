@@ -309,6 +309,163 @@ def fillet_curves(edge_a, edge_b, radius: float,
     return ea_out, arc, eb_out
 
 
+def sweep2(profile, rail1, rail2) -> TopoDS_Shape:
+    """Sweep a profile along rail1, scaled/guided by rail2 (two-rail sweep)."""
+    from .occ import BRepOffsetAPI_MakePipeShell
+    spine = occ.to_wire(to_wire(rail1))
+    aux = occ.to_wire(to_wire(rail2))
+    ps = BRepOffsetAPI_MakePipeShell(spine)
+    ps.SetMode(aux, True)          # curvilinear equivalence with aux rail
+    ps.Add(occ.to_wire(to_wire(profile)))
+    ps.Build()
+    if not ps.IsDone():
+        raise GeometryError("Two-rail sweep failed (check that rails run "
+                            "the same direction and the profile touches "
+                            "the first rail)")
+    return ps.Shape()
+
+
+def _curve_pieces(edges: list, cutters: list) -> list:
+    """Group split edges into pieces, breaking chains at cut vertices."""
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+
+    def on_cutter(p: gp_Pnt) -> bool:
+        v = BRepBuilderAPI_MakeVertex(p).Vertex()
+        for c in cutters:
+            if BRepExtrema_DistShapeShape(v, c).Value() < 1e-6:
+                return True
+        return False
+
+    # vertex key -> list of edge indices, skipping vertices on a cutter
+    def vkey(p: gp_Pnt):
+        return (round(p.X(), 6), round(p.Y(), 6), round(p.Z(), 6))
+
+    links: dict = {}
+    ends: list[list] = []
+    for i, e in enumerate(edges):
+        ad = occ.edge_adaptor(e)
+        pts = [ad.Value(ad.FirstParameter()), ad.Value(ad.LastParameter())]
+        ends.append(pts)
+        for p in pts:
+            if not on_cutter(p):
+                links.setdefault(vkey(p), []).append(i)
+
+    # union-find over edges connected through non-cut vertices
+    parent = list(range(len(edges)))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for idxs in links.values():
+        for other in idxs[1:]:
+            ra, rb = find(idxs[0]), find(other)
+            if ra != rb:
+                parent[rb] = ra
+
+    groups: dict = {}
+    for i in range(len(edges)):
+        groups.setdefault(find(i), []).append(edges[i])
+    out = []
+    for group in groups.values():
+        out.append(group[0] if len(group) == 1 else join_curves(group))
+    return out
+
+
+def split_shape(target, cutters: list) -> list:
+    """Split a curve or surface by cutting objects; returns the pieces.
+
+    Curves are cut by anything they intersect. Surfaces cut by curves use
+    the curve extruded vertically (CPlane normal) as the cutting tool.
+    """
+    from .occ import BRepAlgoAPI_Splitter, TopTools_ListOfShape
+    kind = shape_kind(target)
+
+    tools = TopTools_ListOfShape()
+    for c in cutters:
+        tool = c
+        if kind in ("surface", "solid") and shape_kind(c) == "curve":
+            # extrude the cutter through the target's z-range
+            (mn, mx) = bbox(target)
+            (cmn, cmx) = bbox(c)
+            z0 = min(mn[2], cmn[2]) - 1.0
+            z1 = max(mx[2], cmx[2]) + 1.0
+            moved = translate(c, (0, 0, z0 - cmn[2]))
+            tool = extrude(moved, (0, 0, 1), (z1 - z0) + (cmx[2] - cmn[2]))
+        tools.Append(tool)
+
+    args = TopTools_ListOfShape()
+    args.Append(target)
+    splitter = BRepAlgoAPI_Splitter()
+    splitter.SetArguments(args)
+    splitter.SetTools(tools)
+    splitter.Build()
+    if not splitter.IsDone():
+        raise GeometryError("Split failed")
+    result = splitter.Shape()
+
+    if kind == "curve":
+        pieces = _curve_pieces(edges_of(result), cutters)
+    elif kind in ("surface", "solid"):
+        if kind == "solid":
+            pieces = []
+            exp = TopExp_Explorer(result, occ.SOLID)
+            while exp.More():
+                pieces.append(exp.Current())
+                exp.Next()
+            if not pieces:
+                pieces = faces_of(result)
+        else:
+            pieces = faces_of(result)
+    else:
+        raise GeometryError("Can only split curves and surfaces")
+    if len(pieces) < 2:
+        raise GeometryError("Objects do not intersect — nothing to split")
+    return pieces
+
+
+# --- control points ---------------------------------------------------------
+
+def _edge_bspline(shape):
+    """The (single) edge's curve as a fresh Geom_BSplineCurve in world frame."""
+    from .occ import GeomConvert
+    from OCP.Geom import Geom_TrimmedCurve
+    from OCP.GeomAbs import GeomAbs_CurveType
+    edges = edges_of(shape)
+    if shape_kind(shape) != "curve" or len(edges) != 1:
+        raise GeometryError("Control points work on single curves "
+                            "(explode polylines first)")
+    edge = edges[0]
+    ad = occ.edge_adaptor(edge)
+    if ad.GetType() == GeomAbs_CurveType.GeomAbs_BSplineCurve:
+        bs = ad.BSpline().Copy()      # OCP returns the derived type directly
+    else:
+        base = ad.Curve().Curve()
+        trimmed = Geom_TrimmedCurve(base, ad.FirstParameter(),
+                                    ad.LastParameter())
+        bs = GeomConvert.CurveToBSplineCurve_s(trimmed)
+        loc = edge.Location()
+        if not loc.IsIdentity():
+            bs.Transform(loc.Transformation())
+    return bs
+
+
+def get_control_points(shape) -> list[Point]:
+    bs = _edge_bspline(shape)
+    return [pnt_tuple(bs.Pole(i)) for i in range(1, bs.NbPoles() + 1)]
+
+
+def move_control_point(shape, index: int, new_point: Point) -> TopoDS_Shape:
+    """Return a new curve with control point `index` (0-based) moved."""
+    bs = _edge_bspline(shape)
+    if not (0 <= index < bs.NbPoles()):
+        raise GeometryError(f"Control point index {index} out of range")
+    bs.SetPole(index + 1, _pnt(new_point))
+    return BRepBuilderAPI_MakeEdge(bs).Edge()
+
+
 def explode(shape) -> list:
     """Decompose: wires -> edges, shells/solids -> faces, compounds -> parts."""
     kind = shape_kind(shape)

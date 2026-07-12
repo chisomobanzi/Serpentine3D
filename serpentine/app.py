@@ -82,8 +82,11 @@ class MainWindow(QMainWindow):
         self.command_line.cancelled.connect(self._cancel)
         self.viewport.objectClicked.connect(self._on_object_clicked)
         self.viewport.emptyClicked.connect(self._on_empty_clicked)
+        self.viewport.boxSelected.connect(self._on_box_selected)
         self.viewport.pointPicked.connect(self._on_point_picked)
         self.viewport.mouseWorldMoved.connect(self._on_mouse_world)
+        self.viewport.cvEditBegan.connect(
+            lambda: self.history.checkpoint("edit control point"))
         self.viewport.escapePressed.connect(self._cancel)
         self.scene.add_listener(self._update_status)
         self.selection.add_listener(self._update_status)
@@ -156,6 +159,13 @@ class MainWindow(QMainWindow):
                      lambda: self.run_command("selall"))
         self._action(m_edit, "Select None", None,
                      lambda: self.run_command("selnone"))
+        self._action(m_edit, "Invert Selection", None,
+                     lambda: self.run_command("invert"))
+        m_edit.addSeparator()
+        self._action(m_edit, "Control Points On", "F10",
+                     lambda: self.run_command("pointson"))
+        self._action(m_edit, "Control Points Off", "F11",
+                     lambda: self.run_command("pointsoff"))
 
         m_view = mb.addMenu("&View")
         self._action(m_view, "Top", "F1", lambda: self.run_command("top"))
@@ -242,6 +252,20 @@ class MainWindow(QMainWindow):
                                      | Qt.KeyboardModifier.ControlModifier))
         if not additive:
             self.selection.clear()
+
+    def _on_box_selected(self, ids, modifiers):
+        if isinstance(self.processor.request, SelectReq):
+            self.processor.box_objects(ids)
+            return
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            remaining = [i for i in self.selection.ids if i not in ids]
+            self.selection.set(remaining)
+        elif modifiers & Qt.KeyboardModifier.ShiftModifier:
+            merged = self.selection.ids + [i for i in ids
+                                           if i not in self.selection.ids]
+            self.selection.set(merged)
+        else:
+            self.selection.set(ids)
 
     def _on_point_picked(self, point):
         if isinstance(self.processor.request, PointReq):
@@ -407,6 +431,12 @@ class MainWindow(QMainWindow):
             if fn:
                 fn()
                 return
+        if ev.key() == Qt.Key.Key_F10:
+            self.run_command("pointson")
+            return
+        if ev.key() == Qt.Key.Key_F11:
+            self.run_command("pointsoff")
+            return
         # any printable key focuses the command line (Rhino behaviour)
         text = ev.text()
         if text and text.isprintable() and not self.command_line.input.hasFocus():

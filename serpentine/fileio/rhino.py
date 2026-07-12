@@ -1,0 +1,277 @@
+"""Rhino .3dm import/export via rhino3dm.
+
+Import: NURBS curves are converted exactly (poles/weights/knots); breps,
+extrusions and NURBS surfaces come in as untrimmed NURBS faces; meshes are
+sewn into shells. Layers (names/colors) are preserved both ways.
+
+Export: curves as exact NURBS; surfaces and solids as meshes (render
+meshes — Rhino re-imports them fine; exact BREP export goes via STEP).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import rhino3dm as r3
+
+from ..core import geometry, occ
+from ..core.occ import (
+    BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace, Geom_BSplineCurve,
+    TColStd_Array1OfInteger, TColStd_Array1OfReal, TColgp_Array1OfPnt,
+    gp_Pnt,
+)
+from ..core.tessellate import tessellate
+from .obj import _shell_from_triangles
+
+
+# ------------------------------------------------------------------ knots
+
+def _rhino_knots_to_occ(knots: list[float]):
+    """Rhino knot list -> (distinct knots, multiplicities) with clamped ends."""
+    distinct, mults = [], []
+    for k in knots:
+        if distinct and abs(k - distinct[-1]) < 1e-12:
+            mults[-1] += 1
+        else:
+            distinct.append(k)
+            mults.append(1)
+    mults[0] += 1        # Rhino omits the superfluous end knots
+    mults[-1] += 1
+    return distinct, mults
+
+
+def _occ_knots_to_rhino(distinct: list[float], mults: list[int]) -> list[float]:
+    out = []
+    for i, (k, m) in enumerate(zip(distinct, mults)):
+        count = m - 1 if i in (0, len(distinct) - 1) else m
+        out.extend([k] * count)
+    return out
+
+
+# ------------------------------------------------------------------ curves
+
+def _r3_curve_to_shape(curve: r3.Curve):
+    nc = curve if isinstance(curve, r3.NurbsCurve) else curve.ToNurbsCurve()
+    n = len(nc.Points)
+    degree = nc.Degree
+    knots = [nc.Knots[i] for i in range(len(nc.Knots))]
+    distinct, mults = _rhino_knots_to_occ(knots)
+
+    clamped = (sum(mults) == n + degree + 1
+               and mults[0] == degree + 1 and mults[-1] == degree + 1)
+    if not clamped:
+        # periodic or exotic curve: sample and interpolate
+        t0, t1 = nc.Domain.T0, nc.Domain.T1
+        samples = max(32, n * 4)
+        pts = []
+        for i in range(samples + 1):
+            p = nc.PointAt(t0 + (t1 - t0) * i / samples)
+            pts.append((p.X, p.Y, p.Z))
+        if nc.IsClosed:
+            return geometry.make_interp_curve(pts[:-1], closed=True)
+        return geometry.make_interp_curve(pts)
+
+    poles = TColgp_Array1OfPnt(1, n)
+    weights = TColStd_Array1OfReal(1, n)
+    rational = nc.IsRational
+    for i in range(n):
+        cp = nc.Points[i]     # rhino stores homogeneous (premultiplied) coords
+        w = cp.W if rational and cp.W > 1e-12 else 1.0
+        poles.SetValue(i + 1, gp_Pnt(cp.X / w, cp.Y / w, cp.Z / w))
+        weights.SetValue(i + 1, w)
+    k_arr = TColStd_Array1OfReal(1, len(distinct))
+    m_arr = TColStd_Array1OfInteger(1, len(distinct))
+    for i, (k, m) in enumerate(zip(distinct, mults), start=1):
+        k_arr.SetValue(i, float(k))
+        m_arr.SetValue(i, int(m))
+    bs = Geom_BSplineCurve(poles, weights, k_arr, m_arr, degree, False)
+    return BRepBuilderAPI_MakeEdge(bs).Edge()
+
+
+def _shape_to_r3_curve(shape) -> r3.NurbsCurve | None:
+    try:
+        bs = geometry._edge_bspline(shape)
+    except geometry.GeometryError:
+        return None
+    n = bs.NbPoles()
+    degree = bs.Degree()
+    # (dimension, rational, order, count) — the 2-arg ctor is non-rational
+    nc = r3.NurbsCurve(3, True, degree + 1, n)
+    for i in range(n):
+        p = bs.Pole(i + 1)
+        w = bs.Weight(i + 1)
+        nc.Points[i] = r3.Point4d(p.X() * w, p.Y() * w, p.Z() * w, w)
+    distinct = [bs.Knot(i + 1) for i in range(bs.NbKnots())]
+    mults = [bs.Multiplicity(i + 1) for i in range(bs.NbKnots())]
+    rhino_knots = _occ_knots_to_rhino(distinct, mults)
+    if len(rhino_knots) != len(nc.Knots):
+        return None
+    for i, k in enumerate(rhino_knots):
+        nc.Knots[i] = k
+    return nc
+
+
+# ---------------------------------------------------------------- surfaces
+
+def _r3_surface_to_face(srf: r3.Surface):
+    ns = srf if isinstance(srf, r3.NurbsSurface) else srf.ToNurbsSurface()
+    from OCP.Geom import Geom_BSplineSurface
+    from OCP.TColgp import TColgp_Array2OfPnt
+    from OCP.TColStd import TColStd_Array2OfReal
+
+    cu, cv = ns.Points.CountU, ns.Points.CountV
+    du, dv = ns.Degree(0), ns.Degree(1)
+    ku = [ns.KnotsU[i] for i in range(len(ns.KnotsU))]
+    kv = [ns.KnotsV[i] for i in range(len(ns.KnotsV))]
+    u_distinct, u_mults = _rhino_knots_to_occ(ku)
+    v_distinct, v_mults = _rhino_knots_to_occ(kv)
+    if (sum(u_mults) != cu + du + 1 or sum(v_mults) != cv + dv + 1):
+        return None    # periodic surface; skip exact conversion
+
+    poles = TColgp_Array2OfPnt(1, cu, 1, cv)
+    weights = TColStd_Array2OfReal(1, cu, 1, cv)
+    for i in range(cu):
+        for j in range(cv):
+            cp = ns.Points.GetControlPoint(i, j)   # homogeneous coords
+            w = cp.W if cp.W > 1e-12 else 1.0
+            poles.SetValue(i + 1, j + 1,
+                           gp_Pnt(cp.X / w, cp.Y / w, cp.Z / w))
+            weights.SetValue(i + 1, j + 1, w)
+
+    def arr1(vals, integer=False):
+        a = (TColStd_Array1OfInteger if integer
+             else TColStd_Array1OfReal)(1, len(vals))
+        for i, v in enumerate(vals, start=1):
+            a.SetValue(i, int(v) if integer else float(v))
+        return a
+
+    surf = Geom_BSplineSurface(
+        poles, weights, arr1(u_distinct), arr1(v_distinct),
+        arr1(u_mults, True), arr1(v_mults, True), du, dv, False, False)
+    return BRepBuilderAPI_MakeFace(surf, 1e-6).Face()
+
+
+def _r3_mesh_to_shape(mesh: r3.Mesh):
+    verts = np.array([[v.X, v.Y, v.Z] for v in mesh.Vertices], float)
+    tris = []
+    for i in range(len(mesh.Faces)):
+        f = mesh.Faces[i]
+        a, b, c, d = f[0], f[1], f[2], f[3]
+        tris.append((a, b, c))
+        if d != c:
+            tris.append((a, c, d))
+    return _shell_from_triangles(verts, tris)
+
+
+# ------------------------------------------------------------------- import
+
+def import_3dm(path: str) -> list[tuple[str, object, dict]]:
+    """Returns [(name, shape, {layer, color})]."""
+    model = r3.File3dm.Read(path)
+    if model is None:
+        raise IOError(f"Could not read 3dm file: {path}")
+
+    layers = {}
+    for i in range(len(model.Layers)):
+        layer = model.Layers[i]
+        c = layer.Color
+        layers[layer.Index] = {
+            "name": layer.Name,
+            "color": (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0),
+        }
+
+    out = []
+    counter = 0
+    for obj in model.Objects:
+        geo = obj.Geometry
+        shapes = []
+        if isinstance(geo, r3.Curve):
+            try:
+                shapes = [_r3_curve_to_shape(geo)]
+            except Exception:
+                shapes = []
+        elif isinstance(geo, r3.Extrusion):
+            brep = geo.ToBrep(True)
+            if brep:
+                geo = brep
+        if isinstance(geo, r3.Brep):
+            faces = []
+            for fi in range(len(geo.Faces)):
+                try:
+                    face = _r3_surface_to_face(geo.Faces[fi].ToNurbsSurface())
+                    if face is not None:
+                        faces.append(face)
+                except Exception:
+                    continue
+            if faces:
+                if len(faces) == 1:
+                    shapes = faces
+                else:
+                    from ..core.occ import BRepBuilderAPI_Sewing
+                    sew = BRepBuilderAPI_Sewing(1e-6)
+                    for f in faces:
+                        sew.Add(f)
+                    sew.Perform()
+                    shapes = [sew.SewedShape()]
+        elif isinstance(geo, (r3.NurbsSurface, r3.Surface)) \
+                and not isinstance(geo, r3.Brep):
+            try:
+                face = _r3_surface_to_face(geo)
+                shapes = [face] if face is not None else []
+            except Exception:
+                shapes = []
+        elif isinstance(geo, r3.Mesh):
+            shape = _r3_mesh_to_shape(geo)
+            shapes = [shape] if shape is not None else []
+
+        for shape in shapes:
+            if shape is None or shape.IsNull():
+                continue
+            counter += 1
+            name = obj.Attributes.Name or f"3dm object {counter:02d}"
+            meta = layers.get(obj.Attributes.LayerIndex, {})
+            out.append((name, shape, meta))
+    return out
+
+
+# ------------------------------------------------------------------- export
+
+def export_3dm(scene, path: str, only_ids: list | None = None):
+    model = r3.File3dm()
+    layer_index = {}
+    for layer in scene.layers.all():
+        rl = r3.Layer()
+        rl.Name = layer.name
+        rl.Color = (int(layer.color[0] * 255), int(layer.color[1] * 255),
+                    int(layer.color[2] * 255), 255)
+        idx = model.Layers.Add(rl)
+        layer_index[layer.id] = idx
+
+    objs = scene.all()
+    if only_ids:
+        objs = [o for o in objs if o.id in only_ids]
+    for obj in objs:
+        attrs = r3.ObjectAttributes()
+        attrs.Name = obj.name
+        attrs.LayerIndex = layer_index.get(obj.layer_id, 0)
+        if obj.kind == "curve":
+            exported = False
+            for edge in geometry.edges_of(obj.shape):
+                nc = _shape_to_r3_curve(edge)
+                if nc is not None:
+                    model.Objects.AddCurve(nc, attrs)
+                    exported = True
+            if exported:
+                continue
+        mesh = tessellate(obj.shape)
+        if not mesh.has_faces:
+            continue
+        rm = r3.Mesh()
+        for v in mesh.vertices:
+            rm.Vertices.Add(float(v[0]), float(v[1]), float(v[2]))
+        for t in mesh.triangles:
+            rm.Faces.AddFace(int(t[0]), int(t[1]), int(t[2]))
+        rm.Normals.ComputeNormals()
+        model.Objects.AddMesh(rm, attrs)
+
+    if not model.Write(path, 8):
+        raise IOError(f"Could not write 3dm file: {path}")

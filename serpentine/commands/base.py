@@ -412,6 +412,25 @@ class CommandProcessor:
         else:
             self.ctx.echo(f"No selectable object named '{text}'.")
 
+    def box_objects(self, obj_ids: list[str]):
+        """Add box-selected objects to an active selection request."""
+        req = self.request
+        if not isinstance(req, SelectReq):
+            return
+        for obj_id in obj_ids:
+            obj = self.ctx.scene.get(obj_id)
+            if obj is None or not self._matching(obj, req):
+                continue
+            if obj_id not in self._select_buffer:
+                self._select_buffer.append(obj_id)
+                if req.max_count and len(self._select_buffer) >= req.max_count:
+                    break
+        self.ctx.selection.set(self._select_buffer)
+        if req.max_count and len(self._select_buffer) >= req.max_count:
+            self.finish_selection()
+        else:
+            self._notify()
+
     def finish_selection(self):
         req = self.request
         if not isinstance(req, SelectReq):

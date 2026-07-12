@@ -61,3 +61,16 @@ def cmd_sweep1(ctx):
     srf = g.sweep1(profiles[0].shape, rails[0].shape)
     obj = ctx.scene.add(srf)
     ctx.echo(f"Created {obj.name}.")
+
+
+@command("sweep2")
+def cmd_sweep2(ctx):
+    rail1 = yield SelectReq("Select first rail", kinds=("curve",),
+                            max_count=1)
+    rail2 = yield SelectReq("Select second rail", kinds=("curve",),
+                            max_count=1, allow_preselected=False)
+    profiles = yield SelectReq("Select profile curve", kinds=("curve",),
+                               max_count=1, allow_preselected=False)
+    srf = g.sweep2(profiles[0].shape, rail1[0].shape, rail2[0].shape)
+    obj = ctx.scene.add(srf)
+    ctx.echo(f"Created {obj.name}.")
