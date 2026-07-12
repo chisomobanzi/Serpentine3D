@@ -128,6 +128,21 @@ class MainWindow(QMainWindow):
         self._user_shortcuts: list = []
         self.apply_user_aliases()
         self.apply_user_shortcuts()
+
+        # autosave every N seconds (config), crash recovery in main()
+        from .utils.autosave import AutosaveManager, DEFAULT_INTERVAL_SEC
+        autosave_dir = os.environ.get("SERP_AUTOSAVE_DIR")
+        self.autosave = (AutosaveManager(self.scene, autosave_dir)
+                         if autosave_dir else AutosaveManager(self.scene))
+        self._saved_revision = self.scene.revision
+        interval = int(self.cfg.get("autosave_interval_sec",
+                                    default=DEFAULT_INTERVAL_SEC))
+        if interval > 0:
+            self._autosave_timer = QTimer(self)
+            self._autosave_timer.setInterval(interval * 1000)
+            self._autosave_timer.timeout.connect(self._autosave_tick)
+            self._autosave_timer.start()
+
         self._update_status()
         self.command_line.echo("Serpentine — type a command to begin "
                                "(line, circle, box, extrude, loft, ...)")
@@ -400,6 +415,7 @@ class MainWindow(QMainWindow):
         self.scene.clear()
         self.ctx.current_path = None
         self.command_line.echo("New document.")
+        self.mark_saved()
 
     def _file_open(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open", "",
@@ -414,6 +430,7 @@ class MainWindow(QMainWindow):
             self.command_line.echo(
                 f"Opened {path}: {len(self.scene.all())} object(s).")
             self.viewport.zoom_extents()
+            self.mark_saved()
         except Exception as exc:                              # noqa: BLE001
             self.history.discard_checkpoint()
             QMessageBox.warning(self, "Open failed", str(exc))
@@ -431,6 +448,7 @@ class MainWindow(QMainWindow):
             fileio.export_file(self.scene, path)
             self.ctx.current_path = path
             self.command_line.echo(f"Saved {path}")
+            self.mark_saved()
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Save failed", str(exc))
 
@@ -460,6 +478,72 @@ class MainWindow(QMainWindow):
             self.command_line.echo(f"Exported {scope} to {path}")
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Export failed", str(exc))
+
+    # ------------------------------------------------------------- autosave
+
+    @property
+    def dirty(self) -> bool:
+        return self.scene.revision != self._saved_revision
+
+    def mark_saved(self):
+        self._saved_revision = self.scene.revision
+        self.autosave.set_doc_path(getattr(self.ctx, "current_path", None))
+        self._update_status()
+
+    def _autosave_tick(self):
+        if self.autosave.maybe_autosave():
+            self.statusBar().showMessage("Autosaved.", 2500)
+
+    def closeEvent(self, ev):
+        if self.dirty and self.scene.all():
+            ret = QMessageBox.question(
+                self, "Unsaved changes",
+                "Save changes before closing?",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel)
+            if ret == QMessageBox.StandardButton.Cancel:
+                ev.ignore()
+                return
+            if ret == QMessageBox.StandardButton.Save:
+                self._file_save()
+                if self.dirty:          # save was cancelled
+                    ev.ignore()
+                    return
+        self.autosave.clean_exit()
+        super().closeEvent(ev)
+
+    def offer_recovery(self):
+        """Restore the newest crashed session, if any (called at startup)."""
+        candidates = self.autosave.find_recoverable()
+        if not candidates:
+            return
+        entry = candidates[0]
+        if os.environ.get("SERP_AUTORESTORE") != "1":
+            import datetime
+            when = datetime.datetime.fromtimestamp(
+                entry["mtime"]).strftime("%H:%M")
+            doc = entry.get("doc_path") or "an unsaved document"
+            ret = QMessageBox.question(
+                self, "Recover unsaved work?",
+                f"Serpentine did not close cleanly last time.\n\n"
+                f"An autosave of {doc} from {when} was found. Restore it?",
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No)
+            if ret != QMessageBox.StandardButton.Yes:
+                self.autosave.discard(entry)
+                return
+        try:
+            doc_path = self.autosave.recover(entry)
+            self.ctx.current_path = doc_path
+            self.autosave.set_doc_path(doc_path)
+            self.command_line.echo(
+                f"Recovered {len(self.scene.all())} object(s) from the "
+                "previous session's autosave.")
+            self.viewport.zoom_extents()
+            self._update_status()
+        except Exception as exc:                              # noqa: BLE001
+            QMessageBox.warning(self, "Recovery failed", str(exc))
 
     # ---------------------------------------------------------- space tabs
 
@@ -565,7 +649,8 @@ class MainWindow(QMainWindow):
             f"{mode}  ·  units: {self.scene.units}")
         path = getattr(self.ctx, "current_path", None)
         name = os.path.basename(path) if path else "untitled"
-        self.setWindowTitle(f"{name} — {APP_TITLE}")
+        star = "*" if getattr(self, "autosave", None) and self.dirty else ""
+        self.setWindowTitle(f"{name}{star} — {APP_TITLE}")
 
     def _match_user_shortcut(self, ev) -> bool:
         try:
@@ -643,6 +728,7 @@ def main():
         window._rpc.start()
 
     window.show()
+    window.offer_recovery()
 
     for arg in app.arguments()[1:]:
         if not arg.startswith("-") and os.path.exists(arg):

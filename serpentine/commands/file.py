@@ -22,6 +22,8 @@ def cmd_save(ctx):
         path += ".serp"
     fileio.export_file(ctx.scene, path)
     ctx.current_path = path
+    if ctx.window is not None:
+        ctx.window.mark_saved()
     ctx.echo(f"Saved {len(ctx.scene.all())} object(s) to {path}")
 
 
