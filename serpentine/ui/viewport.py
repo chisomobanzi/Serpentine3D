@@ -241,6 +241,18 @@ class Viewport(QOpenGLWidget):
         GL.glBindVertexArray(0)
         self._build_grid()
         self._preview = _LineBatch(np.zeros((0, 3), np.float32), dynamic=True)
+        # forward-compatible core contexts reject widths > 1.0 regardless of
+        # the advertised range, so probe rather than trust the query
+        self._max_line_width = 1.0
+        try:
+            GL.glLineWidth(2.0)
+            if GL.glGetError() == GL.GL_NO_ERROR:
+                rng = GL.glGetFloatv(GL.GL_ALIASED_LINE_WIDTH_RANGE)
+                self._max_line_width = float(rng[1])
+            GL.glLineWidth(1.0)
+            GL.glGetError()
+        except Exception:
+            pass
         GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glEnable(GL.GL_MULTISAMPLE)
         GL.glEnable(GL.GL_BLEND)
@@ -299,11 +311,14 @@ class Viewport(QOpenGLWidget):
         GL.glUniform4f(GL.glGetUniformLocation(self._line_prog, "uColor"),
                        *color)
 
+    def _line_width(self, width: float):
+        GL.glLineWidth(min(width, getattr(self, "_max_line_width", 1.0)))
+
     def _draw_lines(self, batch: _LineBatch, mvp, color, width=1.0):
         if not batch or batch.count == 0:
             return
         self._set_line_uniforms(mvp, color)
-        GL.glLineWidth(width)
+        self._line_width(width)
         GL.glBindVertexArray(batch.vao)
         GL.glDrawArrays(GL.GL_LINES, 0, batch.count)
 
@@ -373,10 +388,10 @@ class Viewport(QOpenGLWidget):
                     edge_color = (color[0] * 0.35, color[1] * 0.35,
                                   color[2] * 0.35, 1.0)
                 self._set_line_uniforms(mvp, edge_color)
-                GL.glLineWidth(2.2 if selected else 1.4)
+                self._line_width(2.2 if selected else 1.4)
                 GL.glBindVertexArray(gpu.line_vao)
                 GL.glDrawArrays(GL.GL_LINES, 0, gpu.line_count)
-        GL.glLineWidth(1.0)
+        self._line_width(1.0)
 
     def _draw_preview(self, mvp):
         pts = self._preview_data

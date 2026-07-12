@@ -44,12 +44,14 @@ class Scene:
         self.layers = LayerManager()
         self._counters = {}
         self._listeners: list = []
+        self.revision = 0               # bumped on every change notification
 
     # -- notification --
     def add_listener(self, fn):
         self._listeners.append(fn)
 
     def notify(self):
+        self.revision += 1
         for fn in self._listeners:
             fn()
 

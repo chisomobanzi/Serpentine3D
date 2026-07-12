@@ -244,7 +244,7 @@ class CommandProcessor:
         self.active: CommandDef | None = None
         self.request: Req | None = None
         self.last_command: str | None = None
-        self._start_snapshot = None
+        self._start_revision = 0
         self._select_buffer: list[str] = []
         self._listeners: list = []       # notified on state change
 
@@ -273,7 +273,7 @@ class CommandProcessor:
         self.last_command = cd.name
         self.ctx.echo(f"> {cd.name}")
         if cd.mutates:
-            self._start_snapshot = self.ctx.scene.snapshot()
+            self._start_revision = self.ctx.scene.revision
             self.ctx.history.checkpoint(cd.name)
         self.gen = cd.fn(self.ctx)
         self._select_buffer = []
@@ -322,13 +322,10 @@ class CommandProcessor:
         self.gen = None
         self.request = None
         self.active = None
-        if was and was.mutates:
-            if success:
-                self._start_snapshot = None
-            elif self._start_snapshot is not None:
-                self.ctx.scene.restore(self._start_snapshot)
+        if was and was.mutates and not success:
+            # nothing changed -> no undo entry; partial work stays undoable
+            if self.ctx.scene.revision == self._start_revision:
                 self.ctx.history.discard_checkpoint()
-                self._start_snapshot = None
         if not success and was:
             self.ctx.echo(f"{was.label} cancelled.")
         self._notify()
