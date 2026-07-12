@@ -174,3 +174,26 @@ def test_hlr_survives_degenerate_inputs():
                                origin=(0, 0, 0), view_dir=(0, 0, 1),
                                x_dir=(1, 0, 0))
     assert len(res["visible"]) + len(res["outline"]) > 0
+
+
+def test_plugin_loading(tmp_path, monkeypatch, env):
+    scene, sel, hist, ctx, proc = env
+    plug = tmp_path / "hello_plugin.py"
+    plug.write_text(
+        "def serpentine_plugin(ctx):\n"
+        "    @ctx.command('helloplugin', mutates=False)\n"
+        "    def cmd_hello(c):\n"
+        "        c.echo('plugin says hello ' + ctx.version)\n"
+        "        yield from ()\n")
+    monkeypatch.setenv("SERP_PLUGIN_DIR", str(tmp_path))
+    from serpentine import plugins
+    monkeypatch.setattr(plugins, "_loaded", [])
+    names = plugins.load_plugins()
+    assert "hello_plugin" in names
+
+    echoes = []
+    ctx.add_echo_listener(echoes.append)
+    proc.run("helloplugin")
+    assert any("plugin says hello 0.2.0" in e for e in echoes)
+    # loading again is a no-op
+    assert plugins.load_plugins() == []

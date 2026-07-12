@@ -1,0 +1,19 @@
+site_name: Serpentine
+site_description: Open-source NURBS surface modeller for Linux
+repo_url: https://github.com/chisomo-banzi/Serpentine3D
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: teal
+  features:
+    - navigation.sections
+    - content.code.copy
+nav:
+  - Home: index.md
+  - Install: install.md
+  - "Tutorial: model a stage flat": tutorial.md
+  - Drafting & layouts: drafting.md
+  - Scripting & plugins: scripting.md
+  - AI / MCP integration: mcp.md
+  - Command reference: commands.md

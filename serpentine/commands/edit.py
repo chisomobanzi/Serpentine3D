@@ -266,3 +266,19 @@ def cmd_recordhistory(ctx):
     ctx.echo(f"Record history {state}"
              + (f" ({n} recorded object(s) stay live)." if n else "."))
     yield from ()
+
+
+@command("plugins", mutates=False)
+def cmd_plugins(ctx):
+    """List loaded plugins and where they came from."""
+    from ..plugins import load_plugins, loaded_plugins, plugin_dir
+    load_plugins(ctx.window)               # pick up newly dropped files
+    plugs = loaded_plugins()
+    if not plugs:
+        ctx.echo(f"No plugins. Drop .py files defining "
+                 f"serpentine_plugin(ctx) into {plugin_dir()} or install "
+                 "packages with a 'serpentine.plugins' entry point.")
+    else:
+        for name, origin in plugs:
+            ctx.echo(f"{name} — {origin}")
+    yield from ()

@@ -47,7 +47,8 @@ construction plane. `Tab` completes command names, `Up`/`Down` recall history,
 |---|---|
 | **Curves** | `line` `polyline` `curve` (interpolated NURBS) `circle` `arc` `ellipse` `rectangle` `helix` `textobject` `blendcrv` `project` `pull` `intersect` |
 | **Surfaces** | `extrude` `revolve` `loft` `sweep1` `sweep2` `planarsrf` `patch`/`networksrf` `offsetsrf` `unrollsrf` |
-| **Solids** | `box` `sphere` `cylinder` `cone` `torus` `filletedge` `chamferedge` `shell` `cap` `contour` `booleansplit` |
+| **Solids** | `box` `sphere` `cylinder` `cone` `torus` `filletedge` `chamferedge` (both pick edges directly; fillets chain and take `start,end` variable radii) `shell` `cap` `contour` `booleansplit` `pushpull` |
+| **Deform** | `twist` `taper` `bend` `flow` (curve-to-curve) `extend` `matchcrv` |
 | **Booleans** | `booleanunion` `booleandifference` `booleanintersection` |
 | **Transform** | `move` `copy` `rotate` `scale` `scalenu` `mirror` `array` |
 | **Edit** | `join` `explode` `trim` `split` `offset` `fillet` `rebuild` `pointson`/`pointsoff` (control points, curves *and* surfaces) `delete` `hide` `show` `rename` `undo` `redo` |
@@ -55,12 +56,21 @@ construction plane. `Tab` completes command names, `Up`/`Down` recall history,
 | **Organise** | `group`/`ungroup` `lock`/`unlockall` `block` `insert` `blocklist` `count` |
 | **Camera** | `camera` (lens mm, cinema sensors, placement, 2.39/1.85 frame guides) `units` `cplane` |
 | **Array** | `array` (grid) `arraypolar` `arraypath` (along a curve) |
-| **Analysis** | `distance` `length` `area` `volume` `curvature` `zebra` (stripe continuity analysis) |
-| **View** | `top` `front` `right` `perspective` `zoomextents` `wireframe` `shaded` `ghosted` `grid` `snap` |
-| **Layers** | `layer` (new/current/show/hide/rename) — or use the Layers panel |
-| **Files** | `new` `open` `save` `import` `export` |
+| **Analysis** | `distance` `length` `area` `volume` `curvature` `zebra` `curvaturegraph` (combs) `draftanalysis` |
+| **View** | `top` `front` `right` `perspective` `4view`/`1view` `zoomextents` `wireframe` `shaded` `ghosted` `rendered` `technical` `grid` `snap` |
+| **Render** | `material` (Matte/Plastic/Metal/Glass/custom PBR — flows into GLB/USD export) `rendered` |
+| **Layers** | `layer` (new/current/show/hide/rename/weight) — or use the Layers panel |
+| **Meshes** | heavy OBJ/3DM props stay native meshes (instant display); `meshtobrep` / `breptomesh` convert |
+| **Files** | `new` `open` `save` `import` `export` (`.serp` is a zip container with thumbnail + metadata) |
+| **Live** | `recordhistory` — loft/extrude/revolve outputs rebuild when their input curves are edited |
 
 Most commands have Rhino-compatible aliases (`l`, `pl`, `c`, `m`, `co`, `mi`, ...).
+Command options appear as **clickable chips** under the prompt
+(`Cap=Yes`, `BothSides=No`, `Style=Normal`) and can be typed
+Rhino-style (`cap=n`) at any moment without losing your place; numeric
+prompts show a live **gold ghost preview** of the result while you
+type. `help` (or F1) opens a searchable command reference. Arrow keys
+nudge the selection along the CPlane (Shift ×10, Ctrl ×0.1).
 
 ### Navigation & shortcuts
 
@@ -101,9 +111,14 @@ in 2D, print to PDF — without leaving the app:
   `technical` display mode.
 - **`make2d`**: project the current view (or a selection) into real,
   editable 2D curves on `Make2D visible` / `Make2D hidden` layers.
-- **Annotations**: `text` notes and `dim` linear dimensions on the sheet —
-  dimensions placed over a detail automatically read in *model units* at
-  that detail's scale.
+- **Annotations**: multiline `text`, `leader`, `dim` / `dimradius` /
+  `dimdiameter` / `dimangle`, `hatch` (pick corners or **Mode=Region**
+  to click inside detail linework), `scalebar`, `titleblock`,
+  `sheetindex` and per-sheet `revision` tables. Everything on a sheet
+  is selectable — drag to move, grips resize detail frames, Delete
+  removes, `annotedit` edits — and dimensions picked inside a detail
+  are **associative**: they re-project when the detail pans or
+  rescales. `dimstyle` manages named text/arrow styles.
 - **`exportpdf`** (Ctrl+P): true vector PDF — linework stays crisp at any
   zoom; shaded details are embedded as rendered images. Layouts save/load
   with the `.serp` file.
@@ -202,6 +217,14 @@ Geometry is exact BREP on OpenCASCADE 7.9 (via the `OCP` pybind11 bindings);
 the viewport tessellates on demand with trim-aware isocurve display. Commands
 are Python generators that yield typed input requests — the same command code
 serves typed input, viewport clicks, and MCP calls.
+
+## Plugins
+
+Drop a `.py` file into `~/.serpentine/plugins/` defining
+`serpentine_plugin(ctx)`, or ship a package with a
+`serpentine.plugins` entry point — plugins register first-class
+commands (with prompts, osnaps, undo and MCP support for free) and
+menu items. See `docs/scripting.md`.
 
 ## Development
 

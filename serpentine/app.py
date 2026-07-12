@@ -319,9 +319,24 @@ class MainWindow(QMainWindow):
                      self._toggle_console)
         self._action(m_tools, "Settings...", "Ctrl+,", self._show_settings)
 
+        self._plugins_menu = mb.addMenu("&Plugins")
+        self._action(self._plugins_menu, "Plugin folder...", None,
+                     self._open_plugin_dir)
+        self._plugins_menu.addSeparator()
+
         m_help = mb.addMenu("&Help")
         self._action(m_help, "Commands", None, self._show_commands)
         self._action(m_help, "About", None, self._about)
+
+    def plugin_menu_action(self, label: str, fn):
+        self._action(self._plugins_menu, label, None, fn)
+
+    def _open_plugin_dir(self):
+        from .plugins import plugin_dir
+        import subprocess
+        d = plugin_dir()
+        os.makedirs(d, exist_ok=True)
+        subprocess.Popen(["xdg-open", d])
 
     def _action(self, menu, label, shortcut, fn):
         act = QAction(label, self)
@@ -838,6 +853,11 @@ def main():
             window.command_line.echo("Started from template.serp.")
         except Exception:                                     # noqa: BLE001
             pass
+
+    from .plugins import load_plugins
+    loaded = load_plugins(window)
+    if loaded:
+        window.command_line.echo("Plugins: " + ", ".join(loaded))
 
     window.show()
     window.offer_recovery()
