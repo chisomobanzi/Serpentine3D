@@ -108,6 +108,28 @@ out vec4 frag;
 void main() { frag = uColor; }
 """
 
+THICK_VERT = """
+#version 330 core
+layout(location=0) in vec3 pos;      // this end of the segment
+layout(location=1) in vec3 other;    // the far end
+layout(location=2) in float side;    // +1 / -1 across the line
+uniform mat4 uMVP;
+uniform vec2 uViewport;              // pixels
+uniform float uWidthPx;
+void main() {
+    vec4 p = uMVP * vec4(pos, 1.0);
+    vec4 q = uMVP * vec4(other, 1.0);
+    vec2 half_vp = uViewport * 0.5;
+    vec2 sp = p.xy / p.w * half_vp;
+    vec2 sq = q.xy / q.w * half_vp;
+    vec2 dir = sq - sp;
+    float len = length(dir);
+    vec2 n = len > 1e-4 ? vec2(-dir.y, dir.x) / len : vec2(1.0, 0.0);
+    sp += n * side * uWidthPx * 0.5;
+    gl_Position = vec4(sp / half_vp * p.w, p.z, p.w);
+}
+"""
+
 TEX_VERT = """
 #version 330 core
 layout(location=0) in vec3 pos;
@@ -211,8 +233,11 @@ class _GpuObject:
             GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, idx.nbytes, idx,
                             GL.GL_STATIC_DRAW)
             self.tri_count = idx.size
+        self.thick_vao = self.thick_count = 0
         if len(mesh.edge_segments):
             self.line_vao, self.line_count = self._make_line_vao(
+                mesh.edge_segments)
+            self.thick_vao, self.thick_count = self._make_thick_vao(
                 mesh.edge_segments)
         if len(mesh.iso_segments):
             self.iso_vao, self.iso_count = self._make_line_vao(
@@ -233,8 +258,54 @@ class _GpuObject:
                                  ctypes.c_void_p(0))
         return vao, len(pts)
 
+    def _make_thick_vao(self, segments) -> tuple[int, int]:
+        """Per-segment quads for the screen-space wide-line shader."""
+        segs = segments.astype(np.float32)
+        n = len(segs)
+        a, b = segs[:, 0], segs[:, 1]
+        # vertex layout: pos(3) other(3) side(1); quad = A+n, A-n, B-n, B+n
+        verts = np.empty((n, 4, 7), np.float32)
+        verts[:, 0, :3] = a
+        verts[:, 0, 3:6] = b
+        verts[:, 0, 6] = 1.0
+        verts[:, 1, :3] = a
+        verts[:, 1, 3:6] = b
+        verts[:, 1, 6] = -1.0
+        verts[:, 2, :3] = b
+        verts[:, 2, 3:6] = a
+        verts[:, 2, 6] = 1.0
+        verts[:, 3, :3] = b
+        verts[:, 3, 3:6] = a
+        verts[:, 3, 6] = -1.0
+        idx = (np.arange(n, dtype=np.uint32)[:, None] * 4
+               + np.array([0, 1, 2, 0, 2, 3], np.uint32)[None, :]).ravel()
+        flat = verts.reshape(-1, 7)
+        vao = GL.glGenVertexArrays(1)
+        GL.glBindVertexArray(vao)
+        vbo = GL.glGenBuffers(1)
+        self._buffers.append(vbo)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, flat.nbytes, flat,
+                        GL.GL_STATIC_DRAW)
+        GL.glEnableVertexAttribArray(0)
+        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, 28,
+                                 ctypes.c_void_p(0))
+        GL.glEnableVertexAttribArray(1)
+        GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, False, 28,
+                                 ctypes.c_void_p(12))
+        GL.glEnableVertexAttribArray(2)
+        GL.glVertexAttribPointer(2, 1, GL.GL_FLOAT, False, 28,
+                                 ctypes.c_void_p(24))
+        ebo = GL.glGenBuffers(1)
+        self._buffers.append(ebo)
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, ebo)
+        GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, idx.nbytes, idx,
+                        GL.GL_STATIC_DRAW)
+        return vao, len(idx)
+
     def release(self):
-        for vao in (self.tri_vao, self.line_vao, self.iso_vao):
+        for vao in (self.tri_vao, self.line_vao, self.iso_vao,
+                    getattr(self, "thick_vao", 0)):
             if vao:
                 GL.glDeleteVertexArrays(1, [vao])
         if self._buffers:
@@ -280,6 +351,7 @@ class Viewport(QOpenGLWidget):
     mouseWorldMoved = Signal(object)        # (x, y, z) while in point-input mode
     cvEditBegan = Signal()                  # control-point drag started
     escapePressed = Signal()
+    _tessDone = Signal()                    # a background mesh finished
 
     def __init__(self, scene, selection, config=None, parent=None):
         super().__init__(parent)
@@ -317,6 +389,11 @@ class Viewport(QOpenGLWidget):
         self._box_active = False
         self._gpu: dict[str, _GpuObject] = {}
         self._grid = None
+        # heavy shapes tessellate off the UI thread; bbox shown meanwhile
+        self._tess_pool = None                     # created on first use
+        self._tess_pending: dict[str, np.ndarray] = {}   # id -> bbox segs
+        self._tessDone.connect(self._on_tess_done,
+                               Qt.ConnectionType.QueuedConnection)
         self._preview: _LineBatch | None = None
         self._preview_data = np.zeros((0, 3), np.float32)
         self._ghost = None                     # DisplayMesh of pending result
@@ -334,6 +411,7 @@ class Viewport(QOpenGLWidget):
     def initializeGL(self):
         self._mesh_prog = _compile(MESH_VERT, MESH_FRAG)
         self._line_prog = _compile(LINE_VERT, LINE_FRAG)
+        self._thick_prog = _compile(THICK_VERT, LINE_FRAG)
         self._bg_prog = _compile(BG_VERT, BG_FRAG)
         self._tex_prog = _compile(TEX_VERT, TEX_FRAG)
         self._tex_vao = GL.glGenVertexArrays(1)
@@ -371,8 +449,13 @@ class Viewport(QOpenGLWidget):
         # the advertised range, so probe rather than trust the query
         self._max_line_width = 1.0
         try:
+            # software GL advertises a wide range but rasterizes 1px in a
+            # core profile; those edges go through the quad shader instead
+            renderer = GL.glGetString(GL.GL_RENDERER) or b""
+            soft = any(s in renderer for s in (b"llvmpipe", b"softpipe",
+                                               b"SWR"))
             GL.glLineWidth(2.0)
-            if GL.glGetError() == GL.GL_NO_ERROR:
+            if not soft and GL.glGetError() == GL.GL_NO_ERROR:
                 rng = GL.glGetFloatv(GL.GL_ALIASED_LINE_WIDTH_RANGE)
                 self._max_line_width = float(rng[1])
             GL.glLineWidth(1.0)
@@ -650,11 +733,20 @@ class Viewport(QOpenGLWidget):
         self.cplane = cplane
         self.update()
 
+    # shapes with at least this many faces mesh in the background
+    ASYNC_FACE_COUNT = 48
+
     def _sync_gpu(self):
         live = set()
         for obj in self.scene.all():
             live.add(obj.id)
             gpu = self._gpu.get(obj.id)
+            if not obj.mesh_ready and self._schedule_tess(obj):
+                if gpu is not None:
+                    gpu.release()
+                    del self._gpu[obj.id]
+                continue
+            self._tess_pending.pop(obj.id, None)
             if gpu is not None and gpu.mesh_id != id(obj.mesh):
                 gpu.release()
                 gpu = None
@@ -664,6 +756,46 @@ class Viewport(QOpenGLWidget):
         for dead in set(self._gpu) - live:
             self._gpu[dead].release()
             del self._gpu[dead]
+        for dead in set(self._tess_pending) - live:
+            del self._tess_pending[dead]
+
+    def _schedule_tess(self, obj) -> bool:
+        """Queue heavy tessellation on a worker; True while pending."""
+        if obj.id in self._tess_pending:
+            return True
+        from ..core.mesh import MeshShape
+        if isinstance(obj.shape, MeshShape):
+            return False                    # meshes convert instantly
+        try:
+            from ..core import geometry as g
+            n = 0
+            for _ in g.faces_of(obj.shape):
+                n += 1
+                if n >= self.ASYNC_FACE_COUNT:
+                    break
+            if n < self.ASYNC_FACE_COUNT:
+                return False
+            mn, mx = g.bbox(obj.shape)
+        except Exception:                                  # noqa: BLE001
+            return False
+        if self._tess_pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+            self._tess_pool = ThreadPoolExecutor(
+                max_workers=3, thread_name_prefix="serp-tess")
+        self._tess_pending[obj.id] = _bbox_segments(mn, mx)
+
+        def work(target=obj):
+            try:
+                target.mesh                # locks per shape, sets _mesh
+            except Exception:              # noqa: BLE001
+                pass
+            self._tessDone.emit()
+
+        self._tess_pool.submit(work)
+        return True
+
+    def _on_tess_done(self):
+        self.update()
 
     def _curvature_range(self) -> float:
         """95th percentile of |curvature| across visible meshes (cached)."""
@@ -694,6 +826,14 @@ class Viewport(QOpenGLWidget):
         for obj in self.scene.visible_objects():
             gpu = self._gpu.get(obj.id)
             if gpu is None:
+                pend = self._tess_pending.get(obj.id)
+                if pend is not None and len(pend):
+                    self._preview.update(pend)
+                    self._set_line_uniforms(
+                        mvp, (*self.scene.color_of(obj), 0.5))
+                    self._line_width(1.0)
+                    GL.glBindVertexArray(self._preview.vao)
+                    GL.glDrawArrays(GL.GL_LINES, 0, len(pend))
                 continue
             selected = self.selection.is_selected(obj.id)
             color = theme.SELECTION_COLOR if selected else self.scene.color_of(obj)
@@ -751,10 +891,9 @@ class Viewport(QOpenGLWidget):
                     # face edges: darkened object colour
                     edge_color = (line_color[0] * 0.35, line_color[1] * 0.35,
                                   line_color[2] * 0.35, 1.0)
-                self._set_line_uniforms(mvp, edge_color)
-                self._line_width(2.2 if selected else 1.4)
-                GL.glBindVertexArray(gpu.line_vao)
-                GL.glDrawArrays(GL.GL_LINES, 0, gpu.line_count)
+                lw = self.scene.layers.get(obj.layer_id).lineweight
+                self._draw_edges(gpu, mvp, edge_color,
+                                 2.2 if selected else lw)
 
             subs = self.selection.subobjects_of(obj.id, "edge") \
                 if self.selection.subobjects else []
@@ -795,6 +934,28 @@ class Viewport(QOpenGLWidget):
                 GL.glBindVertexArray(gpu.iso_vao)
                 GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
         self._line_width(1.0)
+
+    def _draw_edges(self, gpu, mvp, color, width: float):
+        """Object edges at a given pixel width. Wide lines fall back to a
+        screen-space quad shader where GL_LINES are capped (llvmpipe)."""
+        if width <= self._max_line_width + 0.25 or not gpu.thick_count:
+            self._set_line_uniforms(mvp, color)
+            self._line_width(width)
+            GL.glBindVertexArray(gpu.line_vao)
+            GL.glDrawArrays(GL.GL_LINES, 0, gpu.line_count)
+            return
+        prog = self._thick_prog
+        GL.glUseProgram(prog)
+        GL.glUniformMatrix4fv(GL.glGetUniformLocation(prog, "uMVP"), 1,
+                              GL.GL_TRUE, mvp.astype(np.float32))
+        GL.glUniform2f(GL.glGetUniformLocation(prog, "uViewport"),
+                       float(self.width()), float(self.height()))
+        GL.glUniform1f(GL.glGetUniformLocation(prog, "uWidthPx"),
+                       float(width))
+        GL.glUniform4f(GL.glGetUniformLocation(prog, "uColor"), *color)
+        GL.glBindVertexArray(gpu.thick_vao)
+        GL.glDrawElements(GL.GL_TRIANGLES, gpu.thick_count,
+                          GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
 
     def _draw_preview(self, mvp):
         pts = self._preview_data
@@ -1178,15 +1339,33 @@ class Viewport(QOpenGLWidget):
                 hit = np.asarray(self.cplane.to_world(bu, v, w))
         return tuple(round(float(c), 9) for c in hit)
 
+    def _pick_reject(self, mesh, x0, y0, x1, y1, w, h) -> bool:
+        """True if the mesh's bbox projects fully outside a screen rect."""
+        b = mesh.bounds()
+        if b is None:
+            return True
+        mn, mx = b
+        corners = np.array([(x, y, z) for x in (mn[0], mx[0])
+                            for y in (mn[1], mx[1])
+                            for z in (mn[2], mx[2])])
+        scr = self.camera.project(corners, w, h)
+        if (scr[:, 2] <= 0).any():
+            return False                # crosses the camera plane: keep
+        return bool(scr[:, 0].max() < x0 or scr[:, 0].min() > x1
+                    or scr[:, 1].max() < y0 or scr[:, 1].min() > y1)
+
     def pick_object(self, px: float, py: float) -> str | None:
         w, h = self.width(), self.height()
         origin, direction = self.camera.ray_through(px, py, w, h)
         best_id, best_depth = None, np.inf
 
+        r = PICK_RADIUS_PX
         for obj in self.scene.visible_objects():
             if not self.scene.is_selectable(obj.id):
                 continue
             mesh = obj.mesh
+            if self._pick_reject(mesh, px - r, py - r, px + r, py + r, w, h):
+                continue
             depth = np.inf
             hit = False
             if mesh.has_faces and self.display_mode != "wireframe":
@@ -1226,11 +1405,14 @@ class Viewport(QOpenGLWidget):
         # edges first (they are the smaller target)
         best_edge = None
         best_d2 = PICK_RADIUS_PX ** 2
+        r = PICK_RADIUS_PX
         for obj in self.scene.visible_objects():
             if not self.scene.is_selectable(obj.id):
                 continue
             mesh = obj.mesh
             if not len(mesh.edge_segments):
+                continue
+            if self._pick_reject(mesh, px - r, py - r, px + r, py + r, w, h):
                 continue
             pts = mesh.edge_segments.reshape(-1, 3)
             scr = self.camera.project(pts, w, h)
@@ -1441,6 +1623,8 @@ class Viewport(QOpenGLWidget):
             if not self.scene.is_selectable(obj.id):
                 continue
             mesh = obj.mesh
+            if self._pick_reject(mesh, *rect, w, h):
+                continue
             if len(mesh.edge_segments):
                 pts = mesh.edge_segments.reshape(-1, 3)
             elif len(mesh.vertices):
@@ -1592,6 +1776,22 @@ class Viewport(QOpenGLWidget):
             self.escapePressed.emit()
         else:
             super().keyPressEvent(ev)
+
+
+def _bbox_segments(mn, mx) -> np.ndarray:
+    """12 AABB edges as GL_LINES vertices (24, 3)."""
+    xs = (mn[0], mx[0])
+    ys = (mn[1], mx[1])
+    zs = (mn[2], mx[2])
+    c = [(x, y, z) for x in xs for y in ys for z in zs]
+    pairs = [(0, 1), (2, 3), (4, 5), (6, 7),      # z edges
+             (0, 2), (1, 3), (4, 6), (5, 7),      # y edges
+             (0, 4), (1, 5), (2, 6), (3, 7)]      # x edges
+    out = []
+    for a, b in pairs:
+        out.append(c[a])
+        out.append(c[b])
+    return np.asarray(out, np.float32)
 
 
 def _snap_marker(kind: str, c: np.ndarray, right: np.ndarray,

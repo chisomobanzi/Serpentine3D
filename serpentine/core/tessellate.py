@@ -37,9 +37,22 @@ class DisplayMesh:
     face_of_triangle: np.ndarray = field(
         default_factory=lambda: np.zeros(0, np.int32))
 
+    _bounds: tuple | None = field(default=None, repr=False, compare=False)
+
     @property
     def has_faces(self) -> bool:
         return len(self.triangles) > 0
+
+    def bounds(self) -> tuple | None:
+        """Cached (min_xyz, max_xyz) over vertices and edge points."""
+        if self._bounds is None:
+            pts = [p for p in (self.vertices,
+                               self.edge_segments.reshape(-1, 3)) if len(p)]
+            if not pts:
+                return None
+            allp = np.concatenate(pts)
+            self._bounds = (allp.min(axis=0), allp.max(axis=0))
+        return self._bounds
 
 
 def _deflection_for(shape) -> float:

@@ -37,6 +37,7 @@ def save_scene(scene, path: str):
                 "color": list(layer.color),
                 "visible": layer.visible,
                 "locked": layer.locked,
+                "lineweight": layer.lineweight,
             }
             for layer in scene.layers.all()
         ],
@@ -79,10 +80,12 @@ def load_scene(scene, path: str):
             layers.rename("default", ld["name"])
             layers.set_color("default", tuple(ld["color"]))
             layers.set_visible("default", ld.get("visible", True))
+            layers.set_lineweight("default", ld.get("lineweight", 1.4))
             id_map[ld["id"]] = "default"
         else:
             layer = layers.create(ld["name"], tuple(ld["color"]))
             layers.set_visible(layer.id, ld.get("visible", True))
+            layers.set_lineweight(layer.id, ld.get("lineweight", 1.4))
             layers.set_locked(layer.id, ld.get("locked", False))
             id_map[ld["id"]] = layer.id
 

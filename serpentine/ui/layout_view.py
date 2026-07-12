@@ -387,7 +387,7 @@ class LayoutView:
             if not detail.locked:
                 detail.scale_denom = max(
                     detail.scale_denom * (0.9 ** steps), 1e-6)
-                self.vp.scene.notify()
+                self.vp.scene.notify("layouts")
             return True
         # zoom the paper around the cursor
         before = self.screen_to_paper(sx, sy)
@@ -415,7 +415,7 @@ class LayoutView:
                 detail.target = [float(c) for c in
                                  (np.asarray(detail.target) + shift)]
             self._hlr_cache.pop(detail.id, None)
-            self.vp.scene.notify()
+            self.vp.scene.notify("layouts")
             return True
         self.pan -= np.array([dx, -dy]) / self.px_per_mm
         return True
@@ -525,7 +525,7 @@ class LayoutView:
             move_annotation(kind, obj, dx, dy)
         self._drag_moved = True
         self._drag_last = (px, py)
-        self.vp.scene.notify()
+        self.vp.scene.notify("layouts")
         return True
 
     def release_drag(self):
@@ -556,7 +556,7 @@ class LayoutView:
                 self.selected = None
                 return False
         self.selected = None
-        self.vp.scene.notify()
+        self.vp.scene.notify("layouts")
         return True
 
 

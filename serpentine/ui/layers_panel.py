@@ -54,7 +54,7 @@ class LayersPanel(QWidget):
         layout.addWidget(self.tree, 1)
         layout.addLayout(btns)
 
-        scene.add_listener(self.rebuild)
+        scene.add_listener(self.rebuild, kinds=("objects", "layers"))
         self.rebuild()
 
     def rebuild(self):

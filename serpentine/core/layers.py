@@ -27,6 +27,7 @@ class Layer:
     color: tuple[float, float, float]
     visible: bool = True
     locked: bool = False
+    lineweight: float = 1.4        # on-screen edge width in pixels
 
 
 class LayerManager:
@@ -82,6 +83,10 @@ class LayerManager:
 
     def set_color(self, layer_id: str, color: tuple[float, float, float]):
         self._layers[layer_id] = replace(self._layers[layer_id], color=color)
+
+    def set_lineweight(self, layer_id: str, weight: float):
+        self._layers[layer_id] = replace(self._layers[layer_id],
+                                         lineweight=max(0.2, float(weight)))
 
     def set_locked(self, layer_id: str, locked: bool):
         self._layers[layer_id] = replace(self._layers[layer_id], locked=locked)

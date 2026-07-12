@@ -1,6 +1,14 @@
 import pytest
 
 import serpentine.commands  # registers all commands  # noqa: F401
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _qapp():
+    """A full QApplication before anything creates a QGuiApplication
+    (core/text.py would otherwise block widget construction later)."""
+    from PySide6.QtWidgets import QApplication
+    yield QApplication.instance() or QApplication([])
 from serpentine.commands.base import CommandContext, CommandProcessor
 from serpentine.core.history import History
 from serpentine.core.scene import Scene

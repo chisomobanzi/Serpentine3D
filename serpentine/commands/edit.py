@@ -1,7 +1,7 @@
 """Editing commands: delete, join, hide/show, selection, undo/redo, layers."""
 
 from ..core import geometry as g
-from .base import OptionReq, SelectReq, TextReq, command
+from .base import NumberReq, OptionReq, SelectReq, TextReq, command
 
 
 @command("delete", aliases=("del", "erase"))
@@ -172,7 +172,8 @@ def cmd_rename(ctx):
 @command("layer")
 def cmd_layer(ctx):
     action = yield OptionReq(
-        "Layer action", options=["New", "Current", "Show", "Hide", "Rename"],
+        "Layer action", options=["New", "Current", "Show", "Hide", "Rename",
+                                 "Weight"],
         default="New")
     layers = ctx.scene.layers
     if action == "New":
@@ -196,6 +197,16 @@ def cmd_layer(ctx):
         else:
             layers.set_visible(layer.id, action == "Show")
             ctx.echo(f"Layer '{layer.name}' {action.lower()}n.")
+    elif action == "Weight":
+        name = yield TextReq("Layer name")
+        layer = layers.find_by_name(name)
+        if layer is None:
+            ctx.echo(f"No layer named '{name}'.")
+        else:
+            w = yield NumberReq("Edge width on screen (pixels)",
+                                default=layer.lineweight, minimum=0.2)
+            layers.set_lineweight(layer.id, float(w))
+            ctx.echo(f"Layer '{layer.name}' draws {w:g}px edges.")
     elif action == "Rename":
         old = yield TextReq("Layer to rename")
         layer = layers.find_by_name(old)

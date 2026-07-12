@@ -63,7 +63,7 @@ class PropertiesPanel(QWidget):
         layout.addStretch(1)
 
         selection.add_listener(self.refresh)
-        scene.add_listener(self.refresh)
+        scene.add_listener(self.refresh, kinds=("objects", "layers"))
         self.refresh()
 
     def _selected(self):

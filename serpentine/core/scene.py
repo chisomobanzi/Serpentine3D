@@ -6,6 +6,7 @@ Core is Qt-free; UI subscribes via plain callables.
 from __future__ import annotations
 
 import itertools
+import threading
 import uuid
 from dataclasses import dataclass, field, replace
 
@@ -14,6 +15,23 @@ import numpy as np
 from . import geometry
 from .layers import LayerManager
 from .tessellate import DisplayMesh, tessellate
+
+
+_TESS_GUARD = threading.Lock()
+_TESS_LOCKS: dict[int, tuple] = {}      # id(shape) -> (shape, Lock)
+
+
+def _tess_lock(shape) -> threading.Lock:
+    with _TESS_GUARD:
+        ent = _TESS_LOCKS.get(id(shape))
+        if ent is None or ent[0] is not shape:
+            ent = (shape, threading.Lock())
+            _TESS_LOCKS[id(shape)] = ent
+        if len(_TESS_LOCKS) > 1024:     # bound the registry
+            for k in list(_TESS_LOCKS)[:512]:
+                if not _TESS_LOCKS[k][1].locked():
+                    del _TESS_LOCKS[k]
+        return ent[1]
 
 
 @dataclass
@@ -33,8 +51,14 @@ class SceneObject:
     @property
     def mesh(self) -> DisplayMesh:
         if self._mesh is None:
-            self._mesh = tessellate(self.shape)
+            with _tess_lock(self.shape):
+                if self._mesh is None:
+                    self._mesh = tessellate(self.shape)
         return self._mesh
+
+    @property
+    def mesh_ready(self) -> bool:
+        return self._mesh is not None
 
     def clone(self) -> "SceneObject":
         return replace(self)
@@ -56,13 +80,16 @@ class Scene:
         self.image_planes: list = []    # reference images (pictureframe)
 
     # -- notification --
-    def add_listener(self, fn):
-        self._listeners.append(fn)
+    def add_listener(self, fn, kinds: tuple | None = None):
+        """Subscribe; kinds limits calls to those change categories
+        ("objects", "layers", "layouts") — "all" changes always fire."""
+        self._listeners.append((fn, frozenset(kinds) if kinds else None))
 
-    def notify(self):
+    def notify(self, kind: str = "all"):
         self.revision += 1
-        for fn in self._listeners:
-            fn()
+        for fn, kinds in self._listeners:
+            if kinds is None or kind == "all" or kind in kinds:
+                fn()
 
     # -- object management --
     def _auto_name(self, kind: str) -> str:
@@ -82,14 +109,14 @@ class Scene:
         )
         self.objects[obj.id] = obj
         self._order.append(obj.id)
-        self.notify()
+        self.notify("objects")
         return obj
 
     def remove(self, obj_id: str):
         if obj_id in self.objects:
             del self.objects[obj_id]
             self._order.remove(obj_id)
-            self.notify()
+            self.notify("objects")
 
     def replace_shape(self, obj_id: str, shape) -> SceneObject:
         """Swap an object's geometry (transform, boolean result, ...)."""
@@ -97,13 +124,13 @@ class Scene:
         new = replace(old, shape=shape, kind=geometry.shape_kind(shape),
                       _mesh=None)
         self.objects[obj_id] = new
-        self.notify()
+        self.notify("objects")
         return new
 
     def update(self, obj_id: str, **fields) -> SceneObject:
         new = replace(self.objects[obj_id], **fields)
         self.objects[obj_id] = new
-        self.notify()
+        self.notify("objects")
         return new
 
     def get(self, obj_id: str) -> SceneObject | None:
