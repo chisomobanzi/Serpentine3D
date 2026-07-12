@@ -10,11 +10,21 @@ import numpy as np
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 
-from ..core.layout import hatch_lines
+from ..core.layout import DEFAULT_STYLES, hatch_lines, resolve_associative
 
 INK = QColor(25, 25, 30)
 DIM_INK = QColor(45, 70, 130)
 HATCH_INK = QColor(70, 72, 80)
+
+
+def style_of(scene, name: str) -> dict:
+    """Named annotation style merged over the Standard defaults."""
+    props = dict(DEFAULT_STYLES["Standard"])
+    if name:
+        props.update(DEFAULT_STYLES.get(name, {}))
+        if scene is not None:
+            props.update(getattr(scene, "annot_styles", {}).get(name, {}))
+    return props
 
 
 def _font(k: float, height_mm: float) -> QFont:
@@ -40,11 +50,15 @@ def _arrow(painter, to_dev, tip, direction, size=2.2):
     _line(painter, to_dev, tip, tip + d * size - perp * size * 0.32)
 
 
-def draw_note(painter, to_dev, k, note):
+def draw_note(painter, to_dev, k, note, scene=None):
+    height = note.height
+    if getattr(note, "style", ""):
+        height = style_of(scene, note.style)["text_height"]
     painter.setPen(QPen(INK))
-    painter.setFont(_font(k, note.height))
-    x, y = to_dev(note.x, note.y)
-    painter.drawText(int(x), int(y), note.text)
+    painter.setFont(_font(k, height))
+    for i, line in enumerate((note.text or "").split("\n")):
+        x, y = to_dev(note.x, note.y - i * height * 1.6)
+        painter.drawText(int(x), int(y), line)
 
 
 def draw_leader(painter, to_dev, k, leader):
@@ -92,18 +106,19 @@ def draw_lin_dim(painter, to_dev, k, dim, scene=None):
         return
     d = d / length
     n = np.array([-d[1], d[0]])
+    st = style_of(scene, getattr(dim, "style", ""))
     ao, bo = a + n * dim.offset, b + n * dim.offset
     painter.setPen(QPen(DIM_INK, max(0.18 * k, 1.0)))
     _line(painter, to_dev, a, ao + n * 2)
     _line(painter, to_dev, b, bo + n * 2)
     _line(painter, to_dev, ao, bo)
-    _arrow(painter, to_dev, ao, d)
-    _arrow(painter, to_dev, bo, -d)
+    _arrow(painter, to_dev, ao, d, st["arrow_size"])
+    _arrow(painter, to_dev, bo, -d, st["arrow_size"])
     measured = length * dim.scale_denom
     text = dim.text or (scene.format_length(measured) if scene
                         else f"{measured:g}")
     mid = (a + b) / 2 + n * (dim.offset + 2.2)
-    painter.setFont(_font(k, 3.2))
+    painter.setFont(_font(k, st["text_height"]))
     tx, ty = to_dev(mid[0], mid[1])
     painter.drawText(int(tx) - len(text) * int(k), int(ty), text)
 
@@ -240,13 +255,42 @@ def draw_scale_bar(painter, to_dev, k, x, y, scale_denom, scene=None):
     painter.drawText(int(end[0]), int(end[1]), text)
 
 
+def draw_revision_table(painter, to_dev, k, layout):
+    revs = getattr(layout, "revisions", [])
+    if not revs:
+        return
+    w, row_h = 92.0, 5.0
+    m = layout.margin
+    x0 = layout.paper_w - m - w
+    y0 = m + 26.0 + 2.0                      # sits above the title block
+    h = row_h * (len(revs) + 1)
+    painter.setPen(QPen(INK, max(0.25 * k, 1.0)))
+    painter.setBrush(QColor(255, 255, 255, 235))
+    painter.drawRect(int(to_dev(x0, y0 + h)[0]), int(to_dev(x0, y0 + h)[1]),
+                     int(w * k), int(h * k))
+    painter.setBrush(QColor(0, 0, 0, 0))
+    painter.setFont(_font(k, 2.4))
+    cols = (2.0, 14.0, 34.0)
+    header = ("rev", "date", "description")
+    for row, cells in enumerate([header] + [tuple(map(str, r[:3]))
+                                            for r in revs]):
+        yy = y0 + h - row_h * (row + 1) + 1.2
+        if row:
+            _line(painter, to_dev, (x0, y0 + h - row_h * row),
+                  (x0 + w, y0 + h - row_h * row))
+        for cx, text in zip(cols, cells):
+            painter.drawText(int(to_dev(x0 + cx, yy)[0]),
+                             int(to_dev(x0 + cx, yy)[1]), text)
+
+
 def draw_all(painter, to_dev, k, layout, scene=None, sheet_index=1,
              sheet_count=1):
     """Every annotation for one layout, in drawing order."""
+    resolve_associative(layout)
     for hatch in layout.hatches:
         draw_hatch(painter, to_dev, k, hatch)
     for note in layout.notes:
-        draw_note(painter, to_dev, k, note)
+        draw_note(painter, to_dev, k, note, scene)
     for leader in layout.leaders:
         draw_leader(painter, to_dev, k, leader)
     for dim in layout.dims:
@@ -256,5 +300,6 @@ def draw_all(painter, to_dev, k, layout, scene=None, sheet_index=1,
     for dim in layout.adims:
         draw_angular_dim(painter, to_dev, k, dim)
     draw_title_block(painter, to_dev, k, layout, sheet_index, sheet_count)
+    draw_revision_table(painter, to_dev, k, layout)
     for bar in getattr(layout, "scale_bars", []):
         draw_scale_bar(painter, to_dev, k, bar[0], bar[1], bar[2], scene)

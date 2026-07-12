@@ -1289,6 +1289,9 @@ class Viewport(QOpenGLWidget):
             if self.space != "model":
                 if self.layout_view.click_outside_exits(pos.x(), pos.y()):
                     self.update()
+                    return
+                if self.layout_view.press(pos.x(), pos.y()):
+                    self.update()
                 return
             handle = self.gumball.hit_test(pos.x(), pos.y())
             if handle is not None:
@@ -1314,6 +1317,11 @@ class Viewport(QOpenGLWidget):
         dx = pos.x() - self._last_mouse.x()
         dy = pos.y() - self._last_mouse.y()
         if self.space != "model":
+            if ev.buttons() & Qt.MouseButton.LeftButton \
+                    and self.layout_view.drag_selected(pos.x(), pos.y()):
+                self._last_mouse = pos
+                self.update()
+                return
             if ev.buttons() & self._nav_button():
                 orbit = not (ev.modifiers()
                              & Qt.KeyboardModifier.ShiftModifier)
@@ -1385,6 +1393,8 @@ class Viewport(QOpenGLWidget):
                     and self.display_mode == "technical"):
                 self.update()      # navigation ended: recompute HLR view
             return
+        if self.space != "model":
+            self.layout_view.release_drag()
         if self.gumball.drag is not None:
             self.gumball.end_drag()
             self.update()
@@ -1560,8 +1570,19 @@ class Viewport(QOpenGLWidget):
         return True
 
     def keyPressEvent(self, ev):
+        if self.space != "model":
+            lv = self.layout_view
+            if ev.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) \
+                    and lv.delete_selected():
+                self.update()
+                return
+            if ev.key() == Qt.Key.Key_Escape and lv.selected is not None:
+                lv.selected = None
+                self.update()
+                return
         d = self._NUDGE_KEYS.get(ev.key())
-        if d is not None and self.selection.ids and self._nudge(d):
+        if d is not None and self.space == "model" and self.selection.ids \
+                and self._nudge(d):
             return
         if ev.key() == Qt.Key.Key_Escape:
             if self.gumball.drag is not None:

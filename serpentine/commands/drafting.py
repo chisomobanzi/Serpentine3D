@@ -333,10 +333,15 @@ def cmd_text(ctx):
         return
         yield  # pragma: no cover
     pos = yield PointReq("Text position")
-    content = yield TextReq("Text")
-    height = yield NumberReq("Text height (mm)", default=4.0, minimum=0.5)
+    content = yield TextReq(r"Text (\n for a new line)")
+    content = content.replace("\\n", "\n")
+    height = yield NumberReq("Text height (mm)", default=4.0, minimum=0.5,
+                             choices={"Style": ["None", "Standard", "Small",
+                                                "Heading"]})
+    style = ctx.opt("Style", "None")
     lay.notes.append(TextNote(x=pos[0], y=pos[1], text=content,
-                              height=float(height)))
+                              height=float(height),
+                              style="" if style == "None" else style))
     ctx.scene.notify()
     ctx.echo("Note placed.")
 
@@ -366,13 +371,22 @@ def cmd_dim(ctx):
     detail = lay.detail_at(float(mid[0]), float(mid[1]))
     scale_denom = detail.scale_denom if (detail and
                                          not detail.perspective) else 1.0
-    lay.dims.append(LinearDim(x1=p1[0], y1=p1[1], x2=p2[0], y2=p2[1],
-                              offset=offset, scale_denom=scale_denom))
+    dim = LinearDim(x1=p1[0], y1=p1[1], x2=p2[0], y2=p2[1],
+                    offset=offset, scale_denom=scale_denom)
+    # anchor to the detail: the dim follows detail pan/zoom/rescale
+    if detail is not None and not detail.perspective \
+            and detail.contains(p1[0], p1[1]) \
+            and detail.contains(p2[0], p2[1]):
+        from ..core.layout import detail_unproject
+        dim.detail_id = detail.id
+        dim.m1 = detail_unproject(detail, p1[0], p1[1])
+        dim.m2 = detail_unproject(detail, p2[0], p2[1])
+    lay.dims.append(dim)
     ctx.scene.notify()
     measured = length * scale_denom
     ctx.echo(f"Dimension placed: {measured:g}"
-             + (f" (model units at {detail.scale_text()})" if detail
-                else " mm on paper"))
+             + (f" (anchored to detail at {detail.scale_text()})"
+                if dim.detail_id else " mm on paper"))
 
 @command("leader")
 def cmd_leader(ctx):
@@ -406,7 +420,22 @@ def cmd_hatch(ctx):
         yield  # pragma: no cover
     from ..core.layout import Hatch
     pts = []
-    first = yield PointReq("First corner of hatch region")
+    first = yield PointReq("First corner of hatch region "
+                           "(or click inside detail linework)",
+                           choices={"Mode": ["Corners", "Region"]})
+    if ctx.opt("Mode", "Corners") == "Region":
+        poly = _region_at(ctx, lay, first[0], first[1])
+        if poly is None:
+            ctx.echo("No closed linework region found under that point.")
+            return
+        pattern = yield OptionReq("Pattern",
+                                  options=["Lines", "Cross", "Solid"],
+                                  default="Lines")
+        lay.hatches.append(Hatch(points=[list(p) for p in poly],
+                                 pattern=pattern.lower()))
+        ctx.scene.notify()
+        ctx.echo(f"Region hatched ({len(poly)} vertices).")
+        return
     pts.append([first[0], first[1]])
     while True:
         p = yield PointReq(
@@ -591,3 +620,125 @@ def cmd_exportsvg(ctx):
     from ..fileio.svg import export_layout_svg
     export_layout_svg(_window(ctx), lay, path)
     ctx.echo(f"Exported sheet '{lay.name}' to {path}.")
+
+
+def _region_at(ctx, lay, px, py):
+    """Closed HLR linework loop containing a paper point, if any."""
+    from ..core.layout import enclosing_polygon
+    detail = lay.detail_at(px, py)
+    if detail is None or detail.perspective:
+        return None
+    view = _layout_view(ctx)
+    if view is None:
+        return None
+    data = view._detail_hlr(detail)
+    cx = detail.x + detail.w / 2
+    cy = detail.y + detail.h / 2
+    s = 1.0 / detail.scale_denom
+    polys = [[(cx + p[0] * s, cy + p[1] * s) for p in poly]
+             for poly in (data["visible"] or [])]
+    polys += [[(cx + p[0] * s, cy + p[1] * s) for p in poly]
+              for poly in (data.get("cut") or [])]
+    return enclosing_polygon(polys, px, py)
+
+
+def _layout_view(ctx):
+    win = _window(ctx)
+    return win.viewport.layout_view if win is not None else None
+
+
+@command("dimstyle", aliases=("textstyle",))
+def cmd_dimstyle(ctx):
+    """Create or edit a named annotation style (text height, arrows)."""
+    from ..core.layout import DEFAULT_STYLES
+    known = sorted(set(DEFAULT_STYLES) | set(ctx.scene.annot_styles))
+    ctx.echo("Styles: " + ", ".join(known))
+    name = yield TextReq("Style name (new or existing)", default="Standard")
+    name = name.strip() or "Standard"
+    from ..ui.annot_paint import style_of
+    cur = style_of(ctx.scene, name)
+    th = yield NumberReq("Text height (mm)", default=cur["text_height"],
+                         minimum=0.5)
+    ar = yield NumberReq("Arrow size (mm)", default=cur["arrow_size"],
+                         minimum=0.2)
+    ctx.scene.annot_styles[name] = {"text_height": float(th),
+                                    "arrow_size": float(ar),
+                                    "dim_offset": cur["dim_offset"]}
+    ctx.scene.notify()
+    ctx.echo(f"Style '{name}' saved. New text/dims can reference it; "
+             "set it on existing annotations with 'annotedit'.")
+
+
+@command("annotedit", aliases=("editnote", "edittext"))
+def cmd_annotedit(ctx):
+    """Edit the annotation nearest a picked point (text, style)."""
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Annotations live on layouts — switch to one first.")
+        return
+        yield  # pragma: no cover
+    from ..core.layout import annotation_at
+    p = yield PointReq("Pick an annotation")
+    hit = annotation_at(lay, p[0], p[1], tol=3.0)
+    if hit is None:
+        ctx.echo("Nothing there. Click on a note, dimension, leader or "
+                 "hatch.")
+        return
+    kind, obj = hit
+    if kind in ("note", "leader"):
+        new = yield TextReq("Text", default=obj.text.replace("\n", "\\n"))
+        obj.text = new.replace("\\n", "\n")
+    elif kind in ("dim", "rdim"):
+        new = yield TextReq("Override text (Enter for measured)",
+                            default=obj.text)
+        obj.text = new.strip()
+    elif kind == "hatch":
+        pattern = yield OptionReq("Pattern",
+                                  options=["Lines", "Cross", "Solid"],
+                                  default=obj.pattern.capitalize())
+        obj.pattern = pattern.lower()
+    else:
+        ctx.echo("That annotation has nothing editable.")
+        return
+    ctx.scene.notify()
+    ctx.echo("Annotation updated.")
+
+
+@command("sheetindex")
+def cmd_sheetindex(ctx):
+    """Place an index of all sheets as a note on the current layout."""
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Switch to a layout first.")
+        return
+        yield  # pragma: no cover
+    pos = yield PointReq("Index position")
+    lines = ["SHEET INDEX"]
+    for i, l in enumerate(ctx.scene.layouts, start=1):
+        title = l.title_block.get("fields", {}).get("title", "")
+        lines.append(f"{i:>2}  {l.name}" + (f" — {title}" if title else ""))
+    lay.notes.append(TextNote(x=pos[0], y=pos[1], text="\n".join(lines),
+                              height=3.2))
+    ctx.scene.notify()
+    ctx.echo(f"Sheet index placed ({len(ctx.scene.layouts)} sheets).")
+
+
+@command("revision", aliases=("rev",))
+def cmd_revision(ctx):
+    """Add a row to this sheet's revision table (drawn by the title block)."""
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Switch to a layout first.")
+        return
+        yield  # pragma: no cover
+    rev = yield TextReq("Revision tag", default=chr(ord("A")
+                                                    + len(lay.revisions)))
+    note = yield TextReq("Description")
+    import datetime
+    lay.revisions.append([rev.strip(), datetime.date.today().isoformat(),
+                          note.strip()])
+    if not lay.title_block:
+        lay.title_block = {"fields": {}}
+    ctx.scene.notify()
+    ctx.echo(f"Revision {rev.strip()} recorded "
+             f"({len(lay.revisions)} row(s) in the table).")

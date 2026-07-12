@@ -29,6 +29,7 @@ def save_scene(scene, path: str):
             for bid, bd in scene.block_defs.items()
         },
         "layouts": layouts_to_json(scene.layouts),
+        "annot_styles": {k: dict(v) for k, v in scene.annot_styles.items()},
         "layers": [
             {
                 "id": layer.id,
@@ -98,6 +99,8 @@ def load_scene(scene, path: str):
         }
     from ..core.layout import layouts_from_json
     scene.layouts = layouts_from_json(doc.get("layouts", []))
+    scene.annot_styles = {k: dict(v) for k, v in
+                          doc.get("annot_styles", {}).items()}
 
     for od in doc.get("objects", []):
         if od.get("mesh"):

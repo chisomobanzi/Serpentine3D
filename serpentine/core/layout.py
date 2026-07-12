@@ -69,8 +69,9 @@ class TextNote:
     id: str = field(default_factory=_uid)
     x: float = 0.0
     y: float = 0.0
-    text: str = ""
+    text: str = ""             # may contain newlines
     height: float = 4.0        # mm
+    style: str = ""            # named style overrides height when set
 
 
 @dataclass
@@ -83,6 +84,12 @@ class LinearDim:
     offset: float = 8.0        # mm from the measured points
     text: str = ""             # empty -> auto (measured length)
     scale_denom: float = 1.0   # to express model-space length
+    style: str = ""
+    # associative anchors: model-space points seen through a detail.
+    # When set, x/y are recomputed from the detail camera each draw.
+    detail_id: str = ""
+    m1: list | None = None     # [x, y, z]
+    m2: list | None = None
 
 
 @dataclass
@@ -91,6 +98,7 @@ class Leader:
     points: list = field(default_factory=list)   # [[x,y], ...] arrow at [0]
     text: str = ""
     height: float = 3.5
+    style: str = ""
 
 
 @dataclass
@@ -112,6 +120,7 @@ class RadialDim:
     diameter: bool = False
     scale_denom: float = 1.0
     text: str = ""
+    style: str = ""
 
 
 @dataclass
@@ -161,6 +170,204 @@ def hatch_lines(points: list, angle_deg: float,
     return out
 
 
+DEFAULT_STYLES = {
+    "Standard": {"text_height": 3.2, "arrow_size": 2.2, "dim_offset": 8.0},
+    "Small":    {"text_height": 2.2, "arrow_size": 1.6, "dim_offset": 5.0},
+    "Heading":  {"text_height": 6.0, "arrow_size": 2.2, "dim_offset": 8.0},
+}
+
+
+def detail_project(detail, model_pt) -> tuple[float, float]:
+    """Model-space point -> paper mm through a detail's camera."""
+    import numpy as np
+    from ..ui.layout_view import detail_direction
+    d, right, up = detail_direction(detail)
+    rel = np.asarray(model_pt, float) - np.asarray(detail.target, float)
+    u = float(np.dot(rel, right)) / detail.scale_denom
+    v = float(np.dot(rel, up)) / detail.scale_denom
+    return detail.x + detail.w / 2 + u, detail.y + detail.h / 2 + v
+
+
+def detail_unproject(detail, px: float, py: float) -> list:
+    """Paper mm -> model-space point on the detail's view plane."""
+    import numpy as np
+    from ..ui.layout_view import detail_direction
+    d, right, up = detail_direction(detail)
+    u = (px - detail.x - detail.w / 2) * detail.scale_denom
+    v = (py - detail.y - detail.h / 2) * detail.scale_denom
+    return [float(c) for c in
+            np.asarray(detail.target, float) + right * u + up * v]
+
+
+def resolve_associative(layout):
+    """Refresh paper coordinates of detail-anchored dimensions."""
+    details = {d.id: d for d in layout.details}
+    for dim in layout.dims:
+        det = details.get(getattr(dim, "detail_id", ""))
+        if det is None or dim.m1 is None or dim.m2 is None:
+            continue
+        dim.x1, dim.y1 = detail_project(det, dim.m1)
+        dim.x2, dim.y2 = detail_project(det, dim.m2)
+        dim.scale_denom = det.scale_denom
+
+
+def _dist_seg(px, py, a, b) -> float:
+    import numpy as np
+    p = np.array([px, py], float)
+    a = np.asarray(a, float)[:2]
+    b = np.asarray(b, float)[:2]
+    ab = b - a
+    denom = float(ab @ ab)
+    t = 0.0 if denom < 1e-12 else float(np.clip((p - a) @ ab / denom, 0, 1))
+    return float(np.linalg.norm(p - (a + t * ab)))
+
+
+def annotation_at(layout, px: float, py: float, tol: float = 2.0):
+    """Topmost annotation near a paper point -> (kind, obj) or None.
+
+    Kinds: note, leader, dim, rdim, adim, hatch (dims before hatches so
+    outlines don't shadow them)."""
+    for note in reversed(layout.notes):
+        w = max(len(line) for line in (note.text or " ").split("\n")) \
+            * note.height * 0.62
+        h = note.height * (1 + (note.text or "").count("\n") * 1.6)
+        if note.x - tol <= px <= note.x + w + tol \
+                and note.y - tol <= py <= note.y + h + tol:
+            return ("note", note)
+    for dim in reversed(layout.dims):
+        import numpy as np
+        a = np.array([dim.x1, dim.y1])
+        b = np.array([dim.x2, dim.y2])
+        d = b - a
+        n = np.linalg.norm(d)
+        if n < 1e-9:
+            continue
+        nvec = np.array([-d[1], d[0]]) / n
+        if _dist_seg(px, py, a + nvec * dim.offset,
+                     b + nvec * dim.offset) <= tol:
+            return ("dim", dim)
+    for rd in reversed(layout.rdims):
+        if _dist_seg(px, py, (rd.cx, rd.cy), (rd.px, rd.py)) <= tol:
+            return ("rdim", rd)
+    for ad in reversed(layout.adims):
+        import math as _m
+        r = _m.hypot(px - ad.vx, py - ad.vy)
+        if abs(r - ad.radius) <= tol * 1.5:
+            return ("adim", ad)
+    for leader in reversed(layout.leaders):
+        pts = leader.points
+        for a, b in zip(pts[:-1], pts[1:]):
+            if _dist_seg(px, py, a, b) <= tol:
+                return ("leader", leader)
+    for hatch in reversed(layout.hatches):
+        if _point_in_poly(px, py, hatch.points):
+            return ("hatch", hatch)
+    return None
+
+
+def _point_in_poly(px: float, py: float, pts: list) -> bool:
+    inside = False
+    n = len(pts)
+    for i in range(n):
+        x1, y1 = pts[i][0], pts[i][1]
+        x2, y2 = pts[(i + 1) % n][0], pts[(i + 1) % n][1]
+        if (y1 > py) != (y2 > py):
+            if px < x1 + (py - y1) / (y2 - y1) * (x2 - x1):
+                inside = not inside
+    return inside
+
+
+def move_annotation(kind: str, obj, dx: float, dy: float):
+    """Translate any annotation by paper millimetres."""
+    if kind == "note":
+        obj.x += dx
+        obj.y += dy
+    elif kind == "dim":
+        obj.x1 += dx
+        obj.y1 += dy
+        obj.x2 += dx
+        obj.y2 += dy
+        if getattr(obj, "m1", None) is not None:
+            obj.detail_id = ""          # moving by hand breaks the anchor
+            obj.m1 = obj.m2 = None
+    elif kind == "rdim":
+        obj.cx += dx
+        obj.cy += dy
+        obj.px += dx
+        obj.py += dy
+    elif kind == "adim":
+        obj.vx += dx
+        obj.vy += dy
+        obj.x1 += dx
+        obj.y1 += dy
+        obj.x2 += dx
+        obj.y2 += dy
+    elif kind in ("leader", "hatch"):
+        obj.points = [[p[0] + dx, p[1] + dy] for p in obj.points]
+
+
+def delete_annotation(layout, kind: str, obj) -> bool:
+    pool = {"note": layout.notes, "dim": layout.dims,
+            "rdim": layout.rdims, "adim": layout.adims,
+            "leader": layout.leaders, "hatch": layout.hatches}.get(kind)
+    if pool and obj in pool:
+        pool.remove(obj)
+        return True
+    return False
+
+
+def annotation_bounds(kind: str, obj) -> tuple:
+    """Rough paper-space bbox (x0, y0, x1, y1) of an annotation."""
+    if kind == "note":
+        lines = (obj.text or " ").split("\n")
+        w = max(len(line) for line in lines) * obj.height * 0.62
+        return (obj.x, obj.y - (len(lines) - 1) * obj.height * 1.6,
+                obj.x + w, obj.y + obj.height)
+    if kind == "dim":
+        import numpy as np
+        a = np.array([obj.x1, obj.y1])
+        b = np.array([obj.x2, obj.y2])
+        d = b - a
+        n = np.linalg.norm(d)
+        nvec = np.array([-d[1], d[0]]) / n if n > 1e-9 else np.zeros(2)
+        pts = [a, b, a + nvec * obj.offset, b + nvec * obj.offset]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        return (min(xs), min(ys), max(xs), max(ys))
+    if kind == "rdim":
+        return (min(obj.cx, obj.px), min(obj.cy, obj.py),
+                max(obj.cx, obj.px), max(obj.cy, obj.py))
+    if kind == "adim":
+        r = obj.radius + 3
+        return (obj.vx - r, obj.vy - r, obj.vx + r, obj.vy + r)
+    pts = obj.points or [[0, 0]]
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def enclosing_polygon(polylines: list, px: float, py: float):
+    """Smallest closed polyline (paper coords) containing the point."""
+    best = None
+    best_area = None
+    for poly in polylines:
+        pts = [(p[0], p[1]) for p in poly]
+        if len(pts) < 4:
+            continue
+        if abs(pts[0][0] - pts[-1][0]) > 0.5 \
+                or abs(pts[0][1] - pts[-1][1]) > 0.5:
+            continue
+        if not _point_in_poly(px, py, pts[:-1]):
+            continue
+        area = 0.0
+        for (x1, y1), (x2, y2) in zip(pts[:-1], pts[1:]):
+            area += x1 * y2 - x2 * y1
+        area = abs(area) / 2
+        if best_area is None or area < best_area:
+            best, best_area = pts[:-1], area
+    return best
+
+
 @dataclass
 class Layout:
     id: str = field(default_factory=_uid)
@@ -177,6 +384,7 @@ class Layout:
     adims: list = field(default_factory=list)
     scale_bars: list = field(default_factory=list)   # [x, y, scale_denom]
     title_block: dict = field(default_factory=dict)
+    revisions: list = field(default_factory=list)    # [[rev, date, note]]
 
     def detail_at(self, px: float, py: float) -> DetailView | None:
         for d in reversed(self.details):        # topmost first
@@ -206,6 +414,7 @@ def layouts_to_json(layouts: list) -> list:
             "adims": [vars(x).copy() for x in lay.adims],
             "scale_bars": [list(b) for b in lay.scale_bars],
             "title_block": dict(lay.title_block),
+            "revisions": [list(r) for r in lay.revisions],
         })
     return out
 
@@ -233,6 +442,7 @@ def layouts_from_json(data: list) -> list:
             lay.adims.append(AngularDim(**xd))
         lay.scale_bars = [list(b) for b in ld.get("scale_bars", [])]
         lay.title_block = dict(ld.get("title_block", {}))
+        lay.revisions = [list(r) for r in ld.get("revisions", [])]
         layouts.append(lay)
     return layouts
 

@@ -52,6 +52,7 @@ class Scene:
         self.layouts: list = []         # drafting sheets (core/layout.py)
         self.units: str = "mm"          # document units (utils/units.py)
         self.block_defs: dict = {}      # id -> {"name", "shapes": [TopoDS]}
+        self.annot_styles: dict = {}    # name -> text/dim style overrides
         self.image_planes: list = []    # reference images (pictureframe)
 
     # -- notification --
@@ -154,6 +155,7 @@ class Scene:
         self.named_views = {}
         self.layouts = []
         self.block_defs = {}
+        self.annot_styles = {}
         self.image_planes = []
         # units are a user preference as much as a document property: keep
         self.notify()
@@ -185,6 +187,7 @@ class Scene:
             "named_views": copy.deepcopy(self.named_views),
             "layouts": [lay.clone() for lay in self.layouts],
             "block_defs": {k: dict(v) for k, v in self.block_defs.items()},
+            "annot_styles": {k: dict(v) for k, v in self.annot_styles.items()},
             "image_planes": copy.deepcopy(self.image_planes),
         }
 
@@ -198,5 +201,7 @@ class Scene:
         self.layouts = [lay.clone() for lay in snap.get("layouts", [])]
         self.block_defs = {k: dict(v) for k, v in
                            snap.get("block_defs", {}).items()}
+        self.annot_styles = {k: dict(v) for k, v in
+                             snap.get("annot_styles", {}).items()}
         self.image_planes = copy.deepcopy(snap.get("image_planes", []))
         self.notify()

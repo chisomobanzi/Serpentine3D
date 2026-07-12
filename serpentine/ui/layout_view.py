@@ -49,6 +49,10 @@ class LayoutView:
         self.pan = np.array([0.0, 0.0])      # paper mm at viewport centre
         self.px_per_mm = 2.0
         self.entered_detail: str | None = None
+        self.selected: tuple | None = None       # (kind, obj) on this sheet
+        self._drag: tuple | None = None          # (mode, kind, obj, corner)
+        self._drag_last: tuple | None = None
+        self._drag_moved = False
         self._fitted_for: str | None = None
         self._hlr_cache: dict = {}
 
@@ -283,6 +287,7 @@ class LayoutView:
             if detail.locked:
                 label += "  [locked]"
             painter.drawText(int(sx), int(sy) - 2, label)
+        self._paint_selection(painter)
         from . import annot_paint
         scene = self.vp.scene
         idx = 1
@@ -294,6 +299,38 @@ class LayoutView:
             lambda x, y: self.paper_to_screen(x, y),
             self.px_per_mm, lay, scene,
             sheet_index=idx, sheet_count=max(len(scene.layouts), 1))
+
+    def _paint_selection(self, painter: QPainter):
+        lay = self.layout
+        if lay is None or self.selected is None:
+            return
+        kind, obj = self.selected
+        pools = {"note": lay.notes, "dim": lay.dims, "rdim": lay.rdims,
+                 "adim": lay.adims, "leader": lay.leaders,
+                 "hatch": lay.hatches, "detail": lay.details}
+        if obj not in pools.get(kind, ()):
+            self.selected = None                # stale after undo/delete
+            return
+        gold = QColor(217, 166, 62)
+        painter.setPen(QPen(gold, 2, Qt.PenStyle.DashLine))
+        painter.setBrush(QColor(0, 0, 0, 0))
+        if kind == "detail":
+            x0, y0 = self.paper_to_screen(obj.x, obj.y)
+            x1, y1 = self.paper_to_screen(obj.x + obj.w, obj.y + obj.h)
+            painter.drawRect(int(min(x0, x1)), int(min(y0, y1)),
+                             int(abs(x1 - x0)), int(abs(y0 - y1)))
+            painter.setBrush(gold)
+            for gx, gy in self._corners(obj):
+                sx, sy = self.paper_to_screen(gx, gy)
+                painter.drawRect(int(sx) - 4, int(sy) - 4, 8, 8)
+            painter.setBrush(QColor(0, 0, 0, 0))
+        else:
+            from ..core.layout import annotation_bounds
+            x0, y0, x1, y1 = annotation_bounds(kind, obj)
+            sx0, sy0 = self.paper_to_screen(x0 - 1, y0 - 1)
+            sx1, sy1 = self.paper_to_screen(x1 + 1, y1 + 1)
+            painter.drawRect(int(min(sx0, sx1)), int(min(sy0, sy1)),
+                             int(abs(sx1 - sx0)), int(abs(sy0 - sy1)))
 
     # ------------------------------------------------------------ GL helpers
 
@@ -412,6 +449,115 @@ class LayoutView:
                 return d
         self.entered_detail = None
         return None
+
+    # ----------------------------------------- annotation & frame editing
+
+    @staticmethod
+    def _corners(det):
+        return ((det.x, det.y), (det.x + det.w, det.y),
+                (det.x + det.w, det.y + det.h), (det.x, det.y + det.h))
+
+    def press(self, sx: float, sy: float) -> bool:
+        """LMB press while idle: select / start dragging sheet items."""
+        lay = self.layout
+        if lay is None or self.entered_detail is not None:
+            return False
+        px, py = self.screen_to_paper(sx, sy)
+        tol = max(7.0 / self.px_per_mm, 0.8)
+        if self.selected and self.selected[0] == "detail":
+            det = self.selected[1]
+            for i, (gx, gy) in enumerate(self._corners(det)):
+                if abs(px - gx) <= tol and abs(py - gy) <= tol:
+                    if det.locked:
+                        return True
+                    self.vp.window_checkpoint("resize detail")
+                    self._drag = ("resize", "detail", det, i)
+                    self._drag_last = (px, py)
+                    return True
+        from ..core.layout import annotation_at
+        hit = annotation_at(lay, px, py, tol=max(tol, 2.0))
+        if hit is not None:
+            self.selected = hit
+            self.vp.window_checkpoint("move annotation")
+            self._drag = ("move",) + hit + (-1,)
+            self._drag_last = (px, py)
+            return True
+        det = lay.detail_at(px, py)
+        if det is not None:
+            self.selected = ("detail", det)
+            if not det.locked:
+                self.vp.window_checkpoint("move detail")
+                self._drag = ("move", "detail", det, -1)
+                self._drag_last = (px, py)
+            return True
+        if self.selected is not None:
+            self.selected = None
+            return True
+        return False
+
+    def drag_selected(self, sx: float, sy: float) -> bool:
+        if self._drag is None:
+            return False
+        px, py = self.screen_to_paper(sx, sy)
+        dx = px - self._drag_last[0]
+        dy = py - self._drag_last[1]
+        mode, kind, obj, corner = self._drag
+        if kind == "detail":
+            if mode == "move":
+                obj.x += dx
+                obj.y += dy
+            else:
+                x0, y0 = obj.x, obj.y
+                x1, y1 = obj.x + obj.w, obj.y + obj.h
+                if corner in (0, 3):
+                    x0 += dx
+                else:
+                    x1 += dx
+                if corner in (0, 1):
+                    y0 += dy
+                else:
+                    y1 += dy
+                obj.x, obj.w = min(x0, x1), max(abs(x1 - x0), 5.0)
+                obj.y, obj.h = min(y0, y1), max(abs(y1 - y0), 5.0)
+            self._hlr_cache.pop(obj.id, None)
+        else:
+            from ..core.layout import move_annotation
+            move_annotation(kind, obj, dx, dy)
+        self._drag_moved = True
+        self._drag_last = (px, py)
+        self.vp.scene.notify()
+        return True
+
+    def release_drag(self):
+        if self._drag is None:
+            return
+        if not self._drag_moved:
+            self.vp.window_discard_checkpoint()
+        self._drag = None
+        self._drag_moved = False
+
+    def delete_selected(self) -> bool:
+        lay = self.layout
+        if lay is None or self.selected is None:
+            return False
+        kind, obj = self.selected
+        if kind == "detail":
+            if obj not in lay.details:
+                self.selected = None
+                return False
+            self.vp.window_checkpoint("delete detail")
+            lay.details.remove(obj)
+            self._hlr_cache.pop(obj.id, None)
+        else:
+            from ..core.layout import delete_annotation
+            self.vp.window_checkpoint("delete annotation")
+            if not delete_annotation(lay, kind, obj):
+                self.vp.window_discard_checkpoint()
+                self.selected = None
+                return False
+        self.selected = None
+        self.vp.scene.notify()
+        return True
 
 
 def _section_cut(shapes, target, d, right, up, offset):
