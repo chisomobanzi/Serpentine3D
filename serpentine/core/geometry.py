@@ -272,6 +272,64 @@ def planar_face(shape) -> TopoDS_Shape:
     return mk.Face()
 
 
+def offset_curve(shape, distance: float) -> TopoDS_Shape:
+    """Offset a planar curve by a distance (sign picks the side)."""
+    from .occ import BRepOffsetAPI_MakeOffset, GeomAbs_JoinType
+    wire = occ.to_wire(to_wire(shape))
+    open_result = not is_closed_curve(shape)
+    mk = BRepOffsetAPI_MakeOffset(wire, GeomAbs_JoinType.GeomAbs_Arc,
+                                  open_result)
+    mk.Perform(float(distance))
+    if not mk.IsDone() or mk.Shape().IsNull():
+        raise GeometryError("Offset failed (curve must be planar)")
+    return mk.Shape()
+
+
+def fillet_curves(edge_a, edge_b, radius: float,
+                  near: Point) -> tuple:
+    """Fillet two coplanar line/arc edges; returns (trimmed_a, arc, trimmed_b).
+
+    `near` chooses the corner when the curves cross more than once.
+    """
+    from .occ import ChFi2d_FilletAPI, gp_Pln
+    if radius <= 0:
+        raise GeometryError("Fillet radius must be positive")
+    ea, eb = occ.to_edge(edge_a), occ.to_edge(edge_b)
+    # assume drafting plane = world XY at the corner's z
+    plane = gp_Pln(_pnt((0, 0, near[2])), _dir((0, 0, 1)))
+    api = ChFi2d_FilletAPI(ea, eb, plane)
+    if not api.Perform(float(radius)):
+        raise GeometryError("Fillet failed (radius too large or curves "
+                            "not coplanar in XY)")
+    ea_out = occ.TopoDS_Edge()
+    eb_out = occ.TopoDS_Edge()
+    arc = api.Result(_pnt(near), ea_out, eb_out)
+    if arc.IsNull():
+        raise GeometryError("Fillet produced no result near that corner")
+    return ea_out, arc, eb_out
+
+
+def explode(shape) -> list:
+    """Decompose: wires -> edges, shells/solids -> faces, compounds -> parts."""
+    kind = shape_kind(shape)
+    if kind == "curve" and shape.ShapeType() == occ.WIRE:
+        return [e for e in edges_of(shape)]
+    if kind in ("surface", "solid"):
+        parts = faces_of(shape)
+        if len(parts) > 1:
+            return parts
+        return []
+    if kind == "compound":
+        from .occ import TopoDS_Iterator
+        out = []
+        it = TopoDS_Iterator(shape)
+        while it.More():
+            out.append(it.Value())
+            it.Next()
+        return out
+    return []
+
+
 # --- solids -----------------------------------------------------------------
 
 def make_box(corner: Point, dx: float, dy: float, dz: float) -> TopoDS_Shape:

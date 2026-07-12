@@ -50,9 +50,9 @@ construction plane. `Tab` completes command names, `Up`/`Down` recall history,
 | **Solids** | `box` `sphere` `cylinder` `cone` `torus` |
 | **Booleans** | `booleanunion` `booleandifference` `booleanintersection` |
 | **Transform** | `move` `copy` `rotate` `scale` `scalenu` `mirror` `array` |
-| **Edit** | `join` `delete` `hide` `show` `rename` `undo` `redo` |
+| **Edit** | `join` `explode` `offset` `fillet` `delete` `hide` `show` `rename` `undo` `redo` |
 | **Analysis** | `distance` `length` `area` `volume` |
-| **View** | `top` `front` `right` `perspective` `zoomextents` `wireframe` `shaded` `ghosted` `grid` |
+| **View** | `top` `front` `right` `perspective` `zoomextents` `wireframe` `shaded` `ghosted` `grid` `snap` |
 | **Layers** | `layer` (new/current/show/hide/rename) — or use the Layers panel |
 | **Files** | `new` `open` `save` `import` `export` |
 
@@ -65,6 +65,9 @@ Most commands have Rhino-compatible aliases (`l`, `pl`, `c`, `m`, `co`, `mi`, ..
 - **Ctrl+Z / Ctrl+Y** undo/redo · **Ctrl+A** select all · **Delete** delete selection
 - **Ctrl+S / Ctrl+O / Ctrl+N** save/open/new
 - Click to select (Shift-click adds), click empty space to deselect
+- **Object snaps** (end/mid/center) are on by default while picking points —
+  a white square marks the snap; toggle with `snap`
+- Launch with a file: `serp model.serp` (or any importable format)
 
 ## File formats
 

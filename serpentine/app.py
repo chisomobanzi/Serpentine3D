@@ -365,6 +365,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"{n} object(s)  ·  {sel} selected  ·  layer: {layer}  ·  "
             f"{mode}  ·  MMB orbit / Shift+MMB pan / scroll zoom")
+        path = getattr(self.ctx, "current_path", None)
+        name = os.path.basename(path) if path else "untitled"
+        self.setWindowTitle(f"{name} — {APP_TITLE}")
 
     def keyPressEvent(self, ev):
         # any printable key focuses the command line (Rhino behaviour)
@@ -408,6 +411,19 @@ def main():
         window._rpc.start()
 
     window.show()
+
+    for arg in app.arguments()[1:]:
+        if not arg.startswith("-") and os.path.exists(arg):
+            try:
+                fileio.import_file(window.scene, arg)
+                if arg.endswith(".serp"):
+                    window.ctx.current_path = os.path.abspath(arg)
+                window.command_line.echo(
+                    f"Opened {arg}: {len(window.scene.all())} object(s).")
+                window.viewport.zoom_extents()
+            except Exception as exc:                          # noqa: BLE001
+                window.command_line.echo(f"Could not open {arg}: {exc}")
+            break
     return app.exec()
 
 

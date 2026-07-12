@@ -217,6 +217,9 @@ class Viewport(QOpenGLWidget):
         self.display_mode = "shaded"        # shaded | wireframe | ghosted
         self.grid_visible = True
         self.point_mode = False             # command wants a point click
+        from ..core.snaps import SnapIndex
+        self.snaps = SnapIndex(scene)
+        self._active_snap = None            # (point, kind) under cursor
         self._gpu: dict[str, _GpuObject] = {}
         self._grid = None
         self._preview: _LineBatch | None = None
@@ -418,7 +421,8 @@ class Viewport(QOpenGLWidget):
     def _draw_preview(self, mvp):
         pts = self._preview_data
         markers = self._marker_points
-        if len(pts) == 0 and not markers:
+        snap = self._active_snap if self.point_mode else None
+        if len(pts) == 0 and not markers and snap is None:
             return
         segs = [pts] if len(pts) else []
         # screen-scaled cross markers at picked points
@@ -427,11 +431,24 @@ class Viewport(QOpenGLWidget):
             m = np.asarray(m, np.float32)
             for axis in np.eye(3, dtype=np.float32) * size:
                 segs.append(np.stack([m - axis, m + axis]))
-        allpts = np.concatenate(segs).astype(np.float32)
-        self._preview.update(allpts)
         GL.glDisable(GL.GL_DEPTH_TEST)
-        self._draw_lines(self._preview, mvp, (*theme.SELECTION_COLOR, 0.9),
-                         1.6)
+        if segs:
+            allpts = np.concatenate(segs).astype(np.float32)
+            self._preview.update(allpts)
+            self._draw_lines(self._preview, mvp,
+                             (*theme.SELECTION_COLOR, 0.9), 1.6)
+        if snap is not None:
+            # white square marker at the snap point
+            c = np.asarray(snap[0], np.float32)
+            right, up = self.camera.right_up()
+            r = (right * size * 0.9).astype(np.float32)
+            u = (up * size * 0.9).astype(np.float32)
+            corners = [c - r - u, c + r - u, c + r + u, c - r + u]
+            square = np.concatenate([
+                np.stack([corners[i], corners[(i + 1) % 4]])
+                for i in range(4)]).astype(np.float32)
+            self._preview.update(square)
+            self._draw_lines(self._preview, mvp, (1.0, 1.0, 1.0, 0.95), 2.0)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _draw_axis_triad(self, view, w, h):
@@ -502,7 +519,13 @@ class Viewport(QOpenGLWidget):
     # -------------------------------------------------------------- picking
 
     def world_point_at(self, px: float, py: float):
-        """Intersect the pixel ray with the construction plane (z=0)."""
+        """Point for the pixel: object snap if near one, else CPlane (z=0)."""
+        snap = self.snaps.find(self.camera, px, py, self.width(),
+                               self.height())
+        if snap is not None:
+            self._active_snap = snap
+            return snap[0]
+        self._active_snap = None
         origin, direction = self.camera.ray_through(px, py, self.width(),
                                                     self.height())
         hit = ray_plane(origin, direction, np.zeros(3),

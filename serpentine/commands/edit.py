@@ -23,6 +23,50 @@ def cmd_join(ctx):
     ctx.echo(f"Joined {len(objs)} curves into {new.name}.")
 
 
+@command("offset")
+def cmd_offset(ctx):
+    objs = yield SelectReq("Select curve to offset", kinds=("curve",),
+                           max_count=1)
+    from .base import NumberReq
+    dist = yield NumberReq("Offset distance (negative for other side)")
+    new_shape = g.offset_curve(objs[0].shape, dist)
+    obj = ctx.scene.add(new_shape, layer_id=objs[0].layer_id)
+    ctx.echo(f"Offset -> {obj.name}.")
+
+
+@command("fillet")
+def cmd_fillet(ctx):
+    a = yield SelectReq("Select first curve to fillet", kinds=("curve",),
+                        max_count=1)
+    b = yield SelectReq("Select second curve", kinds=("curve",),
+                        max_count=1, allow_preselected=False)
+    from .base import NumberReq, PointReq
+    radius = yield NumberReq("Fillet radius", minimum=1e-9)
+    corner = yield PointReq("Point near the corner to fillet")
+    ea, arc, eb = g.fillet_curves(a[0].shape, b[0].shape, radius, corner)
+    joined = g.join_curves([ea, arc, eb])
+    ctx.scene.remove(b[0].id)
+    new = ctx.scene.replace_shape(a[0].id, joined)
+    ctx.echo(f"Filleted into {new.name} (r={radius:g}).")
+
+
+@command("explode", aliases=("x",))
+def cmd_explode(ctx):
+    objs = yield SelectReq("Select objects to explode")
+    total = 0
+    for o in objs:
+        parts = g.explode(o.shape)
+        if not parts:
+            ctx.echo(f"{o.name} cannot be exploded further.")
+            continue
+        for p in parts:
+            ctx.scene.add(p, layer_id=o.layer_id)
+        ctx.scene.remove(o.id)
+        total += len(parts)
+    if total:
+        ctx.echo(f"Exploded into {total} object(s).")
+
+
 @command("hide")
 def cmd_hide(ctx):
     objs = yield SelectReq("Select objects to hide")

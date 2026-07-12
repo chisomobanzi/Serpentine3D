@@ -183,3 +183,45 @@ def test_measure():
     box = g.make_box((0, 0, 0), 2, 2, 2)
     assert g.centroid(box) == pytest.approx((1, 1, 1))
     assert g.is_valid(box)
+
+
+def test_offset_curve():
+    circle = g.make_circle((0, 0, 0), 5)
+    off = g.offset_curve(circle, 2.0)
+    assert g.curve_length(off) == pytest.approx(2 * math.pi * 7, rel=1e-3)
+
+
+def test_offset_open_curve():
+    line = g.make_polyline([(0, 0, 0), (10, 0, 0), (10, 10, 0)])
+    off = g.offset_curve(line, 1.0)
+    assert g.shape_kind(off) == "curve"
+
+
+def test_fillet_curves():
+    l1 = g.make_line((0, 0, 0), (10, 0, 0))
+    l2 = g.make_line((10, 0, 0), (10, 10, 0))
+    ea, arc, eb = g.fillet_curves(l1, l2, 2.0, (10, 0, 0))
+    joined = g.join_curves([ea, arc, eb])
+    # 8 + 8 straight + quarter circle r=2
+    assert g.curve_length(joined) == pytest.approx(16 + math.pi, rel=1e-4)
+
+
+def test_explode_wire_and_solid():
+    pl = g.make_polyline([(0, 0, 0), (5, 0, 0), (5, 5, 0)])
+    parts = g.explode(pl)
+    assert len(parts) == 2
+    box = g.make_box((0, 0, 0), 1, 1, 1)
+    faces = g.explode(box)
+    assert len(faces) == 6
+
+
+def test_snap_points():
+    from serpentine.core.snaps import snap_points_for
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    pts = snap_points_for(line)
+    kinds = {k for _, k in pts}
+    assert kinds == {"end", "mid"}
+    assert ((5.0, 0.0, 0.0), "mid") in [(p, k) for p, k in pts]
+    circle = g.make_circle((3, 3, 0), 2)
+    kinds = {k for _, k in snap_points_for(circle)}
+    assert "center" in kinds

@@ -12,7 +12,7 @@ from OCP.gp import (
 from OCP.TopoDS import (
     TopoDS, TopoDS_Shape, TopoDS_Edge, TopoDS_Wire, TopoDS_Face,
     TopoDS_Shell, TopoDS_Solid, TopoDS_Compound, TopoDS_Vertex,
-    TopoDS_Builder,
+    TopoDS_Builder, TopoDS_Iterator,
 )
 from OCP.TopAbs import TopAbs_ShapeEnum, TopAbs_Orientation
 from OCP.TopExp import TopExp_Explorer, TopExp
@@ -34,8 +34,10 @@ from OCP.BRepAlgoAPI import (
 )
 from OCP.BRepOffsetAPI import (
     BRepOffsetAPI_ThruSections, BRepOffsetAPI_MakePipe,
-    BRepOffsetAPI_MakePipeShell,
+    BRepOffsetAPI_MakePipeShell, BRepOffsetAPI_MakeOffset,
 )
+from OCP.ChFi2d import ChFi2d_FilletAPI
+from OCP.GeomAbs import GeomAbs_JoinType
 from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRepTopAdaptor import BRepTopAdaptor_FClass2d

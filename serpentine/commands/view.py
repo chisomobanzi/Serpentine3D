@@ -73,6 +73,15 @@ def cmd_grid(ctx):
     yield from ()
 
 
+@command("snap", aliases=("osnap",), mutates=False)
+def cmd_snap(ctx):
+    vp = _vp(ctx)
+    vp.snaps.enabled = not vp.snaps.enabled
+    ctx.echo(f"Object snap {'on' if vp.snaps.enabled else 'off'} "
+             "(end / mid / center).")
+    yield from ()
+
+
 # --- analysis ----------------------------------------------------------------
 
 @command("distance", aliases=("dist",), mutates=False)
