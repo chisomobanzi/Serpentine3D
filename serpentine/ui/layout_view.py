@@ -113,8 +113,6 @@ class LayoutView:
         for detail in lay.details:
             self._paint_detail(lay, detail, mvp)
 
-        self._paint_dims(lay, mvp)
-
     def _paint_detail(self, lay, detail, paper_mvp):
         vp = self.vp
         mode = detail.display_mode
@@ -173,12 +171,18 @@ class LayoutView:
         vp = self.vp
         key = (vp.scene.revision, round(detail.azimuth, 6),
                round(detail.elevation, 6), tuple(detail.target),
-               detail.perspective)
+               detail.perspective, detail.section_offset)
         cached = self._hlr_cache.get(detail.id)
         if cached is not None and cached[0] == key:
             return cached[1]
         d, right, up = detail_direction(detail)
         shapes = [o.shape for o in vp.scene.visible_objects()]
+        cut_polys = []
+        if shapes and detail.section_offset is not None \
+                and not detail.perspective:
+            shapes, cut_polys = _section_cut(
+                shapes, np.asarray(detail.target, float), d, right, up,
+                detail.section_offset)
         if shapes:
             res = hlr.hlr_project_safe(shapes, origin=detail.target,
                                   view_dir=d, x_dir=right)
@@ -186,9 +190,10 @@ class LayoutView:
                 "visible": hlr.edges_to_polylines(res["visible"]
                                                   + res["outline"]),
                 "hidden": hlr.edges_to_polylines(res["hidden"]),
+                "cut": cut_polys,
             }
         else:
-            data = {"visible": [], "hidden": []}
+            data = {"visible": [], "hidden": [], "cut": cut_polys}
         self._hlr_cache[detail.id] = (key, data)
         return data
 
@@ -235,37 +240,27 @@ class LayoutView:
         if segs_v:
             self._draw_segs(paper_mvp, np.concatenate(segs_v),
                             LINE_VISIBLE, 1.6)
+        # section-cut faces: heavy outline + 45-degree hatching
+        cut = data.get("cut") or []
+        if cut:
+            from ..core.layout import hatch_lines
+            hatch_segs = []
+            outline_segs = []
+            for poly in cut:
+                paper = [(cx + px * s, cy + py * s) for px, py in poly]
+                arr = np.asarray([(p[0], p[1], 0.0) for p in paper],
+                                 np.float32)
+                outline_segs.append(np.stack([arr[:-1], arr[1:]], axis=1))
+                for a, b in hatch_lines(paper, 45.0, 2.5):
+                    hatch_segs.append(np.asarray(
+                        [[a[0], a[1], 0], [b[0], b[1], 0]], np.float32))
+            if hatch_segs:
+                self._draw_segs(paper_mvp, np.stack(hatch_segs),
+                                (0.25, 0.27, 0.32, 1.0), 1.0)
+            if outline_segs:
+                self._draw_segs(paper_mvp, np.concatenate(outline_segs),
+                                (0.05, 0.05, 0.07, 1.0), 2.2)
         GL.glDisable(GL.GL_SCISSOR_TEST)
-
-    def _paint_dims(self, lay, mvp):
-        for dim in lay.dims:
-            self._paint_dim(dim, mvp)
-
-    def _paint_dim(self, dim, mvp):
-        a = np.array([dim.x1, dim.y1])
-        b = np.array([dim.x2, dim.y2])
-        d = b - a
-        length = np.linalg.norm(d)
-        if length < 1e-9:
-            return
-        d = d / length
-        n = np.array([-d[1], d[0]])
-        ao = a + n * dim.offset
-        bo = b + n * dim.offset
-        segs = [
-            np.array([[*a, 0], [*(ao + n * 2), 0]]),      # extension lines
-            np.array([[*b, 0], [*(bo + n * 2), 0]]),
-            np.array([[*ao, 0], [*bo, 0]]),               # dimension line
-        ]
-        # arrowheads
-        for tip, direction in ((ao, d), (bo, -d)):
-            w = direction * 2.2
-            perp = n * 0.7
-            segs.append(np.array([[*tip, 0], [*(tip + w + perp), 0]]))
-            segs.append(np.array([[*tip, 0], [*(tip + w - perp), 0]]))
-        arr = np.concatenate([np.stack([s[:-1], s[1:]], axis=1)
-                              for s in segs])
-        self._draw_segs(mvp, arr, DIM_COLOR, 1.2)
 
     # ------------------------------------------------------- QPainter texts
 
@@ -286,29 +281,17 @@ class LayoutView:
             if detail.locked:
                 label += "  [locked]"
             painter.drawText(int(sx), int(sy) - 2, label)
-        # notes
-        for note in lay.notes:
-            sx, sy = self.paper_to_screen(note.x, note.y)
-            painter.setPen(QPen(QColor(25, 25, 30)))
-            painter.setFont(QFont(
-                "sans", max(int(note.height * self.px_per_mm), 6)))
-            painter.drawText(int(sx), int(sy), note.text)
-        # dimension texts
-        for dim in lay.dims:
-            a = np.array([dim.x1, dim.y1])
-            b = np.array([dim.x2, dim.y2])
-            d = b - a
-            length = np.linalg.norm(d)
-            if length < 1e-9:
-                continue
-            n = np.array([-d[1], d[0]]) / length
-            mid = (a + b) / 2 + n * (dim.offset + 2.5)
-            text = dim.text or self.vp.scene.format_length(
-                length * dim.scale_denom)
-            sx, sy = self.paper_to_screen(mid[0], mid[1])
-            painter.setPen(QPen(QColor(40, 60, 110)))
-            painter.setFont(QFont("sans", max(int(3.2 * self.px_per_mm), 7)))
-            painter.drawText(int(sx) - 14, int(sy), text)
+        from . import annot_paint
+        scene = self.vp.scene
+        idx = 1
+        for i, l in enumerate(scene.layouts):
+            if l.id == lay.id:
+                idx = i + 1
+        annot_paint.draw_all(
+            painter,
+            lambda x, y: self.paper_to_screen(x, y),
+            self.px_per_mm, lay, scene,
+            sheet_index=idx, sheet_count=max(len(scene.layouts), 1))
 
     # ------------------------------------------------------------ GL helpers
 
@@ -427,3 +410,62 @@ class LayoutView:
                 return d
         self.entered_detail = None
         return None
+
+
+def _section_cut(shapes, target, d, right, up, offset):
+    """Cut shapes with a half-space in front of the section plane.
+
+    Returns (cut_shapes, cut_polygons_2d) — polygons are the section
+    outlines in the detail's projector frame (model units)."""
+    from ..core import geometry as g
+    from ..core.occ import gp_Pln
+
+    plane_pt = target + d * float(offset)
+    # extent large enough to swallow the whole scene
+    import numpy as np
+    diag = 0.0
+    for s in shapes:
+        mn, mx = g.bbox(s)
+        diag = max(diag, float(np.linalg.norm(np.subtract(mx, mn))),
+                   float(np.linalg.norm(np.subtract(mx, plane_pt))),
+                   float(np.linalg.norm(np.subtract(mn, plane_pt))))
+    L = diag * 2 + 10
+    corners = [plane_pt + right * sx * L + up * sy * L
+               for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    quad = g.make_polyline([tuple(c) for c in corners], closed=True)
+    cutter = g.extrude(g.planar_face(quad), tuple(d), L, cap=False)
+
+    out_shapes = []
+    cut_polys = []
+    for s in shapes:
+        kind = g.shape_kind(s)
+        try:
+            if kind == "solid":
+                out_shapes.append(g.boolean_difference(s, cutter))
+            else:
+                out_shapes.append(s)
+                continue
+        except g.GeometryError:
+            out_shapes.append(s)
+            continue
+        # section outline for hatching
+        try:
+            from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+            plane = gp_Pln(g._pnt(tuple(plane_pt)), g._dir(tuple(d)))
+            sec = BRepAlgoAPI_Section(s, plane)
+            sec.Build()
+            if sec.IsDone():
+                for wire in g._curve_pieces(g.edges_of(sec.Shape()), []):
+                    pts = g.sample_curve(wire, 96)
+                    poly = [((p[0] - plane_pt[0]) * right[0]
+                             + (p[1] - plane_pt[1]) * right[1]
+                             + (p[2] - plane_pt[2]) * right[2],
+                             (p[0] - plane_pt[0]) * up[0]
+                             + (p[1] - plane_pt[1]) * up[1]
+                             + (p[2] - plane_pt[2]) * up[2])
+                            for p in pts]
+                    if len(poly) >= 3:
+                        cut_polys.append(poly)
+        except Exception:
+            pass
+    return out_shapes, cut_polys

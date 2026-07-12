@@ -302,14 +302,21 @@ def cmd_exportpdf(ctx):
         if lay is None:
             ctx.echo(f"No layout named '{name}'.")
             return
+    scope = "Current"
+    if len(ctx.scene.layouts) > 1:
+        scope = yield OptionReq("Export", options=["Current", "All"],
+                                default="All")
     import os
-    path = yield TextReq("PDF path", default=f"~/{lay.name}.pdf")
+    default_name = (f"~/{lay.name}.pdf" if scope == "Current"
+                    else "~/sheets.pdf")
+    path = yield TextReq("PDF path", default=default_name)
     path = os.path.abspath(os.path.expanduser(path.strip()))
     if not path.endswith(".pdf"):
         path += ".pdf"
-    from ..fileio.pdf import export_layout_pdf
-    export_layout_pdf(_window(ctx), lay, path)
-    ctx.echo(f"Exported '{lay.name}' to {path} "
+    from ..fileio.pdf import export_layouts_pdf
+    layouts = ctx.scene.layouts if scope == "All" else [lay]
+    export_layouts_pdf(_window(ctx), layouts, path)
+    ctx.echo(f"Exported {len(layouts)} sheet(s) to {path} "
              "(vector linework, raster shaded views).")
 
 
@@ -363,3 +370,183 @@ def cmd_dim(ctx):
     ctx.echo(f"Dimension placed: {measured:g}"
              + (f" (model units at {detail.scale_text()})" if detail
                 else " mm on paper"))
+
+@command("leader")
+def cmd_leader(ctx):
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Leaders go on layouts — switch to one first.")
+        return
+        yield  # pragma: no cover
+    from ..core.layout import Leader
+    tip = yield PointReq("Arrow point")
+    pts = [[tip[0], tip[1]]]
+    while True:
+        p = yield PointReq("Next point (Enter to finish)",
+                           rubber_pts=[(q[0], q[1], 0) for q in pts],
+                           allow_empty=len(pts) >= 2)
+        if p is None:
+            break
+        pts.append([p[0], p[1]])
+    text = yield TextReq("Leader text")
+    lay.leaders.append(Leader(points=pts, text=text))
+    ctx.scene.notify()
+    ctx.echo("Leader placed.")
+
+
+@command("hatch")
+def cmd_hatch(ctx):
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Hatches go on layouts — switch to one first.")
+        return
+        yield  # pragma: no cover
+    from ..core.layout import Hatch
+    pts = []
+    first = yield PointReq("First corner of hatch region")
+    pts.append([first[0], first[1]])
+    while True:
+        p = yield PointReq(
+            "Next corner (Enter to close)" if len(pts) >= 3
+            else "Next corner",
+            rubber_pts=[(q[0], q[1], 0) for q in pts],
+            allow_empty=len(pts) >= 3)
+        if p is None:
+            break
+        pts.append([p[0], p[1]])
+    pattern = yield OptionReq("Pattern", options=["Lines", "Cross", "Solid"],
+                              default="Lines")
+    spacing = 3.0
+    angle = 45.0
+    if pattern != "Solid":
+        spacing = yield NumberReq("Line spacing (mm)", default=3.0,
+                                  minimum=0.2)
+        angle = yield NumberReq("Angle (degrees)", default=45.0)
+    lay.hatches.append(Hatch(points=pts, pattern=pattern.lower(),
+                             angle=angle, spacing=spacing))
+    ctx.scene.notify()
+    ctx.echo(f"Hatch placed ({pattern.lower()}).")
+
+
+def _dim_scale_at(lay, x, y):
+    detail = lay.detail_at(x, y)
+    return (detail.scale_denom if detail and not detail.perspective
+            else 1.0)
+
+
+@command("dimradius", aliases=("dimr",))
+def cmd_dimradius(ctx):
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Dimensions go on layouts — switch to one first.")
+        return
+        yield  # pragma: no cover
+    from ..core.layout import RadialDim
+    center = yield PointReq("Circle centre (on the paper)")
+    edge = yield PointReq("Point on the circle", rubber_from=center)
+    lay.rdims.append(RadialDim(
+        cx=center[0], cy=center[1], px=edge[0], py=edge[1],
+        diameter=False,
+        scale_denom=_dim_scale_at(lay, center[0], center[1])))
+    ctx.scene.notify()
+    ctx.echo("Radius dimension placed.")
+
+
+@command("dimdiameter", aliases=("dimdia",))
+def cmd_dimdiameter(ctx):
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Dimensions go on layouts — switch to one first.")
+        return
+        yield  # pragma: no cover
+    from ..core.layout import RadialDim
+    center = yield PointReq("Circle centre (on the paper)")
+    edge = yield PointReq("Point on the circle", rubber_from=center)
+    lay.rdims.append(RadialDim(
+        cx=center[0], cy=center[1], px=edge[0], py=edge[1], diameter=True,
+        scale_denom=_dim_scale_at(lay, center[0], center[1])))
+    ctx.scene.notify()
+    ctx.echo("Diameter dimension placed.")
+
+
+@command("dimangle", aliases=("dimangular",))
+def cmd_dimangle(ctx):
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Dimensions go on layouts — switch to one first.")
+        return
+        yield  # pragma: no cover
+    from ..core.layout import AngularDim
+    vertex = yield PointReq("Angle vertex")
+    p1 = yield PointReq("First direction", rubber_from=vertex)
+    p2 = yield PointReq("Second direction", rubber_from=vertex)
+    lay.adims.append(AngularDim(vx=vertex[0], vy=vertex[1],
+                                x1=p1[0], y1=p1[1], x2=p2[0], y2=p2[1]))
+    ctx.scene.notify()
+    ctx.echo("Angular dimension placed.")
+
+
+@command("titleblock")
+def cmd_titleblock(ctx):
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Title blocks go on layouts — switch to one first.")
+        return
+        yield  # pragma: no cover
+    existing = lay.title_block.get("fields", {})
+    project = yield TextReq("Project", default=existing.get("project", ""))
+    title = yield TextReq("Drawing title",
+                          default=existing.get("title", lay.name))
+    author = yield TextReq("Drawn by", default=existing.get("author", ""))
+    lay.title_block = {"template": "standard", "fields": {
+        "project": project, "title": title, "author": author,
+    }}
+    ctx.scene.notify()
+    ctx.echo("Title block added (bottom right; date/sheet/scale "
+             "fill automatically).")
+
+
+@command("scalebar")
+def cmd_scalebar(ctx):
+    lay = _active_layout(ctx)
+    if lay is None:
+        ctx.echo("Scale bars go on layouts — switch to one first.")
+        return
+        yield  # pragma: no cover
+    pos = yield PointReq("Scale bar position")
+    detail = lay.detail_at(pos[0], pos[1])
+    denom = detail.scale_denom if detail and not detail.perspective else (
+        lay.details[0].scale_denom if lay.details else 10.0)
+    lay.scale_bars.append([pos[0], pos[1], denom])
+    ctx.scene.notify()
+    ctx.echo(f"Scale bar placed (1:{denom:g}).")
+
+
+@command("detailsection")
+def cmd_detailsection(ctx):
+    lay, detail = _entered_or_only_detail(ctx)
+    if detail is None:
+        ctx.echo("Enter a detail first (double-click it).")
+        return
+        yield  # pragma: no cover
+    if detail.perspective:
+        ctx.echo("Sections need a parallel view detail.")
+        return
+    if detail.section_offset is not None:
+        choice = yield OptionReq("Section", options=["Move", "Off"],
+                                 default="Move")
+        if choice == "Off":
+            detail.section_offset = None
+            ctx.viewport.layout_view._hlr_cache.pop(detail.id, None)
+            ctx.scene.notify()
+            ctx.echo("Section removed — detail shows the whole model.")
+            return
+    from .base import LengthReq
+    offset = yield LengthReq(
+        "Cut plane distance from the detail target (toward the viewer)",
+        default=detail.section_offset or 0.0)
+    detail.section_offset = float(offset)
+    ctx.viewport.layout_view._hlr_cache.pop(detail.id, None)
+    ctx.scene.notify()
+    ctx.echo(f"Section cut at {offset:g} — geometry in front of the plane "
+             "is removed, cut faces hatched.")

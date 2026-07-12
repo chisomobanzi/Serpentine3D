@@ -14,15 +14,30 @@ from PySide6.QtGui import (
 
 
 def export_layout_pdf(window, layout, path: str):
+    export_layouts_pdf(window, [layout], path)
+
+
+def export_layouts_pdf(window, layouts: list, path: str):
+    """One PDF with a page per layout (sizes may differ per page)."""
+    if not layouts:
+        raise ValueError("No layouts to export")
     writer = QPdfWriter(path)
-    writer.setPageSize(QPageSize(QSizeF(layout.paper_w, layout.paper_h),
-                                 QPageSize.Unit.Millimeter,
-                                 name="", matchPolicy=QPageSize.SizeMatchPolicy.ExactMatch))
     writer.setResolution(600)
+    first = layouts[0]
+    writer.setPageSize(QPageSize(QSizeF(first.paper_w, first.paper_h),
+                                 QPageSize.Unit.Millimeter, name="",
+                                 matchPolicy=QPageSize.SizeMatchPolicy.ExactMatch))
     painter = QPainter(writer)
     try:
-        _paint_layout(painter, window, layout,
-                      writer.resolution() / 25.4)
+        for i, lay in enumerate(layouts):
+            if i > 0:
+                writer.setPageSize(QPageSize(
+                    QSizeF(lay.paper_w, lay.paper_h),
+                    QPageSize.Unit.Millimeter, name="",
+                    matchPolicy=QPageSize.SizeMatchPolicy.ExactMatch))
+                writer.newPage()
+            _paint_layout(painter, window, lay,
+                          writer.resolution() / 25.4)
     finally:
         painter.end()
 
@@ -54,18 +69,14 @@ def _paint_layout(painter: QPainter, window, layout, k: float):
             lx, ly = pt(detail.x + 1.5, detail.y + 1.5)
             painter.drawText(int(lx), int(ly), detail.scale_text())
 
-    # notes
-    for note in layout.notes:
-        painter.setPen(QPen(QColor(25, 25, 30)))
-        font = QFont("sans")
-        font.setPixelSize(max(int(note.height * k), 4))
-        painter.setFont(font)
-        nx, ny = pt(note.x, note.y)
-        painter.drawText(int(nx), int(ny), note.text)
-
-    # dimensions
-    for dim in layout.dims:
-        _paint_dim(painter, dim, layout, k, pt, window.scene)
+    from ..ui import annot_paint
+    scene = window.scene
+    idx = 1
+    for i, l in enumerate(scene.layouts):
+        if l.id == layout.id:
+            idx = i + 1
+    annot_paint.draw_all(painter, pt, k, layout, scene, sheet_index=idx,
+                         sheet_count=max(len(scene.layouts), 1))
 
 
 def _paint_detail_vector(painter, layout_view, detail, layout, k):
@@ -96,6 +107,24 @@ def _paint_detail_vector(painter, layout_view, detail, layout, k):
         pen_h.setDashPattern([4.0, 2.5])
         draw_polys(data["hidden"], pen_h)
     draw_polys(data["visible"], QPen(QColor(15, 15, 18), 0.3 * k))
+    cut = data.get("cut") or []
+    if cut:
+        from ..core.layout import hatch_lines
+        from PySide6.QtCore import QPointF
+        painter.setPen(QPen(QColor(60, 62, 70), 0.15 * k))
+        for poly in cut:
+            paper = [(cx + px * s, cy + py * s) for px, py in poly]
+            for a, b in hatch_lines(paper, 45.0, 2.5):
+                painter.drawLine(
+                    QPointF(a[0] * k, (layout.paper_h - a[1]) * k),
+                    QPointF(b[0] * k, (layout.paper_h - b[1]) * k))
+        painter.setPen(QPen(QColor(10, 10, 12), 0.5 * k))
+        for poly in cut:
+            pts = [QPointF((cx + px * s) * k,
+                           (layout.paper_h - (cy + py * s)) * k)
+                   for px, py in poly]
+            from PySide6.QtGui import QPolygonF
+            painter.drawPolyline(QPolygonF(pts))
     painter.restore()
 
 

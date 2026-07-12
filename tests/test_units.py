@@ -82,3 +82,23 @@ def test_ray_line_parameter_direction():
     # ray parallel to the line -> None
     assert ray_line_parameter(origin, np.array([1.0, 0, 0]), np.zeros(3),
                               np.array([1.0, 0, 0])) is None
+
+
+def test_hatch_lines():
+    from serpentine.core.layout import hatch_lines
+    square = [(0, 0), (10, 0), (10, 10), (0, 10)]
+    segs = hatch_lines(square, 0.0, 2.0)
+    assert len(segs) == 5
+    for (a, b) in segs:
+        assert abs(a[1] - b[1]) < 1e-9          # horizontal
+        assert abs(abs(b[0] - a[0]) - 10) < 1e-9
+    segs45 = hatch_lines(square, 45.0, 2.0)
+    assert len(segs45) >= 5
+    # a C-shape produces split segments (even-odd)
+    cshape = [(0, 0), (10, 0), (10, 3), (3, 3), (3, 7), (10, 7),
+              (10, 10), (0, 10)]
+    segs_c = hatch_lines(cshape, 0.0, 2.0)
+    ys = {round(a[1], 3) for a, b in segs_c}
+    mid = [s for s in segs_c if 3 < s[0][1] < 7]
+    for (a, b) in mid:
+        assert abs(b[0] - a[0]) - 3 < 1e-6      # only the spine is filled
