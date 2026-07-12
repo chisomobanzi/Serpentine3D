@@ -331,3 +331,20 @@ def test_curvature_at():
     line = g.make_line((0, 0, 0), (10, 0, 0))
     info = g.curvature_at(line, (5, 1, 0))
     assert info["radius"] == float("inf")
+
+
+def test_dash_segments_bounded():
+    import numpy as np
+    from serpentine.core.hlr import dash_segments
+    # exact boundary alignment used to loop forever
+    line = np.array([[0, 0, 0], [10, 0, 0]], float)
+    d = dash_segments(line, dash=2.0, gap=1.2)
+    total = sum(np.linalg.norm(s[1] - s[0]) for s in d)
+    assert 5.0 < total < 8.0
+    # pathological: period exactly divides length, tiny segments
+    poly = np.array([[0, 0, 0], [3.2, 0, 0], [3.2, 6.4, 0]], float)
+    d2 = dash_segments(poly, dash=1.6, gap=1.6)
+    assert len(d2) >= 2
+    # zero-length segments skipped
+    d3 = dash_segments(np.array([[1, 1, 0], [1, 1, 0]], float))
+    assert len(d3) == 0

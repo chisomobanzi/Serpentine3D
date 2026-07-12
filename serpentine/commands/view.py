@@ -64,6 +64,15 @@ def cmd_ghosted(ctx):
     yield from ()
 
 
+@command("technical", aliases=("tech",), mutates=False)
+def cmd_technical(ctx):
+    """Hidden-line technical display (parallel projection linework)."""
+    _vp(ctx).set_display_mode("technical")
+    ctx.echo("Technical display — visible edges solid, hidden dashed. "
+             "Navigation shows wireframe until you release.")
+    yield from ()
+
+
 @command("grid", mutates=False)
 def cmd_grid(ctx):
     vp = _vp(ctx)

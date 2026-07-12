@@ -324,6 +324,45 @@ def main():
           abs(length["length"] - 2 * _m.pi * 5) < 1e-6,
           f"len={length['length']:.6f}")
 
+    # --- drafting: layouts, details, annotations, make2d, pdf --------------
+    import os
+    c.call("command", command="new", inputs=["Yes"])
+    c.call("command", command="box", inputs=["-300,-200,0", "300,200,0", "80"])
+    c.call("command", command="cylinder", inputs=["0,0,80", "120", "300"])
+    c.call("command", command="layout",
+           inputs=["New", "E2E Sheet", "A3", "Landscape"])
+    c.call("command", command="detail",
+           inputs=["20,20", "200,180", "Top", "1:5"])
+    c.call("command", command="detail",
+           inputs=["220,20", "400,180", "Front", "1:5"])
+    c.call("command", command="text",
+           inputs=["20,270", "E2E TEST SHEET", "5"])
+    c.call("command", command="dim", inputs=["50,40", "170,40", "110,30"])
+    r = c.call("command", command="exportpdf",
+               inputs=["/tmp/serp_e2e/e2e_sheet.pdf"])
+    pdf_ok = (os.path.exists("/tmp/serp_e2e/e2e_sheet.pdf")
+              and os.path.getsize("/tmp/serp_e2e/e2e_sheet.pdf") > 2000)
+    check("drafting: layout/details/text/dim/pdf", pdf_ok,
+          f"pdf={os.path.getsize('/tmp/serp_e2e/e2e_sheet.pdf')}b")
+    shot(c, "10_layout_sheet")
+
+    # switch back to model space for make2d (tab click equivalent)
+    c.call("command", command="layout", inputs=["Delete", "E2E Sheet"])
+    n0 = c.call("scene_info")["object_count"]
+    c.call("set_viewport", view="front", zoom_extents=True)
+    c.call("command", command="make2d", inputs=[""])
+    n1 = c.call("scene_info")["object_count"]
+    layer_names = {l["name"] for l in c.call("scene_info")["layers"]}
+    check("make2d", n1 > n0 and "Make2D visible" in layer_names,
+          f"{n0}->{n1} objects, layers={sorted(layer_names)}")
+
+    # technical display mode renders
+    c.call("set_viewport", display_mode="technical")
+    mode = c.call("scene_info")["display_mode"]
+    shot(c, "11_technical")
+    c.call("set_viewport", display_mode="shaded")
+    check("technical display mode", mode == "technical")
+
     # --- summary ---
     print()
     fails = [k for k, v in results.items() if v[0] == "FAIL"]

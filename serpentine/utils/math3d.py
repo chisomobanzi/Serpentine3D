@@ -24,6 +24,18 @@ def perspective(fov_y_deg: float, aspect: float, near: float,
     return m
 
 
+def ortho(left: float, right: float, bottom: float, top: float,
+          near: float, far: float) -> np.ndarray:
+    m = np.eye(4, dtype=np.float32)
+    m[0, 0] = 2.0 / (right - left)
+    m[1, 1] = 2.0 / (top - bottom)
+    m[2, 2] = -2.0 / (far - near)
+    m[0, 3] = -(right + left) / (right - left)
+    m[1, 3] = -(top + bottom) / (top - bottom)
+    m[2, 3] = -(far + near) / (far - near)
+    return m
+
+
 def look_at(eye: np.ndarray, target: np.ndarray, up: np.ndarray) -> np.ndarray:
     f = normalize(target - eye)
     s = normalize(np.cross(f, up))

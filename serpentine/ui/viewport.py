@@ -9,6 +9,7 @@ from OpenGL import GL
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtWidgets import QApplication
 
 from ..utils.math3d import ray_plane, ray_triangle_hits
 from . import theme
@@ -255,6 +256,9 @@ class Viewport(QOpenGLWidget):
         self.point_mode = False             # command wants a point click
         from ..core.cplane import CPlane
         self.cplane = CPlane()
+        from .layout_view import LayoutView
+        self.space = "model"                # "model" | layout id
+        self.layout_view = LayoutView(self)
         from ..core.snaps import SnapIndex
         self.snaps = SnapIndex(scene, config)
         self._active_snap = None            # (point, kind) under cursor
@@ -369,8 +373,34 @@ class Viewport(QOpenGLWidget):
         GL.glEnable(GL.GL_DEPTH_TEST)
 
         w, h = self.width(), self.height()
+
+        if self.space != "model":
+            from PySide6.QtGui import QPainter
+            painter = QPainter(self)
+            painter.beginNativePainting()
+            GL.glEnable(GL.GL_DEPTH_TEST)
+            GL.glEnable(GL.GL_BLEND)
+            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+            self._sync_gpu()
+            self.layout_view.paint()
+            self._draw_preview(self.layout_view._paper_mvp())
+            GL.glBindVertexArray(0)
+            GL.glUseProgram(0)
+            GL.glDisable(GL.GL_SCISSOR_TEST)
+            GL.glDisable(GL.GL_DEPTH_TEST)
+            painter.endNativePainting()
+            self.layout_view.paint_overlay(painter)
+            painter.end()
+            return
+
         view = self.camera.view_matrix()
         mvp = (self.camera.proj_matrix(w, h) @ view).astype(np.float32)
+
+        if self.display_mode == "technical":
+            self._paint_technical(w, h)
+            self._draw_preview(mvp)
+            self._draw_selection_box(w, h)
+            return
 
         if self.grid_visible:
             self._draw_grid(mvp)
@@ -380,6 +410,87 @@ class Viewport(QOpenGLWidget):
         self._draw_control_points(mvp)
         self._draw_axis_triad(view, w, h)
         self._draw_selection_box(w, h)
+
+    def _paint_technical(self, w, h):
+        """Model-space technical view: parallel-projection HLR linework."""
+        import math as _math
+        from ..core import hlr as _hlr
+        # paper-like background
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        self._preview.update(np.array(
+            [[-1, -1, 0], [1, -1, 0], [-1, 1, 0],
+             [1, -1, 0], [1, 1, 0], [-1, 1, 0]], np.float32))
+        self._set_line_uniforms(np.eye(4, dtype=np.float32),
+                                (0.94, 0.94, 0.92, 1.0))
+        GL.glBindVertexArray(self._preview.vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
+
+        cam = self.camera
+        half_h = cam.distance * _math.tan(_math.radians(cam.fov) / 2)
+        half_w = half_h * w / max(h, 1)
+        mvp2d = np.eye(4, dtype=np.float32)
+        mvp2d[0, 0] = 1.0 / half_w
+        mvp2d[1, 1] = 1.0 / half_h
+
+        dragging = bool(QApplication.mouseButtons() & self._nav_button())
+        if dragging:
+            # fast wireframe preview while navigating
+            self._sync_gpu()
+            view = cam.view_matrix()
+            mvp = (cam.proj_matrix(w, h) @ view).astype(np.float32)
+            GL.glEnable(GL.GL_DEPTH_TEST)
+            self._draw_objects(mvp, view, mode_override="wireframe",
+                               light_background=True)
+            GL.glDisable(GL.GL_DEPTH_TEST)
+            return
+
+        key = (self.scene.revision, round(cam.azimuth, 5),
+               round(cam.elevation, 5),
+               tuple(round(float(c), 4) for c in cam.target))
+        cached = getattr(self, "_tech_cache", None)
+        if cached is None or cached[0] != key:
+            shapes = [o.shape for o in self.scene.visible_objects()]
+            if shapes:
+                fwd = cam.target - cam.position
+                fwd = fwd / max(np.linalg.norm(fwd), 1e-12)
+                right, up = cam.right_up()
+                res = _hlr.hlr_project_safe(shapes, origin=tuple(cam.target),
+                                       view_dir=tuple(-fwd),
+                                       x_dir=tuple(right))
+                data = {
+                    "visible": _hlr.edges_to_polylines(
+                        res["visible"] + res["outline"]),
+                    "hidden": _hlr.edges_to_polylines(res["hidden"]),
+                }
+            else:
+                data = {"visible": [], "hidden": []}
+            self._tech_cache = (key, data)
+        data = self._tech_cache[1]
+
+        hidden_segs = []
+        for poly in data["hidden"]:
+            seg = _hlr.dash_segments(poly, dash=half_h * 0.02,
+                                     gap=half_h * 0.012)
+            if len(seg):
+                hidden_segs.append(seg)
+        if hidden_segs:
+            allh = np.concatenate(hidden_segs).reshape(-1, 3)
+            self._preview.update(allh.astype(np.float32))
+            self._set_line_uniforms(mvp2d, (0.45, 0.45, 0.5, 1.0))
+            self._line_width(1.0)
+            GL.glBindVertexArray(self._preview.vao)
+            GL.glDrawArrays(GL.GL_LINES, 0, len(allh))
+        vis_segs = []
+        for poly in data["visible"]:
+            vis_segs.append(np.stack([poly[:-1], poly[1:]], axis=1))
+        if vis_segs:
+            allv = np.concatenate(vis_segs).reshape(-1, 3)
+            self._preview.update(allv.astype(np.float32))
+            self._set_line_uniforms(mvp2d, (0.08, 0.08, 0.1, 1.0))
+            self._line_width(1.6)
+            GL.glBindVertexArray(self._preview.vao)
+            GL.glDrawArrays(GL.GL_LINES, 0, len(allv))
+        GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _set_line_uniforms(self, mvp, color):
         GL.glUseProgram(self._line_prog)
@@ -450,8 +561,9 @@ class Viewport(QOpenGLWidget):
         self._curv_range_cache = (rev, max(rng, 1e-9))
         return self._curv_range_cache[1]
 
-    def _draw_objects(self, mvp, view):
-        mode = self.display_mode
+    def _draw_objects(self, mvp, view, mode_override=None,
+                      light_background=False):
+        mode = mode_override or self.display_mode
         fill_alpha = {"shaded": 1.0, "ghosted": 0.35, "wireframe": 0.0,
                       "zebra": 1.0, "curvature": 1.0}[mode]
         curv_range = self._curvature_range() if mode == "curvature" else 0.0
@@ -461,6 +573,11 @@ class Viewport(QOpenGLWidget):
                 continue
             selected = self.selection.is_selected(obj.id)
             color = theme.SELECTION_COLOR if selected else self.scene.color_of(obj)
+            line_color = color
+            if light_background and not selected:
+                # dark linework on paper-white detail backgrounds
+                line_color = (min(color[0], 0.3), min(color[1], 0.3),
+                              min(color[2], 0.33))
 
             if fill_alpha > 0 and gpu.tri_count:
                 GL.glUseProgram(self._mesh_prog)
@@ -495,11 +612,11 @@ class Viewport(QOpenGLWidget):
                 if selected:
                     edge_color = (*theme.SELECTION_COLOR, 1.0)
                 elif obj.kind == "curve":
-                    edge_color = (*color, 1.0)
+                    edge_color = (*line_color, 1.0)
                 else:
                     # face edges: darkened object colour
-                    edge_color = (color[0] * 0.35, color[1] * 0.35,
-                                  color[2] * 0.35, 1.0)
+                    edge_color = (line_color[0] * 0.35, line_color[1] * 0.35,
+                                  line_color[2] * 0.35, 1.0)
                 self._set_line_uniforms(mvp, edge_color)
                 self._line_width(2.2 if selected else 1.4)
                 GL.glBindVertexArray(gpu.line_vao)
@@ -527,7 +644,10 @@ class Viewport(QOpenGLWidget):
             return
         segs = [pts] if len(pts) else []
         # screen-scaled cross markers at picked points
-        size = self.camera.distance * 0.008
+        if self.space != "model":
+            size = 5.0 / max(self.layout_view.px_per_mm, 1e-6)
+        else:
+            size = self.camera.distance * 0.008
         for m in markers:
             m = np.asarray(m, np.float32)
             for axis in np.eye(3, dtype=np.float32) * size:
@@ -652,7 +772,7 @@ class Viewport(QOpenGLWidget):
 
     def set_display_mode(self, mode: str):
         if mode not in ("shaded", "wireframe", "ghosted", "zebra",
-                        "curvature"):
+                        "curvature", "technical"):
             raise ValueError(f"Unknown display mode '{mode}'")
         self.display_mode = mode
         self.update()
@@ -669,10 +789,57 @@ class Viewport(QOpenGLWidget):
         img = self.grabFramebuffer()
         return img.save(path)
 
+    def render_detail_image(self, detail, px_w: int, px_h: int):
+        """Render a detail's 3D content offscreen (for PDF export)."""
+        from PySide6.QtOpenGL import QOpenGLFramebufferObject
+        self.makeCurrent()
+        try:
+            fbo = QOpenGLFramebufferObject(
+                px_w, px_h,
+                QOpenGLFramebufferObject.Attachment.CombinedDepthStencil)
+            fbo.bind()
+            GL.glViewport(0, 0, px_w, px_h)
+            GL.glClearColor(0.98, 0.98, 0.97, 1.0)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+            GL.glEnable(GL.GL_DEPTH_TEST)
+            self._sync_gpu()
+            proj, view = self.layout_view.detail_matrices(detail, px_w, px_h)
+            mvp = (proj @ view).astype(np.float32)
+            self._draw_objects(mvp, view,
+                               mode_override=detail.display_mode,
+                               light_background=True)
+            img = fbo.toImage()
+            fbo.release()
+            ratio = self.devicePixelRatioF()
+            GL.glViewport(0, 0, int(self.width() * ratio),
+                          int(self.height() * ratio))
+            return img
+        except Exception:
+            return None
+        finally:
+            self.doneCurrent()
+
     # -------------------------------------------------------------- picking
 
+    def set_space(self, space: str):
+        """Switch between model space and a layout (by id)."""
+        self.space = space
+        self.layout_view.entered_detail = None
+        if space != "model":
+            self.layout_view._fitted_for = None
+        self.set_preview(None)
+        self.update()
+
     def world_point_at(self, px: float, py: float):
-        """Point for the pixel: object snap if near one, else CPlane (z=0)."""
+        """Point for the pixel: object snap if near one, else CPlane (z=0).
+
+        In a layout, returns paper coordinates in millimetres (x, y, 0)."""
+        if self.space != "model":
+            self._active_snap = None
+            x, y = self.layout_view.screen_to_paper(px, py)
+            if self.grid_snap:
+                x, y = round(x), round(y)
+            return (float(x), float(y), 0.0)
         snap = self.snaps.find(self.camera, px, py, self.width(),
                                self.height(), base_point=self.snap_base)
         if snap is not None:
@@ -731,6 +898,15 @@ class Viewport(QOpenGLWidget):
 
     # ---------------------------------------------------------------- events
 
+    def mouseDoubleClickEvent(self, ev):
+        if (self.space != "model" and not self.point_mode
+                and ev.button() == Qt.MouseButton.LeftButton):
+            pos = ev.position()
+            self.layout_view.double_click(pos.x(), pos.y())
+            self.update()
+            return
+        super().mouseDoubleClickEvent(ev)
+
     def mousePressEvent(self, ev):
         self._last_mouse = ev.position()
         if ev.button() == Qt.MouseButton.LeftButton:
@@ -739,6 +915,10 @@ class Viewport(QOpenGLWidget):
                 pt = self.world_point_at(pos.x(), pos.y())
                 if pt is not None:
                     self.pointPicked.emit(pt)
+                return
+            if self.space != "model":
+                if self.layout_view.click_outside_exits(pos.x(), pos.y()):
+                    self.update()
                 return
             cv = self._cv_hit(pos.x(), pos.y())
             if cv is not None:
@@ -757,6 +937,18 @@ class Viewport(QOpenGLWidget):
             self._last_mouse = pos
         dx = pos.x() - self._last_mouse.x()
         dy = pos.y() - self._last_mouse.y()
+        if self.space != "model":
+            if ev.buttons() & self._nav_button():
+                orbit = not (ev.modifiers()
+                             & Qt.KeyboardModifier.ShiftModifier)
+                self.layout_view.drag(dx, dy, orbit)
+                self.update()
+            elif self.point_mode:
+                pt = self.world_point_at(pos.x(), pos.y())
+                if pt is not None:
+                    self.mouseWorldMoved.emit(pt)
+            self._last_mouse = pos
+            return
         if ev.buttons() & self._nav_button():
             speed = (float(self.config.get("mouse", "orbit_speed",
                                            default=1.0))
@@ -801,6 +993,9 @@ class Viewport(QOpenGLWidget):
 
     def mouseReleaseEvent(self, ev):
         if ev.button() != Qt.MouseButton.LeftButton:
+            if (ev.button() == self._nav_button()
+                    and self.display_mode == "technical"):
+                self.update()      # navigation ended: recompute HLR view
             return
         if self._cv_drag is not None:
             self._cv_drag = None
@@ -914,6 +1109,11 @@ class Viewport(QOpenGLWidget):
                 steps = -steps
             steps *= float(self.config.get("mouse", "zoom_speed",
                                            default=1.0))
+        if self.space != "model":
+            pos = ev.position()
+            self.layout_view.wheel(steps, pos.x(), pos.y())
+            self.update()
+            return
         self.camera.zoom(steps)
         self.update()
 

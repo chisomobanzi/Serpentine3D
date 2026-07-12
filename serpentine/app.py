@@ -45,8 +45,24 @@ class MainWindow(QMainWindow):
         self.history = History(self.scene)
 
         # widgets
+        from PySide6.QtWidgets import QTabBar
         self.viewport = Viewport(self.scene, self.selection, config=self.cfg)
-        self.setCentralWidget(self.viewport)
+        self.space_tabs = QTabBar()
+        self.space_tabs.setExpanding(False)
+        self.space_tabs.setDrawBase(False)
+        self.space_tabs.setStyleSheet(
+            "QTabBar::tab { padding: 4px 14px; background: #2b2c30;"
+            " border: 1px solid #1b1c1f; border-bottom: none; }"
+            "QTabBar::tab:selected { background: #4a3f28; color: #f0d9a8; }")
+        self._tabs_updating = False
+        self.space_tabs.currentChanged.connect(self._space_tab_changed)
+        central = QWidget()
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(self.viewport, 1)
+        central_layout.addWidget(self.space_tabs)
+        self.setCentralWidget(central)
 
         from .ui.osnap_bar import OsnapBar
         self.command_line = CommandLine()
@@ -100,6 +116,8 @@ class MainWindow(QMainWindow):
         self.viewport.escapePressed.connect(self._cancel)
         self.scene.add_listener(self._update_status)
         self.selection.add_listener(self._update_status)
+        self.scene.add_listener(self._refresh_space_tabs)
+        self._refresh_space_tabs()
 
         self._build_toolbar()
         self._build_menus()
@@ -205,6 +223,24 @@ class MainWindow(QMainWindow):
                      lambda: self.run_command("ghosted"))
         self._action(m_view, "Toggle Grid", "F7",
                      lambda: self.run_command("grid"))
+
+        m_draft = mb.addMenu("&Drafting")
+        self._action(m_draft, "New Layout...", None,
+                     lambda: self.run_command("layout"))
+        self._action(m_draft, "Place Detail View...", None,
+                     lambda: self.run_command("detail"))
+        self._action(m_draft, "Text Note...", None,
+                     lambda: self.run_command("text"))
+        self._action(m_draft, "Linear Dimension...", None,
+                     lambda: self.run_command("dim"))
+        m_draft.addSeparator()
+        self._action(m_draft, "Make2D", None,
+                     lambda: self.run_command("make2d"))
+        self._action(m_draft, "Technical Display", None,
+                     lambda: self.run_command("technical"))
+        m_draft.addSeparator()
+        self._action(m_draft, "Export PDF...", "Ctrl+P",
+                     lambda: self.run_command("exportpdf"))
 
         m_tools = mb.addMenu("&Tools")
         self._action(m_tools, "Settings...", "Ctrl+,", self._show_settings)
@@ -420,6 +456,54 @@ class MainWindow(QMainWindow):
             self.command_line.echo(f"Exported {scope} to {path}")
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Export failed", str(exc))
+
+    # ---------------------------------------------------------- space tabs
+
+    def _refresh_space_tabs(self):
+        self._tabs_updating = True
+        want = [("model", "Model")] + [(lay.id, lay.name)
+                                       for lay in self.scene.layouts]
+        while self.space_tabs.count() > len(want):
+            self.space_tabs.removeTab(self.space_tabs.count() - 1)
+        while self.space_tabs.count() < len(want):
+            self.space_tabs.addTab("")
+        current_index = 0
+        for i, (space_id, label) in enumerate(want):
+            self.space_tabs.setTabText(i, label)
+            self.space_tabs.setTabData(i, space_id)
+            if space_id == self.viewport.space:
+                current_index = i
+        if self.viewport.space != "model" and \
+                self.viewport.space not in [w[0] for w in want]:
+            # active layout was deleted (e.g. via undo)
+            self.viewport.set_space("model")
+            current_index = 0
+        self.space_tabs.setCurrentIndex(current_index)
+        self._tabs_updating = False
+
+    def _space_tab_changed(self, index: int):
+        if self._tabs_updating or index < 0:
+            return
+        space_id = self.space_tabs.tabData(index)
+        if space_id and space_id != self.viewport.space:
+            self.switch_space(space_id)
+
+    def switch_space(self, space_id: str):
+        if self.processor.busy:
+            self.processor.cancel()
+        self.viewport.set_space(space_id)
+        self._refresh_space_tabs()
+        if space_id == "model":
+            self.command_line.echo("Model space.")
+        else:
+            lay = next((l for l in self.scene.layouts
+                        if l.id == space_id), None)
+            if lay:
+                self.command_line.echo(
+                    f"Layout '{lay.name}' — 'detail' places a model view, "
+                    "'text'/'dim' annotate, double-click a detail to enter "
+                    "it.")
+        self._update_status()
 
     # ------------------------------------------------------------- settings
 

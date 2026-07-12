@@ -79,6 +79,33 @@ Most commands have Rhino-compatible aliases (`l`, `pl`, `c`, `m`, `co`, `mi`, ..
   Settings. `gridsnap` snaps picked points to the grid
 - Launch with a file: `serp model.serp` (or any importable format)
 
+## Drafting & documentation
+
+Serpentine has a full two-space drafting workflow — model in 3D, document
+in 2D, print to PDF — without leaving the app:
+
+- **Layouts** (`layout`): paper-space sheets (A4–A0, Letter, Tabloid or
+  custom) with tabs at the bottom of the viewport: `[Model] [Sheet 1] …`
+- **Detail views** (`detail`): live windows into the model placed on the
+  sheet — pick two corners, a view direction (top/front/right/…/perspective)
+  and a scale (`1:10`, `1:50`, …). Double-click a detail to *enter* it,
+  then pan (nav-button drag) and zoom (wheel changes the scale); click
+  outside to exit. `detailscale`, `detailmode`, `detaillock`,
+  `detailborder`, `detaildelete` manage the active detail.
+- **Hidden-line rendering**: each detail can be *technical* (hidden lines
+  removed), *hidden* (dashed hidden lines), *wireframe* or *shaded* —
+  powered by OCCT's HLR engine, isolated in a worker process so degenerate
+  geometry can never crash the app. The same engine drives the model-space
+  `technical` display mode.
+- **`make2d`**: project the current view (or a selection) into real,
+  editable 2D curves on `Make2D visible` / `Make2D hidden` layers.
+- **Annotations**: `text` notes and `dim` linear dimensions on the sheet —
+  dimensions placed over a detail automatically read in *model units* at
+  that detail's scale.
+- **`exportpdf`** (Ctrl+P): true vector PDF — linework stays crisp at any
+  zoom; shaded details are embedded as rendered images. Layouts save/load
+  with the `.serp` file.
+
 ### Settings
 
 **Tools → Settings** (Ctrl+,) — five flat pages, changes apply instantly:
