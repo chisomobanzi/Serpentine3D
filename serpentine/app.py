@@ -148,6 +148,9 @@ class MainWindow(QMainWindow):
         self._action(m_edit, "Undo", "Ctrl+Z", lambda: self.run_command("undo"))
         self._action(m_edit, "Redo", "Ctrl+Y", lambda: self.run_command("redo"))
         m_edit.addSeparator()
+        self._action(m_edit, "Copy", "Ctrl+C", self._copy_selected)
+        self._action(m_edit, "Paste", "Ctrl+V", self._paste)
+        m_edit.addSeparator()
         self._action(m_edit, "Delete", None, self._delete_selected)
         self._action(m_edit, "Select All", "Ctrl+A",
                      lambda: self.run_command("selall"))
@@ -269,6 +272,27 @@ class MainWindow(QMainWindow):
         if self.selection.ids and not self.processor.busy:
             self.run_command("delete")
 
+    def _copy_selected(self):
+        objs = self.selection.objects()
+        if not objs:
+            return
+        self._clipboard = [(o.name, o.shape, o.layer_id) for o in objs]
+        self.command_line.echo(f"Copied {len(objs)} object(s).")
+
+    def _paste(self):
+        clip = getattr(self, "_clipboard", None)
+        if not clip:
+            return
+        from .core import geometry as g
+        self.history.checkpoint("paste")
+        pasted = []
+        for name, shape, layer_id in clip:
+            lid = layer_id if layer_id in {
+                l.id for l in self.scene.layers.all()} else None
+            pasted.append(self.scene.add(g.copy_shape(shape), layer_id=lid))
+        self.selection.set([o.id for o in pasted])
+        self.command_line.echo(f"Pasted {len(pasted)} object(s).")
+
     # ------------------------------------------------------------ file dialogs
 
     _FILTERS = ("Serpentine (*.serp);;STEP (*.step *.stp);;"
@@ -370,6 +394,19 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{name} — {APP_TITLE}")
 
     def keyPressEvent(self, ev):
+        # fallback for env without a WM where QAction shortcuts don't fire
+        if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            handlers = {
+                Qt.Key.Key_C: self._copy_selected,
+                Qt.Key.Key_V: self._paste,
+                Qt.Key.Key_A: lambda: self.run_command("selall"),
+                Qt.Key.Key_Z: lambda: self.run_command("undo"),
+                Qt.Key.Key_Y: lambda: self.run_command("redo"),
+            }
+            fn = handlers.get(ev.key())
+            if fn:
+                fn()
+                return
         # any printable key focuses the command line (Rhino behaviour)
         text = ev.text()
         if text and text.isprintable() and not self.command_line.input.hasFocus():

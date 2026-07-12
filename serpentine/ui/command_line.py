@@ -21,6 +21,12 @@ class CommandInput(QLineEdit):
         if ev.type() == ev.Type.KeyPress and ev.key() == Qt.Key.Key_Tab:
             self.tabPressed.emit()
             return True
+        # with an empty input, cede Ctrl+C/V/A to the app-level shortcuts
+        if (ev.type() == ev.Type.ShortcutOverride and not self.text()
+                and ev.modifiers() & Qt.KeyboardModifier.ControlModifier
+                and ev.key() in (Qt.Key.Key_C, Qt.Key.Key_V, Qt.Key.Key_A)):
+            ev.ignore()
+            return False
         return super().event(ev)
 
     def keyPressEvent(self, ev):
@@ -31,6 +37,11 @@ class CommandInput(QLineEdit):
             self.downPressed.emit()
         elif key == Qt.Key.Key_Escape:
             self.escPressed.emit()
+        elif (not self.text()
+                and ev.modifiers() & Qt.KeyboardModifier.ControlModifier
+                and key in (Qt.Key.Key_C, Qt.Key.Key_V, Qt.Key.Key_A,
+                            Qt.Key.Key_Z, Qt.Key.Key_Y)):
+            ev.ignore()          # bubble to the main window
         else:
             super().keyPressEvent(ev)
 
