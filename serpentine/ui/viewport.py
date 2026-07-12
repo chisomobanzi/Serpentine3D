@@ -869,7 +869,7 @@ class Viewport(QOpenGLWidget):
                 self.cplane.snap_to_grid(hit, self.grid_snap_step))
         # ortho: Shift constrains to the dominant CPlane axis from the base
         if (self.snap_base is not None
-                and QApplication.keyboardModifiers()
+                and QApplication.queryKeyboardModifiers()
                 & Qt.KeyboardModifier.ShiftModifier):
             bu, bv, bw = self.cplane.from_world(self.snap_base)
             u, v, w = self.cplane.from_world(hit)
