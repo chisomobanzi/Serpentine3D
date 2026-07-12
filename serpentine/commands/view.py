@@ -93,22 +93,25 @@ def cmd_gridsnap(ctx):
 
 @command("pointson", aliases=("po",), mutates=False)
 def cmd_pointson(ctx):
-    """Show control points for selected curves (F10)."""
+    """Show control points for selected curves and surfaces (F10)."""
     from ..core import geometry as gm
-    objs = yield SelectReq("Select curves to show control points",
-                           kinds=("curve",))
+    objs = yield SelectReq("Select curves or surfaces to show control points",
+                           kinds=("curve", "surface"))
     vp = _vp(ctx)
     shown = 0
     for o in objs:
         try:
-            gm.get_control_points(o.shape)
+            if o.kind == "surface":
+                gm.surface_control_points(o.shape)
+            else:
+                gm.get_control_points(o.shape)
             vp.cv_enabled.add(o.id)
             shown += 1
         except gm.GeometryError as exc:
             ctx.echo(f"{o.name}: {exc}")
     vp.update()
     if shown:
-        ctx.echo(f"Control points on for {shown} curve(s) — drag to edit, "
+        ctx.echo(f"Control points on for {shown} object(s) — drag to edit, "
                  "F11 to hide.")
 
 
@@ -152,3 +155,26 @@ def cmd_length(ctx):
     objs = yield SelectReq("Select curves", kinds=("curve",))
     total = sum(g.curve_length(o.shape) for o in objs)
     ctx.echo(f"Length: {total:.4f}")
+
+
+@command("curvature", mutates=False)
+def cmd_curvature(ctx):
+    objs = yield SelectReq("Select curve", kinds=("curve",), max_count=1)
+    pt = yield PointReq("Point on curve to evaluate")
+    info = g.curvature_at(objs[0].shape, pt)
+    r = info["radius"]
+    r_text = f"{r:.4f}" if r != float("inf") else "infinite (straight)"
+    ctx.echo(f"Curvature: {info['curvature']:.6f}   Radius: {r_text}")
+
+
+@command("zebra", mutates=False)
+def cmd_zebra(ctx):
+    vp = _vp(ctx)
+    if vp.display_mode == "zebra":
+        vp.set_display_mode("shaded")
+        ctx.echo("Zebra analysis off.")
+    else:
+        vp.set_display_mode("zebra")
+        ctx.echo("Zebra analysis on — stripes reveal surface continuity "
+                 "(run again to turn off).")
+    yield from ()

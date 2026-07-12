@@ -128,3 +128,39 @@ def test_3dm_export_and_reimport(scene, tmp_path):
     assert prof is not None
     assert g.curve_length(prof.shape) == pytest.approx(
         g.curve_length(scene.find_by_name("Profile").shape), rel=1e-6)
+
+
+def test_3dm_trimmed_planar_face(tmp_path):
+    """CreateTrimmedPlane: a plane trimmed to a circle must import as a
+    disc, not the whole rectangle."""
+    import math as _m
+    import rhino3dm as r3
+    model = r3.File3dm()
+    circle = r3.Circle(r3.Point3d(0, 0, 0), 5.0)
+    plane = r3.Plane.WorldXY()
+    brep = r3.Brep.CreateTrimmedPlane(plane, circle.ToNurbsCurve())
+    assert brep is not None
+    model.Objects.AddBrep(brep, None)
+    path = str(tmp_path / "trimmed.3dm")
+    assert model.Write(path, 8)
+
+    scene = Scene()
+    n = fileio.import_file(scene, path)
+    assert n == 1
+    obj = scene.all()[0]
+    area = g.surface_area(obj.shape)
+    assert area == pytest.approx(_m.pi * 25, rel=0.01)
+
+
+def test_surface_control_points():
+    circle = g.make_circle((0, 0, 0), 4)
+    c2 = g.make_circle((0, 0, 8), 2)
+    srf = g.loft([circle, c2])
+    faces = [f for f in g.faces_of(srf)]
+    pts, (nu, nv) = g.surface_control_points(faces[0])
+    assert nu >= 2 and nv >= 2
+    assert len(pts) == nu * nv
+    moved = g.move_surface_control_point(faces[0], 0, (10, 10, 10))
+    assert g.shape_kind(moved) == "surface"
+    pts2, _ = g.surface_control_points(moved)
+    assert pts2[0] == pytest.approx((10, 10, 10))

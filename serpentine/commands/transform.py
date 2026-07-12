@@ -88,6 +88,42 @@ def cmd_mirror(ctx):
     ctx.echo(f"Mirrored {len(objs)} object(s).")
 
 
+@command("arraypolar")
+def cmd_array_polar(ctx):
+    objs = yield SelectReq("Select objects to array")
+    center = yield PointReq("Center of polar array")
+    count = yield IntReq("Number of items", default=6, minimum=2)
+    total = yield NumberReq("Angle to fill (degrees)", default=360.0)
+    step = total / (count if abs(total - 360.0) < 1e-9 else count - 1)
+    n = 0
+    for i in range(1, count):
+        for o in objs:
+            ctx.scene.add(g.rotate(o.shape, center, (0, 0, 1), step * i),
+                          layer_id=o.layer_id)
+            n += 1
+    ctx.echo(f"Created {n} arrayed object(s) around {center}.")
+
+
+@command("arraypath", aliases=("arraycrv",))
+def cmd_array_path(ctx):
+    objs = yield SelectReq("Select objects to array")
+    paths = yield SelectReq("Select path curve", kinds=("curve",),
+                            max_count=1, allow_preselected=False)
+    count = yield IntReq("Number of items", default=6, minimum=2)
+    base = yield PointReq("Base point on the object(s)")
+    samples = g.sample_curve(paths[0].shape, count)
+    n = 0
+    for target in samples:
+        offset = tuple(t - b for t, b in zip(target, base))
+        if all(abs(c) < 1e-12 for c in offset):
+            continue
+        for o in objs:
+            ctx.scene.add(g.translate(o.shape, offset),
+                          layer_id=o.layer_id)
+            n += 1
+    ctx.echo(f"Placed {n} object(s) along {paths[0].name}.")
+
+
 @command("array")
 def cmd_array(ctx):
     objs = yield SelectReq("Select objects to array")

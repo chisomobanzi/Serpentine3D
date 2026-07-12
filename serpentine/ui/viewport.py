@@ -37,12 +37,23 @@ in vec3 vNormal;
 in vec3 vPosView;
 uniform vec3 uColor;
 uniform float uAlpha;
+uniform int uZebra;
 out vec4 frag;
 void main() {
     vec3 n = normalize(vNormal);
     if (!gl_FrontFacing) n = -n;
     vec3 l = normalize(-vPosView);
     float diff = max(dot(n, l), 0.0);
+    if (uZebra == 1) {
+        // stripes follow the reflection direction: any kink in the surface
+        // shows as a jag in the stripes
+        vec3 r = reflect(normalize(vPosView), n);
+        float band = sin(40.0 * r.y);
+        float stripe = smoothstep(-0.06, 0.06, band);
+        vec3 zebra = mix(vec3(0.06), vec3(0.95), stripe);
+        frag = vec4(zebra * (0.55 + 0.45 * diff), uAlpha);
+        return;
+    }
     vec3 base = uColor * (0.30 + 0.70 * diff);
     float spec = pow(max(dot(reflect(-l, n), l), 0.0), 48.0) * 0.18;
     frag = vec4(base + vec3(spec), uAlpha);
@@ -390,7 +401,8 @@ class Viewport(QOpenGLWidget):
 
     def _draw_objects(self, mvp, view):
         mode = self.display_mode
-        fill_alpha = {"shaded": 1.0, "ghosted": 0.35, "wireframe": 0.0}[mode]
+        fill_alpha = {"shaded": 1.0, "ghosted": 0.35, "wireframe": 0.0,
+                      "zebra": 1.0}[mode]
         for obj in self.scene.visible_objects():
             gpu = self._gpu.get(obj.id)
             if gpu is None:
@@ -411,6 +423,9 @@ class Viewport(QOpenGLWidget):
                 GL.glUniform1f(
                     GL.glGetUniformLocation(self._mesh_prog, "uAlpha"),
                     fill_alpha)
+                GL.glUniform1i(
+                    GL.glGetUniformLocation(self._mesh_prog, "uZebra"),
+                    1 if mode == "zebra" else 0)
                 if mode == "ghosted":
                     GL.glDepthMask(False)
                 GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
@@ -485,11 +500,21 @@ class Viewport(QOpenGLWidget):
             if obj is None:
                 self.cv_enabled.discard(obj_id)
                 continue
-            pts = self._cv_points(obj)
+            pts, grid = self._cv_entry(obj)
             if pts is None or len(pts) < 2:
                 continue
-            # control polygon
-            poly = np.stack([pts[:-1], pts[1:]], axis=1).reshape(-1, 3)
+            # control polygon (or control net for surfaces)
+            segs = []
+            if grid is None:
+                segs.append(np.stack([pts[:-1], pts[1:]], axis=1))
+            else:
+                nu, nv = grid
+                net = pts.reshape(nu, nv, 3)
+                for i in range(nu):
+                    segs.append(np.stack([net[i, :-1], net[i, 1:]], axis=1))
+                for j in range(nv):
+                    segs.append(np.stack([net[:-1, j], net[1:, j]], axis=1))
+            poly = np.concatenate(segs).reshape(-1, 3)
             self._preview.update(poly.astype(np.float32))
             self._draw_lines(self._preview, mvp, (0.6, 0.62, 0.66, 0.5), 1.0)
             # CV markers as crosses
@@ -571,7 +596,7 @@ class Viewport(QOpenGLWidget):
             self.set_preview(None)
 
     def set_display_mode(self, mode: str):
-        if mode not in ("shaded", "wireframe", "ghosted"):
+        if mode not in ("shaded", "wireframe", "ghosted", "zebra"):
             raise ValueError(f"Unknown display mode '{mode}'")
         self.display_mode = mode
         self.update()
@@ -695,8 +720,12 @@ class Viewport(QOpenGLWidget):
                 obj = self.scene.get(obj_id)
                 if obj is not None:
                     try:
-                        new_shape = _g.move_control_point(
-                            obj.shape, index, tuple(hit))
+                        if obj.kind == "surface":
+                            new_shape = _g.move_surface_control_point(
+                                obj.shape, index, tuple(hit))
+                        else:
+                            new_shape = _g.move_control_point(
+                                obj.shape, index, tuple(hit))
                         self.scene.replace_shape(obj_id, new_shape)
                         self._cv_drag = (obj_id, index, plane_pt, normal)
                     except _g.GeometryError:
@@ -772,17 +801,26 @@ class Viewport(QOpenGLWidget):
     # -------------------------------------------------------- control points
 
     def _cv_points(self, obj) -> np.ndarray | None:
+        return self._cv_entry(obj)[0]
+
+    def _cv_entry(self, obj) -> tuple:
+        """(points, grid) — grid is (nu, nv) for surfaces, None for curves."""
         from ..core import geometry as _g
         entry = self._cv_cache.get(obj.id)
         key = id(obj.mesh)
         if entry is None or entry[0] != key:
             try:
-                pts = np.asarray(_g.get_control_points(obj.shape), float)
+                if obj.kind == "surface":
+                    pts, grid = _g.surface_control_points(obj.shape)
+                    pts = np.asarray(pts, float)
+                else:
+                    pts = np.asarray(_g.get_control_points(obj.shape), float)
+                    grid = None
             except _g.GeometryError:
-                return None
-            entry = (key, pts)
+                return (None, None)
+            entry = (key, pts, grid)
             self._cv_cache[obj.id] = entry
-        return entry[1]
+        return (entry[1], entry[2])
 
     def _cv_hit(self, px, py):
         """(obj_id, index, world_pos) of a control point near the pixel."""

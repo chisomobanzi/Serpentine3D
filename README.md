@@ -50,9 +50,10 @@ construction plane. `Tab` completes command names, `Up`/`Down` recall history,
 | **Solids** | `box` `sphere` `cylinder` `cone` `torus` |
 | **Booleans** | `booleanunion` `booleandifference` `booleanintersection` |
 | **Transform** | `move` `copy` `rotate` `scale` `scalenu` `mirror` `array` |
-| **Edit** | `join` `explode` `trim` `split` `offset` `fillet` `pointson`/`pointsoff` (control points) `delete` `hide` `show` `rename` `undo` `redo` |
+| **Edit** | `join` `explode` `trim` `split` `offset` `fillet` `rebuild` `pointson`/`pointsoff` (control points, curves *and* surfaces) `delete` `hide` `show` `rename` `undo` `redo` |
 | **Select** | `selall` `selnone` `selcrv` `selsrf` `selsolid` `sellayer` `selname` `sellast` `invert` `isolate` `unisolate` |
-| **Analysis** | `distance` `length` `area` `volume` |
+| **Array** | `array` (grid) `arraypolar` `arraypath` (along a curve) |
+| **Analysis** | `distance` `length` `area` `volume` `curvature` `zebra` (stripe continuity analysis) |
 | **View** | `top` `front` `right` `perspective` `zoomextents` `wireframe` `shaded` `ghosted` `grid` `snap` |
 | **Layers** | `layer` (new/current/show/hide/rename) — or use the Layers panel |
 | **Files** | `new` `open` `save` `import` `export` |
@@ -72,10 +73,25 @@ Most commands have Rhino-compatible aliases (`l`, `pl`, `c`, `m`, `co`, `mi`, ..
   Shift adds, Ctrl removes
 - **Control points**: `pointson` (F10) shows CVs on curves — drag a CV to
   edit the curve live; `pointsoff` (F11) hides them
-- **Object snaps** (end/mid/center) are on by default while picking points —
-  a white square marks the snap; toggle with `snap`. `gridsnap` snaps
-  picked points to the grid
+- **Object snaps** — end, mid, center, quadrant, intersection,
+  perpendicular, and nearest-point, each with a distinct cursor marker.
+  Toggle types on the **osnap bar** under the command line, or in
+  Settings. `gridsnap` snaps picked points to the grid
 - Launch with a file: `serp model.serp` (or any importable format)
+
+### Settings
+
+**Tools → Settings** (Ctrl+,) — five flat pages, changes apply instantly:
+
+- **Mouse** — orbit with the middle *or right* mouse button, scroll
+  direction, orbit/zoom speed
+- **Keyboard** — bind any key to any command; import from a text file
+  (`F5 zoomextents` per line) or JSON
+- **Aliases** — custom command aliases; **imports Rhino alias exports**
+  (Options → Aliases → Export) and maps known commands automatically
+- **Object Snaps** and **Display** (grid size)
+
+Settings live in `~/.config/serpentine/settings.json`.
 
 ## File formats
 

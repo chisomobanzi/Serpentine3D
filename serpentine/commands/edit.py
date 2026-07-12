@@ -101,6 +101,19 @@ def cmd_trim(ctx):
     ctx.echo(f"Trimmed {len(doomed)} piece(s); {kept} kept.")
 
 
+@command("rebuild")
+def cmd_rebuild(ctx):
+    objs = yield SelectReq("Select curves to rebuild", kinds=("curve",))
+    from .base import IntReq
+    count = yield IntReq("Point count", default=10, minimum=2)
+    degree = yield IntReq("Degree", default=3, minimum=1)
+    for o in objs:
+        ctx.scene.replace_shape(
+            o.id, g.rebuild_curve(o.shape, point_count=count, degree=degree))
+    ctx.echo(f"Rebuilt {len(objs)} curve(s) with {count} points, "
+             f"degree {degree}.")
+
+
 @command("hide")
 def cmd_hide(ctx):
     objs = yield SelectReq("Select objects to hide")

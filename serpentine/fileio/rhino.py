@@ -162,6 +162,161 @@ def _r3_mesh_to_shape(mesh: r3.Mesh):
     return _shell_from_triangles(verts, tris)
 
 
+# -------------------------------------------------------------------- breps
+
+def _brep_edges_to_occ(brep) -> list:
+    edges = []
+    for i in range(len(brep.Edges)):
+        try:
+            shape = _r3_curve_to_shape(brep.Edges[i].ToNurbsCurve())
+            edges.append(shape)
+        except Exception:
+            continue
+    return edges
+
+
+def _split_face_by_edges(face, edges: list) -> list:
+    """Split an untrimmed face with on-surface edges; [] if nothing cut."""
+    from ..core.occ import BRepAlgoAPI_Splitter, TopTools_ListOfShape
+    if not edges:
+        return []
+    args = TopTools_ListOfShape()
+    args.Append(face)
+    tools = TopTools_ListOfShape()
+    for e in edges:
+        tools.Append(e)
+    sp = BRepAlgoAPI_Splitter()
+    sp.SetArguments(args)
+    sp.SetTools(tools)
+    sp.SetFuzzyValue(1e-6)
+    sp.Build()
+    if not sp.IsDone():
+        return []
+    pieces = geometry.faces_of(sp.Shape())
+    return pieces if len(pieces) > 1 else []
+
+
+def _classify_by_mesh(pieces: list, mesh_shape, tol: float) -> list:
+    """Keep split pieces whose centroid lies on the reference mesh."""
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    from ..core.occ import BRepBuilderAPI_MakeVertex, gp_Pnt
+    kept = []
+    for piece in pieces:
+        try:
+            cx, cy, cz = geometry.centroid(piece)
+            v = BRepBuilderAPI_MakeVertex(gp_Pnt(cx, cy, cz)).Vertex()
+            d = BRepExtrema_DistShapeShape(v, mesh_shape)
+            if d.IsDone() and d.Value() < tol:
+                kept.append(piece)
+        except Exception:
+            continue
+    return kept
+
+
+def _wire_trimmed_planar(face, edges: list):
+    """Exact trim for planar faces whose edges form closed wires."""
+    from ..core.occ import BRepBuilderAPI_MakeFace
+    try:
+        wires = []
+        remaining = list(edges)
+        while remaining:
+            wire = geometry.join_curves([remaining.pop(0)])
+            # greedy grow
+            grown = True
+            while grown:
+                grown = False
+                for e in list(remaining):
+                    try:
+                        wire = geometry.join_curves([wire, e])
+                        remaining.remove(e)
+                        grown = True
+                    except geometry.GeometryError:
+                        continue
+            wires.append(wire)
+        closed = [w for w in wires if geometry.is_closed_curve(w)]
+        if not closed:
+            return None
+        # largest loop is the boundary; the rest are holes
+        closed.sort(key=lambda w: -geometry.curve_length(w))
+        mk = BRepBuilderAPI_MakeFace(
+            geometry.occ.to_wire(geometry.to_wire(closed[0])), True)
+        if not mk.IsDone():
+            return None
+        from ..core.occ import TopAbs_Orientation
+        for hole in closed[1:]:
+            w = geometry.occ.to_wire(geometry.to_wire(hole))
+            mk.Add(geometry.occ.to_wire(w.Reversed()))
+        if not mk.IsDone():
+            return None
+        return mk.Face()
+    except Exception:
+        return None
+
+
+def _import_brep(brep) -> list:
+    """Faces of a Rhino brep as OCC faces, recovering trims when possible."""
+    occ_edges = _brep_edges_to_occ(brep)
+    faces = []
+    for fi in range(len(brep.Faces)):
+        rface = brep.Faces[fi]
+        try:
+            face = _r3_surface_to_face(rface.ToNurbsSurface())
+        except Exception:
+            face = None
+        if face is None:
+            mesh = _face_mesh_shape(rface)
+            if mesh is not None:
+                faces.append(mesh)
+            continue
+
+        pieces = _split_face_by_edges(face, occ_edges)
+        if pieces:
+            # trimmed face: resolve which pieces are real
+            (mn, mx) = geometry.bbox(face)
+            import numpy as np
+            tol = max(float(np.linalg.norm(np.subtract(mx, mn))) * 0.02,
+                      1e-4)
+            resolved = None
+            mesh = _face_mesh_shape(rface)
+            if mesh is not None:
+                kept = _classify_by_mesh(pieces, mesh, tol)
+                if kept:
+                    resolved = kept
+            if resolved is None and rface.IsPlanar() \
+                    and len(brep.Faces) == 1:
+                exact = _wire_trimmed_planar(face, occ_edges)
+                if exact is not None:
+                    resolved = [exact]
+            if resolved is None:
+                resolved = [mesh] if mesh is not None else [face]
+            faces.extend(resolved)
+        else:
+            faces.append(face)
+
+    faces = [f for f in faces if f is not None and not f.IsNull()]
+    if not faces:
+        return []
+    if len(faces) == 1:
+        return faces
+    from ..core.occ import BRepBuilderAPI_Sewing
+    sew = BRepBuilderAPI_Sewing(1e-6)
+    for f in faces:
+        sew.Add(f)
+    sew.Perform()
+    return [sew.SewedShape()]
+
+
+def _face_mesh_shape(rface):
+    """The face's render mesh as a sewn OCC shell (None if absent)."""
+    try:
+        mesh = rface.GetMesh(r3.MeshType.Any)
+        if mesh is None or len(mesh.Vertices) == 0:
+            return None
+        return _r3_mesh_to_shape(mesh)
+    except Exception:
+        return None
+
+
 # ------------------------------------------------------------------- import
 
 def import_3dm(path: str) -> list[tuple[str, object, dict]]:
@@ -194,24 +349,7 @@ def import_3dm(path: str) -> list[tuple[str, object, dict]]:
             if brep:
                 geo = brep
         if isinstance(geo, r3.Brep):
-            faces = []
-            for fi in range(len(geo.Faces)):
-                try:
-                    face = _r3_surface_to_face(geo.Faces[fi].ToNurbsSurface())
-                    if face is not None:
-                        faces.append(face)
-                except Exception:
-                    continue
-            if faces:
-                if len(faces) == 1:
-                    shapes = faces
-                else:
-                    from ..core.occ import BRepBuilderAPI_Sewing
-                    sew = BRepBuilderAPI_Sewing(1e-6)
-                    for f in faces:
-                        sew.Add(f)
-                    sew.Perform()
-                    shapes = [sew.SewedShape()]
+            shapes = _import_brep(geo)
         elif isinstance(geo, (r3.NurbsSurface, r3.Surface)) \
                 and not isinstance(geo, r3.Brep):
             try:

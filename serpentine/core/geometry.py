@@ -457,6 +457,54 @@ def get_control_points(shape) -> list[Point]:
     return [pnt_tuple(bs.Pole(i)) for i in range(1, bs.NbPoles() + 1)]
 
 
+def _face_bspline_surface(shape):
+    """The (single) face's surface as Geom_BSplineSurface in world frame."""
+    from .occ import BRep_Tool, GeomConvert
+    faces = faces_of(shape)
+    if len(faces) != 1:
+        raise GeometryError("Control points work on single-face surfaces "
+                            "(explode polysurfaces first)")
+    face = faces[0]
+    surf = BRep_Tool.Surface_s(face)
+    from OCP.Geom import Geom_BSplineSurface
+    if isinstance(surf, Geom_BSplineSurface):
+        return surf.Copy(), face
+    try:
+        return GeomConvert.SurfaceToBSplineSurface_s(surf), face
+    except Exception as exc:
+        raise GeometryError(
+            f"Surface cannot be converted to NURBS: {exc}") from exc
+
+
+def surface_control_points(shape) -> tuple[list[Point], tuple[int, int]]:
+    """Control points of a single-face surface, row-major (u, then v)."""
+    bs, _ = _face_bspline_surface(shape)
+    nu, nv = bs.NbUPoles(), bs.NbVPoles()
+    pts = []
+    for i in range(1, nu + 1):
+        for j in range(1, nv + 1):
+            pts.append(pnt_tuple(bs.Pole(i, j)))
+    return pts, (nu, nv)
+
+
+def move_surface_control_point(shape, flat_index: int,
+                               new_point: Point) -> TopoDS_Shape:
+    """New surface with control point `flat_index` (u-major) moved.
+
+    Trimmed faces lose their trims (the rebuilt face is natural-bounds).
+    """
+    bs, _ = _face_bspline_surface(shape)
+    nu, nv = bs.NbUPoles(), bs.NbVPoles()
+    if not (0 <= flat_index < nu * nv):
+        raise GeometryError("Control point index out of range")
+    i, j = divmod(flat_index, nv)
+    bs.SetPole(i + 1, j + 1, _pnt(new_point))
+    mk = BRepBuilderAPI_MakeFace(bs, 1e-6)
+    if not mk.IsDone():
+        raise GeometryError("Surface rebuild failed")
+    return mk.Face()
+
+
 def move_control_point(shape, index: int, new_point: Point) -> TopoDS_Shape:
     """Return a new curve with control point `index` (0-based) moved."""
     bs = _edge_bspline(shape)
@@ -464,6 +512,90 @@ def move_control_point(shape, index: int, new_point: Point) -> TopoDS_Shape:
         raise GeometryError(f"Control point index {index} out of range")
     bs.SetPole(index + 1, _pnt(new_point))
     return BRepBuilderAPI_MakeEdge(bs).Edge()
+
+
+def sample_curve(shape, count: int) -> list[Point]:
+    """`count` points spaced uniformly by arc length along a curve/wire."""
+    from OCP.BRepAdaptor import BRepAdaptor_CompCurve
+    from OCP.GCPnts import GCPnts_UniformAbscissa
+    if count < 2:
+        raise GeometryError("Need at least 2 sample points")
+    st = shape.ShapeType()
+    if st == occ.WIRE:
+        adaptor = BRepAdaptor_CompCurve(occ.to_wire(shape))
+    elif st == occ.EDGE:
+        adaptor = occ.edge_adaptor(occ.to_edge(shape))
+    else:
+        raise GeometryError("Not a curve")
+    ua = GCPnts_UniformAbscissa(adaptor, int(count))
+    if not ua.IsDone():
+        raise GeometryError("Could not sample curve")
+    pts = []
+    for i in range(1, ua.NbPoints() + 1):
+        p = adaptor.Value(ua.Parameter(i))
+        pts.append((p.X(), p.Y(), p.Z()))
+    return pts
+
+
+def rebuild_curve(shape, point_count: int = 10,
+                  degree: int = 3) -> TopoDS_Shape:
+    """Rebuild a curve through `point_count` arc-length samples.
+
+    Degree 3 interpolates through the samples; other degrees fit a
+    least-squares approximation of that degree.
+    """
+    closed = is_closed_curve(shape)
+    n = max(int(point_count), 3 if closed else 2)
+    pts = sample_curve(shape, n + 1 if closed else n)
+    if closed:
+        pts = pts[:-1]
+        return make_interp_curve(pts, closed=True)
+    if degree == 3:
+        return make_interp_curve(pts)
+    from OCP.GeomAPI import GeomAPI_PointsToBSpline
+    from OCP.GeomAbs import GeomAbs_Shape
+    arr = TColgp_Array1OfPnt(1, len(pts))
+    for i, p in enumerate(pts, start=1):
+        arr.SetValue(i, _pnt(p))
+    cont = (GeomAbs_Shape.GeomAbs_C0 if degree < 2
+            else GeomAbs_Shape.GeomAbs_C1)
+    fit = GeomAPI_PointsToBSpline(arr, degree, degree, cont, 1e-4)
+    if not fit.IsDone():
+        raise GeometryError("Rebuild failed")
+    return BRepBuilderAPI_MakeEdge(fit.Curve()).Edge()
+
+
+def curvature_at(shape, near_point: Point) -> dict:
+    """Curvature of a curve at the point closest to `near_point`."""
+    from OCP.BRepLProp import BRepLProp_CLProps
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    edges = edges_of(shape)
+    if not edges:
+        raise GeometryError("Not a curve")
+    v = BRepBuilderAPI_MakeVertex(_pnt(near_point)).Vertex()
+    best = None
+    for edge in edges:
+        dist = BRepExtrema_DistShapeShape(v, edge)
+        if dist.IsDone() and (best is None or dist.Value() < best[0]):
+            best = (dist.Value(), edge, dist.PointOnShape2(1))
+    _, edge, pt = best
+    ad = occ.edge_adaptor(edge)
+    # locate the parameter of the closest point by dense sampling refinement
+    t0, t1 = ad.FirstParameter(), ad.LastParameter()
+    samples = 256
+    best_t, best_d = t0, float("inf")
+    for i in range(samples + 1):
+        t = t0 + (t1 - t0) * i / samples
+        d = ad.Value(t).Distance(pt)
+        if d < best_d:
+            best_d, best_t = d, t
+    props = BRepLProp_CLProps(ad, best_t, 2, 1e-9)
+    k = props.Curvature()
+    return {
+        "point": pnt_tuple(ad.Value(best_t)),
+        "curvature": k,
+        "radius": (1.0 / k) if k > 1e-12 else float("inf"),
+    }
 
 
 def explode(shape) -> list:

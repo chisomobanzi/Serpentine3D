@@ -291,3 +291,43 @@ def test_control_points_of_circle_via_conversion():
     assert len(cvs) >= 7    # rational bspline circle representation
     moved = g.move_control_point(circle, 0, (8, 0, 0))
     assert g.shape_kind(moved) == "curve"
+
+
+def test_sample_curve():
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    pts = g.sample_curve(line, 5)
+    assert len(pts) == 5
+    assert pts[2] == pytest.approx((5, 0, 0), abs=1e-6)
+    # works on wires too
+    pl = g.make_polyline([(0, 0, 0), (10, 0, 0), (10, 10, 0)])
+    pts = g.sample_curve(pl, 3)
+    assert pts[1] == pytest.approx((10, 0, 0), abs=1e-6)
+
+
+def test_rebuild_curve():
+    curve = g.make_interp_curve(
+        [(0, 0, 0), (3, 4, 0), (6, -2, 0), (10, 1, 0), (14, 5, 0)])
+    rebuilt = g.rebuild_curve(curve, point_count=8, degree=3)
+    assert g.shape_kind(rebuilt) == "curve"
+    # length approximately preserved (rebuild smooths, so allow a few %)
+    assert g.curve_length(rebuilt) == pytest.approx(
+        g.curve_length(curve), rel=0.05)
+    # rebuild with degree 2 fit
+    rebuilt2 = g.rebuild_curve(curve, point_count=12, degree=2)
+    assert g.curve_length(rebuilt2) == pytest.approx(
+        g.curve_length(curve), rel=0.08)
+    # closed curves stay closed
+    circle = g.make_circle((0, 0, 0), 5)
+    rc = g.rebuild_curve(circle, point_count=12)
+    assert g.is_closed_curve(rc)
+    assert g.curve_length(rc) == pytest.approx(2 * math.pi * 5, rel=0.01)
+
+
+def test_curvature_at():
+    circle = g.make_circle((0, 0, 0), 5)
+    info = g.curvature_at(circle, (5.2, 0, 0))
+    assert info["curvature"] == pytest.approx(1 / 5, rel=1e-4)
+    assert info["radius"] == pytest.approx(5, rel=1e-4)
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    info = g.curvature_at(line, (5, 1, 0))
+    assert info["radius"] == float("inf")
