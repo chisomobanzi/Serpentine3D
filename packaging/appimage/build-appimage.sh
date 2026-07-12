@@ -3,27 +3,27 @@
 #
 #   ./packaging/appimage/build-appimage.sh
 #
-# Produces Serpentine-<version>-x86_64.AppImage in packaging/appimage/dist.
-# Needs network access (downloads a relocatable CPython runtime) and
-# ~2 GB of scratch space; run from the repository root.
+# Produces Serpentine-x86_64.AppImage in packaging/appimage/dist.
+# Needs network access (PyPI wheels + a relocatable CPython runtime)
+# and a few GB of scratch space. FUSE is not required to build.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 DIST="$HERE/dist"
-VERSION="$(python3 -c 'import tomllib;print(tomllib.load(open("'"$ROOT"'/pyproject.toml","rb"))["project"]["version"])')"
+PYVER="${SERP_APPIMAGE_PYTHON:-3.12}"
 
-mkdir -p "$DIST"
-cd "$DIST"
+# recipe directory: its basename is the fallback app name; the .desktop
+# Name= field (Serpentine) names the final AppImage.
+RECIPE="$DIST/serpentine"
+rm -rf "$RECIPE"
+mkdir -p "$RECIPE"
 
-python3 -m pip install --upgrade python-appimage
-
-# recipe directory consumed by python-appimage
-RECIPE="$DIST/recipe"
-rm -rf "$RECIPE" && mkdir -p "$RECIPE"
 cp "$HERE/serpentine.desktop" "$RECIPE/"
-cp "$HERE/serpentine.png" "$RECIPE/" 2>/dev/null || {
-    # fall back to a generated placeholder icon
+if [ -f "$HERE/serpentine.png" ]; then
+    cp "$HERE/serpentine.png" "$RECIPE/"
+else
+    # placeholder icon so the recipe is self-sufficient
     python3 - "$RECIPE/serpentine.png" << 'PY'
 import struct, sys, zlib
 w = h = 64
@@ -37,13 +37,24 @@ png = (b"\x89PNG\r\n\x1a\n"
        + chunk(b"IDAT", raw) + chunk(b"IEND", b""))
 open(sys.argv[1], "wb").write(png)
 PY
-}
-printf '%s\n' "serpentine @ file://$ROOT" > "$RECIPE/requirements.txt"
-printf '%s\n' "-m serpentine.app" > "$RECIPE/entrypoint.sh"
+fi
 
-python3 -m python_appimage build app \
-    --python-version 3.12 \
-    --name "Serpentine-$VERSION" \
-    "$RECIPE"
+# {{ python-executable }} is substituted by python-appimage at build time
+cat > "$RECIPE/entrypoint.sh" << 'EOF'
+{{ python-executable }} -m serpentine.app "$@"
+EOF
 
-echo "AppImage written to $DIST"
+# no spaces: python-appimage word-splits requirement lines when invoking pip
+printf 'serpentine@file://%s\n' "$ROOT" > "$RECIPE/requirements.txt"
+
+if command -v uvx > /dev/null 2>&1; then
+    BUILDER=(uvx python-appimage)
+else
+    python3 -m pip install --user --upgrade python-appimage
+    BUILDER=(python3 -m python_appimage)
+fi
+
+cd "$DIST"
+"${BUILDER[@]}" build app --python-version "$PYVER" "$RECIPE"
+
+ls -lh "$DIST"/*.AppImage
