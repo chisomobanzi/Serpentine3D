@@ -7,7 +7,7 @@ import signal
 import sys
 
 import numpy as np
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QMainWindow, QMessageBox,
@@ -62,6 +62,8 @@ class MainWindow(QMainWindow):
         self.space_tabs.currentChanged.connect(self._space_tab_changed)
         from PySide6.QtWidgets import QGridLayout
         self.aux_viewports: list = []           # Top/Front/Right in quad mode
+        self.dock_viewports: list = []          # user-created dockable panes
+        self._active_vp = self.viewport
         self._view_grid = QWidget()
         grid = QGridLayout(self._view_grid)
         grid.setContentsMargins(0, 0, 0, 0)
@@ -154,7 +156,79 @@ class MainWindow(QMainWindow):
                                "(line, circle, box, extrude, loft, ...)")
         self.command_line.focus()
 
+    @staticmethod
+    def _pane_alive(vp) -> bool:
+        """Not explicitly hidden, and its dock (if any) not closed.
+        Unlike isVisible this stays true in headless/never-shown windows."""
+        parent = vp.parentWidget()
+        return not vp.isHidden() and (parent is None
+                                      or not parent.isHidden())
+
+    @property
+    def active_viewport(self):
+        vp = self._active_vp
+        if vp is not self.viewport and not self._pane_alive(vp):
+            self._active_vp = self.viewport      # its dock was closed
+        return self._active_vp
+
+    def _set_active_viewport(self, vp):
+        if vp is self._active_vp:
+            return
+        self._active_vp = vp
+        self.ctx.viewport = vp                   # commands act on this pane
+        self._refresh_space_tabs()
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.MouseButtonPress \
+                and isinstance(obj, Viewport):
+            self._set_active_viewport(obj)
+        return super().eventFilter(obj, ev)
+
+    def new_viewport_dock(self, area: str = "Right", space: str = "model"):
+        """A fully live extra viewport in a dockable/floatable panel."""
+        vp = Viewport(self.scene, self.selection, self.cfg)
+        vp.cplane = self.viewport.cplane
+        vp.camera.azimuth = self.viewport.camera.azimuth + 0.4
+        vp.camera.elevation = self.viewport.camera.elevation
+        vp.camera.target = self.viewport.camera.target.copy()
+        vp.camera.distance = self.viewport.camera.distance
+        vp.setMinimumSize(360, 260)   # a size-hint-less GL widget would
+        self._wire_viewport(vp)        # otherwise collapse the dock to 0px
+        self.dock_viewports.append(vp)
+        dock = QDockWidget("Viewport", self)
+        dock.setObjectName(f"viewportDock{len(self.dock_viewports)}")
+        dock.setWidget(vp)
+        areas = {"Right": Qt.DockWidgetArea.RightDockWidgetArea,
+                 "Left": Qt.DockWidgetArea.LeftDockWidgetArea,
+                 "Top": Qt.DockWidgetArea.TopDockWidgetArea,
+                 "Bottom": Qt.DockWidgetArea.BottomDockWidgetArea}
+        self.addDockWidget(areas.get(area,
+                                     Qt.DockWidgetArea.RightDockWidgetArea),
+                           dock)
+        if area == "Floating":
+            dock.setFloating(True)
+            dock.resize(860, 620)
+        if space != "model":
+            vp.set_space(space)
+        self._update_viewport_dock_title(vp)
+        vp.zoom_extents()
+        self._set_active_viewport(vp)
+        return vp
+
+    def _update_viewport_dock_title(self, vp):
+        dock = vp.parentWidget()
+        if not isinstance(dock, QDockWidget):
+            return
+        if vp.space == "model":
+            label = "Model"
+        else:
+            lay = next((l for l in self.scene.layouts if l.id == vp.space),
+                       None)
+            label = lay.name if lay else "Layout"
+        dock.setWindowTitle(f"{label} viewport")
+
     def _wire_viewport(self, vp):
+        vp.installEventFilter(self)
         vp.history = self.history
         vp.objectClicked.connect(self._on_object_clicked)
         vp.emptyClicked.connect(self._on_empty_clicked)
@@ -166,8 +240,9 @@ class MainWindow(QMainWindow):
         vp.escapePressed.connect(self._cancel)
 
     def all_viewports(self) -> list:
-        return [self.viewport] + [v for v in self.aux_viewports
-                                  if v.isVisible()]
+        return ([self.viewport]
+                + [v for v in self.aux_viewports if self._pane_alive(v)]
+                + [v for v in self.dock_viewports if self._pane_alive(v)])
 
     def set_view_layout(self, mode: str):
         """'single' or 'quad' (Top / Front / Right around Perspective)."""
@@ -468,10 +543,10 @@ class MainWindow(QMainWindow):
             # ghost of the pending result under the cursor, ~30Hz cap
             from PySide6.QtCore import QElapsedTimer
             timer = getattr(self, "_ghost_timer", None)
+            due = timer is None or timer.elapsed() >= 33
             if timer is None:
                 timer = self._ghost_timer = QElapsedTimer()
-                timer.start()
-            if timer.elapsed() >= 33:
+            if due:
                 timer.restart()
                 ghost = self.processor.preview_for(point)
                 for vp in self.all_viewports():
@@ -677,7 +752,7 @@ class MainWindow(QMainWindow):
         for i, (space_id, label) in enumerate(want):
             self.space_tabs.setTabText(i, label)
             self.space_tabs.setTabData(i, space_id)
-            if space_id == self.viewport.space:
+            if space_id == self.active_viewport.space:
                 current_index = i
         if self.viewport.space != "model" and \
                 self.viewport.space not in [w[0] for w in want]:
@@ -691,13 +766,15 @@ class MainWindow(QMainWindow):
         if self._tabs_updating or index < 0:
             return
         space_id = self.space_tabs.tabData(index)
-        if space_id and space_id != self.viewport.space:
+        if space_id and space_id != self.active_viewport.space:
             self.switch_space(space_id)
 
     def switch_space(self, space_id: str):
         if self.processor.busy:
             self.processor.cancel()
-        self.viewport.set_space(space_id)
+        vp = self.active_viewport
+        vp.set_space(space_id)
+        self._update_viewport_dock_title(vp)
         self._refresh_space_tabs()
         if space_id == "model":
             self.command_line.echo("Model space.")

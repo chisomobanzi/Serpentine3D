@@ -104,6 +104,44 @@ def cmd_zoomwindow(ctx):
     vp.zoom_to_points(p1, p2)
 
 
+@command("newviewport", aliases=("newvp", "splitview"), mutates=False)
+def cmd_newviewport(ctx):
+    """Open an extra live viewport in a dockable panel — drag its title
+    bar to rearrange or tear it off to float; space tabs switch what the
+    focused pane shows (model and paper sheets can sit side by side)."""
+    win = ctx.window
+    if win is None:
+        ctx.echo("Extra viewports need the GUI.")
+        return
+        yield  # pragma: no cover
+    where = yield OptionReq(
+        "Place the new viewport",
+        options=["Right", "Left", "Bottom", "Top", "Floating"],
+        default="Right")
+    space = "model"
+    if ctx.scene.layouts:
+        names = ["Model"] + [lay.name for lay in ctx.scene.layouts]
+        pick = yield OptionReq("Showing", options=names, default="Model")
+        if pick != "Model":
+            space = next(lay.id for lay in ctx.scene.layouts
+                         if lay.name == pick)
+    win.new_viewport_dock(where, space)
+    ctx.echo("New viewport opened — drag its title bar to rearrange; "
+             "click it, then a space tab, to change what it shows.")
+
+
+@command("floatviewport", aliases=("floatvp",), mutates=False)
+def cmd_floatviewport(ctx):
+    """Open a floating viewport window (drag it to another monitor)."""
+    win = ctx.window
+    if win is None:
+        ctx.echo("Extra viewports need the GUI.")
+    else:
+        win.new_viewport_dock("Floating")
+        ctx.echo("Floating viewport opened.")
+    yield from ()
+
+
 @command("4view", aliases=("fourview", "quadview"), mutates=False)
 def cmd_4view(ctx):
     """Split the model area into Top / Front / Right / Perspective."""

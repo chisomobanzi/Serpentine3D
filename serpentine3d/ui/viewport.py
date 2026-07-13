@@ -436,6 +436,10 @@ class Viewport(QOpenGLWidget):
     # ---------------------------------------------------------------- GL setup
 
     def initializeGL(self):
+        # runs again after reparenting (dock/undock) destroys the context:
+        # every GPU-side cache from the old context is stale, drop it all
+        self._gpu = {}
+        self._grid = None
         self._mesh_prog = _compile(MESH_VERT, MESH_FRAG)
         self._line_prog = _compile(LINE_VERT, LINE_FRAG)
         self._thick_prog = _compile(THICK_VERT, LINE_FRAG)
