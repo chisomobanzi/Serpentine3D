@@ -824,15 +824,25 @@ class MainWindow(QMainWindow):
             sc.setParent(None)
             sc.deleteLater()
         self._user_shortcuts = []
+        self._user_shortcut_keys = set()
+        wanted = {}
         for key, command in (self.cfg.get("shortcuts",
                                           default={}) or {}).items():
             seq = QKeySequence(key)
             if seq.isEmpty():
                 continue
-            sc = QShortcut(seq, self)
+            wanted[seq.toString()] = command
+        # the user's keys win: strip clashing built-in menu shortcuts
+        for act in self.findChildren(QAction):
+            if not act.shortcut().isEmpty() \
+                    and act.shortcut().toString() in wanted:
+                act.setShortcut(QKeySequence())
+        for key_text, command in wanted.items():
+            sc = QShortcut(QKeySequence(key_text), self)
             sc.activated.connect(
                 lambda c=command: self.run_command(c))
             self._user_shortcuts.append(sc)
+            self._user_shortcut_keys.add(key_text)
 
     # ------------------------------------------------------------------ misc
 
@@ -889,7 +899,8 @@ class MainWindow(QMainWindow):
             if fn:
                 fn()
                 return
-        if ev.key() == Qt.Key.Key_F1:
+        if ev.key() == Qt.Key.Key_F1 \
+                and "F1" not in getattr(self, "_user_shortcut_keys", ()):
             self.show_help_browser()
             return
         if ev.key() == Qt.Key.Key_F10:

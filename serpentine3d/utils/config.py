@@ -139,6 +139,87 @@ RHINO_COMMAND_MAP = {
 }
 
 
+# full-macro phrases (normalized: prefixes stripped, lowercased) whose
+# meaning needs more than the first command token. Values may be Serp3D
+# macros ('osnap mid toggle') — aliases and shortcuts both accept those.
+RHINO_MACRO_MAP = {
+    "zoom": "zoom",
+    "zoom extents": "zoomextents",
+    "zoom target": "zoom",
+    "zoom all extents": "zoomextents",
+    "zoom selected": "zoomselected",
+    "zoom all selected": "zoomselected",
+    "zoom window": "zoomwindow",
+    "setview world top": "top",
+    "setview world front": "front",
+    "setview world back": "back",
+    "setview world right": "right",
+    "setview world left": "left",
+    "setview world bottom": "bottom",
+    "setview world perspective": "perspective",
+    "setdisplaymode arctic": "rendered",
+    "setdisplaymode rendered": "rendered",
+    "setdisplaymode shaded": "shaded",
+    "setdisplaymode wireframe": "wireframe",
+    "setdisplaymode ghosted": "ghosted",
+    "osnap end toggle enter": "osnap end toggle",
+    "osnap mid toggle enter": "osnap mid toggle",
+    "osnap center toggle enter": "osnap center toggle",
+    "osnap near toggle enter": "osnap near toggle",
+    "osnap quad toggle enter": "osnap quad toggle",
+    "osnap int toggle enter": "osnap int toggle",
+    "osnap perp toggle enter": "osnap perp toggle",
+    "disableosnap toggle": "osnap all toggle",
+    "maxviewport": "1view",
+    "optionspage plugins": "plugins",
+    "curvaturegraphoff": "curvaturegraph",
+    "deletesubcrv": "split",
+    "selprev": "sellast",
+    "selpolysrf": "selsolid",
+    "selpolysurface": "selsolid",
+    "lockalldetails": "detaillock",
+    "hatchborder": "hatch",
+    "scale1d": "scalenu",
+    "boundingbox": "boundingbox",
+    "viewcapturetofile": "viewcapturetofile",
+    "viewcapturetoclipboard": "viewcapturetoclipboard",
+    "snap": "snap",
+    "dim": "dim",
+}
+
+
+def normalize_rhino_macro(macro: str) -> str:
+    """'noecho -Osnap _Mid _Toggle _Enter' -> 'osnap mid toggle enter'."""
+    tokens = []
+    for tok in macro.replace("!", " ").replace("'", " ").split():
+        tok = tok.lstrip("_-'").lower()
+        if tok and tok != "noecho":
+            tokens.append(tok)
+    return " ".join(tokens)
+
+
+def map_rhino_macro(macro: str) -> str | None:
+    """Best Serp3D command (or macro) for a Rhino macro, else None."""
+    phrase = normalize_rhino_macro(macro)
+    if not phrase:
+        return None
+    if phrase in RHINO_MACRO_MAP:
+        return RHINO_MACRO_MAP[phrase]
+    first = phrase.split()[0]
+    mapped = RHINO_COMMAND_MAP.get(first)
+    if mapped:
+        return mapped
+    # many Rhino names are also Serp3D names (or aliases) verbatim
+    try:
+        from ..commands.base import resolve
+        cd = resolve(first)
+        if cd is not None:
+            return cd.name
+    except Exception:                                  # noqa: BLE001
+        pass
+    return None
+
+
 def parse_rhino_aliases(text: str) -> tuple[dict, list[str]]:
     """Parse a Rhino alias export (.txt): each line 'alias macro'.
 
@@ -156,16 +237,15 @@ def parse_rhino_aliases(text: str) -> tuple[dict, list[str]]:
         if len(parts) != 2:
             continue
         alias, macro = parts[0].lower(), parts[1]
-        tokens = [t for t in macro.replace("!", " ").split() if t]
-        if not tokens:
-            continue
-        cmd = tokens[0].lstrip("_-'").lower()
-        mapped = RHINO_COMMAND_MAP.get(cmd)
+        mapped = map_rhino_macro(macro)
         if mapped:
             aliases[alias] = mapped
         else:
-            aliases[alias] = cmd
-            unmapped.append(cmd)
+            phrase = normalize_rhino_macro(macro)
+            if not phrase:
+                continue
+            aliases[alias] = phrase.split()[0]
+            unmapped.append(phrase.split()[0])
     return aliases, unmapped
 
 

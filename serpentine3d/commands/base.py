@@ -136,7 +136,7 @@ def resolve(name: str) -> CommandDef | None:
     if key in _REGISTRY:
         return _REGISTRY[key]
     if key in _ALIASES:
-        return _REGISTRY[_ALIASES[key]]
+        return _REGISTRY.get(_ALIASES[key].split()[0])
     return None
 
 
@@ -345,6 +345,16 @@ class CommandProcessor:
     def run(self, name: str) -> bool:
         if self.busy:
             self.cancel()
+        # macro form: 'osnap mid toggle' — first token is the command,
+        # the rest answer its prompts; aliases may expand to macros too
+        tokens = name.split()
+        name = tokens[0] if tokens else name
+        args = tokens[1:]
+        alias_target = _ALIASES.get(name.lower().strip())
+        if alias_target and " " in alias_target:
+            expanded = alias_target.split()
+            name = expanded[0]
+            args = expanded[1:] + args
         cd = resolve(name)
         if cd is None:
             self.ctx.echo(f"Unknown command: {name}")
@@ -361,6 +371,10 @@ class CommandProcessor:
         self.command_options = {}
         self.ctx.options = self.command_options
         self._advance(None)
+        for arg in args:
+            if not self.busy:
+                break
+            self.provide_text(arg)
         return True
 
     def _advance(self, value):

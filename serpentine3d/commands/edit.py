@@ -282,3 +282,23 @@ def cmd_plugins(ctx):
         for name, origin in plugs:
             ctx.echo(f"{name} — {origin}")
     yield from ()
+
+
+@command("boundingbox", aliases=("bb",))
+def cmd_boundingbox(ctx):
+    """Create the world-aligned bounding box of the selection."""
+    objs = yield SelectReq("Select objects for the bounding box")
+    import numpy as np
+    mins = np.full(3, np.inf)
+    maxs = np.full(3, -np.inf)
+    for o in objs:
+        mn, mx = g.bbox(o.shape)
+        mins = np.minimum(mins, mn)
+        maxs = np.maximum(maxs, mx)
+    size = maxs - mins
+    if min(size) < 1e-9:
+        ctx.echo("Selection is flat — bounding box would be degenerate.")
+        return
+    obj = ctx.scene.add(g.make_box(tuple(mins), *map(float, size)))
+    ctx.echo(f"Created {obj.name} "
+             f"({size[0]:g} x {size[1]:g} x {size[2]:g}).")

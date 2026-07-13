@@ -717,3 +717,95 @@ def test_point_axis_lock_in_viewport():
     assert pt[0] == pytest.approx(5) and pt[1] == pytest.approx(5)
     pt_lower = vp.world_point_at(400, 500)
     assert pt_lower[2] < pt[2]              # lower pixel -> lower height
+
+
+def test_macro_aliases_and_args(env):
+    """Aliases can expand to full macros; run() accepts trailing args."""
+    scene, sel, hist, ctx, proc = env
+    from serpentine3d.commands import base as cmd_base
+    cmd_base.add_alias("zx", "zoom extents")
+    assert cmd_base.resolve("zx").name == "zoom"      # first token resolves
+
+    class VP:
+        space = "model"
+
+        def __init__(self):
+            self.calls = []
+
+        def zoom_extents(self):
+            self.calls.append("extents")
+
+        def zoom_selected(self):
+            return False
+    vp = VP()
+    ctx.viewport = vp
+    proc.run("zx")                       # alias -> zoom + Extents answer
+    assert vp.calls == ["extents"]
+    proc.run("zoom extents")             # macro form directly
+    assert vp.calls == ["extents", "extents"]
+    cmd_base.remove_alias("zx")
+
+
+def test_osnap_command_toggles_config(env):
+    scene, sel, hist, ctx, proc = env
+    from serpentine3d.utils.config import Config
+    import json, tempfile, os
+    fd, path = tempfile.mkstemp(suffix=".json")
+    os.write(fd, b"{}")
+    os.close(fd)
+    os.environ["SERP3D_CONFIG"] = path
+    try:
+        cfg = Config()
+        class VP:
+            space = "model"
+            config = cfg
+
+            class snaps:
+                enabled = True
+        ctx.viewport = VP()
+        proc.run("osnap mid toggle")
+        assert cfg.get("osnaps", "mid") is False      # default True -> off
+        proc.run("osnap mid on")
+        assert cfg.get("osnaps", "mid") is True
+        proc.run("osnap all toggle")
+        assert VP.snaps.enabled is False
+    finally:
+        del os.environ["SERP3D_CONFIG"]
+        os.unlink(path)
+
+
+def test_rhino_macro_mapping():
+    from serpentine3d.utils.config import map_rhino_macro
+    assert map_rhino_macro("'_Zoom _Extents") == "zoomextents"
+    assert map_rhino_macro("'_Zoom _Selected") == "zoomselected"
+    assert map_rhino_macro("!_SetView _World _Back") == "back"
+    assert map_rhino_macro(
+        "noecho -Osnap _Mid _Toggle _Enter") == "osnap mid toggle"
+    assert map_rhino_macro("!_FilletEDge") == "filletedge"   # registry fall
+    assert map_rhino_macro("!_BooleanSplit") == "booleansplit"
+    assert map_rhino_macro("!_Grasshopper") is None
+    assert map_rhino_macro("-SetLinetype Dashed") is None
+
+
+def test_boundingbox_command(env):
+    scene, sel, hist, ctx, proc = env
+    scene.add(g.make_sphere((0, 0, 0), 5))
+    proc.run("boundingbox")
+    proc.provide_text("all")
+    box = scene.all()[-1]
+    assert g.volume(box.shape) == pytest.approx(1000, rel=1e-2)
+
+
+def test_back_left_bottom_views(env):
+    scene, sel, hist, ctx, proc = env
+    import math
+    from serpentine3d.core.selection import SelectionManager
+    from serpentine3d.ui.viewport import Viewport
+    vp = Viewport(scene, SelectionManager(scene))
+    ctx.viewport = vp
+    proc.run("back")
+    assert vp.camera.azimuth == pytest.approx(math.radians(90))
+    proc.run("left")
+    assert vp.camera.azimuth == pytest.approx(math.radians(180))
+    proc.run("bottom")
+    assert vp.camera.elevation == pytest.approx(math.radians(-89.9))

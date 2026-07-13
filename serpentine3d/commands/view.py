@@ -1,7 +1,7 @@
 """View and display commands (non-mutating)."""
 
 from ..core import geometry as g
-from .base import OptionReq, PointReq, SelectReq, command
+from .base import OptionReq, PointReq, SelectReq, TextReq, command
 
 
 def _vp(ctx):
@@ -61,6 +61,48 @@ def cmd_shaded(ctx):
 def cmd_ghosted(ctx):
     _vp(ctx).set_display_mode("ghosted")
     ctx.echo("Ghosted display.")
+    yield from ()
+
+
+@command("back", mutates=False)
+def cmd_back(ctx):
+    _vp(ctx).set_view("back")
+    yield from ()
+
+
+@command("left", mutates=False)
+def cmd_left(ctx):
+    _vp(ctx).set_view("left")
+    yield from ()
+
+
+@command("bottom", mutates=False)
+def cmd_bottom(ctx):
+    _vp(ctx).set_view("bottom")
+    yield from ()
+
+
+@command("viewcapturetofile", aliases=("vcf", "viewcapture"), mutates=False)
+def cmd_viewcapturetofile(ctx):
+    """Save the active viewport as a PNG image."""
+    import os
+    path = yield TextReq("Image path", default="~/viewport.png")
+    path = os.path.abspath(os.path.expanduser(path.strip()))
+    if not path.lower().endswith((".png", ".jpg", ".jpeg")):
+        path += ".png"
+    img = _vp(ctx).grabFramebuffer()
+    img.save(path)
+    ctx.echo(f"Saved {img.width()}x{img.height()} capture to {path}")
+
+
+@command("viewcapturetoclipboard", aliases=("vcc",), mutates=False)
+def cmd_viewcapturetoclipboard(ctx):
+    """Copy the active viewport image to the clipboard."""
+    from PySide6.QtWidgets import QApplication
+    img = _vp(ctx).grabFramebuffer()
+    QApplication.clipboard().setImage(img)
+    ctx.echo(f"Copied {img.width()}x{img.height()} capture to the "
+             "clipboard.")
     yield from ()
 
 
@@ -191,13 +233,45 @@ def cmd_grid(ctx):
     yield from ()
 
 
-@command("snap", aliases=("osnap",), mutates=False)
+@command("snap", mutates=False)
 def cmd_snap(ctx):
     vp = _vp(ctx)
     vp.snaps.enabled = not vp.snaps.enabled
     ctx.echo(f"Object snap {'on' if vp.snaps.enabled else 'off'} "
              "(end / mid / center).")
     yield from ()
+
+
+_OSNAP_KINDS = ("End", "Mid", "Center", "Quad", "Int", "Perp", "Near")
+
+
+@command("osnap", mutates=False)
+def cmd_osnap(ctx):
+    """Toggle one object-snap type (or All = the master switch) —
+    scriptable, e.g. bind a key to 'osnap mid toggle'."""
+    kind = yield OptionReq("Snap type", options=["All", *_OSNAP_KINDS],
+                           default="All")
+    action = yield OptionReq("Action", options=["Toggle", "On", "Off"],
+                             default="Toggle")
+    vp = _vp(ctx)
+    cfg = getattr(vp, "config", None)
+    if kind == "All":
+        vp.snaps.enabled = (not vp.snaps.enabled if action == "Toggle"
+                            else action == "On")
+        if cfg:
+            cfg.set("osnaps", "enabled", vp.snaps.enabled)
+        state = "on" if vp.snaps.enabled else "off"
+        ctx.echo(f"Object snaps {state}.")
+    else:
+        key = kind.lower()
+        cur = bool(cfg.get("osnaps", key, default=True)) if cfg else True
+        new = (not cur) if action == "Toggle" else action == "On"
+        if cfg:
+            cfg.set("osnaps", key, new)
+        ctx.echo(f"{kind} snap {'on' if new else 'off'}.")
+    win = ctx.window
+    if win is not None and hasattr(win, "osnap_bar"):
+        win.osnap_bar.refresh()
 
 
 @command("gridsnap", mutates=False)
