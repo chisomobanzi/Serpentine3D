@@ -1,6 +1,6 @@
 import pytest
 
-import serpentine.commands  # registers all commands  # noqa: F401
+import serpentine3d.commands  # registers all commands  # noqa: F401
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -9,10 +9,10 @@ def _qapp():
     (core/text.py would otherwise block widget construction later)."""
     from PySide6.QtWidgets import QApplication
     yield QApplication.instance() or QApplication([])
-from serpentine.commands.base import CommandContext, CommandProcessor
-from serpentine.core.history import History
-from serpentine.core.scene import Scene
-from serpentine.core.selection import SelectionManager
+from serpentine3d.commands.base import CommandContext, CommandProcessor
+from serpentine3d.core.history import History
+from serpentine3d.core.scene import Scene
+from serpentine3d.core.selection import SelectionManager
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ class StubLayoutView:
 
 class StubViewport:
     def __init__(self, space: str):
-        from serpentine.core.cplane import CPlane
+        from serpentine3d.core.cplane import CPlane
         self.space = space          # a layout id puts commands on that sheet
         self.layout_view = StubLayoutView()
         self.cplane = CPlane()

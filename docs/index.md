@@ -1,9 +1,9 @@
-# Serpentine
+# Serpentine3D
 
 **An open-source NURBS surface modeller for Linux, with native AI
 integration via MCP.**
 
-Serpentine (`serp`) is a freeform surface modeller in the spirit of
+Serpentine3D (`serp3d`) is a freeform surface modeller in the spirit of
 Rhinoceros 3D — exact BREP/NURBS geometry on the OpenCASCADE kernel, not
 meshes. It is built for set designers, architects and industrial
 designers who want a genuine Rhino-style workflow on Linux: a command

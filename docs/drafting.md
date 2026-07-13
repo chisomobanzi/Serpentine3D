@@ -1,6 +1,6 @@
 # Drafting & layouts
 
-Serpentine has two spaces, like Rhino:
+Serpentine3D has two spaces, like Rhino:
 
 - **Model space** — one 3D world in real units.
 - **Layouts** — paper sheets in millimetres, shown as tabs. Each sheet

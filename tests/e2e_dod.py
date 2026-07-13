@@ -233,9 +233,9 @@ def main():
     c.call("command", command="new", inputs=["Yes"])
     c.call("import_file", path="/tmp/serp_e2e/scene.obj")
     n_obj = c.call("scene_info")["object_count"]
-    check("file io: serp/step/obj round-trips",
+    check("file io: serp3d/step/obj round-trips",
           n_serp == 2 and n_step == 2 and n_obj == 2,
-          f"serp={n_serp} step={n_step} obj={n_obj}")
+          f"serp3d={n_serp} step={n_step} obj={n_obj}")
 
     # --- item 11: layers -------------------------------------------------------
     c.call("command", command="new", inputs=["Yes"])

@@ -3,9 +3,9 @@ import os
 
 import pytest
 
-from serpentine.core import geometry as g
-from serpentine.core.scene import Scene
-from serpentine.utils.autosave import AutosaveManager
+from serpentine3d.core import geometry as g
+from serpentine3d.core.scene import Scene
+from serpentine3d.utils.autosave import AutosaveManager
 
 
 def test_autosave_and_recovery_cycle(tmp_path):

@@ -1,5 +1,5 @@
 [project]
-name = "serpentine"
+name = "serpentine3d"
 version = "0.2.0"
 description = "Open-source NURBS surface modeller for Linux with MCP integration"
 readme = "README.md"
@@ -25,16 +25,17 @@ docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 Homepage = "https://github.com/chisomo-banzi/Serpentine3D"
 
 [project.scripts]
-serp = "serpentine.app:main"
-serp-mcp = "serpentine.mcp_server.server:main"
-serp-batch = "serpentine.batch:main"
+serp3d = "serpentine3d.app:main"
+serp = "serpentine3d.app:main"          # short alias, like `code` for VS Code
+serp3d-mcp = "serpentine3d.mcp_server.server:main"
+serp3d-batch = "serpentine3d.batch:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["serpentine*"]
+include = ["serpentine3d*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

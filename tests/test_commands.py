@@ -1,14 +1,14 @@
 import pytest
 
-import serpentine.commands  # registers all commands  # noqa: F401
-from serpentine.commands.base import (
+import serpentine3d.commands  # registers all commands  # noqa: F401
+from serpentine3d.commands.base import (
     CommandContext, CommandProcessor, PointReq, SelectReq, parse_point,
     resolve,
 )
-from serpentine.core import geometry as g
-from serpentine.core.history import History
-from serpentine.core.scene import Scene
-from serpentine.core.selection import SelectionManager
+from serpentine3d.core import geometry as g
+from serpentine3d.core.history import History
+from serpentine3d.core.scene import Scene
+from serpentine3d.core.selection import SelectionManager
 
 
 @pytest.fixture
@@ -94,7 +94,7 @@ def test_preselection_skips_select_request(env):
     sel.set([obj.id])
     proc.run("extrude")
     # selection consumed automatically; first prompt is the distance
-    from serpentine.commands.base import NumberReq
+    from serpentine3d.commands.base import NumberReq
     assert isinstance(proc.request, NumberReq)
 
 
@@ -463,7 +463,7 @@ def test_group_lock_block(env):
 
 
 def test_block_persistence(env, tmp_path):
-    from serpentine import fileio
+    from serpentine3d import fileio
     scene, sel, hist, ctx, proc = env
     a = scene.add(g.make_box((0, 0, 0), 2, 2, 2))
     proc.run("block")
@@ -476,7 +476,7 @@ def test_block_persistence(env, tmp_path):
 
     path = str(tmp_path / "blocks.serp")
     fileio.export_file(scene, path)
-    from serpentine.core.scene import Scene
+    from serpentine3d.core.scene import Scene
     loaded = Scene()
     fileio.import_file(loaded, path)
     assert len(loaded.block_defs) == 1

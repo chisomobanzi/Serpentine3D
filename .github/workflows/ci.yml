@@ -40,7 +40,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y libgl1 libegl1 \
             libfontconfig1
           python -m pip install -U pip && pip install -e .
-      - name: serp-batch smoke test
+      - name: serp3d-batch smoke test
         run: |
           cat > smoke.py << 'PY'
           doc.add(geo.make_box((0, 0, 0), 10, 10, 10), name="Box")
@@ -49,5 +49,5 @@ jobs:
           doc.export("out.glb")
           print("volume:", round(doc.volume("Box"), 1))
           PY
-          serp-batch smoke.py
+          serp3d-batch smoke.py
           test -s out.step && test -s out.glb

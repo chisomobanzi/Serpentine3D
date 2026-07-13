@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from serpentine.core.layout import (
+from serpentine3d.core.layout import (
     AngularDim, DetailView, Hatch, Layout, Leader, LinearDim, RadialDim,
     TextNote, annotation_at, annotation_bounds, delete_annotation,
     detail_project, detail_unproject, enclosing_polygon, layouts_from_json,
@@ -109,8 +109,8 @@ def test_layout_serialization_v2_fields():
 
 
 def test_annot_styles_roundtrip(tmp_path):
-    from serpentine import fileio
-    from serpentine.core.scene import Scene
+    from serpentine3d import fileio
+    from serpentine3d.core.scene import Scene
     scene = Scene()
     scene.annot_styles["Big"] = {"text_height": 8.0, "arrow_size": 3.0,
                                  "dim_offset": 8.0}
@@ -121,7 +121,7 @@ def test_annot_styles_roundtrip(tmp_path):
     fileio.import_file(loaded, path)
     assert loaded.annot_styles["Big"]["text_height"] == 8.0
 
-    from serpentine.ui.annot_paint import style_of
+    from serpentine3d.ui.annot_paint import style_of
     assert style_of(loaded, "Big")["text_height"] == 8.0
     assert style_of(loaded, "")["text_height"] == 3.2       # Standard
     assert style_of(loaded, "Heading")["text_height"] == 6.0
@@ -130,7 +130,7 @@ def test_annot_styles_roundtrip(tmp_path):
 def test_drafting_commands(env):
     """text with style + multiline, dim anchoring, revision, sheetindex."""
     scene, sel, hist, ctx, proc = env
-    from serpentine.core.layout import Layout
+    from serpentine3d.core.layout import Layout
     lay = Layout(name="Sheet 1")
     det = _detail()
     lay.details.append(det)

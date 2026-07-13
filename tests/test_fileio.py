@@ -3,9 +3,9 @@ import os
 
 import pytest
 
-from serpentine import fileio
-from serpentine.core import geometry as g
-from serpentine.core.scene import Scene
+from serpentine3d import fileio
+from serpentine3d.core import geometry as g
+from serpentine3d.core.scene import Scene
 
 
 @pytest.fixture
@@ -120,7 +120,7 @@ def test_3dm_export_and_reimport(scene, tmp_path):
     assert any(isinstance(gg, r3.Curve) for gg in geos)
     assert any(isinstance(gg, r3.Mesh) for gg in geos)
 
-    # and re-import into serpentine
+    # and re-import into serpentine3d
     loaded = Scene()
     n = fileio.import_file(loaded, path)
     assert n >= 3
@@ -203,7 +203,7 @@ def test_glb_export(scene, tmp_path):
         jlen, jtype = struct.unpack("<II", f.read(8))
         doc = json.loads(f.read(jlen))
     assert len(doc["meshes"]) == 2       # box + sphere (curve skipped)
-    assert doc["asset"]["generator"] == "Serpentine"
+    assert doc["asset"]["generator"] == "Serpentine3D"
     assert len(doc["materials"]) == 2
 
 

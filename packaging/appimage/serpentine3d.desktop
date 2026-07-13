@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Serpentine3D
+Comment=NURBS surface modeller
+Exec=serp3d %F
+Icon=serpentine3d
+Terminal=false
+Categories=Graphics;3DGraphics;Engineering;
+MimeType=application/x-serpentine3d;
+Keywords=CAD;NURBS;3D;modelling;

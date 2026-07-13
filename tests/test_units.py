@@ -1,6 +1,6 @@
 import pytest
 
-from serpentine.utils.units import convert, format_length, parse_length
+from serpentine3d.utils.units import convert, format_length, parse_length
 
 
 def test_parse_plain_numbers():
@@ -71,7 +71,7 @@ def test_convert():
 
 def test_ray_line_parameter_direction():
     import numpy as np
-    from serpentine.utils.math3d import ray_line_parameter
+    from serpentine3d.utils.math3d import ray_line_parameter
     # camera above origin looking down at a point on the +X axis:
     # the closest point on the X axis must have positive t
     origin = np.array([0.0, 0.0, 10.0])
@@ -85,7 +85,7 @@ def test_ray_line_parameter_direction():
 
 
 def test_hatch_lines():
-    from serpentine.core.layout import hatch_lines
+    from serpentine3d.core.layout import hatch_lines
     square = [(0, 0), (10, 0), (10, 10), (0, 10)]
     segs = hatch_lines(square, 0.0, 2.0)
     assert len(segs) == 5

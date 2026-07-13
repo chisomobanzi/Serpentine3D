@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from serpentine.core import geometry as g
-from serpentine.core.history import History
-from serpentine.core.scene import Scene
-from serpentine.core.tessellate import tessellate
+from serpentine3d.core import geometry as g
+from serpentine3d.core.history import History
+from serpentine3d.core.scene import Scene
+from serpentine3d.core.tessellate import tessellate
 
 
 def test_tessellate_solid():
@@ -136,8 +136,8 @@ def test_replace_shape_invalidates_mesh():
 
 def test_native_mesh_objects(tmp_path):
     import numpy as np
-    from serpentine import fileio
-    from serpentine.core.mesh import MeshShape, brep_from_mesh
+    from serpentine3d import fileio
+    from serpentine3d.core.mesh import MeshShape, brep_from_mesh
 
     # unit cube mesh
     v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
@@ -182,7 +182,7 @@ def test_native_mesh_objects(tmp_path):
 
 
 def test_obj_import_is_mesh(tmp_path):
-    from serpentine import fileio
+    from serpentine3d import fileio
     p = str(tmp_path / "tri.obj")
     with open(p, "w") as f:
         f.write("o T\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")

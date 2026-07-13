@@ -4,7 +4,7 @@ import numpy as np
 
 import pytest
 
-from serpentine.core import geometry as g
+from serpentine3d.core import geometry as g
 
 
 def test_line():
@@ -218,7 +218,7 @@ def test_explode_wire_and_solid():
 
 
 def test_snap_points():
-    from serpentine.core.snaps import snap_points_for
+    from serpentine3d.core.snaps import snap_points_for
     line = g.make_line((0, 0, 0), (10, 0, 0))
     pts = snap_points_for(line)
     kinds = {k for _, k in pts}
@@ -337,7 +337,7 @@ def test_curvature_at():
 
 def test_dash_segments_bounded():
     import numpy as np
-    from serpentine.core.hlr import dash_segments
+    from serpentine3d.core.hlr import dash_segments
     # exact boundary alignment used to loop forever
     line = np.array([[0, 0, 0], [10, 0, 0]], float)
     d = dash_segments(line, dash=2.0, gap=1.2)
@@ -448,7 +448,7 @@ def test_unroll_cylinder():
 
 
 def test_text_curves():
-    from serpentine.core.text import text_curves
+    from serpentine3d.core.text import text_curves
     curves = text_curves("AB", height=10)
     assert len(curves) >= 3        # A outer, A hole, B outer, B holes
     import numpy as np
@@ -460,7 +460,7 @@ def test_text_curves():
 
 
 def test_deform_twist_curve():
-    from serpentine.core import deform
+    from serpentine3d.core import deform
     line = g.make_line((5, 0, 0), (5, 0, 10))
     fn = deform.twist_fn((0, 0, 0), (0, 0, 1), 90.0, 10.0)
     twisted = deform.deform_shape(line, fn)
@@ -471,7 +471,7 @@ def test_deform_twist_curve():
 
 
 def test_deform_taper_surface():
-    from serpentine.core import deform
+    from serpentine3d.core import deform
     rect = g.make_rectangle((-5, -5, 0), (5, 5, 0))
     solidish = g.extrude(rect, (0, 0, 1), 10, cap=False)
     fn = deform.taper_fn((0, 0, 0), (0, 0, 1), 0.5, 10.0)
@@ -489,7 +489,7 @@ def test_deform_taper_surface():
 
 
 def test_deform_bend_curve():
-    from serpentine.core import deform
+    from serpentine3d.core import deform
     line = g.make_line((0, 0, 0), (10, 0, 0))
     fn = deform.bend_fn((0, 0, 0), (1, 0, 0), 90.0, 10.0)
     bent = deform.deform_shape(line, fn)
@@ -500,7 +500,7 @@ def test_deform_bend_curve():
 
 
 def test_flow_along_curve():
-    from serpentine.core import deform
+    from serpentine3d.core import deform
     target = g.make_arc_3pt((0, 0, 0), (10, 6, 0), (20, 0, 0))
     box_curve = g.make_rectangle((0, -1, 0), (20, 1, 0))
     fn = deform.flow_fn((0, 0, 0), (20, 0, 0), target)

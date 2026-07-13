@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Renamed to **Serpentine3D** across the board (after Rhinoceros3D /
+  Rhino3D): Python package `serpentine3d`, CLI `serp3d` /
+  `serp3d-mcp` / `serp3d-batch` (`serp` kept as a convenience alias),
+  desktop entry + icon + `application/x-serpentine3d` MIME type, data
+  dirs `~/.serpentine3d` and `~/.config/serpentine3d` (pre-rename dirs
+  migrate automatically on first launch), plugin entry-point group
+  `serpentine3d.plugins`, drop-in hook `serpentine3d_plugin(ctx)`,
+  env vars `SERP3D_*`, AppImage `Serpentine3D-x86_64.AppImage`.
+  `.serp` files keep their extension; files saved before the rename
+  still load.
+
 ## 0.2.0 — 2026-07-14
 
 The "documentation and depth" release: nine feature waves on top of the
@@ -56,8 +69,8 @@ The "documentation and depth" release: nine feature waves on top of the
   when their input curves change; records persist and undo.
 - Seeded fuzz tests and an HLR crash corpus against the isolated
   hidden-line worker.
-- Plugin architecture: `~/.serpentine/plugins/*.py` or
-  `serpentine.plugins` entry points; Plugins menu; `plugins` command.
+- Plugin architecture: `~/.serpentine3d/plugins/*.py` or
+  `serpentine3d.plugins` entry points; Plugins menu; `plugins` command.
 - mkdocs documentation site (`docs/`), AppImage recipe
   (`packaging/appimage`), 160+ unit/integration tests + 24-check GUI
   E2E suite.

@@ -14,7 +14,7 @@ run("zoomextents")
 ## Headless batch
 
 ```bash
-serp-batch myscript.py --output out.step
+serp3d-batch myscript.py --output out.step
 ```
 
 Runs the same `sp` API without a display — good for CI, conversions and
@@ -22,13 +22,13 @@ overnight jobs.
 
 ## Plugins
 
-Two ways to extend Serpentine:
+Two ways to extend Serpentine3D:
 
-**1. Drop a file** into `~/.serpentine/plugins/` (or `SERP_PLUGIN_DIR`):
+**1. Drop a file** into `~/.serpentine3d/plugins/` (or `SERP3D_PLUGIN_DIR`):
 
 ```python
-# ~/.serpentine/plugins/greeble.py
-def serpentine_plugin(ctx):
+# ~/.serpentine3d/plugins/greeble.py
+def serpentine3d_plugin(ctx):
     base = ctx.requests()
 
     @ctx.command("greeble")
@@ -40,7 +40,7 @@ def serpentine_plugin(ctx):
 **2. Ship a package** exposing an entry point:
 
 ```toml
-[project.entry-points."serpentine.plugins"]
+[project.entry-points."serpentine3d.plugins"]
 myplugin = "myplugin:register"
 ```
 

@@ -1,8 +1,8 @@
-# Serpentine
+# Serpentine3D
 
 **An open-source NURBS surface modeller for Linux, with native AI integration via MCP.**
 
-Serpentine (`serp`) is a freeform surface modeller in the spirit of Rhinoceros 3D —
+Serpentine3D (`serp3d`) is a freeform surface modeller in the spirit of Rhinoceros 3D —
 BREP/NURBS geometry on the OpenCASCADE kernel, not meshes. It is built for set
 designers, architects, and industrial designers who want a genuine Rhino-style
 workflow on Linux: a command line that prompts for input, layers, object snaps to
@@ -11,12 +11,12 @@ a construction plane, STEP/OBJ interchange, and a dark, focused interface.
 Named for the serpentine stone of Zimbabwean Shona sculpture, and for the
 S-curve at the heart of NURBS geometry.
 
-![Serpentine screenshot](screenshots/17_showcase.png)
+![Serpentine3D screenshot](screenshots/17_showcase.png)
 
 ## Why
 
 - **No genuine open-source NURBS modeller exists for Linux.** FreeCAD is
-  parametric CAD; Blender is mesh-based. Serpentine fills the freeform
+  parametric CAD; Blender is mesh-based. Serpentine3D fills the freeform
   surface-modelling gap.
 - **First CAD tool with native AI integration.** The bundled MCP server lets
   Claude (or any MCP client) see your viewport, create geometry, run any
@@ -30,7 +30,7 @@ Requires Python 3.10+ on Linux with OpenGL 3.3.
 git clone <this-repo> && cd Serpentine3D
 python3 -m venv .venv
 .venv/bin/pip install -e .
-.venv/bin/serp        # launch
+.venv/bin/serp3d        # launch
 ```
 
 The OpenCASCADE kernel ships as pip wheels (`cadquery-ocp`) — no conda, no
@@ -89,11 +89,11 @@ nudge the selection along the CPlane (Shift ×10, Ctrl ×0.1).
   perpendicular, and nearest-point, each with a distinct cursor marker.
   Toggle types on the **osnap bar** under the command line, or in
   Settings. `gridsnap` snaps picked points to the grid
-- Launch with a file: `serp model.serp` (or any importable format)
+- Launch with a file: `serp3d model.serp` (or any importable format)
 
 ## Drafting & documentation
 
-Serpentine has a full two-space drafting workflow — model in 3D, document
+Serpentine3D has a full two-space drafting workflow — model in 3D, document
 in 2D, print to PDF — without leaving the app:
 
 - **Layouts** (`layout`): paper-space sheets (A4–A0, Letter, Tabloid or
@@ -141,14 +141,14 @@ optional model rescale. Every prompt then accepts unit input — `3'6"`,
 
 - **Python console** (Tools menu, Ctrl+`): the live scene, geometry
   builders and the full API in an interactive session.
-- **`serpentine.scripting.Document`**: the same power headless —
+- **`serpentine3d.scripting.Document`**: the same power headless —
   `doc.add(geo.make_box(...))`, `doc.run("filletedge", [...])`,
   `doc.export("part.step")`.
-- **`serp-batch script.py`**: run scripts from the command line / CI
+- **`serp3d-batch script.py`**: run scripts from the command line / CI
   with `doc`, `geo` and `args` predefined. No display needed.
 - **Autosave & crash recovery**: every 5 minutes (configurable); on
-  launch after a crash Serpentine offers to restore the autosave.
-- Drop a `~/.config/serpentine/template.serp` to start every new
+  launch after a crash Serpentine3D offers to restore the autosave.
+- Drop a `~/.config/serpentine3d/template.serp` to start every new
   document from your own template (units, layers, title blocks).
 
 ### Settings
@@ -163,7 +163,7 @@ optional model rescale. Every prompt then accepts unit input — `3'6"`,
   (Options → Aliases → Export) and maps known commands automatically
 - **Object Snaps** and **Display** (grid size)
 
-Settings live in `~/.config/serpentine/settings.json`.
+Settings live in `~/.config/serpentine3d/settings.json`.
 
 ## File formats
 
@@ -180,11 +180,11 @@ Settings live in `~/.config/serpentine/settings.json`.
 
 ## MCP server (AI integration)
 
-Serpentine exposes its full modelling surface as MCP tools. Start the app,
+Serpentine3D exposes its full modelling surface as MCP tools. Start the app,
 then register the server with your MCP client:
 
 ```bash
-claude mcp add serpentine -- /path/to/.venv/bin/serp-mcp
+claude mcp add serpentine3d -- /path/to/.venv/bin/serp3d-mcp
 ```
 
 Tools: `serp_scene_info`, `serp_screenshot` (returns an image of the viewport),
@@ -196,12 +196,12 @@ Tools: `serp_scene_info`, `serp_screenshot` (returns an image of the viewport),
 The combination of `serp_screenshot` and `serp_command` means an AI assistant
 can model alongside you: it sees what you see and can operate every tool the
 command line offers. The bridge is a localhost-only JSON-RPC socket
-(`~/.serpentine/rpc.port`); set `SERP_NO_RPC=1` to disable it.
+(`~/.serpentine3d/rpc.port`); set `SERP3D_NO_RPC=1` to disable it.
 
 ## Architecture
 
 ```
-serpentine/
+serpentine3d/
 ├── core/          # kernel layer: geometry builders, tessellation,
 │                  #   scene graph, layers, selection, undo history
 ├── commands/      # generator-based interactive commands (Rhino-style
@@ -220,9 +220,9 @@ serves typed input, viewport clicks, and MCP calls.
 
 ## Plugins
 
-Drop a `.py` file into `~/.serpentine/plugins/` defining
-`serpentine_plugin(ctx)`, or ship a package with a
-`serpentine.plugins` entry point — plugins register first-class
+Drop a `.py` file into `~/.serpentine3d/plugins/` defining
+`serpentine3d_plugin(ctx)`, or ship a package with a
+`serpentine3d.plugins` entry point — plugins register first-class
 commands (with prompts, osnaps, undo and MCP support for free) and
 menu items. See `docs/scripting.md`.
 

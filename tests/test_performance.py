@@ -6,8 +6,8 @@ import time
 import numpy as np
 import pytest
 
-from serpentine.core import geometry as g
-from serpentine.core.scene import Scene
+from serpentine3d.core import geometry as g
+from serpentine3d.core.scene import Scene
 
 
 def test_notify_kinds():
@@ -27,7 +27,7 @@ def test_notify_kinds():
 
 def test_concurrent_mesh_access_tessellates_once(monkeypatch):
     """obj.mesh is safe to race: one tessellation, everyone gets it."""
-    import serpentine.core.scene as scene_mod
+    import serpentine3d.core.scene as scene_mod
     real = scene_mod.tessellate
     calls = []
 
@@ -52,7 +52,7 @@ def test_concurrent_mesh_access_tessellates_once(monkeypatch):
 
 
 def test_display_mesh_bounds_cached():
-    from serpentine.core.tessellate import tessellate
+    from serpentine3d.core.tessellate import tessellate
     box = g.make_box((1, 2, 3), 2, 2, 2)
     dm = tessellate(box)
     b1 = dm.bounds()
@@ -62,7 +62,7 @@ def test_display_mesh_bounds_cached():
 
 
 def test_layer_lineweight_roundtrip(tmp_path):
-    from serpentine import fileio
+    from serpentine3d import fileio
     scene = Scene()
     heavy = scene.layers.create("Walls")
     scene.layers.set_lineweight(heavy.id, 3.0)
@@ -82,8 +82,8 @@ def _qapp():
 
 def test_pick_reject_culls_offscreen_objects():
     _qapp()
-    from serpentine.core.selection import SelectionManager
-    from serpentine.ui.viewport import Viewport
+    from serpentine3d.core.selection import SelectionManager
+    from serpentine3d.ui.viewport import Viewport
     scene = Scene()
     sel = SelectionManager(scene)
     vp = Viewport(scene, sel)
@@ -100,8 +100,8 @@ def test_pick_reject_culls_offscreen_objects():
 
 def test_background_tessellation_of_heavy_shapes():
     _qapp()
-    from serpentine.core.selection import SelectionManager
-    from serpentine.ui.viewport import Viewport
+    from serpentine3d.core.selection import SelectionManager
+    from serpentine3d.ui.viewport import Viewport
     scene = Scene()
     sel = SelectionManager(scene)
     vp = Viewport(scene, sel)
@@ -124,7 +124,7 @@ def test_background_tessellation_of_heavy_shapes():
 
 
 def test_materials_persist_and_export(tmp_path):
-    from serpentine import fileio
+    from serpentine3d import fileio
     scene = Scene()
     obj = scene.add(g.make_sphere((0, 0, 0), 5))
     scene.update(obj.id, material={"metallic": 1.0, "roughness": 0.2,

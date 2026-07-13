@@ -1,9 +1,9 @@
 import pytest
 
-from serpentine.core import geometry as g
-from serpentine.core.scene import Scene
-from serpentine.core.snaps import SnapIndex, _intersections, _static_snap_points
-from serpentine.utils.config import Config, parse_rhino_aliases
+from serpentine3d.core import geometry as g
+from serpentine3d.core.scene import Scene
+from serpentine3d.core.snaps import SnapIndex, _intersections, _static_snap_points
+from serpentine3d.utils.config import Config, parse_rhino_aliases
 
 
 def test_quad_snap_points():
@@ -26,7 +26,7 @@ def test_intersection_snap():
 def test_snapindex_respects_type_toggles():
     scene = Scene()
     scene.add(g.make_line((0, 0, 0), (10, 0, 0)))
-    from serpentine.ui.camera import Camera
+    from serpentine3d.ui.camera import Camera
     cam = Camera()
     cam.set_standard_view("top")
     cam.target[:] = (5, 0, 0)
@@ -55,8 +55,8 @@ def test_config_roundtrip(tmp_path):
 
 
 def test_alias_runtime_registration():
-    import serpentine.commands  # noqa: F401
-    from serpentine.commands.base import add_alias, remove_alias, resolve
+    import serpentine3d.commands  # noqa: F401
+    from serpentine3d.commands.base import add_alias, remove_alias, resolve
     add_alias("qq", "circle")
     assert resolve("qq").name == "circle"
     remove_alias("qq")

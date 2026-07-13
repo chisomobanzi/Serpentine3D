@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from serpentine.commands.help_cmd import command_reference  # noqa: E402
+from serpentine3d.commands.help_cmd import command_reference  # noqa: E402
 
 
 def main():

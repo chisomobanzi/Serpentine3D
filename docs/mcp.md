@@ -1,6 +1,6 @@
 # AI / MCP integration
 
-Serpentine ships an [MCP](https://modelcontextprotocol.io) server so AI
+Serpentine3D ships an [MCP](https://modelcontextprotocol.io) server so AI
 assistants can drive the modeller: create geometry, run any command,
 inspect and screenshot the scene.
 
@@ -10,7 +10,7 @@ With the GUI running (it opens a local RPC bridge automatically), add
 to your MCP client config — e.g. Claude Code:
 
 ```bash
-claude mcp add serpentine -- /path/to/.venv/bin/serp-mcp
+claude mcp add serpentine3d -- /path/to/.venv/bin/serp3d-mcp
 ```
 
 or in `claude_desktop_config.json`:
@@ -18,12 +18,12 @@ or in `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "serpentine": { "command": "/path/to/.venv/bin/serp-mcp" }
+    "serpentine3d": { "command": "/path/to/.venv/bin/serp3d-mcp" }
   }
 }
 ```
 
-The MCP server finds the running GUI through `~/.serpentine/rpc.port`.
+The MCP server finds the running GUI through `~/.serpentine3d/rpc.port`.
 
 ## What the assistant can do
 

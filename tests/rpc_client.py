@@ -1,4 +1,4 @@
-"""Tiny RPC client for driving a running Serpentine (used by tests + MCP)."""
+"""Tiny RPC client for driving a running Serpentine3D (used by tests + MCP)."""
 
 import json
 import os
@@ -8,7 +8,7 @@ import socket
 class SerpClient:
     def __init__(self, port: int | None = None, timeout: float = 60.0):
         if port is None:
-            port_file = os.path.expanduser("~/.serpentine/rpc.port")
+            port_file = os.path.expanduser("~/.serpentine3d/rpc.port")
             port = int(open(port_file).read().strip())
         self.sock = socket.create_connection(("127.0.0.1", port),
                                              timeout=timeout)

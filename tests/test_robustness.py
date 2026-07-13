@@ -6,13 +6,13 @@ import zipfile
 
 import pytest
 
-from serpentine import fileio
-from serpentine.core import geometry as g
-from serpentine.core.scene import Scene
+from serpentine3d import fileio
+from serpentine3d.core import geometry as g
+from serpentine3d.core.scene import Scene
 
 
 def test_serp_v2_container(tmp_path):
-    from serpentine.fileio import native
+    from serpentine3d.fileio import native
     scene = Scene()
     scene.add(g.make_box((0, 0, 0), 2, 2, 2), name="Crate")
     path = str(tmp_path / "doc.serp")
@@ -20,7 +20,7 @@ def test_serp_v2_container(tmp_path):
 
     assert zipfile.is_zipfile(path)
     meta = native.read_meta(path)
-    assert meta["format"] == "serpentine" and meta["version"] == 2
+    assert meta["format"] == "serpentine3d" and meta["version"] == 2
     assert meta["objects"] == 1
     assert native.read_thumbnail(path) is None      # headless save
 
@@ -34,7 +34,7 @@ def test_serp_v2_container(tmp_path):
 
 
 def test_serp_v1_still_loads(tmp_path):
-    from serpentine.fileio import native
+    from serpentine3d.fileio import native
     scene = Scene()
     scene.add(g.make_sphere((0, 0, 0), 3), name="Ball")
     v2 = str(tmp_path / "doc.serp")
@@ -154,7 +154,7 @@ def test_fuzz_random_modelling_pipeline():
 def test_hlr_survives_degenerate_inputs():
     """The isolated HLR worker returns (possibly empty) results for the
     crash corpus and keeps serving afterwards."""
-    from serpentine.core import hlr
+    from serpentine3d.core import hlr
     corpus = []
     # planar circle seen exactly edge-on (the classic OCCT killer)
     corpus.append(([g.make_circle((0, 0, 0), 5)], (1, 0, 0), (0, 1, 0)))
@@ -180,13 +180,13 @@ def test_plugin_loading(tmp_path, monkeypatch, env):
     scene, sel, hist, ctx, proc = env
     plug = tmp_path / "hello_plugin.py"
     plug.write_text(
-        "def serpentine_plugin(ctx):\n"
+        "def serpentine3d_plugin(ctx):\n"
         "    @ctx.command('helloplugin', mutates=False)\n"
         "    def cmd_hello(c):\n"
         "        c.echo('plugin says hello ' + ctx.version)\n"
         "        yield from ()\n")
-    monkeypatch.setenv("SERP_PLUGIN_DIR", str(tmp_path))
-    from serpentine import plugins
+    monkeypatch.setenv("SERP3D_PLUGIN_DIR", str(tmp_path))
+    from serpentine3d import plugins
     monkeypatch.setattr(plugins, "_loaded", [])
     names = plugins.load_plugins()
     assert "hello_plugin" in names

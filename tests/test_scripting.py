@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from serpentine.scripting import Document
+from serpentine3d.scripting import Document
 
 
 def test_document_api(tmp_path):
@@ -47,7 +47,7 @@ def test_batch_runner(tmp_path):
         "print('made', len(doc.objects()))\n")
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
     res = subprocess.run(
-        [sys.executable, "-m", "serpentine.batch", str(script)],
+        [sys.executable, "-m", "serpentine3d.batch", str(script)],
         capture_output=True, text=True, env=env,
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     assert res.returncode == 0, res.stderr
