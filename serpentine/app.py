@@ -836,6 +836,9 @@ def main():
     set_default_gl_format()
     app = QApplication(sys.argv)
     app.setApplicationName(APP_TITLE)
+    # GNOME matches windows to the launcher (icon, grouping, pinning)
+    # by this name — must equal the installed serpentine.desktop
+    app.setDesktopFileName("serpentine")
     app.setStyleSheet(theme.QSS)
     window = MainWindow()
 
