@@ -41,7 +41,9 @@ class PointReq(Req):
     allow_empty: bool = False             # Enter with no input -> None (done)
     extra_options: tuple = ()             # typed keywords returned verbatim
     choices: dict | None = None
-    preview_fn: object = None
+    preview_fn: object = None             # value/point -> ghost shape
+    axis_lock: tuple | None = None        # (base, dir): pick along this axis
+    number_from: tuple | None = None      # (base, dir): '10' -> base+10*dir
 
 
 @dataclass
@@ -239,6 +241,12 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
             if text and opt.lower().startswith(text.lower()):
                 return True, opt
         pt = parse_point(text, ctx.last_point, ctx.scene.units, ctx.cplane)
+        if pt is None and req.number_from is not None:
+            from ..utils.units import parse_length
+            v = parse_length(text, ctx.scene.units)
+            if v is not None:
+                base, direction = req.number_from
+                pt = tuple(b + v * d for b, d in zip(base, direction))
         if pt is None:
             return False, ("Expected coordinates like 3,4,0 "
                            "(@1,0 relative, 10<45 polar, units like 3'6\")")
@@ -468,11 +476,16 @@ class CommandProcessor:
     def preview_shape(self, text: str):
         """Ghost shape for text being typed at the current request, or None."""
         req = self.request
-        fn = getattr(req, "preview_fn", None) if req else None
-        if fn is None:
+        if req is None or getattr(req, "preview_fn", None) is None:
             return None
         ok, value = parse_value(req, text, self.ctx)
-        if not ok:
+        return self.preview_for(value) if ok else None
+
+    def preview_for(self, value):
+        """Ghost shape for a candidate value (e.g. the mouse point)."""
+        req = self.request
+        fn = getattr(req, "preview_fn", None) if req else None
+        if fn is None or value is None:
             return None
         try:
             return fn(value)

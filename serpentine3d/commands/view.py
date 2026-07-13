@@ -1,7 +1,7 @@
 """View and display commands (non-mutating)."""
 
 from ..core import geometry as g
-from .base import PointReq, SelectReq, command
+from .base import OptionReq, PointReq, SelectReq, command
 
 
 def _vp(ctx):
@@ -62,6 +62,46 @@ def cmd_ghosted(ctx):
     _vp(ctx).set_display_mode("ghosted")
     ctx.echo("Ghosted display.")
     yield from ()
+
+
+@command("zoom", aliases=("z",), mutates=False)
+def cmd_zoom(ctx):
+    """Zoom the active view: Selected, Extents, a picked Window, In, Out."""
+    vp = _vp(ctx)
+    mode = yield OptionReq(
+        "Zoom", options=["Selected", "Extents", "Window", "In", "Out"],
+        default="Selected" if ctx.selection.ids else "Extents")
+    if mode == "Window":
+        p1 = yield PointReq("First corner of zoom window")
+        p2 = yield PointReq("Opposite corner", rubber_from=p1)
+        vp.zoom_to_points(p1, p2)
+    elif mode == "Selected":
+        if not vp.zoom_selected():
+            ctx.echo("Nothing selected — zooming extents instead.")
+            vp.zoom_extents()
+    elif mode == "Extents":
+        vp.zoom_extents()
+    else:
+        vp.camera.zoom(3.0 if mode == "In" else -3.0)
+        vp.update()
+
+
+@command("zoomselected", aliases=("zs",), mutates=False)
+def cmd_zoomselected(ctx):
+    """Frame the current selection in the active view."""
+    vp = _vp(ctx)
+    if not vp.zoom_selected():
+        ctx.echo("Nothing selected.")
+    yield from ()
+
+
+@command("zoomwindow", aliases=("zw",), mutates=False)
+def cmd_zoomwindow(ctx):
+    """Zoom into a window picked with two corner points."""
+    vp = _vp(ctx)
+    p1 = yield PointReq("First corner of zoom window")
+    p2 = yield PointReq("Opposite corner", rubber_from=p1)
+    vp.zoom_to_points(p1, p2)
 
 
 @command("4view", aliases=("fourview", "quadview"), mutates=False)

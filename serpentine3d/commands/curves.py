@@ -61,9 +61,22 @@ def cmd_curve(ctx):
 @command("circle", aliases=("c", "ci"))
 def cmd_circle(ctx):
     center = yield PointReq("Center of circle")
-    r = yield LengthReq("Radius", minimum=1e-9)
-    obj = ctx.scene.add(g.make_circle(center, r,
-                                      normal=tuple(ctx.cplane.normal)))
+    normal = tuple(ctx.cplane.normal)
+
+    def _circle_to(p):
+        import math
+        r = math.dist(center, p)
+        return g.make_circle(center, r, normal=normal) if r > 1e-9 else None
+
+    rp = yield PointReq("Radius (click, or type a number)",
+                        number_from=(center, tuple(ctx.cplane.xdir)),
+                        rubber_from=center, preview_fn=_circle_to)
+    import math
+    r = math.dist(center, rp)
+    if r < 1e-9:
+        ctx.echo("Zero radius — no circle created.")
+        return
+    obj = ctx.scene.add(g.make_circle(center, r, normal=normal))
     ctx.echo(f"Created {obj.name} (r={r:g}).")
 
 
@@ -71,7 +84,8 @@ def cmd_circle(ctx):
 def cmd_arc(ctx):
     p1 = yield PointReq("Start of arc")
     p2 = yield PointReq("Point on arc", rubber_from=p1)
-    p3 = yield PointReq("End of arc", rubber_from=p2)
+    p3 = yield PointReq("End of arc", rubber_from=p2,
+                        preview_fn=lambda p: g.make_arc_3pt(p1, p2, p))
     obj = ctx.scene.add(g.make_arc_3pt(p1, p2, p3))
     ctx.echo(f"Created {obj.name}.")
 
@@ -88,8 +102,21 @@ def cmd_ellipse(ctx):
 @command("rectangle", aliases=("rect", "rec"))
 def cmd_rectangle(ctx):
     c1 = yield PointReq("First corner")
-    c2 = yield PointReq("Opposite corner", rubber_from=c1)
     cp = ctx.cplane
+
+    def _rect_to(p):
+        if cp.is_world_xy():
+            return g.make_rectangle(c1, p)
+        u1, v1, _ = cp.from_world(c1)
+        u2, v2, _ = cp.from_world(p)
+        if abs(u2 - u1) < 1e-9 or abs(v2 - v1) < 1e-9:
+            return None
+        return g.make_polyline(
+            [cp.to_world(u1, v1), cp.to_world(u2, v1),
+             cp.to_world(u2, v2), cp.to_world(u1, v2)], closed=True)
+
+    c2 = yield PointReq("Opposite corner", rubber_from=c1,
+                        preview_fn=_rect_to)
     if cp.is_world_xy():
         obj = ctx.scene.add(g.make_rectangle(c1, c2))
     else:

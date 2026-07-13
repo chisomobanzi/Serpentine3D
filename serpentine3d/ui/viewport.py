@@ -11,7 +11,7 @@ from PySide6.QtGui import QCursor, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication
 
-from ..utils.math3d import (normalize, ray_plane, ray_plane_any, ray_triangle_hits)
+from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
 from . import theme
 from .camera import Camera
 
@@ -1329,6 +1329,31 @@ class Viewport(QOpenGLWidget):
         self.camera.zoom_extents(self.scene.bbox())
         self.update()
 
+    def zoom_selected(self) -> bool:
+        """Frame the selection. False when nothing is selected."""
+        objs = [o for i in self.selection.ids
+                if (o := self.scene.get(i)) is not None]
+        if not objs:
+            return False
+        from ..core import geometry as g
+        mins = np.full(3, np.inf)
+        maxs = np.full(3, -np.inf)
+        for o in objs:
+            mn, mx = g.bbox(o.shape)
+            mins = np.minimum(mins, mn)
+            maxs = np.maximum(maxs, mx)
+        self.camera.zoom_extents((tuple(mins), tuple(maxs)))
+        self.update()
+        return True
+
+    def zoom_to_points(self, p1, p2):
+        """Frame the axis-aligned window spanned by two world points."""
+        mn = np.minimum(np.asarray(p1, float), np.asarray(p2, float))
+        mx = np.maximum(np.asarray(p1, float), np.asarray(p2, float))
+        pad = max(float(np.linalg.norm(mx - mn)) * 0.05, 0.5)
+        self.camera.zoom_extents((tuple(mn - pad), tuple(mx + pad)))
+        self.update()
+
     def set_view(self, name: str):
         self.camera.set_standard_view(name)
         self.update()
@@ -1396,6 +1421,17 @@ class Viewport(QOpenGLWidget):
             if self.grid_snap:
                 x, y = round(x), round(y)
             return (float(x), float(y), 0.0)
+        if self.point_axis is not None:
+            base, axis = (np.asarray(v, float) for v in self.point_axis)
+            self._active_snap = None
+            origin, direction = self.camera.ray_through(
+                px, py, self.width(), self.height())
+            t = ray_line_parameter(origin, direction, base, axis)
+            if t is None:
+                return None
+            if self.grid_snap:
+                t = round(t / self.grid_snap_step) * self.grid_snap_step
+            return tuple(float(c) for c in base + t * normalize(axis))
         snap = self.snaps.find(self.camera, px, py, self.width(),
                                self.height(), base_point=self.snap_base)
         if snap is not None:

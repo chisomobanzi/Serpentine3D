@@ -404,11 +404,13 @@ class MainWindow(QMainWindow):
             for vp in self.all_viewports():
                 vp.set_point_mode(True)
                 vp.snap_base = base
+                vp.point_axis = req.axis_lock
             self._refresh_rubber(None)
         else:
             for vp in self.all_viewports():
                 vp.set_point_mode(False)
                 vp.snap_base = None
+                vp.point_axis = None
                 vp.set_preview(None)
         self.osnap_bar.refresh()
         self._update_status()
@@ -461,6 +463,19 @@ class MainWindow(QMainWindow):
 
     def _on_mouse_world(self, point):
         self._refresh_rubber(point)
+        req = self.processor.request
+        if isinstance(req, PointReq) and getattr(req, "preview_fn", None):
+            # ghost of the pending result under the cursor, ~30Hz cap
+            from PySide6.QtCore import QElapsedTimer
+            timer = getattr(self, "_ghost_timer", None)
+            if timer is None:
+                timer = self._ghost_timer = QElapsedTimer()
+                timer.start()
+            if timer.elapsed() >= 33:
+                timer.restart()
+                ghost = self.processor.preview_for(point)
+                for vp in self.all_viewports():
+                    vp.set_ghost(ghost)
 
     def _refresh_rubber(self, cursor):
         req = self.processor.request

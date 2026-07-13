@@ -585,3 +585,135 @@ def test_help_command(env):
     proc.run("help")
     proc.provide_text("")
     assert any(e.startswith("Surfaces:") for e in echoes)
+
+
+def test_zoom_commands(env):
+    scene, sel, hist, ctx, proc = env
+    from tests.conftest import StubViewport
+
+    class ZoomStub(StubViewport):
+        def __init__(self):
+            super().__init__("model")
+            self.calls = []
+
+        def zoom_selected(self):
+            self.calls.append("selected")
+            return bool(sel.ids)
+
+        def zoom_extents(self):
+            self.calls.append("extents")
+
+        def zoom_to_points(self, p1, p2):
+            self.calls.append(("window", p1, p2))
+
+    vp = ZoomStub()
+    ctx.viewport = vp
+    obj = scene.add(g.make_box((0, 0, 0), 5, 5, 5))
+    sel.set([obj.id])
+    proc.run("zoomselected")
+    assert vp.calls[-1] == "selected"
+    proc.run("zoom")
+    proc.provide_text("")          # default Selected (something is selected)
+    assert vp.calls[-1] == "selected"
+    proc.run("zoomwindow")
+    proc.provide_text("0,0,0")
+    proc.provide_text("10,10,0")
+    assert vp.calls[-1] == ("window", (0, 0, 0), (10, 10, 0))
+    sel.clear()
+    proc.run("zoom")
+    proc.provide_text("Extents")
+    assert vp.calls[-1] == "extents"
+
+
+def test_zoom_selected_math():
+    import numpy as np
+    from serpentine3d.core.scene import Scene
+    from serpentine3d.core.selection import SelectionManager
+    from serpentine3d.ui.viewport import Viewport
+    scene = Scene()
+    sel = SelectionManager(scene)
+    vp = Viewport(scene, sel)
+    far = scene.add(g.make_box((100, 100, 100), 2, 2, 2))
+    sel.set([far.id])
+    assert vp.zoom_selected()
+    assert np.allclose(vp.camera.target, (101, 101, 101))
+    assert vp.camera.distance < 30            # framed tight, not extents
+    vp.zoom_to_points((0, 0, 0), (10, 10, 0))
+    assert np.allclose(vp.camera.target, (5, 5, 0), atol=0.01)
+
+
+def test_box_click_height_flow(env):
+    """box: rect preview after 2 corners, click/typed height, axis lock."""
+    scene, sel, hist, ctx, proc = env
+    proc.run("box")
+    proc.provide_text("0,0,0")
+    # rectangle preview follows the candidate second corner
+    ghost = proc.preview_for((10, 6, 0))
+    assert ghost is not None and g.shape_kind(ghost) == "curve"
+    proc.provide_text("10,6,0")
+    req = proc.request
+    assert req.axis_lock == ((10, 6, 0), (0.0, 0.0, 1.0))
+    # box preview materialises toward the candidate height point
+    ghost = proc.preview_for((10, 6, 8))
+    assert g.shape_kind(ghost) == "solid"
+    assert g.volume(ghost) == pytest.approx(10 * 6 * 8)
+    proc.preview_for((10, 6, 0)) is None            # degenerate -> no ghost
+    # typed bare number resolves along the axis (E2E compatibility)
+    proc.provide_text("8")
+    assert not proc.busy
+    assert g.volume(scene.all()[0].shape) == pytest.approx(480)
+
+
+def test_box_negative_height_and_zero(env):
+    scene, sel, hist, ctx, proc = env
+    proc.run("box")
+    proc.provide_text("0,0,0")
+    proc.provide_text("4,4,0")
+    proc.provide_text("-5")                  # downward box
+    box = scene.all()[0]
+    assert g.volume(box.shape) == pytest.approx(80)
+    assert g.bbox(box.shape)[0][2] == pytest.approx(-5)
+    proc.run("box")
+    proc.provide_text("0,0,20")
+    proc.provide_text("4,4,20")
+    proc.provide_text("0")                   # zero height refused
+    assert not proc.busy and len(scene.all()) == 1
+
+
+def test_cylinder_and_circle_click_radius(env):
+    scene, sel, hist, ctx, proc = env
+    import math
+    proc.run("cylinder")
+    proc.provide_text("0,0,0")
+    ghost = proc.preview_for((3, 4, 0))      # radius 5 by click
+    assert g.shape_kind(ghost) == "curve"
+    proc.provide_text("3,4,0")
+    proc.provide_text("7")
+    cyl = scene.all()[-1]
+    assert g.volume(cyl.shape) == pytest.approx(math.pi * 25 * 7, rel=1e-3)
+
+    proc.run("circle")
+    proc.provide_text("0,0,0")
+    proc.provide_text("5")                   # typed radius still works
+    circ = scene.all()[-1]
+    assert circ.kind == "curve"
+    assert g.curve_length(circ.shape) == pytest.approx(2 * math.pi * 5,
+                                                       rel=1e-3)
+
+
+def test_point_axis_lock_in_viewport():
+    import numpy as np
+    from serpentine3d.core.scene import Scene
+    from serpentine3d.core.selection import SelectionManager
+    from serpentine3d.ui.viewport import Viewport
+    scene = Scene()
+    vp = Viewport(scene, SelectionManager(scene))
+    vp.resize(800, 600)
+    vp.point_mode = True
+    vp.point_axis = ((5, 5, 0), (0, 0, 1))
+    # any pixel resolves to a point on the vertical axis through (5,5,0)
+    pt = vp.world_point_at(400, 200)
+    assert pt is not None
+    assert pt[0] == pytest.approx(5) and pt[1] == pytest.approx(5)
+    pt_lower = vp.world_point_at(400, 500)
+    assert pt_lower[2] < pt[2]              # lower pixel -> lower height
