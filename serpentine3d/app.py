@@ -238,6 +238,7 @@ class MainWindow(QMainWindow):
         vp.cvEditBegan.connect(
             lambda: self.history.checkpoint("edit control point"))
         vp.escapePressed.connect(self._cancel)
+        vp.enterShortcut.connect(lambda: self._on_submit(""))
 
     def all_viewports(self) -> list:
         return ([self.viewport]

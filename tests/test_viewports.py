@@ -80,3 +80,59 @@ def test_zoom_selected_targets_focused_pane(window):
     window.processor.run("zoomselected")
     assert vp2.camera.distance < 30                 # focused pane framed it
     assert window.viewport.camera.distance == before_main
+
+
+def _rmb_click(vp, pos=None):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtCore import Qt as QtC
+    from PySide6.QtTest import QTest
+    QTest.mouseClick(vp, QtC.MouseButton.RightButton,
+                     pos=pos or QPoint(200, 150))
+
+
+def test_right_click_finishes_selection(window):
+    from serpentine3d.core import geometry as g
+    c1 = window.scene.add(g.make_circle((0, 0, 0), 5))
+    c2 = window.scene.add(g.make_circle((0, 0, 10), 3))
+    window.processor.run("loft")
+    window.processor.click_object(c1.id)
+    window.processor.click_object(c2.id)
+    _rmb_click(window.viewport)          # "press enter when done"
+    assert not window.processor.busy
+    assert window.scene.all()[-1].kind in ("surface", "solid")
+
+
+def test_right_click_repeats_last_command(window):
+    window.processor.run("circle")
+    window.processor.provide_text("0,0,0")
+    window.processor.provide_text("5")
+    assert not window.processor.busy
+    _rmb_click(window.viewport)          # idle: repeat 'circle'
+    assert window.processor.busy
+    assert "circle" in window.processor.prompt_text().lower() \
+        or "center" in window.processor.prompt_text().lower()
+    window.processor.cancel()
+
+
+def test_right_drag_does_not_trigger_enter(window):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtCore import Qt as QtC
+    from PySide6.QtTest import QTest
+    window.processor.run("circle")       # busy; a drag must not advance it
+    vp = window.viewport
+    QTest.mousePress(vp, QtC.MouseButton.RightButton, pos=QPoint(100, 100))
+    QTest.mouseRelease(vp, QtC.MouseButton.RightButton, pos=QPoint(160, 130))
+    assert window.processor.busy         # still waiting for the center
+    window.processor.cancel()
+
+
+def test_right_click_accepts_defaults(window):
+    from serpentine3d.core import geometry as g
+    c = window.scene.add(g.make_circle((0, 0, 0), 5))
+    window.selection.set([c.id])
+    window.processor.run("extrude")      # preselection consumed
+    _rmb_click(window.viewport)          # accept default distance 10
+    assert not window.processor.busy
+    solid = window.scene.all()[-1]
+    assert solid.kind == "solid"
+    assert g.bbox(solid.shape)[1][2] == pytest.approx(10)

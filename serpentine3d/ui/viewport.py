@@ -378,6 +378,7 @@ class Viewport(QOpenGLWidget):
     mouseWorldMoved = Signal(object)        # (x, y, z) while in point-input mode
     cvEditBegan = Signal()                  # control-point drag started
     escapePressed = Signal()
+    enterShortcut = Signal()                # right-click without dragging
     _tessDone = Signal()                    # a background mesh finished
 
     def __init__(self, scene, selection, config=None, parent=None):
@@ -1585,6 +1586,8 @@ class Viewport(QOpenGLWidget):
 
     def mousePressEvent(self, ev):
         self._last_mouse = ev.position()
+        if ev.button() == Qt.MouseButton.RightButton:
+            self._rmb_press = ev.position()
         if ev.button() == Qt.MouseButton.LeftButton:
             pos = ev.position()
             if self.point_mode:
@@ -1694,6 +1697,15 @@ class Viewport(QOpenGLWidget):
         self._last_mouse = pos
 
     def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.MouseButton.RightButton:
+            press = getattr(self, "_rmb_press", None)
+            self._rmb_press = None
+            pos = ev.position()
+            if press is not None and \
+                    (pos - press).manhattanLength() <= 4:
+                # a click, not an orbit/pan drag: Rhino-style Enter
+                self.enterShortcut.emit()
+                return
         if ev.button() != Qt.MouseButton.LeftButton:
             if (ev.button() == self._nav_button()
                     and self.display_mode == "technical"):
