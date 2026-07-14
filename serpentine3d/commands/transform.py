@@ -147,3 +147,133 @@ def cmd_array(ctx):
                               layer_id=o.layer_id)
                 n += 1
     ctx.echo(f"Created {n} arrayed object(s).")
+
+
+def _rotation_between(v1, v2):
+    """3x3 rotation taking direction v1 to v2 (numpy, Rodrigues)."""
+    import numpy as np
+    a = np.asarray(v1, float)
+    b = np.asarray(v2, float)
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
+    v = np.cross(a, b)
+    c = float(np.dot(a, b))
+    s = float(np.linalg.norm(v))
+    if s < 1e-12:
+        if c > 0:
+            return np.eye(3)
+        # antiparallel: rotate pi about any axis perpendicular to a
+        perp = np.cross(a, [1.0, 0.0, 0.0])
+        if np.linalg.norm(perp) < 1e-9:
+            perp = np.cross(a, [0.0, 1.0, 0.0])
+        perp = perp / np.linalg.norm(perp)
+        return 2.0 * np.outer(perp, perp) - np.eye(3)
+    k = v / s
+    kx = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+    angle = float(np.arctan2(s, c))
+    import math
+    return (np.eye(3) + math.sin(angle) * kx
+            + (1 - math.cos(angle)) * (kx @ kx))
+
+
+def _frame(p1, p2, p3):
+    """Orthonormal basis from three points (x along p1->p2)."""
+    import numpy as np
+    x = np.asarray(p2, float) - np.asarray(p1, float)
+    nx = np.linalg.norm(x)
+    if nx < 1e-12:
+        raise g.GeometryError("Reference points coincide")
+    x = x / nx
+    v = np.asarray(p3, float) - np.asarray(p1, float)
+    z = np.cross(x, v)
+    nz = np.linalg.norm(z)
+    if nz < 1e-12:
+        raise g.GeometryError("Points are collinear")
+    z = z / nz
+    return np.column_stack([x, np.cross(z, x), z])
+
+
+def _similarity(rot3, scale, src_origin, dst_origin):
+    """4x4 taking src_origin to dst_origin with rotation and scale."""
+    import numpy as np
+    A = rot3 * float(scale)
+    M = np.eye(4)
+    M[:3, :3] = A
+    M[:3, 3] = np.asarray(dst_origin, float) - A @ np.asarray(src_origin,
+                                                              float)
+    return M
+
+
+def _place(ctx, objs, matrix, copy: bool):
+    made = []
+    for o in objs:
+        shape = g.apply_matrix(o.shape, matrix)
+        if copy:
+            made.append(ctx.scene.add(shape, layer_id=o.layer_id))
+        else:
+            ctx.scene.replace_shape(o.id, shape)
+            made.append(o)
+    return made
+
+
+@command("orient", aliases=("o2",))
+def cmd_orient(ctx):
+    """Remap objects from two reference points to two target points
+    (rotation + translation, Scale=Yes matches the point spacing)."""
+    import math
+
+    import numpy as np
+    objs = yield SelectReq("Select objects to orient")
+    r1 = yield PointReq("First reference point")
+    r2 = yield PointReq("Second reference point", rubber_from=r1)
+    t1 = yield PointReq("First target point", rubber_from=r1,
+                        choices={"Copy": ["No", "Yes"],
+                                 "Scale": ["No", "Yes"]})
+
+    def _matrix(t2):
+        v1 = np.subtract(r2, r1)
+        v2 = np.subtract(t2, t1)
+        if np.linalg.norm(v1) < 1e-12 or np.linalg.norm(v2) < 1e-12:
+            raise g.GeometryError("Reference points coincide")
+        s = (np.linalg.norm(v2) / np.linalg.norm(v1)
+             if ctx.opt("Scale", "No") == "Yes" else 1.0)
+        return _similarity(_rotation_between(v1, v2), s, r1, t1)
+
+    def _preview(p):
+        m = _matrix(p)
+        return g.make_compound([g.apply_matrix(o.shape, m) for o in objs])
+
+    t2 = yield PointReq("Second target point", rubber_from=t1,
+                        preview_fn=_preview)
+    made = _place(ctx, objs, _matrix(t2), ctx.opt("Copy", "No") == "Yes")
+    verb = "Oriented a copy of" if ctx.opt("Copy", "No") == "Yes" \
+        else "Oriented"
+    ctx.echo(f"{verb} {len(made)} object(s)"
+             + (" (scaled to fit)." if ctx.opt("Scale", "No") == "Yes"
+                else "."))
+
+
+@command("orient3pt", aliases=("o3",))
+def cmd_orient3pt(ctx):
+    """Remap objects from three reference points to three target points
+    (full 3D reorientation)."""
+    objs = yield SelectReq("Select objects to orient")
+    r1 = yield PointReq("First reference point")
+    r2 = yield PointReq("Second reference point", rubber_from=r1)
+    r3 = yield PointReq("Third reference point", rubber_from=r2)
+    t1 = yield PointReq("First target point",
+                        choices={"Copy": ["No", "Yes"]})
+    t2 = yield PointReq("Second target point", rubber_from=t1)
+
+    def _matrix(t3):
+        rot = _frame(t1, t2, t3) @ _frame(r1, r2, r3).T
+        return _similarity(rot, 1.0, r1, t1)
+
+    def _preview(p):
+        m = _matrix(p)
+        return g.make_compound([g.apply_matrix(o.shape, m) for o in objs])
+
+    t3 = yield PointReq("Third target point", rubber_from=t2,
+                        preview_fn=_preview)
+    made = _place(ctx, objs, _matrix(t3), ctx.opt("Copy", "No") == "Yes")
+    ctx.echo(f"Oriented {len(made)} object(s) onto the target frame.")

@@ -136,3 +136,37 @@ def test_right_click_accepts_defaults(window):
     solid = window.scene.all()[-1]
     assert solid.kind == "solid"
     assert g.bbox(solid.shape)[1][2] == pytest.approx(10)
+
+
+def test_command_terminates_cleanly_after_completion(window):
+    """The playtest bug: scale must end when done — a habitual right-click
+    afterwards re-prompts for objects (selection released), and another
+    right-click on the empty prompt cancels instead of sticking."""
+    from serpentine3d.core import geometry as g
+    obj = window.scene.add(g.make_box((0, 0, 0), 2, 2, 2))
+    window.selection.set([obj.id])
+    window.processor.run("scale")        # preselection consumed
+    window.processor.provide_text("0,0,0")
+    window.processor.provide_text("2")
+    assert not window.processor.busy     # terminated
+    assert window.selection.ids == []    # selection released (Rhino-style)
+
+    _rmb_click(window.viewport)          # habit: RMB after finishing
+    assert window.processor.busy         # repeat asks for objects...
+    from serpentine3d.commands.base import SelectReq
+    assert isinstance(window.processor.request, SelectReq)
+    _rmb_click(window.viewport)          # ...and RMB on nothing bows out
+    assert not window.processor.busy
+    assert g.volume(window.scene.all()[0].shape) == pytest.approx(64)
+
+
+def test_sellast_recovers_released_selection(window):
+    from serpentine3d.core import geometry as g
+    obj = window.scene.add(g.make_box((0, 0, 0), 2, 2, 2))
+    window.selection.set([obj.id])
+    window.processor.run("move")
+    window.processor.provide_text("0,0,0")
+    window.processor.provide_text("5,0,0")
+    assert window.selection.ids == []
+    window.processor.run("sellast")
+    assert window.selection.ids == [obj.id]

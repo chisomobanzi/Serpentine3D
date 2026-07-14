@@ -419,6 +419,10 @@ class CommandProcessor:
         self.gen = None
         self.request = None
         self.active = None
+        if was and was.mutates and success:
+            # command is over: release the selection (Rhino-style);
+            # 'sellast' / 'selprev' habits bring it back
+            self.ctx.selection.clear()
         if was and was.mutates and not success:
             # nothing changed -> no undo entry; partial work stays undoable
             if self.ctx.scene.revision == self._start_revision:
@@ -594,6 +598,9 @@ class CommandProcessor:
     def finish_selection(self):
         req = self.request
         if not isinstance(req, SelectReq):
+            return
+        if not self._select_buffer and req.min_count > 0:
+            self.cancel()                    # Enter on nothing: never mind
             return
         if len(self._select_buffer) < req.min_count:
             self.ctx.echo(

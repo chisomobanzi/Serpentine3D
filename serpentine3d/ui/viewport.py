@@ -28,8 +28,14 @@ out vec3 vNormal;
 out vec3 vPosView;
 out float vCurv;
 out float vWorldZ;
+uniform int uClipCount;
+uniform vec4 uClips[4];
+out float gl_ClipDistance[4];
 void main() {
     gl_Position = uMVP * vec4(pos, 1.0);
+    for (int i = 0; i < uClipCount; ++i)
+        gl_ClipDistance[i] = dot(uClips[i], vec4(pos, 1.0));
+
     vNormal = mat3(uView) * nrm;
     vPosView = (uView * vec4(pos, 1.0)).xyz;
     vCurv = curv;
@@ -125,7 +131,14 @@ LINE_VERT = """
 #version 330 core
 layout(location=0) in vec3 pos;
 uniform mat4 uMVP;
-void main() { gl_Position = uMVP * vec4(pos, 1.0); }
+uniform int uClipCount;
+uniform vec4 uClips[4];
+out float gl_ClipDistance[4];
+void main() {
+    gl_Position = uMVP * vec4(pos, 1.0);
+    for (int i = 0; i < uClipCount; ++i)
+        gl_ClipDistance[i] = dot(uClips[i], vec4(pos, 1.0));
+}
 """
 
 LINE_FRAG = """
@@ -143,7 +156,13 @@ layout(location=2) in float side;    // +1 / -1 across the line
 uniform mat4 uMVP;
 uniform vec2 uViewport;              // pixels
 uniform float uWidthPx;
+uniform int uClipCount;
+uniform vec4 uClips[4];
+out float gl_ClipDistance[4];
 void main() {
+    for (int i = 0; i < uClipCount; ++i)
+        gl_ClipDistance[i] = dot(uClips[i], vec4(pos, 1.0));
+
     vec4 p = uMVP * vec4(pos, 1.0);
     vec4 q = uMVP * vec4(other, 1.0);
     vec2 half_vp = uViewport * 0.5;
@@ -857,6 +876,11 @@ class Viewport(QOpenGLWidget):
                       "rendered": 1.0}[mode]
         curv_range = self._curvature_range() if mode == "curvature" else 0.0
         objects = self.scene.visible_objects()
+        clips = self._clip_vectors() if self.space == "model" else []
+        for i in range(len(clips)):
+            GL.glEnable(GL.GL_CLIP_DISTANCE0 + i)
+        for prog in (self._mesh_prog, self._line_prog, self._thick_prog):
+            self._set_clip_uniforms(prog, clips)
         translucent = mode == "ghosted" or any(
             (o.material or {}).get("opacity", 1.0) < 1.0 for o in objects)
         if translucent:
@@ -895,7 +919,11 @@ class Viewport(QOpenGLWidget):
                 line_color = (min(color[0], 0.3), min(color[1], 0.3),
                               min(color[2], 0.33))
 
-            if fill_alpha > 0 and gpu.tri_count:
+            if obj.clip_plane is not None:
+                fill_alpha_obj = 0.18
+            else:
+                fill_alpha_obj = fill_alpha
+            if fill_alpha_obj > 0 and gpu.tri_count:
                 GL.glUseProgram(self._mesh_prog)
                 GL.glUniformMatrix4fv(
                     GL.glGetUniformLocation(self._mesh_prog, "uMVP"), 1,
@@ -907,7 +935,7 @@ class Viewport(QOpenGLWidget):
                     GL.glGetUniformLocation(self._mesh_prog, "uColor"), *color)
                 GL.glUniform1f(
                     GL.glGetUniformLocation(self._mesh_prog, "uAlpha"),
-                    fill_alpha)
+                    fill_alpha_obj)
                 GL.glUniform1i(
                     GL.glGetUniformLocation(self._mesh_prog, "uZebra"),
                     1 if mode == "zebra" else 0)
@@ -936,7 +964,8 @@ class Viewport(QOpenGLWidget):
                     GL.glUniform1f(
                         GL.glGetUniformLocation(self._mesh_prog, "uAlpha"),
                         fill_alpha * opacity)
-                if mode == "ghosted" or opacity < 1.0:
+                if mode == "ghosted" or opacity < 1.0 \
+                        or obj.clip_plane is not None:
                     GL.glDepthMask(False)
                 GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
                 GL.glPolygonOffset(1.0, 1.0)
@@ -985,6 +1014,10 @@ class Viewport(QOpenGLWidget):
                                             (*theme.SELECTION_COLOR, 0.45))
                     GL.glBindVertexArray(self._preview.vao)
                     GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
+            if obj.clip_plane is not None and clips:
+                for prog in (self._mesh_prog, self._line_prog,
+                             self._thick_prog):
+                    self._set_clip_uniforms(prog, clips)
             if gpu.iso_count:
                 if selected:
                     iso_color = (*theme.SELECTION_COLOR, 0.55)
@@ -998,6 +1031,13 @@ class Viewport(QOpenGLWidget):
                 GL.glBindVertexArray(gpu.iso_vao)
                 GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
         self._line_width(1.0)
+        self._end_clips(clips)
+
+    def _end_clips(self, clips):
+        for i in range(len(clips)):
+            GL.glDisable(GL.GL_CLIP_DISTANCE0 + i)
+        for prog in (self._mesh_prog, self._line_prog, self._thick_prog):
+            self._set_clip_uniforms(prog, [])
 
     def _draw_ground_shadow(self, mvp, objects):
         """Flatten object triangles onto z=0 as a soft dark stamp."""
@@ -1283,6 +1323,38 @@ class Viewport(QOpenGLWidget):
             self._ghost = None
         self.update()
 
+    def _clip_vectors(self) -> list:
+        """vec4 clip equations from enabled clipping-plane objects.
+        Keeps the half-space behind each plane's normal."""
+        cache = getattr(self, "_clip_cache", None)
+        if cache is not None and cache[0] == self.scene.revision:
+            return cache[1]
+        from ..core import geometry as g
+        vecs = []
+        for obj in self.scene.visible_objects():
+            if not (obj.clip_plane and obj.clip_plane.get("enabled")):
+                continue
+            try:
+                face = next(iter(g.faces_of(obj.shape)))
+                n = np.asarray(g.face_normal(face), float)
+                o = np.asarray(g.centroid(obj.shape), float)
+                vecs.append(np.array([-n[0], -n[1], -n[2],
+                                      float(np.dot(n, o))], np.float32))
+            except Exception:                              # noqa: BLE001
+                continue
+            if len(vecs) == 4:
+                break
+        self._clip_cache = (self.scene.revision, vecs)
+        return vecs
+
+    def _set_clip_uniforms(self, prog, clips):
+        GL.glUseProgram(prog)
+        GL.glUniform1i(GL.glGetUniformLocation(prog, "uClipCount"),
+                       len(clips))
+        if clips:
+            GL.glUniform4fv(GL.glGetUniformLocation(prog, "uClips"),
+                            len(clips), np.asarray(clips, np.float32))
+
     def _draw_ghost(self, mvp):
         dm = self._ghost
         if dm is None or self._preview is None:
@@ -1487,6 +1559,8 @@ class Viewport(QOpenGLWidget):
         r = PICK_RADIUS_PX
         for obj in self.scene.visible_objects():
             if not self.scene.is_selectable(obj.id):
+                continue
+            if not self.selection.filter_allows(obj.kind):
                 continue
             mesh = obj.mesh
             if self._pick_reject(mesh, px - r, py - r, px + r, py + r, w, h):
@@ -1757,6 +1831,8 @@ class Viewport(QOpenGLWidget):
         picked = []
         for obj in self.scene.visible_objects():
             if not self.scene.is_selectable(obj.id):
+                continue
+            if not self.selection.filter_allows(obj.kind):
                 continue
             mesh = obj.mesh
             if self._pick_reject(mesh, *rect, w, h):

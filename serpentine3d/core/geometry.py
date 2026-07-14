@@ -206,6 +206,52 @@ def join_curves(shapes: list) -> TopoDS_Shape:
     return mk.Wire()
 
 
+def apply_matrix(shape, matrix):
+    """Apply a 4x4 similarity transform (rotation + translation +
+    uniform scale). OCCT's gp_Trsf cannot express shear/non-uniform."""
+    import numpy as np
+    from .mesh import MeshShape
+    m = np.asarray(matrix, float)
+    if isinstance(shape, MeshShape):
+        return shape.transformed(m)
+    trsf = gp_Trsf()
+    trsf.SetValues(m[0, 0], m[0, 1], m[0, 2], m[0, 3],
+                   m[1, 0], m[1, 1], m[1, 2], m[1, 3],
+                   m[2, 0], m[2, 1], m[2, 2], m[2, 3])
+    return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+
+
+def curve_endpoints(shape) -> tuple[Point, Point]:
+    """(start, end) of an open edge or wire."""
+    st = shape.ShapeType()
+    if st == occ.EDGE:
+        ad = occ.edge_adaptor(occ.to_edge(shape))
+        p0 = ad.Value(ad.FirstParameter())
+        p1 = ad.Value(ad.LastParameter())
+        return ((p0.X(), p0.Y(), p0.Z()), (p1.X(), p1.Y(), p1.Z()))
+    if st == occ.WIRE:
+        from OCP.BRep import BRep_Tool
+        from OCP.TopExp import TopExp
+        from OCP.TopoDS import TopoDS_Vertex
+        v1, v2 = TopoDS_Vertex(), TopoDS_Vertex()
+        TopExp.Vertices_s(occ.to_wire(shape), v1, v2)
+        p0 = BRep_Tool.Pnt_s(v1)
+        p1 = BRep_Tool.Pnt_s(v2)
+        return ((p0.X(), p0.Y(), p0.Z()), (p1.X(), p1.Y(), p1.Z()))
+    raise GeometryError("Not a curve")
+
+
+def close_curve(shape) -> TopoDS_Shape:
+    """Close an open curve with a straight segment start-to-end."""
+    if is_closed_curve(shape):
+        raise GeometryError("Curve is already closed")
+    a, b = curve_endpoints(shape)
+    import math
+    if math.dist(a, b) < tol() * 0.1:
+        raise GeometryError("Curve ends already coincide")
+    return join_curves([shape, make_line(b, a)])
+
+
 def is_closed_curve(shape) -> bool:
     st = shape.ShapeType()
     if st == occ.EDGE:

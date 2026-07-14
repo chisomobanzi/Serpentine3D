@@ -106,6 +106,80 @@ def cmd_viewcapturetoclipboard(ctx):
     yield from ()
 
 
+@command("clippingplane", aliases=("clip",))
+def cmd_clippingplane(ctx):
+    """Place a rectangular clipping plane on the CPlane: geometry on its
+    normal side is hidden in shaded viewports. Move or rotate the plane
+    object to move the cut; Flip reverses the kept side."""
+    c1 = yield PointReq("First corner of clipping plane")
+
+    def _rect(p):
+        cp = ctx.cplane
+        u1, v1, _ = cp.from_world(c1)
+        u2, v2, _ = cp.from_world(p)
+        if abs(u2 - u1) < 1e-9 or abs(v2 - v1) < 1e-9:
+            return None
+        return g.planar_face(g.make_polyline(
+            [cp.to_world(u1, v1), cp.to_world(u2, v1),
+             cp.to_world(u2, v2), cp.to_world(u1, v2)], closed=True))
+
+    c2 = yield PointReq("Opposite corner", rubber_from=c1,
+                        choices={"Flip": ["No", "Yes"]}, preview_fn=_rect)
+    face = _rect(c2)
+    if face is None:
+        ctx.echo("Degenerate rectangle — no clipping plane created.")
+        return
+    if ctx.opt("Flip", "No") == "Yes":
+        face = g.mirror(face, tuple(c1), tuple(ctx.cplane.normal))
+    obj = ctx.scene.add(face, name=_next_clip_name(ctx.scene))
+    ctx.scene.update(obj.id, clip_plane={"enabled": True})
+    ctx.echo(f"Created {obj.name} — geometry on its normal side is "
+             "hidden. 'disableclippingplane' pauses it.")
+
+
+def _next_clip_name(scene) -> str:
+    n = sum(1 for o in scene.all() if o.clip_plane) + 1
+    return f"Clipping Plane {n:02d}"
+
+
+def _clip_planes_from(ctx, objs):
+    planes = [o for o in objs if o.clip_plane]
+    if not planes:                       # fall back to every clip plane
+        planes = [o for o in ctx.scene.all() if o.clip_plane]
+    return planes
+
+
+@command("disableclippingplane", aliases=("dcc",), mutates=False)
+def cmd_disableclippingplane(ctx):
+    """Pause clipping planes (they stay in the scene, the cut stops)."""
+    objs = yield SelectReq("Select clipping planes (Enter or 'all' = all)",
+                           allow_preselected=True)
+    planes = _clip_planes_from(ctx, objs)
+    for o in planes:
+        ctx.scene.update(o.id, clip_plane={"enabled": False})
+    ctx.echo(f"Disabled {len(planes)} clipping plane(s).")
+
+
+@command("enableclippingplane", aliases=("ecc",), mutates=False)
+def cmd_enableclippingplane(ctx):
+    """Re-enable paused clipping planes."""
+    objs = yield SelectReq("Select clipping planes (Enter or 'all' = all)",
+                           allow_preselected=True)
+    planes = _clip_planes_from(ctx, objs)
+    for o in planes:
+        ctx.scene.update(o.id, clip_plane={"enabled": True})
+    ctx.echo(f"Enabled {len(planes)} clipping plane(s).")
+
+
+@command("selclippingplane", mutates=False)
+def cmd_selclippingplane(ctx):
+    """Select every clipping plane object."""
+    ids = [o.id for o in ctx.scene.all() if o.clip_plane]
+    ctx.selection.set(ids)
+    ctx.echo(f"Selected {len(ids)} clipping plane(s).")
+    yield from ()
+
+
 @command("zoom", aliases=("z",), mutates=False)
 def cmd_zoom(ctx):
     """Zoom the active view: Selected, Extents, a picked Window, In, Out."""

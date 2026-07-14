@@ -9,6 +9,14 @@ class SelectionManager:
         self._ids: list[str] = []      # ordered
         self.subobjects: list = []     # [(obj_id, "edge"|"face", index)]
         self._listeners: list = []
+        self.filter_kinds: set = set()   # e.g. {"curve"}; empty = any
+        self.filter_active = False       # F6-style master toggle
+
+    def filter_allows(self, kind: str) -> bool:
+        """May viewport picking select objects of this kind?"""
+        if not self.filter_active or not self.filter_kinds:
+            return True
+        return kind in self.filter_kinds
 
     def add_listener(self, fn):
         self._listeners.append(fn)

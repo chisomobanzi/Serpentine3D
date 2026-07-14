@@ -809,3 +809,131 @@ def test_back_left_bottom_views(env):
     assert vp.camera.azimuth == pytest.approx(math.radians(180))
     proc.run("bottom")
     assert vp.camera.elevation == pytest.approx(math.radians(-89.9))
+
+
+def test_orient_two_points(env):
+    scene, sel, hist, ctx, proc = env
+    import math
+    box = scene.add(g.make_box((0, 0, 0), 4, 2, 1))
+    proc.run("orient")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")           # ref 1
+    proc.provide_text("4,0,0")           # ref 2 (along +X)
+    proc.provide_text("10,0,0")          # target 1
+    proc.provide_text("10,4,0")          # target 2 (along +Y): 90deg turn
+    assert not proc.busy
+    mn, mx = g.bbox(scene.all()[0].shape)
+    assert mn[0] == pytest.approx(8, abs=1e-5)
+    assert mx[0] == pytest.approx(10, abs=1e-5)
+    assert mn[1] == pytest.approx(0, abs=1e-5)
+    assert mx[1] == pytest.approx(4, abs=1e-5)
+    assert g.volume(scene.all()[0].shape) == pytest.approx(8)
+
+    # Scale=Yes stretches to the target spacing (uniform)
+    sel.clear()
+    box2 = scene.add(g.make_box((0, 0, 0), 4, 2, 1))
+    proc.run("orient")
+    proc.click_object(box2.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")
+    proc.provide_text("4,0,0")
+    proc.provide_text("Scale=Yes")
+    proc.provide_text("20,0,0")
+    proc.provide_text("28,0,0")          # 8 units: scale factor 2
+    assert g.volume(scene.all()[-1].shape) == pytest.approx(8 * 8)
+
+
+def test_orient3pt_flips_onto_wall(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 4, 2, 1))
+    proc.run("orient3pt")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    # reference frame on the floor (XY), target frame on the XZ wall
+    for p in ("0,0,0", "1,0,0", "0,1,0",
+              "0,0,0", "1,0,0", "0,0,1"):
+        proc.provide_text(p)
+    assert not proc.busy
+    mn, mx = g.bbox(scene.all()[0].shape)
+    assert mx[2] == pytest.approx(2)     # old Y extent now points up Z
+    assert mx[1] - mn[1] == pytest.approx(1, abs=1e-6)
+    assert g.volume(scene.all()[0].shape) == pytest.approx(8)
+
+
+def test_closecrv(env):
+    scene, sel, hist, ctx, proc = env
+    arc = scene.add(g.make_arc_3pt((0, 0, 0), (5, 5, 0), (10, 0, 0)))
+    proc.run("closecrv")
+    proc.click_object(arc.id)
+    proc.finish_selection()
+    assert g.is_closed_curve(scene.all()[0].shape)
+    # a closed curve reports the problem instead of failing
+    proc.run("closecrv")
+    proc.click_object(arc.id)
+    proc.finish_selection()
+    assert not proc.busy
+
+
+def test_clipping_plane_lifecycle(env, tmp_path):
+    scene, sel, hist, ctx, proc = env
+    from serpentine3d import fileio
+    from tests.conftest import StubViewport
+    ctx.viewport = StubViewport("model")
+    scene.add(g.make_box((0, 0, 0), 10, 10, 10))
+    proc.run("clippingplane")
+    proc.provide_text("-2,-2,5")
+    proc.provide_text("12,12,5")
+    plane = scene.all()[-1]
+    assert plane.clip_plane == {"enabled": True}
+    assert plane.name.startswith("Clipping Plane")
+
+    proc.run("disableclippingplane all")
+    assert scene.get(plane.id).clip_plane == {"enabled": False}
+    proc.run("enableclippingplane all")
+    assert scene.get(plane.id).clip_plane == {"enabled": True}
+    proc.run("selclippingplane")
+    assert sel.ids == [plane.id]
+
+    path = str(tmp_path / "clip.serp")
+    fileio.export_file(scene, path)
+    from serpentine3d.core.scene import Scene
+    loaded = Scene()
+    fileio.import_file(loaded, path)
+    planes = [o for o in loaded.all() if o.clip_plane]
+    assert len(planes) == 1 and planes[0].clip_plane["enabled"]
+
+
+def test_selection_filter(env):
+    scene, sel, hist, ctx, proc = env
+    scene.add(g.make_circle((0, 0, 0), 5))
+    scene.add(g.make_box((0, 0, 0), 2, 2, 2))
+    proc.run("selfilter curves")
+    assert sel.filter_active and sel.filter_kinds == {"curve"}
+    assert sel.filter_allows("curve") and not sel.filter_allows("solid")
+    proc.run("selfiltertoggle")
+    assert not sel.filter_active and sel.filter_allows("solid")
+    proc.run("selfiltertoggle")          # resumes with the same kind
+    assert sel.filter_active
+    proc.run("selfilter off")
+    assert not sel.filter_active
+
+
+def test_clip_vectors_derived_from_plane_object(env):
+    import numpy as np
+    from serpentine3d.core.scene import Scene
+    from serpentine3d.core.selection import SelectionManager
+    from serpentine3d.ui.viewport import Viewport
+    scene = Scene()
+    vp = Viewport(scene, SelectionManager(scene))
+    face = g.planar_face(g.make_rectangle((0, 0, 5), (10, 10, 5)))
+    obj = scene.add(face)
+    scene.update(obj.id, clip_plane={"enabled": True})
+    vecs = vp._clip_vectors()
+    assert len(vecs) == 1
+    v = vecs[0]
+    # plane z=5, normal +Z: keeps below (distance >= 0 for z < 5)
+    assert np.dot(v, [0, 0, 0, 1]) > 0       # origin kept
+    assert np.dot(v, [0, 0, 10, 1]) < 0      # above the plane clipped
+    scene.update(obj.id, clip_plane={"enabled": False})
+    assert vp._clip_vectors() == []

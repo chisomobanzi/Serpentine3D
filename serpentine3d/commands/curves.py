@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..core import geometry as g
-from .base import LengthReq, NumberReq, OptionReq, PointReq, command
+from .base import LengthReq, NumberReq, OptionReq, PointReq, SelectReq, command
 
 
 def _rubber(pts):
@@ -129,3 +129,17 @@ def cmd_rectangle(ctx):
                cp.to_world(u2, v2), cp.to_world(u1, v2)]
         obj = ctx.scene.add(g.make_polyline(pts, closed=True))
     ctx.echo(f"Created {obj.name}.")
+
+
+@command("closecrv", aliases=("cc", "closecurve"))
+def cmd_closecrv(ctx):
+    """Close open curves with a straight segment between their ends."""
+    objs = yield SelectReq("Select open curves to close", kinds=("curve",))
+    done = 0
+    for o in objs:
+        try:
+            ctx.scene.replace_shape(o.id, g.close_curve(o.shape))
+            done += 1
+        except g.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+    ctx.echo(f"Closed {done} curve(s).")

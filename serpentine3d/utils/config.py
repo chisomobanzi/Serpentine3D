@@ -185,6 +185,14 @@ RHINO_MACRO_MAP = {
     "viewcapturetoclipboard": "viewcapturetoclipboard",
     "snap": "snap",
     "dim": "dim",
+    "orient": "orient",
+    "orient3pt": "orient3pt",
+    "closecrv": "closecrv",
+    "clippingplane": "clippingplane",
+    "disableclippingplane": "disableclippingplane all",
+    "enableclippingplane": "enableclippingplane all",
+    "selclippingplane disableclippingplane": "disableclippingplane all",
+    "selectionfiltertoggle": "selfiltertoggle",
 }
 
 

@@ -862,9 +862,13 @@ class MainWindow(QMainWindow):
         sel = len(self.selection.ids)
         mode = self.viewport.display_mode
         layer = self.scene.layers.current.name
+        filt = ""
+        if self.selection.filter_active and self.selection.filter_kinds:
+            filt = ("  ·  filter: "
+                    + ", ".join(sorted(self.selection.filter_kinds)))
         self.statusBar().showMessage(
             f"{n} object(s)  ·  {sel} selected  ·  layer: {layer}  ·  "
-            f"{mode}  ·  units: {self.scene.units}")
+            f"{mode}  ·  units: {self.scene.units}{filt}")
         path = getattr(self.ctx, "current_path", None)
         name = os.path.basename(path) if path else "untitled"
         star = "*" if getattr(self, "autosave", None) and self.dirty else ""

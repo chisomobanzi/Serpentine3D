@@ -1,6 +1,6 @@
 """Selection commands: filters, inversion, isolation."""
 
-from .base import SelectReq, TextReq, command
+from .base import OptionReq, SelectReq, TextReq, command
 
 
 def _select_kind(ctx, kind: str, label: str):
@@ -97,4 +97,43 @@ def cmd_unisolate(ctx):
             n += 1
     ctx._isolated = []
     ctx.echo(f"Restored {n} object(s).")
+    yield from ()
+
+
+@command("selfilter", aliases=("selectionfilter",), mutates=False)
+def cmd_selfilter(ctx):
+    """Restrict viewport picking to one kind of object (Off = anything).
+    'selfiltertoggle' (F6-style) pauses/resumes without forgetting."""
+    kind = yield OptionReq(
+        "Selectable objects",
+        options=["Off", "Curves", "Surfaces", "Solids", "Meshes", "Points"],
+        default="Off")
+    sel = ctx.selection
+    if kind == "Off":
+        sel.filter_active = False
+        sel.filter_kinds = set()
+        ctx.echo("Selection filter off — clicking selects anything.")
+    else:
+        sel.filter_kinds = {kind.lower().rstrip("es") if kind == "Meshes"
+                            else kind.lower().rstrip("s")}
+        sel.filter_active = True
+        ctx.echo(f"Selection filter: only {kind.lower()} are clickable "
+                 "(sel* commands ignore the filter).")
+    if ctx.window is not None:
+        ctx.window._update_status()
+
+
+@command("selfiltertoggle", aliases=("sft",), mutates=False)
+def cmd_selfiltertoggle(ctx):
+    """Pause/resume the selection filter without changing its kind."""
+    sel = ctx.selection
+    if not sel.filter_kinds:
+        ctx.echo("No selection filter set — choose one with 'selfilter'.")
+    else:
+        sel.filter_active = not sel.filter_active
+        state = "on" if sel.filter_active else "paused"
+        kinds = ", ".join(sorted(sel.filter_kinds))
+        ctx.echo(f"Selection filter {state} ({kinds}).")
+    if ctx.window is not None:
+        ctx.window._update_status()
     yield from ()
