@@ -6,7 +6,11 @@ centre, constant screen size):
   - plane pads         -> move in plane
   - circles            -> rotate about axis (Shift snaps to 15 degrees)
   - square knobs       -> scale along axis (Shift scales uniformly)
-Alt-drag any move handle to drag a copy. Escape cancels a drag.
+
+Precision: drag a handle for feel, or click it and type an exact value
+(distance / angle / factor) then Enter — the value previews live while
+you type. Grid snap rounds move drags to the grid step. Alt-drag any
+move handle drags a copy. Escape cancels.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ ARC_R = 0.82
 PAD0, PAD1 = 0.28, 0.5
 
 # handle ids: ("move",axis) ("pad",axis) ("rot",axis) ("scale",axis)
+_ONE_DOF = ("move", "rot", "scale")     # take a single typed value
 
 
 class Gumball:
@@ -52,11 +57,9 @@ class Gumball:
                 and bool(vp.selection.ids))
 
     def anchor_and_axes(self):
-        bbox = None
         objs = self.vp.selection.objects()
         if not objs:
             return None
-        import numpy as np
         mins = np.full(3, np.inf)
         maxs = np.full(3, -np.inf)
         for o in objs:
@@ -67,6 +70,20 @@ class Gumball:
         cp = self.vp.cplane
         return anchor, (np.asarray(cp.xdir), np.asarray(cp.ydir),
                         np.asarray(cp.normal))
+
+    def _draw_anchor(self):
+        """Where the gumball is drawn this frame. During a move/pad drag
+        it tracks the geometry (frozen anchor + applied offset); rotate
+        and scale keep the anchor as the fixed pivot.
+        """
+        if self.drag is None:
+            state = self.anchor_and_axes()
+            return None if state is None else (state[0], state[1])
+        d = self.drag
+        anchor = np.asarray(d["anchor"], float)
+        if d["handle"][0] in ("move", "pad"):
+            anchor = anchor + d["offset"]
+        return anchor, d["axes"]
 
     def _size_world(self, anchor) -> float:
         """World length that projects to SIZE_PX pixels at the anchor."""
@@ -85,15 +102,11 @@ class Gumball:
     def paint(self, mvp):
         if not self.active():
             return
-        state = self.anchor_and_axes()
+        state = self._draw_anchor()
         if state is None:
             return
         anchor, axes = state
-        if self.drag is not None:
-            anchor = self.drag["anchor"]      # frozen during drag
-            axes = self.drag["axes"]
         s = self._size_world(anchor)
-        vp = self.vp
         GL.glDisable(GL.GL_DEPTH_TEST)
 
         def color_for(handle, base):
@@ -104,7 +117,6 @@ class Gumball:
 
         # rotation circles
         for i in range(3):
-            axis = axes[i]
             u, v = axes[(i + 1) % 3], axes[(i + 2) % 3]
             pts = []
             for k in range(49):
@@ -183,6 +195,35 @@ class Gumball:
         GL.glBindVertexArray(vp._preview.vao)
         GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
 
+    def readout(self):
+        """(text, (screen_x, screen_y)) for the value readout, pinned to
+        where the drag STARTED — a typed move sends the geometry (and its
+        live anchor) off screen, so the readout stays put. None if there
+        is nothing to show."""
+        d = self.drag
+        if d is None:
+            return None
+        anchor = np.asarray(d["anchor"], float)
+        scr = self.vp.camera.project(np.asarray([anchor], float),
+                                     self.vp.width(), self.vp.height())[0]
+        if scr[2] <= 0:
+            return None
+        kind = d["handle"][0]
+        if d["typed"]:
+            unit = {"move": "", "rot": "°", "scale": "×"}.get(kind, "")
+            prompt = {"move": "distance", "rot": "angle",
+                      "scale": "factor"}.get(kind, "")
+            text = f"{prompt}: {d['typed']}{unit}"
+        elif d.get("armed"):
+            prompt = {"move": "distance", "rot": "angle",
+                      "scale": "factor"}.get(kind, "")
+            text = f"type a {prompt}, Enter"
+        else:
+            text = d.get("last_label", "")
+        if not text:
+            return None
+        return text, (int(scr[0]) + 18, int(scr[1]) - 14)
+
     # ------------------------------------------------------- hit testing
 
     def hit_test(self, px, py):
@@ -258,7 +299,6 @@ class Gumball:
             return False
         copy_mode = bool(modifiers & Qt.KeyboardModifier.AltModifier) and \
             handle[0] in ("move", "pad")
-        # history checkpoint before any mutation
         self.vp.window_checkpoint("gumball " + handle[0])
         if copy_mode:
             new_objs = []
@@ -292,34 +332,40 @@ class Gumball:
         self.drag = {
             "handle": handle, "anchor": anchor, "axes": axes,
             "originals": {o.id: o.shape for o in objs},
-            "ref": ref, "last_label": "",
+            "ref": ref, "last_label": "", "offset": np.zeros(3),
+            "typed": "", "armed": False, "moved": False,
         }
         return True
 
     def drag_to(self, px, py, modifiers) -> str:
         d = self.drag
-        if d is None:
-            return ""
+        if d is None or d["typed"]:      # numeric entry overrides the mouse
+            return d["last_label"] if d else ""
         vp = self.vp
         anchor, axes = d["anchor"], d["axes"]
         kind, i = d["handle"]
         origin, direction = vp.camera.ray_through(px, py, vp.width(),
                                                   vp.height())
-        label = ""
-        if kind == "move":
-            t = ray_line_parameter(origin, direction, anchor, axes[i])
-            if t is None:
-                return d["last_label"]
-            delta = axes[i] * (t - d["ref"])
-            self._apply(lambda s: g.translate(s, tuple(delta)))
-            label = f"move {vp.scene.format_length(float(t - d['ref']))}"
-        elif kind == "pad":
+        uniform = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        d["moved"] = True
+        if kind == "pad":
             hit = ray_plane_any(origin, direction, anchor, axes[i])
             if hit is None:
                 return d["last_label"]
             delta = hit - d["ref"]
+            d["offset"] = np.asarray(delta, float)
             self._apply(lambda s: g.translate(s, tuple(delta)))
-            label = f"move {vp.scene.format_length(float(np.linalg.norm(delta)))}"
+            d["last_label"] = ("move "
+                               + vp.scene.format_length(float(
+                                   np.linalg.norm(delta))))
+            return d["last_label"]
+        if kind == "move":
+            t = ray_line_parameter(origin, direction, anchor, axes[i])
+            if t is None:
+                return d["last_label"]
+            value = t - d["ref"]
+            if vp.grid_snap and vp.grid_snap_step > 0:
+                value = round(value / vp.grid_snap_step) * vp.grid_snap_step
         elif kind == "rot":
             hit = ray_plane_any(origin, direction, anchor, axes[i])
             if hit is None:
@@ -331,28 +377,104 @@ class Gumball:
             vec = vec / n
             cosv = float(np.clip(np.dot(d["ref"], vec), -1, 1))
             sign = float(np.dot(np.cross(d["ref"], vec), axes[i]))
-            angle = math.degrees(math.acos(cosv)) * (1 if sign >= 0 else -1)
-            if modifiers & Qt.KeyboardModifier.ShiftModifier:
-                angle = round(angle / 15.0) * 15.0
-            self._apply(lambda s: g.rotate(s, tuple(anchor),
-                                           tuple(axes[i]), angle))
-            label = f"rotate {angle:.1f}°"
+            value = math.degrees(math.acos(cosv)) * (1 if sign >= 0 else -1)
+            if uniform:
+                value = round(value / 15.0) * 15.0
         elif kind == "scale":
             t = ray_line_parameter(origin, direction, anchor, axes[i])
             if t is None or abs(d["ref"]) < 1e-9:
                 return d["last_label"]
-            factor = t / d["ref"]
-            if abs(factor) < 0.01:
+            value = t / d["ref"]
+        else:
+            return d["last_label"]
+        return self.apply_scalar(value, uniform=uniform)
+
+    def apply_scalar(self, value: float, uniform: bool = False) -> str:
+        """Apply the move/rotate/scale transform for a single value and
+        return its label. Shared by mouse drag and typed entry."""
+        d = self.drag
+        if d is None:
+            return ""
+        vp = self.vp
+        kind, i = d["handle"]
+        anchor, axes = d["anchor"], d["axes"]
+        if kind == "move":
+            delta = axes[i] * value
+            d["offset"] = np.asarray(delta, float)
+            self._apply(lambda s: g.translate(s, tuple(delta)))
+            label = "move " + vp.scene.format_length(float(value))
+        elif kind == "rot":
+            self._apply(lambda s: g.rotate(s, tuple(anchor),
+                                           tuple(axes[i]), value))
+            label = f"rotate {value:.1f}°"
+        elif kind == "scale":
+            if abs(value) < 1e-4:
                 return d["last_label"]
-            if modifiers & Qt.KeyboardModifier.ShiftModifier:
-                self._apply(lambda s: g.scale(s, tuple(anchor), factor))
-                label = f"scale {factor:.3f} (uniform)"
+            if uniform:
+                self._apply(lambda s: g.scale(s, tuple(anchor), value))
+                label = f"scale {value:.3f} (uniform)"
             else:
                 self._apply(lambda s: g.scale_along_axis(
-                    s, tuple(anchor), tuple(axes[i]), factor))
-                label = f"scale {factor:.3f}"
+                    s, tuple(anchor), tuple(axes[i]), value))
+                label = f"scale {value:.3f}"
+        else:
+            return d["last_label"]
         d["last_label"] = label
         return label
+
+    # -------------------------------------------------------- numeric entry
+
+    def accepts_typing(self) -> bool:
+        return self.drag is not None and self.drag["handle"][0] in _ONE_DOF
+
+    def type_char(self, ch: str) -> bool:
+        """Feed a keystroke ('0'..'9', '.', '-', 'back') to numeric entry.
+        Returns True if consumed."""
+        d = self.drag
+        if d is None or d["handle"][0] not in _ONE_DOF:
+            return False
+        if ch == "back":
+            d["typed"] = d["typed"][:-1]
+        elif ch in "0123456789.-":
+            d["typed"] += ch
+        else:
+            return False
+        self._preview_typed()
+        return True
+
+    def _parse_typed(self):
+        s = self.drag["typed"]
+        if s in ("", "-", ".", "-.", "+"):
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    def _preview_typed(self):
+        val = self._parse_typed()
+        if val is None:
+            self._apply(lambda s: s)          # revert to originals
+            self.drag["offset"] = np.zeros(3)
+            self.drag["last_label"] = ""
+        else:
+            self.apply_scalar(val)
+
+    def commit_typed(self) -> bool:
+        d = self.drag
+        if d is None:
+            return False
+        val = self._parse_typed()
+        if val is None:
+            return False
+        self.apply_scalar(val)
+        self.end_drag()
+        return True
+
+    def arm(self):
+        """Keep an un-dragged handle click alive so a value can be typed."""
+        if self.drag is not None and self.drag["handle"][0] in _ONE_DOF:
+            self.drag["armed"] = True
 
     def _apply(self, fn):
         d = self.drag

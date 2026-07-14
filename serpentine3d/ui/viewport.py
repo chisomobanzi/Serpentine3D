@@ -416,6 +416,15 @@ class Viewport(QOpenGLWidget):
         self.layout_view = LayoutView(self)
         from .gumball import Gumball
         self.gumball = Gumball(self)
+        from PySide6.QtWidgets import QLabel
+        self._gumball_readout = QLabel(self)
+        self._gumball_readout.setStyleSheet(
+            "QLabel { background: rgba(20,21,24,225); color: #e6d896;"
+            " border: 1px solid #4a4b52; border-radius: 4px;"
+            " padding: 2px 7px; font-family: monospace; }")
+        self._gumball_readout.setVisible(False)
+        self._gumball_readout.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.history = None                 # set by the main window
         from ..core.snaps import SnapIndex
         self.snaps = SnapIndex(scene, config)
@@ -607,6 +616,26 @@ class Viewport(QOpenGLWidget):
         self._draw_axis_triad(view, w, h)
         self._draw_frame_guides(w, h)
         self._draw_selection_box(w, h)
+        self._update_gumball_readout()
+
+    def _update_gumball_readout(self):
+        """Position the value-readout label by the gumball (a real child
+        widget, so it always composites and is testable)."""
+        info = self.gumball.readout() if self.gumball.drag is not None \
+            else None
+        if info is None:
+            if not self._gumball_readout.isHidden():
+                self._gumball_readout.setVisible(False)
+            return
+        text, (x, y) = info
+        self._gumball_readout.setText(text)
+        self._gumball_readout.adjustSize()
+        h = self._gumball_readout.height()
+        x = max(2, min(x, self.width() - self._gumball_readout.width() - 2))
+        y = max(2, min(y - h, self.height() - h - 2))
+        self._gumball_readout.move(x, y)
+        self._gumball_readout.setVisible(True)
+        self._gumball_readout.raise_()
 
     def _paint_technical(self, w, h):
         """Model-space technical view: parallel-projection HLR linework."""
@@ -1664,6 +1693,12 @@ class Viewport(QOpenGLWidget):
             self._rmb_press = ev.position()
         if ev.button() == Qt.MouseButton.LeftButton:
             pos = ev.position()
+            # resolve a gumball armed for numeric entry before anything else
+            if self.gumball.drag is not None and \
+                    self.gumball.drag.get("armed"):
+                if not self.gumball.commit_typed():
+                    self.gumball.cancel_drag()
+                self.update()
             if self.point_mode:
                 pt = self.world_point_at(pos.x(), pos.y())
                 if pt is not None:
@@ -1680,6 +1715,7 @@ class Viewport(QOpenGLWidget):
             if handle is not None:
                 if self.gumball.begin_drag(handle, pos.x(), pos.y(),
                                            ev.modifiers()):
+                    self._gumball_press = pos
                     self.update()
                     return
             cv = self._cv_hit(pos.x(), pos.y())
@@ -1725,7 +1761,8 @@ class Viewport(QOpenGLWidget):
             else:
                 self.camera.orbit(dx * speed, dy * speed)
             self.update()
-        elif self.gumball.drag is not None:
+        elif (self.gumball.drag is not None
+                and ev.buttons() & Qt.MouseButton.LeftButton):
             label = self.gumball.drag_to(pos.x(), pos.y(), ev.modifiers())
             if label:
                 from PySide6.QtWidgets import QMainWindow
@@ -1788,7 +1825,16 @@ class Viewport(QOpenGLWidget):
         if self.space != "model":
             self.layout_view.release_drag()
         if self.gumball.drag is not None:
-            self.gumball.end_drag()
+            press = getattr(self, "_gumball_press", None)
+            moved = (press is not None
+                     and (ev.position() - press).manhattanLength() > 4)
+            d = self.gumball.drag
+            if d["typed"] or (not moved and self.gumball.accepts_typing()):
+                # clicked a handle (or typed mid-drag): keep it live so a
+                # value can be typed, committed with Enter
+                self.gumball.arm()
+            else:
+                self.gumball.end_drag()
             self.update()
             return
         if self._cv_drag is not None:
@@ -1966,6 +2012,26 @@ class Viewport(QOpenGLWidget):
         return True
 
     def keyPressEvent(self, ev):
+        # while a gumball drag is live, type an exact distance/angle/factor
+        if self.gumball.drag is not None:
+            key = ev.key()
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if self.gumball.commit_typed():
+                    self.update()
+                    return
+            elif key == Qt.Key.Key_Escape:
+                self.gumball.cancel_drag()
+                self.update()
+                return
+            elif key == Qt.Key.Key_Backspace:
+                if self.gumball.type_char("back"):
+                    self.update()
+                    return
+            elif ev.text() in "0123456789.-" and ev.text() \
+                    and self.gumball.accepts_typing():
+                self.gumball.type_char(ev.text())
+                self.update()
+                return
         if self.space != "model":
             lv = self.layout_view
             if ev.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) \
