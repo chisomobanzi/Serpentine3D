@@ -193,3 +193,34 @@ def test_sellast_recovers_released_selection(window):
     assert window.selection.ids == []
     window.processor.run("sellast")
     assert window.selection.ids == [obj.id]
+
+
+def test_final_enter_does_not_rerun_command(window):
+    """The real playtest bug: QLineEdit leaves Return unaccepted, so the
+    keystroke that completed a command bubbled to the main window's
+    Enter-repeats fallback and instantly re-ran it."""
+    from PySide6.QtCore import Qt as QtC
+    from PySide6.QtTest import QTest
+    from serpentine3d.core import geometry as g
+    box = window.scene.add(g.make_box((0, 0, 0), 10, 10, 10))
+    window.selection.set([box.id])
+    window.show()
+    for text in ("scale", "0,0,0", "2"):
+        QTest.keyClicks(window.command_line.input, text)
+        QTest.keyClick(window.command_line.input, QtC.Key.Key_Return)
+    assert not window.processor.busy          # finished means finished
+    assert window.command_line.prompt_label.text() == "Command"
+    assert g.volume(window.scene.all()[0].shape) == pytest.approx(8000)
+
+    # Enter with the VIEWPORT focused still repeats (Rhino gesture kept)
+    window.viewport.setFocus()
+    window.keyPressEvent(_key_event(QtC.Key.Key_Return))
+    assert window.processor.busy
+    window.processor.cancel()
+
+
+def _key_event(key):
+    from PySide6.QtCore import QEvent, Qt as QtC
+    from PySide6.QtGui import QKeyEvent
+    return QKeyEvent(QEvent.Type.KeyPress, key,
+                     QtC.KeyboardModifier.NoModifier)

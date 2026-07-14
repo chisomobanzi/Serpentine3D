@@ -32,7 +32,14 @@ class CommandInput(QLineEdit):
 
     def keyPressEvent(self, ev):
         key = ev.key()
-        if key == Qt.Key.Key_Up:
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            # QLineEdit fires returnPressed but leaves the event ignored;
+            # consume it here or it bubbles to the main window, whose
+            # Enter-repeats-last-command fallback instantly re-runs the
+            # command the returnPressed handling just completed
+            super().keyPressEvent(ev)
+            ev.accept()
+        elif key == Qt.Key.Key_Up:
             self.upPressed.emit()
         elif key == Qt.Key.Key_Down:
             self.downPressed.emit()
