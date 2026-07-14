@@ -94,8 +94,10 @@ def test_preselection_skips_select_request(env):
     sel.set([obj.id])
     proc.run("extrude")
     # selection consumed automatically; first prompt is the distance
-    from serpentine3d.commands.base import NumberReq
-    assert isinstance(proc.request, NumberReq)
+    # (a clickable axis-locked point since the reference-workflow wave)
+    from serpentine3d.commands.base import PointReq
+    assert isinstance(proc.request, PointReq)
+    assert proc.request.axis_lock is not None
 
 
 def test_cancel_restores_scene(env):
@@ -937,3 +939,88 @@ def test_clip_vectors_derived_from_plane_object(env):
     assert np.dot(v, [0, 0, 10, 1]) < 0      # above the plane clipped
     scene.update(obj.id, clip_plane={"enabled": False})
     assert vp._clip_vectors() == []
+
+
+def test_scale_by_reference_points(env):
+    """Rhino workflow: base point, grab a reference, drag to resize."""
+    import math
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 2, 2, 2))
+    proc.run("scale")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")           # base
+    proc.provide_text("4,0,0")           # reference where it is now
+    ghost = proc.preview_for((8.0, 0.0, 0.0))   # dragging: factor 2
+    assert g.volume(ghost) == pytest.approx(64)
+    ghost = proc.preview_for(3.0)               # typed factor previews too
+    assert g.volume(ghost) == pytest.approx(8 * 27)
+    proc.provide_text("8,0,0")           # commit at factor 2
+    assert not proc.busy
+    assert g.volume(scene.all()[0].shape) == pytest.approx(64)
+
+
+def test_rotate_by_reference_direction(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((1, 0, 0), 1, 1, 1))
+    proc.run("rotate")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")           # center
+    proc.provide_text("1,0,0")           # reference direction +X
+    ghost = proc.preview_for((0.0, 1.0, 0.0))   # dragged to +Y
+    assert g.bbox(ghost)[1][1] == pytest.approx(2, abs=1e-6)
+    proc.provide_text("0,1,0")           # commit 90 degrees
+    assert not proc.busy
+    assert g.bbox(scene.all()[0].shape)[1][1] == pytest.approx(2, abs=1e-6)
+
+
+def test_move_and_mirror_previews(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 2, 2, 2))
+    proc.run("move")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")
+    ghost = proc.preview_for((10.0, 0.0, 0.0))
+    assert g.bbox(ghost)[0][0] == pytest.approx(10)
+    proc.provide_text("10,0,0")
+    assert not proc.busy
+
+    proc.run("mirror")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")
+    ghost = proc.preview_for((0.0, 10.0, 0.0))   # mirror across Y axis
+    assert g.bbox(ghost)[0][0] == pytest.approx(-12)
+    proc.cancel()
+
+
+def test_extrude_click_distance(env):
+    scene, sel, hist, ctx, proc = env
+    import math
+    c = scene.add(g.make_circle((5, 5, 0), 3))
+    proc.run("extrude")
+    proc.click_object(c.id)
+    proc.finish_selection()
+    req = proc.request
+    assert req.axis_lock is not None            # height is clickable
+    ghost = proc.preview_for((5.0, 5.0, 7.0))   # dragged up 7
+    assert g.bbox(ghost)[1][2] == pytest.approx(7, abs=1e-6)
+    proc.provide_text("7")                      # typed still works
+    assert not proc.busy
+    solid = scene.all()[-1]
+    assert g.volume(solid.shape) == pytest.approx(math.pi * 9 * 7, rel=1e-3)
+
+
+def test_array_previews(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 2, 2, 2))
+    proc.run("arraypolar")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    proc.provide_text("20,0,0")
+    assert proc.preview_for(8) is not None      # count ghost
+    proc.provide_text("6")
+    assert proc.preview_for(180.0) is not None  # fill-angle ghost
+    proc.cancel()

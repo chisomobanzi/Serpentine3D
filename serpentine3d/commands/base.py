@@ -43,7 +43,9 @@ class PointReq(Req):
     choices: dict | None = None
     preview_fn: object = None             # value/point -> ghost shape
     axis_lock: tuple | None = None        # (base, dir): pick along this axis
-    number_from: tuple | None = None      # (base, dir): '10' -> base+10*dir
+    number_from: object = None            # (base, dir) or point-fn: '10' ->
+                                          # base+10*dir / number_from(10.0)
+    allow_number: bool = False            # bare number returns the float
 
 
 @dataclass
@@ -65,6 +67,8 @@ class IntReq(Req):
     prompt: str
     default: int | None = None
     minimum: int | None = None
+    choices: dict | None = None
+    preview_fn: object = None
 
 
 @dataclass
@@ -241,12 +245,17 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
             if text and opt.lower().startswith(text.lower()):
                 return True, opt
         pt = parse_point(text, ctx.last_point, ctx.scene.units, ctx.cplane)
-        if pt is None and req.number_from is not None:
+        if pt is None and (req.number_from is not None or req.allow_number):
             from ..utils.units import parse_length
             v = parse_length(text, ctx.scene.units)
             if v is not None:
-                base, direction = req.number_from
-                pt = tuple(b + v * d for b, d in zip(base, direction))
+                if callable(req.number_from):
+                    pt = tuple(req.number_from(v))
+                elif req.number_from is not None:
+                    base, direction = req.number_from
+                    pt = tuple(b + v * d for b, d in zip(base, direction))
+                else:
+                    return True, float(v)     # allow_number: the raw value
         if pt is None:
             return False, ("Expected coordinates like 3,4,0 "
                            "(@1,0 relative, 10<45 polar, units like 3'6\")")

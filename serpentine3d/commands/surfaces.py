@@ -25,9 +25,26 @@ def cmd_extrude(ctx):
     choices = {"BothSides": ["No", "Yes"]}
     if closed:
         choices = {"Cap": ["Yes", "No"], **choices}
-    dist = yield LengthReq(
-        "Extrusion distance", default=10.0, choices=choices,
-        preview_fn=lambda d: g.make_compound(_make(d, cap=False)))
+    base = g.centroid(curves[0].shape)
+
+    def _dist_of(p):
+        return sum((c - b) * d for c, b, d in zip(p, base, direction))
+
+    def _preview(p):
+        d = _dist_of(p)
+        return g.make_compound(_make(d, cap=False)) if abs(d) > 1e-9 \
+            else None
+
+    dp = yield PointReq(
+        "Extrusion distance (click, or type a number)",
+        axis_lock=(base, direction), number_from=(base, direction),
+        rubber_from=base, choices=choices,
+        default=tuple(b + 10.0 * d for b, d in zip(base, direction)),
+        preview_fn=_preview)
+    dist = _dist_of(dp)
+    if abs(dist) < 1e-9:
+        ctx.echo("Zero distance — nothing extruded.")
+        return
     cap = closed and ctx.opt("Cap", "Yes") == "Yes"
     both = ctx.opt("BothSides", "No") == "Yes"
     made = [ctx.scene.add(s) for s in _make(dist, cap)]

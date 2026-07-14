@@ -4,11 +4,22 @@ from ..core import geometry as g
 from .base import IntReq, LengthReq, NumberReq, OptionReq, PointReq, SelectReq, command
 
 
+def _ghost(objs, fn):
+    """Compound preview of every object transformed by fn(shape)."""
+    return g.make_compound([fn(o.shape) for o in objs])
+
+
 @command("move", aliases=("m",))
 def cmd_move(ctx):
     objs = yield SelectReq("Select objects to move")
     p1 = yield PointReq("Point to move from")
-    p2 = yield PointReq("Point to move to", rubber_from=p1)
+
+    def _preview(p):
+        off = tuple(b - a for a, b in zip(p1, p))
+        return _ghost(objs, lambda s: g.translate(s, off))
+
+    p2 = yield PointReq("Point to move to", rubber_from=p1,
+                        preview_fn=_preview)
     offset = tuple(b - a for a, b in zip(p1, p2))
     for o in objs:
         ctx.scene.replace_shape(o.id, g.translate(o.shape, offset))
@@ -19,10 +30,16 @@ def cmd_move(ctx):
 def cmd_copy(ctx):
     objs = yield SelectReq("Select objects to copy")
     p1 = yield PointReq("Point to copy from")
+
+    def _preview(p):
+        off = tuple(b - a for a, b in zip(p1, p))
+        return _ghost(objs, lambda s: g.translate(s, off))
+
     count = 0
     while True:
         p2 = yield PointReq("Point to copy to (Enter to finish)",
-                            rubber_from=p1, allow_empty=count > 0)
+                            rubber_from=p1, allow_empty=count > 0,
+                            preview_fn=_preview)
         if p2 is None:
             break
         offset = tuple(b - a for a, b in zip(p1, p2))
@@ -35,10 +52,38 @@ def cmd_copy(ctx):
 
 @command("rotate", aliases=("ro",))
 def cmd_rotate(ctx):
+    """Rotate around the CPlane normal: type an angle, or pick a
+    reference direction and drag it to its new heading (live preview)."""
+    import math
+
+    import numpy as np
     objs = yield SelectReq("Select objects to rotate")
     center = yield PointReq("Center of rotation")
-    angle = yield NumberReq("Angle in degrees (around the CPlane normal)")
     axis = tuple(ctx.cplane.normal)
+    ref = yield PointReq("Angle in degrees, or first reference point",
+                         rubber_from=center, allow_number=True)
+    if isinstance(ref, float):
+        angle = ref
+    else:
+        v1 = np.subtract(ref, center)
+        if np.linalg.norm(v1) < 1e-12:
+            ctx.echo("Reference point is on the center — cancelled.")
+            return
+
+        def _angle(p):
+            v2 = np.subtract(p, center)
+            n = np.asarray(axis, float)
+            return math.degrees(math.atan2(
+                float(np.dot(np.cross(v1, v2), n)), float(np.dot(v1, v2))))
+
+        def _preview(p):
+            a = p if isinstance(p, float) else _angle(p)
+            return _ghost(objs, lambda s: g.rotate(s, center, axis, a))
+
+        p2 = yield PointReq("Angle, or second reference point",
+                            rubber_from=center, allow_number=True,
+                            preview_fn=_preview)
+        angle = p2 if isinstance(p2, float) else _angle(p2)
     for o in objs:
         ctx.scene.replace_shape(
             o.id, g.rotate(o.shape, center, axis, angle))
@@ -47,9 +92,37 @@ def cmd_rotate(ctx):
 
 @command("scale", aliases=("sc",))
 def cmd_scale(ctx):
+    """Scale about a base point: type a factor, or grab a reference
+    point and drag it to its new position (live preview)."""
+    import math
     objs = yield SelectReq("Select objects to scale")
     center = yield PointReq("Base point")
-    factor = yield NumberReq("Scale factor")
+    ref = yield PointReq("Scale factor, or first reference point",
+                         rubber_from=center, allow_number=True)
+    if isinstance(ref, float):
+        factor = ref
+    else:
+        d0 = math.dist(center, ref)
+        if d0 < 1e-12:
+            ctx.echo("Reference point is on the base point — cancelled.")
+            return
+
+        def _factor(p):
+            return p if isinstance(p, float) else math.dist(center, p) / d0
+
+        def _preview(p):
+            f = _factor(p)
+            if f < 1e-9:
+                return None
+            return _ghost(objs, lambda s: g.scale(s, center, f))
+
+        p2 = yield PointReq("Second reference point (drag to scale)",
+                            rubber_from=center, allow_number=True,
+                            preview_fn=_preview)
+        factor = _factor(p2)
+    if abs(factor) < 1e-9:
+        ctx.echo("Zero scale factor — cancelled.")
+        return
     for o in objs:
         ctx.scene.replace_shape(o.id, g.scale(o.shape, center, factor))
     ctx.echo(f"Scaled {len(objs)} object(s) by {factor:g}.")
@@ -72,17 +145,26 @@ def cmd_scale_nu(ctx):
 def cmd_mirror(ctx):
     objs = yield SelectReq("Select objects to mirror")
     p1 = yield PointReq("Start of mirror line")
-    p2 = yield PointReq("End of mirror line", rubber_from=p1)
+
+    def _mirror_normal(p):
+        import numpy as np
+        line = np.subtract(p, p1)
+        normal = np.cross(ctx.cplane.normal, line)
+        if np.linalg.norm(normal) < 1e-12:
+            normal = np.asarray(ctx.cplane.xdir)
+        return tuple(float(c) for c in normal)
+
+    def _preview(p):
+        n = _mirror_normal(p)
+        return _ghost(objs, lambda s: g.mirror(s, p1, n))
+
+    p2 = yield PointReq("End of mirror line", rubber_from=p1,
+                        preview_fn=_preview)
     keep = yield OptionReq("Keep original?", options=["Yes", "No"],
                            default="Yes")
     # mirror across the plane through the picked line, perpendicular to
     # the construction plane
-    import numpy as np
-    line = np.subtract(p2, p1)
-    normal = np.cross(ctx.cplane.normal, line)
-    if np.linalg.norm(normal) < 1e-12:
-        normal = ctx.cplane.xdir
-    normal = tuple(float(c) for c in normal)
+    normal = _mirror_normal(p2)
     for o in objs:
         mirrored = g.mirror(o.shape, p1, normal)
         if keep == "Yes":
@@ -96,8 +178,17 @@ def cmd_mirror(ctx):
 def cmd_array_polar(ctx):
     objs = yield SelectReq("Select objects to array")
     center = yield PointReq("Center of polar array")
-    count = yield IntReq("Number of items", default=6, minimum=2)
-    total = yield NumberReq("Angle to fill (degrees)", default=360.0)
+
+    def _ring(count, total):
+        step = total / (count if abs(total - 360.0) < 1e-9 else count - 1)
+        return g.make_compound(
+            [g.rotate(o.shape, center, (0, 0, 1), step * i)
+             for i in range(1, count) for o in objs])
+
+    count = yield IntReq("Number of items", default=6, minimum=2,
+                         preview_fn=lambda v: _ring(v, 360.0))
+    total = yield NumberReq("Angle to fill (degrees)", default=360.0,
+                            preview_fn=lambda v: _ring(count, v))
     step = total / (count if abs(total - 360.0) < 1e-9 else count - 1)
     n = 0
     for i in range(1, count):
@@ -133,10 +224,19 @@ def cmd_array(ctx):
     objs = yield SelectReq("Select objects to array")
     nx = yield IntReq("Count X", default=2, minimum=1)
     ny = yield IntReq("Count Y", default=1, minimum=1)
-    dx = yield LengthReq("Spacing X", default=10.0)
+
+    def _grid(dx, dy):
+        shapes = [g.translate(o.shape, (i * dx, j * dy, 0))
+                  for i in range(nx) for j in range(ny)
+                  if (i, j) != (0, 0) for o in objs]
+        return g.make_compound(shapes) if shapes else None
+
+    dx = yield LengthReq("Spacing X", default=10.0,
+                         preview_fn=lambda v: _grid(v, 0.0))
     dy = 0.0
     if ny > 1:
-        dy = yield LengthReq("Spacing Y", default=10.0)
+        dy = yield LengthReq("Spacing Y", default=10.0,
+                             preview_fn=lambda v: _grid(dx, v))
     n = 0
     for i in range(nx):
         for j in range(ny):
