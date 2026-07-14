@@ -238,7 +238,7 @@ class MainWindow(QMainWindow):
         vp.cvEditBegan.connect(
             lambda: self.history.checkpoint("edit control point"))
         vp.escapePressed.connect(self._cancel)
-        vp.enterShortcut.connect(lambda: self._on_submit(""))
+        vp.enterShortcut.connect(self._rmb_enter)
 
     def all_viewports(self) -> list:
         return ([self.viewport]
@@ -455,6 +455,14 @@ class MainWindow(QMainWindow):
         self._help_browser.show()
         self._help_browser.raise_()
 
+    def _rmb_enter(self):
+        """Right-click: Enter while busy; when idle, the first click after
+        a command ends is the 'done' gesture, the next one repeats."""
+        if not self.processor.busy and getattr(self, "_rmb_absorb", False):
+            self._rmb_absorb = False
+            return
+        self._on_submit("")
+
     def _on_option_chip(self, name: str):
         self.processor.set_option(name)
         self._live_preview(self.command_line.input.text())
@@ -469,6 +477,12 @@ class MainWindow(QMainWindow):
             self.viewport.set_ghost(None)
 
     def _sync_command_state(self):
+        busy = self.processor.busy
+        if getattr(self, "_prev_busy", False) and not busy:
+            self._rmb_absorb = True          # one inert right-click
+        elif busy:
+            self._rmb_absorb = False
+        self._prev_busy = busy
         req = self.processor.request
         self.command_line.set_prompt(self.processor.prompt_text())
         self.command_line.set_options(self.processor.option_chips())
@@ -492,6 +506,7 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _on_object_clicked(self, obj_id: str, modifiers):
+        self._rmb_absorb = False             # fresh pick: next RMB repeats
         if isinstance(self.processor.request, SelectReq):
             self.processor.click_object(obj_id)
             return

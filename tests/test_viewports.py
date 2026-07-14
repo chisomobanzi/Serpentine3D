@@ -107,7 +107,9 @@ def test_right_click_repeats_last_command(window):
     window.processor.provide_text("0,0,0")
     window.processor.provide_text("5")
     assert not window.processor.busy
-    _rmb_click(window.viewport)          # idle: repeat 'circle'
+    _rmb_click(window.viewport)          # first click: the 'done' gesture
+    assert not window.processor.busy
+    _rmb_click(window.viewport)          # second click: repeat 'circle'
     assert window.processor.busy
     assert "circle" in window.processor.prompt_text().lower() \
         or "center" in window.processor.prompt_text().lower()
@@ -152,12 +154,33 @@ def test_command_terminates_cleanly_after_completion(window):
     assert window.selection.ids == []    # selection released (Rhino-style)
 
     _rmb_click(window.viewport)          # habit: RMB after finishing
-    assert window.processor.busy         # repeat asks for objects...
+    assert not window.processor.busy     # inert 'done' gesture — no repeat
+    _rmb_click(window.viewport)          # deliberate second click repeats
+    assert window.processor.busy
     from serpentine3d.commands.base import SelectReq
     assert isinstance(window.processor.request, SelectReq)
-    _rmb_click(window.viewport)          # ...and RMB on nothing bows out
+    _rmb_click(window.viewport)          # RMB on nothing bows out again
     assert not window.processor.busy
     assert g.volume(window.scene.all()[0].shape) == pytest.approx(64)
+
+
+def test_select_then_right_click_repeats_immediately(window):
+    """A fresh pick disarms the inert click: select + RMB = repeat now."""
+    from serpentine3d.core import geometry as g
+    a = window.scene.add(g.make_box((0, 0, 0), 2, 2, 2))
+    window.selection.set([a.id])
+    window.processor.run("scale")
+    window.processor.provide_text("0,0,0")
+    window.processor.provide_text("2")
+    assert not window.processor.busy
+    b = window.scene.add(g.make_box((10, 0, 0), 2, 2, 2))
+    from PySide6.QtCore import Qt as QtC
+    window._on_object_clicked(b.id, QtC.KeyboardModifier.NoModifier)
+    _rmb_click(window.viewport)               # repeats right away
+    assert window.processor.busy
+    window.processor.provide_text("10,0,0")
+    window.processor.provide_text("3")
+    assert g.volume(window.scene.get(b.id).shape) == pytest.approx(8 * 27)
 
 
 def test_sellast_recovers_released_selection(window):
