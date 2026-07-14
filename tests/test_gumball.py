@@ -176,3 +176,42 @@ def test_readout_label_states():
     vp.gumball.cancel_drag()
     vp._update_gumball_readout()
     assert vp._gumball_readout.isHidden()
+
+
+def test_compounded_nonuniform_scale_stays_valid():
+    """Regression: scaling a shape non-uniformly, tessellating, then
+    scaling again used to make BRepBuilderAPI_GTransform emit faces with
+    NULL surfaces — every later OCCT call then segfaulted (crash after
+    gumball scaling on a second axis). It must stay valid now."""
+    from serpentine3d.core.tessellate import tessellate
+    from serpentine3d.core.geometry import _has_null_surface
+    box = g.make_box((-2, -2, -2), 4, 4, 4)
+    shape = box
+    for axis in [(0, 1, 0), (0, 0, 1), (1, 0, 0), (0, 1, 0), (0, 0, 1)]:
+        shape = g.scale_along_axis(shape, (0, 0, 0), axis, -2.5)
+        tessellate(shape)                     # mutates the shape in place
+        assert not _has_null_surface(shape), \
+            "non-uniform scale of a meshed shape produced null surfaces"
+    # non-uniform scale via factors= is guarded the same way
+    s = g.scale(box, (0, 0, 0), 1.0, factors=(2.0, 0.5, 1.0))
+    tessellate(s)
+    s = g.scale(s, (0, 0, 0), 1.0, factors=(0.5, 2.0, 1.0))
+    assert not _has_null_surface(s)
+
+
+def test_gumball_scale_across_axes_no_crash():
+    """Drive real gumball scale drags across all three axes (the crash
+    repro): the shape must remain tessellatable at every step."""
+    from serpentine3d.core.tessellate import tessellate
+    from serpentine3d.core.geometry import _has_null_surface
+    vp, scene, sel = _vp()
+    box = scene.add(g.make_box((-2, -2, -2), 4, 4, 4))
+    sel.set([box.id])
+    for axis in (0, 1, 2):
+        _begin(vp, "scale", axis)
+        vp.gumball.apply_scalar(-1.8)         # negative, non-uniform
+        vp.gumball.end_drag()
+        obj = scene.get(box.id)
+        tessellate(obj.shape)                 # what the viewport does
+        assert not _has_null_surface(obj.shape)
+    assert g.volume(scene.get(box.id).shape) > 0

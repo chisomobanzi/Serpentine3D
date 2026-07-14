@@ -1252,6 +1252,34 @@ def rotate(shape, axis_point: Point, axis_dir: Point,
     return _apply_trsf(shape, t)
 
 
+def _gtransform(shape, gtrsf) -> TopoDS_Shape:
+    """Non-uniform (gp_GTrsf) transform, made safe against a known OCCT
+    crash: BRepBuilderAPI_GTransform on a shape that already carries a
+    triangulation (from a prior tessellation) silently produces faces
+    with NULL surfaces, and any later OCCT call on them segfaults.
+    Strip the triangulation first, then reject a degenerate result."""
+    from OCP.BRepTools import BRepTools
+    BRepTools.Clean_s(shape)
+    result = BRepBuilderAPI_GTransform(shape, gtrsf, True)
+    if not result.IsDone():
+        raise GeometryError("Non-uniform transform failed")
+    out = result.Shape()
+    if _has_null_surface(out):
+        raise GeometryError("Non-uniform transform produced degenerate "
+                            "geometry")
+    return out
+
+
+def _has_null_surface(shape) -> bool:
+    from OCP.BRep import BRep_Tool
+    exp = TopExp_Explorer(shape, occ.FACE)
+    while exp.More():
+        if BRep_Tool.Surface_s(occ.to_face(exp.Current())) is None:
+            return True
+        exp.Next()
+    return False
+
+
 def scale(shape, center: Point, factor: float,
           factors: Point | None = None) -> TopoDS_Shape:
     """Uniform scale, or non-uniform when `factors=(sx,sy,sz)` given."""
@@ -1277,13 +1305,10 @@ def scale(shape, center: Point, factor: float,
     if 0 in (sx, sy, sz):
         raise GeometryError("Scale factors cannot be zero")
     cx, cy, cz = center
-    g = gp_GTrsf()
-    g.SetVectorialPart(gp_Mat(sx, 0, 0, 0, sy, 0, 0, 0, sz))
-    g.SetTranslationPart(gp_XYZ(cx - sx * cx, cy - sy * cy, cz - sz * cz))
-    result = BRepBuilderAPI_GTransform(shape, g, True)
-    if not result.IsDone():
-        raise GeometryError("Non-uniform scale failed")
-    return result.Shape()
+    gt = gp_GTrsf()
+    gt.SetVectorialPart(gp_Mat(sx, 0, 0, 0, sy, 0, 0, 0, sz))
+    gt.SetTranslationPart(gp_XYZ(cx - sx * cx, cy - sy * cy, cz - sz * cz))
+    return _gtransform(shape, gt)
 
 
 def scale_along_axis(shape, center: Point, axis: Point,
@@ -1297,13 +1322,10 @@ def scale_along_axis(shape, center: Point, axis: Point,
     m = np.eye(3) + (float(factor) - 1.0) * np.outer(a, a)
     c = np.asarray(center, float)
     t = c - m @ c
-    g = gp_GTrsf()
-    g.SetVectorialPart(gp_Mat(*m.flatten()))
-    g.SetTranslationPart(gp_XYZ(*t))
-    result = BRepBuilderAPI_GTransform(shape, g, True)
-    if not result.IsDone():
-        raise GeometryError("Axis scale failed")
-    return result.Shape()
+    gt = gp_GTrsf()
+    gt.SetVectorialPart(gp_Mat(*m.flatten()))
+    gt.SetTranslationPart(gp_XYZ(*t))
+    return _gtransform(shape, gt)
 
 
 def mirror(shape, plane_point: Point, plane_normal: Point) -> TopoDS_Shape:
