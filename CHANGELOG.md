@@ -1,7 +1,32 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-07-16
 
+The "daily-driver" release: everything learned from real playtesting,
+plus the rebrand.
+
+- **Live everywhere**: creation commands previsualise as you pick (box
+  grows to the cursor, cylinder/sphere/arc ghost-follow); Rhino-style
+  reference-point transforms (scale/rotate by grabbing a point and
+  dragging it home) with live previews on move, copy, mirror, extrude
+  and arrays.
+- **Gumball, finished**: drag or click-and-type exact distances/angles/
+  factors with a live readout, grid snapping, Alt-copy — and a hard
+  crash fixed (OCCT null-surface segfault when scaling a second axis).
+- **Right mouse button**: Enter during a command (finishes selections,
+  accepts defaults), repeat-last when idle, drag still orbits; commands
+  now terminate cleanly when done (a bubbled Return used to re-run
+  them instantly).
+- **Viewports**: dockable/floatable extra viewports — model space and a
+  paper sheet side by side; zoom tools (zoomselected/zoomwindow/zoom).
+- **New commands**: orient/orient3pt, closecrv, clipping planes
+  (gumball-movable section planes), selection filters (F6), pipe,
+  point/divide, dupborder/dupedge, untrim, edgesrf, extractisocurve,
+  seldup, purge, what, boundingbox, viewcapture to file/clipboard,
+  back/left/bottom views, osnap toggles, command macros.
+- **Rhino import**: aliases *and* keyboard shortcuts from a real Rhino
+  8 settings file map onto Serpentine3D equivalents (62/88 in the
+  reference setup), with user shortcuts overriding built-in keys.
 - `dot` — Rhino-style model-space annotation dots: camera-facing label
   bubbles anchored to 3D points, constant screen size, selectable,
   saved in `.serp`. Copies, mirrors, arrays and orient now carry
@@ -24,6 +49,8 @@
   env vars `SERP3D_*`, AppImage `Serpentine3D-x86_64.AppImage`.
   `.serp` files keep their extension; files saved before the rename
   still load.
+- Desktop integration (`packaging/install-desktop.sh`): launcher,
+  icon, `.serp` file association; MIT licence; `examples/hero_scene.py`.
 
 ## 0.2.0 — 2026-07-14
 

@@ -11,3 +11,4 @@ dist/
 *.obj
 !tests/fixtures/*
 screenshots/
+.tokensave/
