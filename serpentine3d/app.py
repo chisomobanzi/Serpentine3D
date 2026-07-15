@@ -369,6 +369,21 @@ class MainWindow(QMainWindow):
                      lambda: self.run_command("shaded"))
         self._action(m_view, "Ghosted", None,
                      lambda: self.run_command("ghosted"))
+        self._action(m_view, "Rendered", None,
+                     lambda: self.run_command("rendered"))
+        self._action(m_view, "Technical", None,
+                     lambda: self.run_command("technical"))
+        m_view.addSeparator()
+        m_ports = m_view.addMenu("Viewports")
+        self._action(m_ports, "New Viewport...", None,
+                     lambda: self.run_command("newviewport"))
+        self._action(m_ports, "Floating Viewport", None,
+                     lambda: self.run_command("floatviewport"))
+        self._action(m_ports, "Four Viewports", None,
+                     lambda: self.run_command("4view"))
+        self._action(m_ports, "Single Viewport", None,
+                     lambda: self.run_command("1view"))
+        m_view.addSeparator()
         self._action(m_view, "Toggle Grid", "F7",
                      lambda: self.run_command("grid"))
 
