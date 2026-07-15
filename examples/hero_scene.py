@@ -31,39 +31,56 @@ from serpentine3d.ui import theme
 from serpentine3d.core import geometry as g
 
 # ---- tweakables ---------------------------------------------------------
-COLOR = (0.24, 0.66, 0.62)          # surface colour (RGB 0-1); app-teal
-MATERIAL = {"metallic": 0.45, "roughness": 0.38, "opacity": 1.0}
+# two chained Mobius strips: each is a loft of straight sections that
+# rotate a half-turn as they orbit — the second ring's plane is tilted
+# (not perpendicular) so both faces read from one camera. Verified
+# interlinked with real clearance (BRepExtrema, ~3.8 units).
+COLOR_A = (0.24, 0.66, 0.62)        # teal band
+COLOR_B = (0.80, 0.60, 0.38)        # gold band
+MAT_A = {"metallic": 0.55, "roughness": 0.30, "opacity": 1.0}
+MAT_B = {"metallic": 0.75, "roughness": 0.35, "opacity": 1.0}
 DISPLAY_MODE = "rendered"           # or "shaded", "ghosted", "wireframe"
-# blooming petal vase: lofted profiles whose lobes grow with height —
-# circular foot, swelling belly, scalloped seven-petal lip
-LOBES = 7
-HEIGHT = 32.0
-# silhouette: (fraction of height, radius)
-SILHOUETTE = [(0.00, 2.6), (0.10, 4.0), (0.28, 5.6), (0.46, 5.4),
-              (0.62, 4.0), (0.76, 3.4), (0.88, 4.2), (1.00, 5.8)]
-CAM = dict(target=(0, 0, 16), azimuth_deg=-55, elevation_deg=18, distance=66)
+RADIUS = 10.0                       # ring radius
+WIDTH = 2.8                         # band half-width
+SECTIONS = 72
+TILT_DEG = 38                       # second ring's plane tilt
+CAM = dict(target=(7, 3, 14.8), azimuth_deg=-64, elevation_deg=21,
+           distance=68)
 # -------------------------------------------------------------------------
 
 
-def _vase_profile(t, r):
-    """Lobed profile at height fraction t: lobes grow from foot to lip."""
-    z = t * HEIGHT
-    amp = 0.015 + 0.14 * t * t
-    pts = []
-    n = 96
-    for k in range(n):
-        a = 2 * math.pi * k / n
-        rr = r * (1.0 + amp * math.cos(LOBES * a))
-        pts.append((rr * math.cos(a), rr * math.sin(a), z))
-    return g.make_interp_curve(pts + [pts[0]])
+def _mobius(center, u, v, n):
+    """Mobius band: loft of line sections with a half-twist."""
+    center = np.asarray(center, float)
+    u, v, n = (np.asarray(a, float) for a in (u, v, n))
+    secs = []
+    for k in range(SECTIONS + 1):
+        th = 2 * math.pi * k / SECTIONS
+        radial = math.cos(th) * u + math.sin(th) * v
+        c, s = math.cos(th / 2), math.sin(th / 2)
+        d = c * radial + s * n
+        mid = center + RADIUS * radial
+        secs.append(g.make_line(tuple(mid - WIDTH * d),
+                                tuple(mid + WIDTH * d)))
+    return g.loft(secs, solid=False)
+
+
+def _pose(shape):
+    shape = g.rotate(shape, (6, 0, 0), (0, 0, 1), -20)
+    return g.translate(shape, (0, 0, RADIUS + WIDTH + 4.0))
 
 
 def build(window):
     scene = window.scene
-    vase = g.loft([_vase_profile(t, r) for t, r in SILHOUETTE],
-                  solid=False)
-    obj = scene.add(vase, name="Vase")
-    scene.update(obj.id, color=COLOR, material=dict(MATERIAL))
+    tilt = math.radians(TILT_DEG)
+    a = _mobius((0, 0, 0), (1, 0, 0), (0, 0, 1), (0, 1, 0))
+    b = _mobius((RADIUS * 1.18, 0, 0), (1, 0, 0),
+                (0, math.cos(tilt), math.sin(tilt)),
+                (0, -math.sin(tilt), math.cos(tilt)))
+    oa = scene.add(_pose(a), name="Mobius A")
+    scene.update(oa.id, color=COLOR_A, material=dict(MAT_A))
+    ob = scene.add(_pose(b), name="Mobius B")
+    scene.update(ob.id, color=COLOR_B, material=dict(MAT_B))
 
     vp = window.viewport
     window.selection.clear()
