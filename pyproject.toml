@@ -22,7 +22,7 @@ dev = ["pytest>=8.0"]
 docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 
 [project.urls]
-Homepage = "https://github.com/chisomo-banzi/Serpentine3D"
+Homepage = "https://github.com/chisomobanzi/Serpentine3D"
 
 [project.scripts]
 serp3d = "serpentine3d.app:main"

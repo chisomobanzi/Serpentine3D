@@ -5,7 +5,7 @@ Serpentine3D needs Python 3.10+ on Linux with OpenGL 3.3.
 ## From source
 
 ```bash
-git clone https://github.com/chisomo-banzi/Serpentine3D
+git clone https://github.com/chisomobanzi/Serpentine3D
 cd Serpentine3D
 python3 -m venv .venv
 .venv/bin/pip install -e .
