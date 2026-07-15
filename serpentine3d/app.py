@@ -424,11 +424,12 @@ class MainWindow(QMainWindow):
         self._action(self._plugins_menu, label, None, fn)
 
     def _open_plugin_dir(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
         from .plugins import plugin_dir
-        import subprocess
         d = plugin_dir()
         os.makedirs(d, exist_ok=True)
-        subprocess.Popen(["xdg-open", d])
+        QDesktopServices.openUrl(QUrl.fromLocalFile(d))  # portable
 
     def _action(self, menu, label, shortcut, fn):
         act = QAction(label, self)
