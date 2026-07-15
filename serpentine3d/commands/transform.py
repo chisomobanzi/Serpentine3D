@@ -44,8 +44,7 @@ def cmd_copy(ctx):
             break
         offset = tuple(b - a for a, b in zip(p1, p2))
         for o in objs:
-            ctx.scene.add(g.translate(o.shape, offset),
-                          name=None, layer_id=o.layer_id)
+            ctx.scene.add_from(g.translate(o.shape, offset), o)
         count += 1
     ctx.echo(f"Copied {len(objs)} object(s) {count} time(s).")
 
@@ -168,7 +167,7 @@ def cmd_mirror(ctx):
     for o in objs:
         mirrored = g.mirror(o.shape, p1, normal)
         if keep == "Yes":
-            ctx.scene.add(mirrored, layer_id=o.layer_id)
+            ctx.scene.add_from(mirrored, o)
         else:
             ctx.scene.replace_shape(o.id, mirrored)
     ctx.echo(f"Mirrored {len(objs)} object(s).")
@@ -193,8 +192,8 @@ def cmd_array_polar(ctx):
     n = 0
     for i in range(1, count):
         for o in objs:
-            ctx.scene.add(g.rotate(o.shape, center, (0, 0, 1), step * i),
-                          layer_id=o.layer_id)
+            ctx.scene.add_from(
+                g.rotate(o.shape, center, (0, 0, 1), step * i), o)
             n += 1
     ctx.echo(f"Created {n} arrayed object(s) around {center}.")
 
@@ -213,8 +212,7 @@ def cmd_array_path(ctx):
         if all(abs(c) < 1e-12 for c in offset):
             continue
         for o in objs:
-            ctx.scene.add(g.translate(o.shape, offset),
-                          layer_id=o.layer_id)
+            ctx.scene.add_from(g.translate(o.shape, offset), o)
             n += 1
     ctx.echo(f"Placed {n} object(s) along {paths[0].name}.")
 
@@ -243,8 +241,8 @@ def cmd_array(ctx):
             if i == 0 and j == 0:
                 continue
             for o in objs:
-                ctx.scene.add(g.translate(o.shape, (i * dx, j * dy, 0)),
-                              layer_id=o.layer_id)
+                ctx.scene.add_from(
+                    g.translate(o.shape, (i * dx, j * dy, 0)), o)
                 n += 1
     ctx.echo(f"Created {n} arrayed object(s).")
 
@@ -309,7 +307,7 @@ def _place(ctx, objs, matrix, copy: bool):
     for o in objs:
         shape = g.apply_matrix(o.shape, matrix)
         if copy:
-            made.append(ctx.scene.add(shape, layer_id=o.layer_id))
+            made.append(ctx.scene.add_from(shape, o))
         else:
             ctx.scene.replace_shape(o.id, shape)
             made.append(o)

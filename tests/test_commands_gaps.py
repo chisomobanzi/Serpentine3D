@@ -171,3 +171,61 @@ def test_what_command(env):
     assert "solid" in text
     assert "volume" in text
     assert "8" in text
+
+
+def test_dot_command_and_roundtrip(env, tmp_path):
+    scene, sel, hist, ctx, proc = env
+    proc.run("dot")
+    proc.provide_text("5,5,0")
+    proc.provide_text("STAGE LEFT")
+    proc.provide_text("")
+    assert not proc.busy
+    dots = [o for o in scene.all() if o.annotation]
+    assert len(dots) == 1
+    assert dots[0].kind == "point"
+    assert dots[0].annotation["text"] == "STAGE LEFT"
+
+    from serpentine3d.fileio.native import load_scene, save_scene
+    path = str(tmp_path / "dots.serp")
+    save_scene(scene, path)
+    from serpentine3d.core.scene import Scene
+    scene2 = Scene()
+    load_scene(scene2, path)
+    dots2 = [o for o in scene2.all() if o.annotation]
+    assert len(dots2) == 1
+    assert dots2[0].annotation["text"] == "STAGE LEFT"
+
+
+def test_copy_preserves_attributes(env):
+    scene, sel, hist, ctx, proc = env
+    obj = scene.add(g.make_point((0, 0, 0)))
+    scene.update(obj.id, annotation={"text": "PROP"},
+                 color=(1.0, 0.0, 0.0), material={"opacity": 0.5})
+    proc.run("copy")
+    proc.click_object(obj.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")
+    proc.provide_text("10,0,0")
+    proc.provide_text("")
+    copies = [o for o in scene.all() if o.id != obj.id]
+    assert len(copies) == 1
+    c = copies[0]
+    assert c.annotation == {"text": "PROP"}
+    assert c.color == (1.0, 0.0, 0.0)
+    assert c.material == {"opacity": 0.5}
+    assert g.point_coords(c.shape) == pytest.approx((10, 0, 0))
+
+
+def test_mirror_copy_preserves_attributes(env):
+    scene, sel, hist, ctx, proc = env
+    obj = scene.add(g.make_line((1, 0, 0), (2, 0, 0)))
+    scene.update(obj.id, color=(0.0, 1.0, 0.0))
+    proc.run("mirror")
+    proc.click_object(obj.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")
+    proc.provide_text("0,1,0")
+    proc.provide_text("Yes")   # keep original
+    copies = [o for o in scene.all() if o.id != obj.id]
+    assert len(copies) == 1
+    assert copies[0].color == (0.0, 1.0, 0.0)

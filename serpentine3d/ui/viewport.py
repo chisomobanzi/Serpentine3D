@@ -559,6 +559,11 @@ class Viewport(QOpenGLWidget):
     # ---------------------------------------------------------------- render
 
     def paintGL(self):
+        # QPainter overlays (dots, layout text) reset GL state behind our
+        # back — re-assert what every frame relies on.
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+        GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glClearColor(*theme.VIEWPORT_BG_BOTTOM, 1.0)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
 
@@ -617,6 +622,52 @@ class Viewport(QOpenGLWidget):
         self._draw_frame_guides(w, h)
         self._draw_selection_box(w, h)
         self._update_gumball_readout()
+        self._paint_dots(w, h)
+
+    def _paint_dots(self, w, h):
+        """Annotation dots: screen-space label bubbles over their anchors."""
+        dots = [o for o in self.scene.visible_objects()
+                if o.annotation and len(o.mesh.points)]
+        if not dots:
+            return
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QColor, QFont, QPainter, QPen
+        GL.glBindVertexArray(0)
+        GL.glUseProgram(0)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        font = QFont(self.font())
+        font.setPointSizeF(9.0)
+        painter.setFont(font)
+        fm = painter.fontMetrics()
+        for obj in dots:
+            anchor = obj.mesh.points[0].astype(float)
+            scr = self.camera.project(anchor.reshape(1, 3), w, h)[0]
+            if scr[2] <= 0:
+                continue
+            text = str(obj.annotation.get("text", ""))
+            tw = fm.horizontalAdvance(text)
+            th = fm.height()
+            pad = 5.0
+            rect = QRectF(scr[0] - tw / 2 - pad, scr[1] - th / 2 - 3,
+                          tw + 2 * pad, th + 6)
+            selected = self.selection.is_selected(obj.id)
+            if selected:
+                border = QColor.fromRgbF(*theme.SELECTION_COLOR)
+                fill = QColor(58, 48, 22, 235)
+            else:
+                col = self.scene.color_of(obj)
+                border = QColor.fromRgbF(col[0] * 0.75, col[1] * 0.75,
+                                         col[2] * 0.75)
+                fill = QColor(38, 38, 42, 225)
+            painter.setPen(QPen(border, 2.0 if selected else 1.2))
+            painter.setBrush(fill)
+            painter.drawRoundedRect(rect, 4, 4)
+            painter.setPen(QColor(235, 235, 235))
+            painter.drawText(rect, 0x84, text)  # AlignHCenter | AlignVCenter
+        painter.end()
+        GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _update_gumball_readout(self):
         """Position the value-readout label by the gumball (a real child
@@ -1059,7 +1110,7 @@ class Viewport(QOpenGLWidget):
                 self._line_width(1.0)
                 GL.glBindVertexArray(gpu.iso_vao)
                 GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
-            if len(obj.mesh.points):
+            if len(obj.mesh.points) and not obj.annotation:
                 self._draw_point_markers(mvp, obj.mesh.points,
                                          (*line_color, 1.0), selected)
         self._line_width(1.0)

@@ -62,6 +62,7 @@ class SceneObject:
     color: tuple[float, float, float] | None = None   # None -> layer color
     material: dict | None = None       # {"metallic","roughness","opacity"}
     clip_plane: dict | None = None     # {"enabled": bool}: sections the view
+    annotation: dict | None = None     # {"text": str}: model-space dot label
     _mesh: DisplayMesh | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -129,6 +130,23 @@ class Scene:
         self.objects[obj.id] = obj
         self._order.append(obj.id)
         self.notify("objects")
+        return obj
+
+    def add_from(self, shape, like: SceneObject) -> SceneObject:
+        """Add a shape carrying over another object's display attributes
+        (layer, colour, material, annotation, group)."""
+        obj = self.add(shape, layer_id=like.layer_id)
+        fields = {}
+        if like.color is not None:
+            fields["color"] = like.color
+        if like.material:
+            fields["material"] = dict(like.material)
+        if like.annotation:
+            fields["annotation"] = dict(like.annotation)
+        if like.group_id:
+            fields["group_id"] = like.group_id
+        if fields:
+            obj = self.update(obj.id, **fields)
         return obj
 
     def remove(self, obj_id: str):

@@ -742,3 +742,24 @@ def cmd_revision(ctx):
     ctx.scene.notify()
     ctx.echo(f"Revision {rev.strip()} recorded "
              f"({len(lay.revisions)} row(s) in the table).")
+
+
+@command("dot", aliases=("annotationdot",))
+def cmd_dot(ctx):
+    """Model-space annotation dots: a label bubble anchored to a 3D point.
+    Dots keep their size on screen and always face the camera."""
+    count = 0
+    while True:
+        prompt = ("Dot location" if count == 0
+                  else "Next dot location (Enter to finish)")
+        p = yield PointReq(prompt, allow_empty=count > 0)
+        if p is None:
+            break
+        text = yield TextReq("Dot text", default="A" if count == 0 else "")
+        if not text.strip():
+            ctx.echo("Empty text — dot skipped.")
+            continue
+        obj = ctx.scene.add(g.make_point(p))
+        ctx.scene.update(obj.id, annotation={"text": text.strip()})
+        count += 1
+    ctx.echo(f"Placed {count} dot(s).")

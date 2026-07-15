@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `dot` — Rhino-style model-space annotation dots: camera-facing label
+  bubbles anchored to 3D points, constant screen size, selectable,
+  saved in `.serp`. Copies, mirrors, arrays and orient now carry
+  object colour, material, annotation and group across (`add_from`).
 - Daily-driver command batch: `pipe` (round-corner tube along any rail,
   capped or open), `point` / `divide` (point objects with viewport
   markers, picking, snapping and `.serp` round-trip), `dupborder` /

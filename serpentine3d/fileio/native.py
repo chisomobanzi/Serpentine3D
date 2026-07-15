@@ -96,6 +96,8 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "material": dict(obj.material) if obj.material else None,
                 "clip_plane": (dict(obj.clip_plane) if obj.clip_plane
                                else None),
+                "annotation": (dict(obj.annotation) if obj.annotation
+                               else None),
                 "locked": obj.locked,
                 "group": obj.group_id,
                 "block": obj.block_id,
@@ -179,6 +181,8 @@ def _load_doc(scene, doc: dict):
             updates["material"] = dict(od["material"])
         if od.get("clip_plane"):
             updates["clip_plane"] = dict(od["clip_plane"])
+        if od.get("annotation"):
+            updates["annotation"] = dict(od["annotation"])
         if od.get("locked"):
             updates["locked"] = True
         if od.get("group"):

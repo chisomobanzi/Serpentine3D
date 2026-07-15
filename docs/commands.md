@@ -112,6 +112,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `dimdiameter` (`dimdia`) | Dimdiameter |
 | `dimradius` (`dimr`) | Dimradius |
 | `dimstyle` (`textstyle`) | Create or edit a named annotation style (text height, arrows). |
+| `dot` (`annotationdot`) | Model-space annotation dots: a label bubble anchored to a 3D point. |
 | `exportdxf` | Export the active layout sheet (or the model) to DXF. |
 | `exportpdf` (`print`, `pdf`) | Exportpdf |
 | `exportsvg` | Exportsvg |
