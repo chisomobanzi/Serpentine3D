@@ -398,6 +398,7 @@ class Viewport(QOpenGLWidget):
     cvEditBegan = Signal()                  # control-point drag started
     escapePressed = Signal()
     enterShortcut = Signal()                # right-click without dragging
+    displayModeChanged = Signal()           # shaded/rendered/... changed
     _tessDone = Signal()                    # a background mesh finished
 
     def __init__(self, scene, selection, config=None, parent=None):
@@ -1499,6 +1500,7 @@ class Viewport(QOpenGLWidget):
                         "curvature", "technical", "draft", "rendered"):
             raise ValueError(f"Unknown display mode '{mode}'")
         self.display_mode = mode
+        self.displayModeChanged.emit()
         self.update()
 
     def zoom_extents(self):

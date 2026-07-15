@@ -229,6 +229,7 @@ class MainWindow(QMainWindow):
 
     def _wire_viewport(self, vp):
         vp.installEventFilter(self)
+        vp.displayModeChanged.connect(self._update_status)
         vp.history = self.history
         vp.objectClicked.connect(self._on_object_clicked)
         vp.emptyClicked.connect(self._on_empty_clicked)
