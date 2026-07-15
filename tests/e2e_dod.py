@@ -271,7 +271,8 @@ def main():
            name="T")
     c.call("create_curve", points=[[5, -5, 0], [5, 5, 0]], kind="line",
            name="K")
-    c.call("command", command="split", inputs=["T", "", "K", ""])
+    # target select is max_count=1 (auto-finishes); "" would cancel cutters
+    c.call("command", command="split", inputs=["T", "K", ""])
     n = c.call("scene_info")["object_count"]
     check("split command", n == 3, f"{n} objects")
 
