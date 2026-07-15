@@ -159,3 +159,62 @@ def cmd_breptomesh(ctx):
         except Exception as exc:                              # noqa: BLE001
             ctx.echo(f"{o.name}: {exc}")
     ctx.echo(f"Converted {done} object(s) to mesh.")
+
+
+@command("purge")
+def cmd_purge(ctx):
+    """Remove empty layers and unused block definitions."""
+    from ..core.layers import DEFAULT_LAYER_ID
+    used_layers = {o.layer_id for o in ctx.scene.all()}
+    removed_layers = 0
+    for layer in list(ctx.scene.layers.all()):
+        if (layer.id not in used_layers
+                and layer.id != DEFAULT_LAYER_ID
+                and layer.id != ctx.scene.layers.current_id):
+            ctx.scene.layers.remove(layer.id)
+            removed_layers += 1
+    used_blocks = {o.block_id for o in ctx.scene.all() if o.block_id}
+    removed_blocks = 0
+    for bid in list(ctx.scene.block_defs):
+        if bid not in used_blocks:
+            del ctx.scene.block_defs[bid]
+            removed_blocks += 1
+    ctx.scene.notify()
+    ctx.echo(f"Purged {removed_layers} empty layer(s) and "
+             f"{removed_blocks} unused block definition(s).")
+    yield from ()
+
+
+@command("what", mutates=False)
+def cmd_what(ctx):
+    """Report details of the selected objects."""
+    objs = yield SelectReq("Select objects to describe")
+    for o in objs:
+        layer = ctx.scene.layers.get(o.layer_id)
+        lines = [f"{o.name} — {o.kind}",
+                 f"  layer: {layer.name if layer else o.layer_id}"]
+        try:
+            if o.kind == "curve":
+                closed = g.is_closed_curve(o.shape)
+                lines.append(f"  length: {g.curve_length(o.shape):.4g}"
+                             f"  ({'closed' if closed else 'open'})")
+            elif o.kind == "surface":
+                lines.append(f"  area: {g.surface_area(o.shape):.4g}")
+            elif o.kind == "solid":
+                lines.append(f"  area: {g.surface_area(o.shape):.4g}"
+                             f"  volume: {g.volume(o.shape):.4g}")
+            elif o.kind == "point":
+                x, y, z = g.point_coords(o.shape)
+                lines.append(f"  at: {x:g}, {y:g}, {z:g}")
+            (mn, mx) = g.bbox(o.shape)
+            lines.append("  bbox: "
+                         f"({mn[0]:.4g}, {mn[1]:.4g}, {mn[2]:.4g}) to "
+                         f"({mx[0]:.4g}, {mx[1]:.4g}, {mx[2]:.4g})")
+            valid = g.is_valid(o.shape)
+            if not valid:
+                lines.append("  WARNING: geometry is invalid")
+        except Exception as exc:
+            lines.append(f"  (analysis failed: {exc})")
+        ctx.echo("\n".join(lines))
+    if not objs:
+        ctx.echo("Nothing selected.")

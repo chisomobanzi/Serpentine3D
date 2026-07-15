@@ -137,3 +137,35 @@ def cmd_selfiltertoggle(ctx):
     if ctx.window is not None:
         ctx.window._update_status()
     yield from ()
+
+
+@command("seldup", mutates=False)
+def cmd_seldup(ctx):
+    """Select later duplicates of identical, identically-placed objects."""
+    from ..core import geometry as g
+
+    def _key(o):
+        (mn, mx) = g.bbox(o.shape)
+        if o.kind == "solid":
+            meas = g.volume(o.shape)
+        elif o.kind == "surface":
+            meas = g.surface_area(o.shape)
+        elif o.kind == "curve":
+            meas = g.curve_length(o.shape)
+        else:
+            meas = 0.0
+        return (o.kind,
+                tuple(round(v, 4) for v in (*mn, *mx)),
+                round(meas, 4))
+
+    seen, dups = set(), []
+    for o in ctx.scene.selectable_objects():
+        k = _key(o)
+        if k in seen:
+            dups.append(o.id)
+        else:
+            seen.add(k)
+    ctx.selection.set(dups)
+    ctx.echo(f"Selected {len(dups)} duplicate object(s)."
+             if dups else "No duplicates found.")
+    yield from ()

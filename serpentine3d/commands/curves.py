@@ -143,3 +143,34 @@ def cmd_closecrv(ctx):
         except g.GeometryError as exc:
             ctx.echo(f"{o.name}: {exc}")
     ctx.echo(f"Closed {done} curve(s).")
+
+
+@command("point", aliases=("pt",))
+def cmd_point(ctx):
+    count = 0
+    p = yield PointReq("Location of point object")
+    while p is not None:
+        ctx.scene.add(g.make_point(p))
+        count += 1
+        p = yield PointReq("Next point (Enter to finish)", allow_empty=True)
+    ctx.echo(f"Placed {count} point object(s).")
+
+
+@command("divide")
+def cmd_divide(ctx):
+    from .base import IntReq
+    curves = yield SelectReq("Select curves to divide", kinds=("curve",))
+    n = yield IntReq("Number of segments", default=10, minimum=1)
+    total = 0
+    for c in curves:
+        try:
+            pts = g.sample_curve(c.shape, int(n) + 1)
+        except g.GeometryError as exc:
+            ctx.echo(f"{c.name}: {exc}")
+            continue
+        if g.is_closed_curve(c.shape):
+            pts = pts[:-1]
+        for p in pts:
+            ctx.scene.add(g.make_point(p), layer_id=c.layer_id)
+            total += 1
+    ctx.echo(f"Placed {total} division points.")

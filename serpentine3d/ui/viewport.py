@@ -1059,8 +1059,27 @@ class Viewport(QOpenGLWidget):
                 self._line_width(1.0)
                 GL.glBindVertexArray(gpu.iso_vao)
                 GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
+            if len(obj.mesh.points):
+                self._draw_point_markers(mvp, obj.mesh.points,
+                                         (*line_color, 1.0), selected)
         self._line_width(1.0)
         self._end_clips(clips)
+
+    def _draw_point_markers(self, mvp, points, color, selected: bool):
+        """Point objects as fixed-ish size crosses (always visible)."""
+        size = self.camera.distance * (0.009 if selected else 0.007)
+        segs = []
+        axes = np.eye(3, dtype=np.float32) * size
+        for p in np.asarray(points, np.float32):
+            for axis in axes:
+                segs.append(np.stack([p - axis, p + axis]))
+        self._preview.update(np.concatenate(segs).astype(np.float32))
+        self._set_line_uniforms(mvp, color)
+        self._line_width(2.6 if selected else 1.8)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glBindVertexArray(self._preview.vao)
+        GL.glDrawArrays(GL.GL_LINES, 0, len(segs) * 2)
+        GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _end_clips(self, clips):
         for i in range(len(clips)):
@@ -1620,6 +1639,18 @@ class Viewport(QOpenGLWidget):
                         seg_depth *= 0.999
                         if seg_depth < depth:
                             depth = seg_depth
+                        hit = True
+            if len(mesh.points):
+                scr = self.camera.project(mesh.points.astype(float), w, h)
+                d2 = ((scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2)
+                near = d2 < PICK_RADIUS_PX ** 2
+                if near.any():
+                    pt_depth = scr[near, 2].min()
+                    if pt_depth > 0:
+                        # points win ties: they're drawn on top
+                        pt_depth *= 0.998
+                        if pt_depth < depth:
+                            depth = pt_depth
                         hit = True
             if hit and depth < best_depth:
                 best_depth = depth

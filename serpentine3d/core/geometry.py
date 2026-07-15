@@ -1477,3 +1477,195 @@ def make_compound(shapes: list) -> TopoDS_Shape:
     for s in shapes:
         builder.Add(comp, s)
     return comp
+
+
+# --- daily-driver batch: points, pipe, borders, untrim, edgesrf, isocurves ---
+
+def make_point(p: Point) -> TopoDS_Shape:
+    """A point object (vertex)."""
+    from .occ import BRepBuilderAPI_MakeVertex
+    return BRepBuilderAPI_MakeVertex(_pnt(p)).Vertex()
+
+
+def point_coords(shape) -> Point:
+    from OCP.BRep import BRep_Tool
+    p = BRep_Tool.Pnt_s(occ.to_vertex(shape))
+    return (p.X(), p.Y(), p.Z())
+
+
+def pipe(rail, radius: float, cap: bool = True) -> TopoDS_Shape:
+    """Tube of the given radius around a rail curve."""
+    if radius <= 0:
+        raise GeometryError("Pipe radius must be positive")
+    from OCP.BRepAdaptor import BRepAdaptor_CompCurve
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_TransitionMode
+    from .occ import BRepOffsetAPI_MakePipeShell, gp_Vec
+
+    wire = occ.to_wire(to_wire(rail))
+    ad = BRepAdaptor_CompCurve(wire)
+    p0, tan = gp_Pnt(), gp_Vec()
+    ad.D1(ad.FirstParameter(), p0, tan)
+    if tan.Magnitude() < 1e-12:
+        raise GeometryError("Cannot find rail direction")
+    profile = make_circle((p0.X(), p0.Y(), p0.Z()), radius,
+                          (tan.X(), tan.Y(), tan.Z()))
+    ps = BRepOffsetAPI_MakePipeShell(wire)
+    ps.SetTransitionMode(
+        BRepBuilderAPI_TransitionMode.BRepBuilderAPI_RoundCorner)
+    ps.Add(occ.to_wire(to_wire(profile)), False, False)
+    ps.Build()
+    if not ps.IsDone():
+        raise GeometryError("Pipe failed on this rail")
+    if cap:
+        ps.MakeSolid()  # caps planar ends; harmless no-op when impossible
+    return ps.Shape()
+
+
+def free_boundaries(shape) -> list:
+    """Naked boundary wires of a surface/polysurface (empty for solids)."""
+    from .occ import ShapeAnalysis_FreeBounds
+    fb = ShapeAnalysis_FreeBounds(shape)
+    wires = []
+    for comp in (fb.GetClosedWires(), fb.GetOpenWires()):
+        if comp is None or comp.IsNull():
+            continue
+        exp = TopExp_Explorer(comp, occ.WIRE)
+        while exp.More():
+            wires.append(occ.to_wire(exp.Current()))
+            exp.Next()
+    return wires
+
+
+def untrim(shape, holes_only: bool = True) -> TopoDS_Shape:
+    """Remove trims from a single face.
+
+    holes_only keeps the outer boundary and drops interior holes; otherwise
+    the face is rebuilt over the surface's natural bounds (infinite
+    directions clamped to the current trimmed range)."""
+    faces = faces_of(shape)
+    if len(faces) != 1:
+        raise GeometryError("Untrim works on a single face")
+    face = faces[0]
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepTools import BRepTools
+    surf = BRep_Tool.Surface_s(face)
+    if holes_only:
+        outer = BRepTools.OuterWire_s(face)
+        mk = BRepBuilderAPI_MakeFace(surf, outer)
+        if not mk.IsDone():
+            raise GeometryError("Untrim failed")
+        return mk.Face()
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAdaptor import GeomAdaptor_Surface
+    ga = GeomAdaptor_Surface(surf)
+    ba = BRepAdaptor_Surface(face)
+
+    def _rng(nat_lo, nat_hi, trim_lo, trim_hi):
+        big = 1e50
+        return (nat_lo if abs(nat_lo) < big else trim_lo,
+                nat_hi if abs(nat_hi) < big else trim_hi)
+
+    u1, u2 = _rng(ga.FirstUParameter(), ga.LastUParameter(),
+                  ba.FirstUParameter(), ba.LastUParameter())
+    v1, v2 = _rng(ga.FirstVParameter(), ga.LastVParameter(),
+                  ba.FirstVParameter(), ba.LastVParameter())
+    mk = BRepBuilderAPI_MakeFace(surf, u1, u2, v1, v2, 1e-7)
+    if not mk.IsDone():
+        raise GeometryError("Untrim failed")
+    return mk.Face()
+
+
+def _order_loop(curves: list) -> list:
+    """Order and orient single-edge curves head-to-tail (greedy chaining)."""
+    bs = [_edge_bspline(c) for c in curves]
+    ends = []
+    for b in bs:
+        p0, p1 = b.StartPoint(), b.EndPoint()
+        ends.append(((p0.X(), p0.Y(), p0.Z()), (p1.X(), p1.Y(), p1.Z())))
+    diag = 0.0
+    for (s, e) in ends:
+        diag = max(diag, abs(s[0]) + abs(s[1]) + abs(s[2]),
+                   abs(e[0]) + abs(e[1]) + abs(e[2]))
+    tol = max(diag * 1e-6, 1e-7)
+
+    def _d(a, b):
+        return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+
+    ordered = [bs[0]]
+    tail = ends[0][1]
+    remaining = list(range(1, len(bs)))
+    while remaining:
+        found = None
+        for i in remaining:
+            s, e = ends[i]
+            if _d(tail, s) < tol:
+                found, rev = i, False
+                break
+            if _d(tail, e) < tol:
+                found, rev = i, True
+                break
+        if found is None:
+            raise GeometryError("Curves do not connect end-to-end")
+        b = bs[found]
+        if rev:
+            b.Reverse()
+        s, e = ends[found]
+        tail = s if rev else e
+        ordered.append(b)
+        remaining.remove(found)
+    return ordered
+
+
+def edge_surface(curves: list) -> TopoDS_Shape:
+    """Coons-style surface from 2, 3 or 4 connected boundary curves."""
+    from OCP.GeomFill import GeomFill_BSplineCurves, GeomFill_FillingStyle
+    n = len(curves)
+    if n not in (2, 3, 4):
+        raise GeometryError("EdgeSrf needs 2, 3 or 4 curves")
+    style = GeomFill_FillingStyle.GeomFill_CoonsStyle
+    if n == 2:
+        b1, b2 = _edge_bspline(curves[0]), _edge_bspline(curves[1])
+        s10, s20 = b1.StartPoint(), b2.StartPoint()
+        e1, e2 = b1.EndPoint(), b2.EndPoint()
+        if (s10.Distance(s20) + e1.Distance(e2)
+                > s10.Distance(e2) + e1.Distance(s20)):
+            b2.Reverse()
+        fill = GeomFill_BSplineCurves(b1, b2, style)
+    else:
+        bs = _order_loop(curves)
+        tail = bs[-1].EndPoint()
+        head = bs[0].StartPoint()
+        if tail.Distance(head) > 1e-5 * max(1.0, tail.XYZ().Modulus()):
+            raise GeometryError("Curves do not form a closed loop")
+        for b in bs:  # Coons fill needs degree >= 2
+            if b.Degree() < 3:
+                b.IncreaseDegree(3)
+        fill = GeomFill_BSplineCurves(*bs, style)
+    surf = fill.Surface()
+    mk = BRepBuilderAPI_MakeFace(surf, 1e-6)
+    if not mk.IsDone():
+        raise GeometryError("EdgeSrf failed to build the surface")
+    return mk.Face()
+
+
+def iso_curve(shape, point: Point, along: str = "u") -> TopoDS_Shape:
+    """Isoparametric curve through `point`, running along U or V."""
+    faces = faces_of(shape)
+    if len(faces) != 1:
+        raise GeometryError("Pick a single surface")
+    face = faces[0]
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.ShapeAnalysis import ShapeAnalysis_Surface
+    surf = BRep_Tool.Surface_s(face)
+    uv = ShapeAnalysis_Surface(surf).ValueOfUV(_pnt(point), 1e-6)
+    ba = BRepAdaptor_Surface(face)
+    if along.lower() == "u":
+        curve = surf.VIso(uv.Y())
+        lo, hi = ba.FirstUParameter(), ba.LastUParameter()
+    else:
+        curve = surf.UIso(uv.X())
+        lo, hi = ba.FirstVParameter(), ba.LastVParameter()
+    if curve is None:
+        raise GeometryError("No isocurve at this point")
+    return BRepBuilderAPI_MakeEdge(curve, lo, hi).Edge()

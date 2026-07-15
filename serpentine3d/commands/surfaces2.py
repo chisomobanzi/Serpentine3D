@@ -123,3 +123,110 @@ def cmd_unrollsrf(ctx):
     if total:
         ctx.echo(f"Unrolled {total} boundary curve(s) onto layer "
                  "'Unrolled' (laid out along +X from the origin).")
+
+@command("pipe")
+def cmd_pipe(ctx):
+    rails = yield SelectReq("Select rail curves", kinds=("curve",))
+
+    def _preview(r):
+        try:
+            return g.make_compound(
+                [g.pipe(o.shape, r, cap=False) for o in rails])
+        except g.GeometryError:
+            return None
+
+    radius = yield LengthReq("Pipe radius", minimum=1e-9, default=1.0,
+                             choices={"Cap": ["Yes", "No"]},
+                             preview_fn=_preview)
+    cap = ctx.opt("Cap", "Yes") == "Yes"
+    made = []
+    for o in rails:
+        try:
+            made.append(ctx.scene.add(g.pipe(o.shape, radius, cap=cap),
+                                      layer_id=o.layer_id))
+        except g.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+    ctx.echo(f"Piped {len(made)} curve(s).")
+
+
+@command("edgesrf", aliases=("srfedges",))
+def cmd_edgesrf(ctx):
+    curves = yield SelectReq("Select 2, 3 or 4 connected curves",
+                             kinds=("curve",), min_count=2, max_count=4)
+    srf = g.edge_surface([c.shape for c in curves])
+    obj = ctx.scene.add(srf)
+    ctx.echo(f"Created {obj.name} from {len(curves)} edge curves.")
+
+
+@command("dupborder")
+def cmd_dupborder(ctx):
+    objs = yield SelectReq("Select surfaces or polysurfaces",
+                           kinds=("surface", "solid"))
+    made = []
+    for o in objs:
+        for w in g.free_boundaries(o.shape):
+            made.append(ctx.scene.add(w, layer_id=o.layer_id))
+    if made:
+        ctx.echo(f"Duplicated {len(made)} border curve(s).")
+    else:
+        ctx.echo("No naked borders found (solids have none).")
+
+
+@command("dupedge")
+def cmd_dupedge(ctx):
+    """Duplicate Ctrl+Shift-picked edges as curves."""
+    from .solids_edit import _subobject_edge_map
+    picked = _subobject_edge_map(ctx)
+    if not picked:
+        ctx.echo("Ctrl+Shift-click edges first, then run DupEdge.")
+        yield from ()
+        return
+    made = []
+    for obj_id, edges in picked.items():
+        obj = ctx.scene.get(obj_id)
+        for e in edges:
+            made.append(ctx.scene.add(g.copy_shape(e),
+                                      layer_id=obj.layer_id))
+    ctx.echo(f"Duplicated {len(made)} edge(s) as curves.")
+    yield from ()
+
+
+@command("untrim")
+def cmd_untrim(ctx):
+    objs = yield SelectReq(
+        "Select trimmed surfaces",
+        kinds=("surface",),
+        choices={"Mode": ["Holes", "All"]})
+    holes_only = ctx.opt("Mode", "Holes") == "Holes"
+    n = 0
+    for o in objs:
+        try:
+            ctx.scene.replace_shape(o.id,
+                                    g.untrim(o.shape, holes_only=holes_only))
+            n += 1
+        except g.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+    ctx.echo(f"Untrimmed {n} surface(s)"
+             + (" (holes removed)." if holes_only else " (all trims)."))
+
+
+@command("extractisocurve", aliases=("isocurve",))
+def cmd_extractisocurve(ctx):
+    srfs = yield SelectReq("Select surface", kinds=("surface",), max_count=1)
+    o = srfs[0]
+    made = 0
+    while True:
+        p = yield PointReq("Point on surface (Enter to finish)",
+                           allow_empty=True,
+                           choices={"Direction": ["U", "V", "Both"]})
+        if p is None:
+            break
+        d = ctx.opt("Direction", "U").lower()
+        for along in (("u", "v") if d == "both" else (d,)):
+            try:
+                ctx.scene.add(g.iso_curve(o.shape, p, along),
+                              layer_id=o.layer_id)
+                made += 1
+            except g.GeometryError as exc:
+                ctx.echo(str(exc))
+    ctx.echo(f"Extracted {made} isocurve(s).")

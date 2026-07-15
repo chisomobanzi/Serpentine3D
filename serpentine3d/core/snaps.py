@@ -29,6 +29,11 @@ def _static_snap_points(shape) -> list[tuple[tuple, str]]:
             seen.add(key)
             out.append(((x, y, z), kind))
 
+    if shape.ShapeType() == occ.VERTEX:
+        x, y, z = geometry.point_coords(shape)
+        add(x, y, z, "end")
+        return out
+
     from OCP.GeomAbs import GeomAbs_CurveType
     for edge in geometry.edges_of(shape):
         try:

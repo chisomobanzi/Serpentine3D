@@ -23,9 +23,12 @@ F1 opens this list inside the app). Aliases in parentheses.
 |---|---|
 | `arc` (`a`) | Arc |
 | `circle` (`c`, `ci`) | Circle |
+| `closecrv` (`cc`, `closecurve`) | Close open curves with a straight segment between their ends. |
 | `curve` (`cv`, `interpcrv`) | NURBS curve interpolated through picked points. |
+| `divide` | Divide |
 | `ellipse` (`el`) | Ellipse |
 | `line` (`l`) | Line |
+| `point` (`pt`) | Point |
 | `polyline` (`pl`, `pline`) | Polyline |
 | `rectangle` (`rect`, `rec`) | Rectangle |
 
@@ -49,33 +52,48 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `1view` (`oneview`, `singleview`) | 1view |
 | `4view` (`fourview`, `quadview`) | Split the model area into Top / Front / Right / Perspective. |
 | `area` | Area |
+| `back` | Back |
+| `bottom` | Bottom |
+| `clippingplane` (`clip`) | Place a rectangular clipping plane on the CPlane: geometry on its |
 | `cplane` | Reposition the construction plane (drawing plane + grid). |
 | `curvature` | Curvature |
 | `curvatureanalysis` (`curvmap`) | Curvatureanalysis |
+| `disableclippingplane` (`dcc`) | Pause clipping planes (they stay in the scene, the cut stops). |
 | `distance` (`dist`) | Distance |
+| `enableclippingplane` (`ecc`) | Re-enable paused clipping planes. |
+| `floatviewport` (`floatvp`) | Open a floating viewport window (drag it to another monitor). |
 | `front` | Front |
 | `ghosted` (`gh`) | Ghosted |
 | `grid` | Grid |
 | `gridsnap` | Gridsnap |
 | `gumball` | Gumball |
+| `left` | Left |
 | `length` (`len`) | Length |
 | `namedview` (`nv`) | Namedview |
+| `newviewport` (`newvp`, `splitview`) | Open an extra live viewport in a dockable panel — drag its title |
+| `osnap` | Toggle one object-snap type (or All = the master switch) — |
 | `perspective` (`persp`) | Perspective |
 | `pictureframe` (`picture`) | Place a reference image in the model (trace over photos/plans). |
 | `pointsoff` (`pf`) | Pointsoff |
 | `pointson` (`po`) | Show control points for selected curves and surfaces (F10). |
 | `rendered` (`render`) | Environment-lit display with materials and a ground shadow. |
 | `right` | Right |
+| `selclippingplane` | Select every clipping plane object. |
 | `shaded` (`sh`) | Shaded |
-| `snap` (`osnap`) | Snap |
+| `snap` | Snap |
 | `technical` (`tech`) | Hidden-line technical display (parallel projection linework). |
 | `tolerance` | Show or set the document's absolute modelling tolerance. |
 | `top` | Top |
 | `units` | Set document units; optionally rescale the model to keep real size. |
+| `viewcapturetoclipboard` (`vcc`) | Copy the active viewport image to the clipboard. |
+| `viewcapturetofile` (`vcf`, `viewcapture`) | Save the active viewport as a PNG image. |
 | `volume` (`vol`) | Volume |
 | `wireframe` (`wf`) | Wireframe |
 | `zebra` | Zebra |
+| `zoom` (`z`) | Zoom the active view: Selected, Extents, a picked Window, In, Out. |
 | `zoomextents` (`ze`, `zea`) | Zoomextents |
+| `zoomselected` (`zs`) | Frame the current selection in the active view. |
+| `zoomwindow` (`zw`) | Zoom into a window picked with two corner points. |
 
 ## Drafting & layouts
 
@@ -111,6 +129,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 
 | Command | Does |
 |---|---|
+| `boundingbox` (`bb`) | Create the world-aligned bounding box of the selection. |
 | `delete` (`del`, `erase`) | Delete |
 | `explode` (`x`) | Explode |
 | `fillet` | Fillet |
@@ -159,8 +178,10 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `insert` | Insert |
 | `lock` | Lock |
 | `meshtobrep` | Convert mesh objects into exact BREP shells (slow for big meshes). |
+| `purge` | Remove empty layers and unused block definitions. |
 | `ungroup` | Ungroup |
 | `unlockall` (`unlock`) | Unlockall |
+| `what` | Report details of the selected objects. |
 
 ## Selection
 
@@ -169,6 +190,9 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `invert` (`selinv`) | Invert |
 | `isolate` | Isolate |
 | `selcrv` (`selcurves`) | Selcrv |
+| `seldup` | Select later duplicates of identical, identically-placed objects. |
+| `selfilter` (`selectionfilter`) | Restrict viewport picking to one kind of object (Off = anything). |
+| `selfiltertoggle` (`sft`) | Pause/resume the selection filter without changing its kind. |
 | `sellast` | Sellast |
 | `sellayer` | Sellayer |
 | `selname` | Select objects whose name contains the given text. |
@@ -203,11 +227,16 @@ F1 opens this list inside the app). Aliases in parentheses.
 | Command | Does |
 |---|---|
 | `blendcrv` (`blend`) | Blendcrv |
+| `dupborder` | Dupborder |
+| `dupedge` | Duplicate Ctrl+Shift-picked edges as curves. |
+| `edgesrf` (`srfedges`) | Edgesrf |
+| `extractisocurve` (`isocurve`) | Extractisocurve |
 | `extrude` (`ext`, `extrudecrv`) | Extrude |
 | `helix` | Helix |
 | `loft` | Loft |
 | `offsetsrf` | Offsetsrf |
 | `patch` (`networksrf`) | Patch |
+| `pipe` | Pipe |
 | `planarsrf` (`planar`, `planesrf`) | Planarsrf |
 | `project` | Project |
 | `pull` | Pull |
@@ -217,6 +246,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `sweep2` | Sweep2 |
 | `textobject` (`textcurves`) | Textobject |
 | `unrollsrf` (`unroll`) | Unrollsrf |
+| `untrim` | Untrim |
 
 ## Transforms
 
@@ -228,7 +258,9 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `copy` (`co`, `cp`) | Copy |
 | `mirror` (`mi`) | Mirror |
 | `move` (`m`) | Move |
-| `rotate` (`ro`) | Rotate |
-| `scale` (`sc`) | Scale |
+| `orient` (`o2`) | Remap objects from two reference points to two target points |
+| `orient3pt` (`o3`) | Remap objects from three reference points to three target points |
+| `rotate` (`ro`) | Rotate around the CPlane normal: type an angle, or pick a |
+| `scale` (`sc`) | Scale about a base point: type a factor, or grab a reference |
 | `scalenu` | Scalenu |
 

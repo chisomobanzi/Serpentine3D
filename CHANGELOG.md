@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Daily-driver command batch: `pipe` (round-corner tube along any rail,
+  capped or open), `point` / `divide` (point objects with viewport
+  markers, picking, snapping and `.serp` round-trip), `dupborder` /
+  `dupedge` (extract naked borders or Ctrl+Shift-picked edges as
+  curves), `untrim` (Holes/All modes), `edgesrf` (Coons patch from
+  2–4 connected curves), `extractisocurve` (U/V/Both at a picked
+  point), `seldup`, `purge` (empty layers + unused blocks) and `what`
+  (object report: kind, layer, measures, bbox, validity).
 - Renamed to **Serpentine3D** across the board (after Rhinoceros3D /
   Rhino3D): Python package `serpentine3d`, CLI `serp3d` /
   `serp3d-mcp` / `serp3d-batch` (`serp` kept as a convenience alias),

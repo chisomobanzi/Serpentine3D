@@ -36,6 +36,9 @@ class DisplayMesh:
         default_factory=lambda: np.zeros(0, np.int32))
     face_of_triangle: np.ndarray = field(
         default_factory=lambda: np.zeros(0, np.int32))
+    # free-standing point objects (vertex shapes): (N, 3)
+    points: np.ndarray = field(
+        default_factory=lambda: np.zeros((0, 3), np.float32))
 
     _bounds: tuple | None = field(default=None, repr=False, compare=False)
 
@@ -44,10 +47,11 @@ class DisplayMesh:
         return len(self.triangles) > 0
 
     def bounds(self) -> tuple | None:
-        """Cached (min_xyz, max_xyz) over vertices and edge points."""
+        """Cached (min_xyz, max_xyz) over vertices, edge and point data."""
         if self._bounds is None:
             pts = [p for p in (self.vertices,
-                               self.edge_segments.reshape(-1, 3)) if len(p)]
+                               self.edge_segments.reshape(-1, 3),
+                               self.points) if len(p)]
             if not pts:
                 return None
             allp = np.concatenate(pts)
@@ -236,4 +240,28 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         mesh.edge_of_segment = np.concatenate(seg_edge_ids)
     if isos:
         mesh.iso_segments = np.concatenate(isos).astype(np.float32)
+
+    # free-standing points: vertex shapes and vertices dangling in compounds
+    free_pts = []
+    if shape.ShapeType() == occ.VERTEX:
+        free_pts.append(geometry.point_coords(shape))
+    elif shape.ShapeType() == occ.COMPOUND:
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+        owners = TopTools_IndexedDataMapOfShapeListOfShape()
+        TopExp.MapShapesAndAncestors_s(shape, occ.VERTEX, occ.EDGE, owners)
+        exp = TopExp_Explorer(shape, occ.VERTEX)
+        seen = set()
+        while exp.More():
+            v = occ.to_vertex(exp.Current())
+            exp.Next()
+            key = hash(v.TShape())
+            if key in seen:
+                continue
+            seen.add(key)
+            idx = owners.FindIndex(v)
+            if idx == 0 or owners.FindFromIndex(idx).Size() == 0:
+                free_pts.append(geometry.point_coords(v))
+    if free_pts:
+        mesh.points = np.asarray(free_pts, np.float32)
     return mesh
