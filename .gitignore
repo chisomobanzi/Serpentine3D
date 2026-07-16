@@ -12,3 +12,4 @@ dist/
 !tests/fixtures/*
 screenshots/
 .tokensave/
+packaging/windows/Output/
