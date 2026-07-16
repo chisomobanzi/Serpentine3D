@@ -1,0 +1,31 @@
+name: Feature request
+description: A command, tool, or workflow you're missing
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >
+        Describe the modelling task, not just the feature — there may be an
+        existing command that covers it, or a better shape for the new one.
+      placeholder: |
+        I need to array objects along a curve to place balusters on a
+        curved staircase.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rhino-equivalent
+    attributes:
+      label: Rhino equivalent (if any)
+      description: >
+        If Rhino (or another modeller) has this, name the command — matching
+        familiar muscle memory is an explicit goal of this project.
+      placeholder: ArrayCrv
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: How do you imagine it working?
+      description: Prompts, options, defaults — sketch the interaction if you can.
