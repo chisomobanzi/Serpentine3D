@@ -36,6 +36,14 @@ python3 -m venv .venv
 The OpenCASCADE kernel ships as pip wheels (`cadquery-ocp`) — no conda, no
 system packages.
 
+**Windows (experimental):** the same pip install works on Windows —
+every dependency has prebuilt wheels, and the full test suite passes on
+Windows 10 (Python 3.12). The GUI needs a GPU with OpenGL 3.3 drivers,
+which any normal desktop has; GPU-less VMs and remote-desktop sessions
+only expose Windows' built-in OpenGL 1.1 and get a clear error message
+instead of a viewport. Headless use (`serp3d-batch`, MCP server, file
+conversion) works everywhere. macOS is untested — reports welcome.
+
 ## The command line
 
 Everything works Rhino-style: type a command, answer its prompts. Prompts accept

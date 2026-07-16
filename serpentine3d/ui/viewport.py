@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import ctypes
+import os
+import sys
 
 import numpy as np
 from OpenGL import GL
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
 from . import theme
@@ -466,6 +468,26 @@ class Viewport(QOpenGLWidget):
     # ---------------------------------------------------------------- GL setup
 
     def initializeGL(self):
+        if not GL.glCreateProgram:
+            # a legacy context (e.g. Windows GDI GL 1.1 in a VM or over
+            # remote desktop) has no shader entry points. Raising here
+            # poisons Qt's event delivery with an unrelated-looking
+            # error, so report cleanly and exit instead.
+            ver = None
+            try:
+                ver = GL.glGetString(GL.GL_VERSION)
+            except Exception:
+                pass
+            msg = ("Serpentine3D needs OpenGL 3.3, but this system only "
+                   f"provides {ver.decode() if ver else 'no usable OpenGL'}.\n\n"
+                   "Update your GPU drivers. In a virtual machine, enable "
+                   "3D acceleration; over remote desktop, a software "
+                   "renderer (Mesa llvmpipe) is required.")
+            print(f"serp3d: {msg}", file=sys.stderr)
+            QMessageBox.critical(None, "OpenGL not available", msg)
+            # raising here would surface as an unrelated shiboken error
+            # mid event delivery — exit hard instead, message delivered
+            os._exit(1)
         # runs again after reparenting (dock/undock) destroys the context:
         # every GPU-side cache from the old context is stale, drop it all
         self._gpu = {}
