@@ -974,7 +974,46 @@ class _EmptyTitleBar(QWidget):
         self.setFixedHeight(0)
 
 
+def _selftest() -> int:
+    """Verify a packaged install without opening a window: Qt platform
+    plugin, OCCT kernel, and file I/O. Windowed executables on Windows
+    have no console, so the report also goes to a file."""
+    import tempfile
+    lines = []
+    try:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        qt_app = QApplication.instance() or QApplication([])
+        lines.append(f"qt: {qt_app.platformName()}")
+        from .core import geometry as g
+        from .core.scene import Scene
+        scene = Scene()
+        obj = scene.add(g.make_box((0, 0, 0), 10, 10, 10), name="Box")
+        scene.replace_shape(obj.id, g.fillet_edges(obj.shape, radius=1.0))
+        with tempfile.TemporaryDirectory() as tmp:
+            step = os.path.join(tmp, "selftest.step")
+            fileio.export_file(scene, step)
+            lines.append(f"step: {os.path.getsize(step)} bytes")
+        vol = g.volume(scene.all()[0].shape)
+        lines.append(f"volume: {vol:.1f}")
+        ok = abs(vol - 975.6) < 1.0
+        lines.append("SELFTEST OK" if ok else "SELFTEST FAILED: bad volume")
+    except Exception as exc:                                  # noqa: BLE001
+        ok = False
+        lines.append(f"SELFTEST FAILED: {type(exc).__name__}: {exc}")
+    report = "\n".join(lines) + "\n"
+    try:
+        print(report, end="")
+    except Exception:                                         # noqa: BLE001
+        pass                        # windowed exe: stdout may be closed
+    path = os.path.join(tempfile.gettempdir(), "serp3d-selftest.txt")
+    with open(path, "w") as f:
+        f.write(report)
+    return 0 if ok else 1
+
+
 def main():
+    if "--selftest" in sys.argv:
+        raise SystemExit(_selftest())
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     set_default_gl_format()
     app = QApplication(sys.argv)
