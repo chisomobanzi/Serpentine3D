@@ -155,3 +155,47 @@ def test_materials_persist_and_export(tmp_path):
     assert "UsdPreviewSurface" in text
     assert "inputs:metallic = 1" in text
     assert "material:binding" in text
+
+
+def test_curvature_skipped_by_default():
+    """Per-vertex curvature is pure-Python and display-only: tessellation
+    must not pay for it unless curvature mode has been used."""
+    import serpentine3d.core.tessellate as tmod
+    from serpentine3d.core import geometry as g
+    tmod.set_curvature_enabled(False)
+    try:
+        mesh = tmod.tessellate(g.make_sphere((0, 0, 0), 5))
+        assert not mesh.has_curvature
+        assert not mesh.curvature.any()          # zeros, not computed
+        tmod.set_curvature_enabled(True)
+        mesh2 = tmod.tessellate(g.make_sphere((0, 0, 0), 5))
+        assert mesh2.has_curvature
+        # a sphere's mean curvature is 1/r everywhere
+        import numpy as np
+        assert np.median(np.abs(mesh2.curvature)) == pytest.approx(
+            1 / 5, rel=0.05)
+    finally:
+        tmod.set_curvature_enabled(False)
+
+
+def test_curvature_mode_regenerates_stale_meshes():
+    import serpentine3d.core.tessellate as tmod
+    from serpentine3d.core import geometry as g
+    from serpentine3d.core.selection import SelectionManager
+    from serpentine3d.ui.viewport import Viewport
+    tmod.set_curvature_enabled(False)
+    try:
+        scene = Scene()
+        vp = Viewport(scene, SelectionManager(scene))
+        obj = scene.add(g.make_sphere((0, 0, 0), 4))
+        assert not obj.mesh.has_curvature        # meshed without data
+        vp.set_display_mode("curvature")
+        assert tmod.curvature_enabled()          # latched for the session
+        assert obj._mesh is None                 # stale cache dropped
+        assert obj.mesh.has_curvature            # regenerated with data
+        assert obj.mesh.curvature.any()
+        # leaving the mode keeps the latch: no thrash on mode toggles
+        vp.set_display_mode("shaded")
+        assert tmod.curvature_enabled()
+    finally:
+        tmod.set_curvature_enabled(False)

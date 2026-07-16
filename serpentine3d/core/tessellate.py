@@ -40,6 +40,7 @@ class DisplayMesh:
     points: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 3), np.float32))
 
+    has_curvature: bool = False
     _bounds: tuple | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -86,8 +87,25 @@ def _face_mesh(face) -> tuple | None:
     if reversed_face:
         idx = idx[:, ::-1].copy()
     normals = _smooth_normals(verts, idx)
-    curv = _vertex_curvature(face, tri, n, reversed_face)
+    # the per-vertex curvature loop is pure Python (~17% of tessellation)
+    # and only the curvature display mode reads it — skip unless latched
+    if _CURVATURE:
+        curv = _vertex_curvature(face, tri, n, reversed_face)
+    else:
+        curv = np.zeros(n, np.float32)
     return verts.astype(np.float32), normals, idx, curv
+
+
+_CURVATURE = False      # latched on by the first curvature-mode viewport
+
+
+def set_curvature_enabled(on: bool):
+    global _CURVATURE
+    _CURVATURE = bool(on)
+
+
+def curvature_enabled() -> bool:
+    return _CURVATURE
 
 
 def _vertex_curvature(face, tri, n: int, reversed_face: bool) -> np.ndarray:
@@ -234,6 +252,7 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         mesh.normals = np.concatenate(all_norms)
         mesh.triangles = np.concatenate(all_tris)
         mesh.curvature = np.concatenate(all_curv).astype(np.float32)
+        mesh.has_curvature = _CURVATURE
         mesh.face_of_triangle = np.concatenate(tri_face_ids)
     if segments:
         mesh.edge_segments = np.concatenate(segments).astype(np.float32)

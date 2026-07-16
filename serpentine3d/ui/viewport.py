@@ -1499,6 +1499,15 @@ class Viewport(QOpenGLWidget):
         if mode not in ("shaded", "wireframe", "ghosted", "zebra",
                         "curvature", "technical", "draft", "rendered"):
             raise ValueError(f"Unknown display mode '{mode}'")
+        if mode == "curvature":
+            from ..core import tessellate as _tess
+            if not _tess.curvature_enabled():
+                _tess.set_curvature_enabled(True)
+            # cached meshes without curvature data must regenerate
+            for obj in self.scene.all():
+                m = obj._mesh
+                if m is not None and m.has_faces and not m.has_curvature:
+                    obj._mesh = None
         self.display_mode = mode
         self.displayModeChanged.emit()
         self.update()
