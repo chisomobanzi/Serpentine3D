@@ -180,6 +180,37 @@ def cmd_selclippingplane(ctx):
     yield from ()
 
 
+@command("spacemouse", aliases=("3dmouse",), mutates=False)
+def cmd_spacemouse(ctx):
+    """SpaceMouse status, on/off toggle, and a live axis readout for
+    checking the motion mapping."""
+    win = ctx.window
+    if win is None or not hasattr(win, "spacemouse"):
+        ctx.echo("SpaceMouse support needs the GUI.")
+        return
+        yield  # pragma: no cover
+    action = yield OptionReq("SpaceMouse",
+                             options=["Status", "Toggle", "Diag"],
+                             default="Status")
+    sm = win.spacemouse
+    cfg = win.cfg
+    if action == "Toggle":
+        new = not cfg.get("spacemouse", "enabled", default=True)
+        cfg.set("spacemouse", "enabled", new)
+        ctx.echo(f"SpaceMouse {'enabled' if new else 'disabled'} "
+                 f"({sm.status()}).")
+    elif action == "Diag":
+        import time
+        sm.diag_until = time.time() + 10
+        ctx.echo("SpaceMouse diagnostics for 10 s — move the puck and "
+                 "watch the axis values here.")
+    else:
+        state = "on" if cfg.get("spacemouse", "enabled",
+                                default=True) else "off"
+        ctx.echo(f"SpaceMouse: {sm.status()}; navigation {state}. "
+                 "Sensitivity and inversion live in Settings > Mouse.")
+
+
 @command("zoom", aliases=("z",), mutates=False)
 def cmd_zoom(ctx):
     """Zoom the active view: Selected, Extents, a picked Window, In, Out."""

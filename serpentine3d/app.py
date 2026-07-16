@@ -151,6 +151,9 @@ class MainWindow(QMainWindow):
             self._autosave_timer.timeout.connect(self._autosave_tick)
             self._autosave_timer.start()
 
+        from .ui.spacemouse import SpaceMouseNavigator
+        self.spacemouse = SpaceMouseNavigator(self)
+
         self._update_status()
         self.command_line.echo("Serpentine3D — type a command to begin "
                                "(line, circle, box, extrude, loft, ...)")

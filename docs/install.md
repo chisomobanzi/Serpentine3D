@@ -32,6 +32,16 @@ A self-contained AppImage recipe lives in `packaging/appimage`:
 ./packaging/appimage/build-appimage.sh
 ```
 
+## SpaceMouse
+
+3Dconnexion devices work out of the box when
+[spacenavd](https://spacenav.sourceforge.net/) is running
+(`sudo apt install spacenavd`) — Serpentine3D speaks the daemon's
+socket directly, on X11 and Wayland alike. Slide to pan, push/pull to
+zoom, tilt/twist to orbit; buttons default to Fit and Perspective.
+Sensitivity and inversion live in *Settings → Mouse*; the `spacemouse`
+command shows status and a live axis readout (`Diag`).
+
 ## Configuration
 
 Settings live in `~/.config/serpentine3d/config.json` (edit through

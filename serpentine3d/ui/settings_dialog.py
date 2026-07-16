@@ -120,6 +120,43 @@ class SettingsDialog(QDialog):
 
         self.sl_orbit = slider_row("Orbit speed", "orbit_speed")
         self.sl_zoom = slider_row("Zoom speed", "zoom_speed")
+
+        layout.addSpacing(12)
+        layout.addWidget(QLabel("<b>SpaceMouse (3Dconnexion)</b>"))
+        self.cb_sm_enabled = QCheckBox("Enable SpaceMouse navigation")
+        self.cb_sm_enabled.setChecked(
+            bool(self.cfg.get("spacemouse", "enabled", default=True)))
+        self.cb_sm_enabled.toggled.connect(self._mouse_changed)
+        layout.addWidget(self.cb_sm_enabled)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Sensitivity"))
+        self.sl_sm = QSlider(Qt.Orientation.Horizontal)
+        self.sl_sm.setRange(20, 300)
+        self.sl_sm.setValue(int(float(self.cfg.get(
+            "spacemouse", "sensitivity", default=1.0)) * 100))
+        self.sl_sm.valueChanged.connect(self._mouse_changed)
+        row.addWidget(self.sl_sm, 1)
+        sm_val = QLabel(f"{self.sl_sm.value()}%")
+        sm_val.setFixedWidth(44)
+        self.sl_sm.valueChanged.connect(
+            lambda v, lbl=sm_val: lbl.setText(f"{v}%"))
+        row.addWidget(sm_val)
+        layout.addLayout(row)
+
+        self.cb_sm_pan = QCheckBox("Invert pan (slide/lift)")
+        self.cb_sm_zoom = QCheckBox("Invert zoom (push/pull)")
+        self.cb_sm_orbit = QCheckBox("Invert orbit (tilt/twist)")
+        for cb, key in ((self.cb_sm_pan, "invert_pan"),
+                        (self.cb_sm_zoom, "invert_zoom"),
+                        (self.cb_sm_orbit, "invert_orbit")):
+            cb.setChecked(bool(self.cfg.get("spacemouse", key,
+                                            default=False)))
+            cb.toggled.connect(self._mouse_changed)
+            layout.addWidget(cb)
+        sm = getattr(self.window, "spacemouse", None)
+        layout.addWidget(QLabel(f"Status: {sm.status() if sm else 'n/a'}"))
+
         layout.addStretch(1)
         return w
 
@@ -129,6 +166,13 @@ class SettingsDialog(QDialog):
         self.cfg.set("mouse", "invert_scroll", self.cb_invert.isChecked())
         self.cfg.set("mouse", "orbit_speed", self.sl_orbit.value() / 100.0)
         self.cfg.set("mouse", "zoom_speed", self.sl_zoom.value() / 100.0)
+        self.cfg.set("spacemouse", "enabled", self.cb_sm_enabled.isChecked())
+        self.cfg.set("spacemouse", "sensitivity", self.sl_sm.value() / 100.0)
+        self.cfg.set("spacemouse", "invert_pan", self.cb_sm_pan.isChecked())
+        self.cfg.set("spacemouse", "invert_zoom",
+                     self.cb_sm_zoom.isChecked())
+        self.cfg.set("spacemouse", "invert_orbit",
+                     self.cb_sm_orbit.isChecked())
 
     # ---------------------------------------------------------- keyboard
 
