@@ -478,8 +478,9 @@ class Viewport(QOpenGLWidget):
                 ver = GL.glGetString(GL.GL_VERSION)
             except Exception:
                 pass
-            msg = ("Serpentine3D needs OpenGL 3.3, but this system only "
-                   f"provides {ver.decode() if ver else 'no usable OpenGL'}.\n\n"
+            got = (f"this system only provides OpenGL {ver.decode()}"
+                   if ver else "no capable OpenGL driver was found")
+            msg = (f"Serpentine3D needs OpenGL 3.3, but {got}.\n\n"
                    "Update your GPU drivers. In a virtual machine, enable "
                    "3D acceleration; over remote desktop, a software "
                    "renderer (Mesa llvmpipe) is required.")
