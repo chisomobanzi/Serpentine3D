@@ -10,6 +10,9 @@ $ErrorActionPreference = "Stop"
 # PyInstaller cannot trace PEP 660 editable installs - make sure the
 # package is present as real files in site-packages
 & $Python -m pip install --quiet --force-reinstall --no-deps ..\..
+# a failed run leaves a poisoned Analysis-00.toc that later runs reuse;
+# always start from a clean workspace
+Remove-Item build, dist -Recurse -Force -ErrorAction SilentlyContinue
 & $Python -m PyInstaller --clean -y serp3d.spec
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
