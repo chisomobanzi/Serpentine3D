@@ -7,6 +7,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 & $Python -m pip install --quiet pyinstaller
+# PyInstaller cannot trace PEP 660 editable installs - make sure the
+# package is present as real files in site-packages
+& $Python -m pip install --quiet --force-reinstall --no-deps ..\..
 & $Python -m PyInstaller --clean -y serp3d.spec
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
