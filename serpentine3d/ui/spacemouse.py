@@ -231,7 +231,7 @@ class SpaceMouseNavigator(QObject):
             lv = vp.layout_view
             k = _PAN_PX * sens / max(lv.px_per_mm, 1e-6)
             lv.pan[0] += s_pan * x * k
-            lv.pan[1] += s_pan * y * k
+            lv.pan[1] -= s_pan * y * k
             if abs(z) > 1e-3:
                 lv.wheel(s_zoom * z * _ZOOM_STEPS * sens * 4,
                          vp.width() / 2, vp.height() / 2)
@@ -244,7 +244,7 @@ class SpaceMouseNavigator(QObject):
         # uniformly backwards in the hand
         if abs(x) > 1e-3 or abs(y) > 1e-3:
             cam.pan(s_pan * -x * _PAN_PX * sens,
-                    s_pan * -y * _PAN_PX * sens, vp.height())
+                    s_pan * y * _PAN_PX * sens, vp.height())
         if abs(z) > 1e-3:
             cam.zoom(s_zoom * z * _ZOOM_STEPS * sens)
         if abs(rx) > 1e-3 or abs(ry) > 1e-3:
