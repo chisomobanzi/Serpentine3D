@@ -56,7 +56,7 @@ def test_twist_orbits_and_push_zooms(win_sm):
     _pump(app)
     assert cam.azimuth != az0
     az1 = cam.azimuth
-    feed.sendall(_motion(z=-350))          # push forward = zoom in
+    feed.sendall(_motion(z=350))           # push forward = zoom in
     _pump(app)
     assert cam.distance < dist0
     assert cam.azimuth == az1              # zoom does not orbit
@@ -69,12 +69,12 @@ def test_events_coalesce_and_disabled_flag(win_sm):
     w, sm, feed, app = win_sm
     cam = w.viewport.camera
     d0 = cam.distance
-    feed.sendall(b"".join(_motion(z=-350) for _ in range(10)))
+    feed.sendall(b"".join(_motion(z=350) for _ in range(10)))
     _pump(app)
     d1 = cam.distance
     assert d1 < d0
     w.cfg.set("spacemouse", "enabled", False)
-    feed.sendall(_motion(z=-350))
+    feed.sendall(_motion(z=350))
     _pump(app)
     assert cam.distance == d1              # disabled: no movement
 
