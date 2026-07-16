@@ -19,14 +19,29 @@ AUTOSAVE_DIR = os.path.join(
 DEFAULT_INTERVAL_SEC = 300
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
+if os.name == "nt":
+    def _pid_alive(pid: int) -> bool:
+        # os.kill(pid, 0) is NOT a liveness probe on Windows — signal 0 is
+        # CTRL_C_EVENT, which actually interrupts console process groups.
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        ERROR_ACCESS_DENIED = 5
+        k32 = ctypes.windll.kernel32
+        handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,
+                                 False, pid)
+        if handle:
+            k32.CloseHandle(handle)
+            return True
+        return k32.GetLastError() == ERROR_ACCESS_DENIED
+else:
+    def _pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
         return True
-    return True
 
 
 class AutosaveManager:

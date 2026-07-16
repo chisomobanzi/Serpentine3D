@@ -448,6 +448,12 @@ def test_unroll_cylinder():
 
 
 def test_text_curves():
+    from PySide6.QtGui import QFontDatabase
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    if not QFontDatabase.families():
+        pytest.skip("no fonts in the Qt font database (headless Windows "
+                    "uses the freetype backend, which ships no fonts)")
     from serpentine3d.core.text import text_curves
     curves = text_curves("AB", height=10)
     assert len(curves) >= 3        # A outer, A hole, B outer, B holes

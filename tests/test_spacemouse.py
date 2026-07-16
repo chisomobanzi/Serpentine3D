@@ -33,7 +33,7 @@ def win_sm(tmp_path, monkeypatch):
     monkeypatch.setattr(sm_mod.SpaceMouseNavigator, "_open_evdev",
                         lambda self: None)
     w = MainWindow()
-    a, b = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    a, b = socket.socketpair()      # AF_UNIX on POSIX, AF_INET on Windows
     w.spacemouse.attach_socket(b)
     app = QApplication.instance()
     yield w, w.spacemouse, a, app
