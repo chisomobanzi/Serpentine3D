@@ -11,6 +11,15 @@ from serpentine3d.core import geometry as g
 from serpentine3d.core.scene import Scene
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config(tmp_path, monkeypatch):
+    """Never let these tests read or write the user's real config."""
+    monkeypatch.setenv("SERP3D_CONFIG", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("SERP3D_AUTOSAVE_DIR", str(tmp_path / "autosave"))
+    monkeypatch.setenv("SERP3D_NO_RPC", "1")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+
 def _qapp():
     from PySide6.QtWidgets import QApplication
     return QApplication.instance() or QApplication([])
