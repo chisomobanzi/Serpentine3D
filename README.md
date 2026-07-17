@@ -186,10 +186,33 @@ Settings live in `~/.config/serpentine3d/settings.json`.
 | `.glb` | | ✓ | Binary glTF with materials (Unreal/Blender/web) |
 | `.usda` | | ✓ | USD for virtual-production pipelines |
 
+## The assistant (AI modelling)
+
+Serpentine3D has a built-in AI assistant: open it from the View menu (or
+type `ai`, or Ctrl+Shift+A), describe what you want, and it builds real
+BREP geometry in your live scene —
+
+> *a spiral staircase, 3 m tall, 14 steps, 900 mm radius*
+> *fillet every edge of the box 2 mm*
+> *what's the volume of the hull?*
+
+It works with the full command set (the same commands you type), can
+measure and inspect the scene, and can **look at the viewport** — it
+takes a screenshot, checks its own work, and fixes mistakes before
+answering. Everything it does streams into the panel as it happens, and
+everything is undoable.
+
+Bring your own Anthropic API key (Settings → Assistant, or the
+`ANTHROPIC_API_KEY` environment variable — get one at
+[console.anthropic.com](https://console.anthropic.com)). Usage is billed
+to your Anthropic account; the assistant never phones home anywhere
+else, and the key never leaves your machine except to call the API.
+
 ## MCP server (AI integration)
 
-Serpentine3D exposes its full modelling surface as MCP tools. Start the app,
-then register the server with your MCP client:
+Prefer driving Serpentine3D from an external agent (Claude Code, Claude
+Desktop)? The same modelling surface is exposed as MCP tools. Start the
+app, then register the server with your MCP client:
 
 ```bash
 claude mcp add serpentine3d -- /path/to/.venv/bin/serp3d-mcp
