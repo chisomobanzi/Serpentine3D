@@ -126,9 +126,15 @@ def test_dispatch_run_command_and_scene_info():
     assert info["objects"][0]["kind"] == "solid"
 
 
+def _require_gl(w):
+    if w.viewport.grabFramebuffer().isNull():
+        pytest.skip("no GL framebuffer on this platform (CI offscreen)")
+
+
 def test_dispatch_screenshot_returns_image():
     api, w = _api()
     w.scene.add(g.make_box((0, 0, 0), 5, 5, 5))
+    _require_gl(w)
     result = T.dispatch(api, "screenshot", {"width": 320})
     assert isinstance(result, T.ImageResult)
     assert result.data[:8] == b"\x89PNG\r\n\x1a\n"
@@ -239,6 +245,7 @@ def test_agent_screenshot_result_is_image_block():
     from serpentine3d.ai.agent import Agent
     api, w = _api()
     w.scene.add(g.make_box((0, 0, 0), 5, 5, 5))
+    _require_gl(w)
     client = ScriptedClient([
         _tool_use("screenshot", {"width": 320}),
         _text("Looks right."),
