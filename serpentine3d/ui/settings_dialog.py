@@ -51,6 +51,7 @@ class SettingsDialog(QDialog):
             ("Aliases", self._aliases_page),
             ("Object Snaps", self._osnap_page),
             ("Display", self._display_page),
+            ("Assistant", self._assistant_page),
         ]:
             self.sidebar.addItem(name)
             self.pages.addWidget(builder())
@@ -329,6 +330,53 @@ class SettingsDialog(QDialog):
         self.window.osnap_bar.refresh()
 
     # ----------------------------------------------------------- display
+
+    def _assistant_page(self) -> QWidget:
+        from PySide6.QtWidgets import QComboBox, QLineEdit
+        from ..ai.client import DEFAULT_MODEL, MODELS
+        w, layout = _page(
+            "Assistant",
+            "The in-app AI assistant (View menu or the `ai` command) "
+            "models with your own Anthropic API key. The "
+            "ANTHROPIC_API_KEY environment variable takes precedence "
+            "and is never written to disk.")
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("API key"))
+        self.ed_ai_key = QLineEdit()
+        self.ed_ai_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ed_ai_key.setPlaceholderText("sk-ant-…")
+        self.ed_ai_key.setText(
+            str(self.cfg.get("ai", "api_key", default="") or ""))
+        self.ed_ai_key.editingFinished.connect(self._ai_changed)
+        row.addWidget(self.ed_ai_key, 1)
+        layout.addLayout(row)
+
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("Model"))
+        self.cb_ai_model = QComboBox()
+        current = self.cfg.get("ai", "model", default=DEFAULT_MODEL)
+        for model_id, label in MODELS:
+            self.cb_ai_model.addItem(label, model_id)
+            if model_id == current:
+                self.cb_ai_model.setCurrentIndex(self.cb_ai_model.count() - 1)
+        self.cb_ai_model.currentIndexChanged.connect(self._ai_changed)
+        row2.addWidget(self.cb_ai_model, 1)
+        layout.addLayout(row2)
+
+        note = QLabel("The key is stored in your Serpentine3D config "
+                      "file, readable only by your user account. Usage "
+                      "is billed to your Anthropic account.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #85868a; font-size: 11px;")
+        layout.addWidget(note)
+        layout.addStretch(1)
+        return w
+
+    def _ai_changed(self):
+        self.cfg.set("ai", "api_key", self.ed_ai_key.text().strip())
+        self.cfg.set("ai", "model", self.cb_ai_model.currentData())
+        self.cfg.save()
 
     def _display_page(self) -> QWidget:
         w, layout = _page("Display",

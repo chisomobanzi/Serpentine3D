@@ -111,6 +111,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, layer_dock)
         self.resizeDocks([prop_dock, layer_dock], [280, 280],
                          Qt.Orientation.Horizontal)
+        self._ai_dock = None                # created on first use
 
         # command engine
         self.ctx = CommandContext(self.scene, self.selection, self.history,
@@ -217,6 +218,24 @@ class MainWindow(QMainWindow):
         vp.zoom_extents()
         self._set_active_viewport(vp)
         return vp
+
+    def show_ai_panel(self):
+        """Open (or reveal) the AI assistant dock."""
+        if self._ai_dock is None:
+            from .ai.panel import AiPanel
+            panel = AiPanel(self)
+            dock = QDockWidget("Assistant", self)
+            dock.setObjectName("aiDock")
+            dock.setWidget(panel)
+            dock.setMinimumWidth(320)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+            self._ai_dock = dock
+        self._ai_dock.show()
+        self._ai_dock.raise_()
+        panel = self._ai_dock.widget()
+        if panel.input_row.isVisible():
+            panel.input.setFocus()
+        return panel
 
     def _update_viewport_dock_title(self, vp):
         dock = vp.parentWidget()
@@ -377,6 +396,9 @@ class MainWindow(QMainWindow):
                      lambda: self.run_command("rendered"))
         self._action(m_view, "Technical", None,
                      lambda: self.run_command("technical"))
+        m_view.addSeparator()
+        self._action(m_view, "AI Assistant", "Ctrl+Shift+A",
+                     self.show_ai_panel)
         m_view.addSeparator()
         m_ports = m_view.addMenu("Viewports")
         self._action(m_ports, "New Viewport...", None,

@@ -660,3 +660,10 @@ def cmd_tolerance(ctx):
         default=tol(), minimum=1e-9)
     set_tolerance(float(value))
     ctx.echo(f"Modelling tolerance: {ctx.scene.format_length(value)}.")
+
+
+@command("ai", aliases=("assistant",), label="AI Assistant", mutates=False)
+def cmd_ai(ctx):
+    """Open the AI assistant panel — model by describing what you want."""
+    ctx.window.show_ai_panel()
+    yield from ()

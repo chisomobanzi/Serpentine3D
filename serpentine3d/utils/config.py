@@ -74,6 +74,8 @@ class Config:
         tmp = self.path + ".tmp"
         with open(tmp, "w") as f:
             json.dump(self.data, f, indent=2, sort_keys=True)
+        if os.name != "nt":
+            os.chmod(tmp, 0o600)    # may hold an API key
         os.replace(tmp, self.path)
 
     def reset(self):
