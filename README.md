@@ -138,6 +138,11 @@ an axis, the pads to move in a plane, the circles to rotate (Shift snaps
 to 15°), the square knobs to scale along an axis (Shift = uniform).
 Alt-drag moves a copy. Escape cancels a drag. `gumball` toggles it.
 
+Ctrl+Shift-click a **planar face** of a solid and the gumball becomes a
+push/pull handle along the face normal — drag it, or type a distance, to
+extrude the face outward or carve it inward; the solid rebuilds live and
+the handle stays on the moved face for repeated pulls.
+
 ### Units
 
 `units` sets the document units (mm/cm/m/in/**feet-and-inches**) with an

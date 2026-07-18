@@ -1,0 +1,149 @@
+"""Sub-object gumball: a single selected planar face turns the gumball into
+a normal-aligned push/pull handle that moves the face and rebuilds the solid.
+
+The interactive drag (mouse math) needs a live GL viewport, so here we drive
+the geometry-facing logic directly with a minimal fake viewport."""
+
+import numpy as np
+import pytest
+
+from serpentine3d.core import geometry as g
+from serpentine3d.core.cplane import CPlane
+from serpentine3d.core.scene import Scene
+from serpentine3d.core.selection import SelectionManager
+from serpentine3d.ui.gumball import Gumball
+
+
+class _Cam:
+    """Just enough camera for begin_drag/_size_world: an orthographic-ish
+    ray straight down -Z and a trivial projection."""
+    def ray_through(self, px, py, w, h):
+        # look along -Y so a +Z face-normal handle isn't parallel to the ray
+        return np.array([px, 100.0, py]), np.array([0.0, -1.0, 0.0])
+
+    def project(self, pts, w, h):
+        pts = np.asarray(pts, float)
+        out = np.zeros((len(pts), 3))
+        out[:, 0] = pts[:, 0]
+        out[:, 1] = pts[:, 1]
+        out[:, 2] = 1.0
+        return out
+
+    def right_up(self):
+        return np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])
+
+
+class _Cfg:
+    def get(self, *a, default=None, **k):
+        return default if default is not None else True
+
+
+class _VP:
+    def __init__(self, scene, selection):
+        self.scene = scene
+        self.selection = selection
+        self.config = _Cfg()
+        self.space = "model"
+        self.point_mode = False
+        self.cplane = CPlane((0, 0, 0), (0, 0, 1))
+        self.camera = _Cam()
+        self.grid_snap = False
+        self.grid_snap_step = 0.0
+        self._checkpoints = []
+
+    def width(self):
+        return 800
+
+    def height(self):
+        return 600
+
+    def window_checkpoint(self, label):
+        self._checkpoints.append(label)
+
+
+def _box_scene():
+    scene = Scene()
+    obj = scene.add(g.make_box((0, 0, 0), 10, 10, 10))
+    sel = SelectionManager(scene)
+    # find the top face index (normal +z) in faces_of order — matches picking
+    faces = g.faces_of(obj.shape)
+    top = next(i for i, f in enumerate(faces) if g.face_normal(f)[2] > 0.9)
+    return scene, sel, obj, top
+
+
+def test_planar_face_activates_pushpull():
+    scene, sel, obj, top = _box_scene()
+    gb = Gumball(_VP(scene, sel))
+    assert gb.active() is False              # nothing selected yet
+    sel.toggle_subobject(obj.id, "face", top)
+    assert gb.active() is True
+    assert gb._face_mode() is True
+    tgt = gb._pushpull_target()
+    assert tgt is not None
+    oid, fidx, centroid, (t1, t2, n) = tgt
+    assert (oid, fidx) == (obj.id, top)
+    assert n[2] == pytest.approx(1.0, abs=1e-6)     # face normal is +z
+    assert centroid[2] == pytest.approx(10.0, abs=1e-6)
+    # axes are an orthonormal right-handed basis with normal last
+    assert np.dot(t1, n) == pytest.approx(0, abs=1e-9)
+    assert np.dot(t1, t2) == pytest.approx(0, abs=1e-9)
+
+
+def test_nonplanar_face_gets_no_handle():
+    scene = Scene()
+    cyl = scene.add(g.make_cylinder((0, 0, 0), 5, 10))
+    sel = SelectionManager(scene)
+    # the curved side is non-planar → face_normal raises → no push/pull
+    faces = g.faces_of(cyl.shape)
+    side = next(i for i, f in enumerate(faces)
+                if _is_nonplanar(f))
+    sel.toggle_subobject(cyl.id, "face", side)
+    gb = Gumball(_VP(scene, sel))
+    assert gb._pushpull_target() is None
+    assert gb.active() is False
+
+
+def _is_nonplanar(face):
+    try:
+        g.face_normal(face)
+        return False
+    except g.GeometryError:
+        return True
+
+
+def test_pushpull_extrudes_and_carves_via_gumball():
+    scene, sel, obj, top = _box_scene()
+    sel.toggle_subobject(obj.id, "face", top)
+    gb = Gumball(_VP(scene, sel))
+
+    # begin a drag on the normal handle, then apply distances the way a
+    # mouse drag / typed value would
+    assert gb.begin_drag(("move", 2), 5.0, 5.0, 0) is True
+    assert gb.drag["pp"] == (obj.id, top)
+
+    gb.apply_scalar(5.0)                      # pull out 5
+    assert g.volume(scene.get(obj.id).shape) == pytest.approx(1500.0, abs=1)
+
+    gb.apply_scalar(-3.0)                     # each apply works from originals
+    assert g.volume(scene.get(obj.id).shape) == pytest.approx(700.0, abs=1)
+
+    gb.end_drag()
+    assert gb.drag is None
+
+    # push_pull rebuilt the solid (face indices shift); the selection must
+    # re-point at the moved face so the gumball stays on it for the next pull
+    tgt = gb._pushpull_target()
+    assert tgt is not None, "gumball should stay on the moved face"
+    _, fidx, centroid, (_, _, n) = tgt
+    assert n[2] == pytest.approx(1.0, abs=1e-6)     # still the top (+z) face
+    assert centroid[2] == pytest.approx(7.0, abs=0.1)   # carved down to z=7
+    assert (obj.id, "face", fidx) in sel.subobjects
+
+
+def test_pushpull_rejects_wrong_handle():
+    scene, sel, obj, top = _box_scene()
+    sel.toggle_subobject(obj.id, "face", top)
+    gb = Gumball(_VP(scene, sel))
+    # in face mode only the normal move handle is valid
+    assert gb.begin_drag(("rot", 1), 5.0, 5.0, 0) is False
+    assert gb.drag is None
