@@ -27,6 +27,7 @@ from ..utils.math3d import ray_line_parameter, ray_plane_any
 AXIS_COLORS = ((0.86, 0.33, 0.31), (0.42, 0.72, 0.35), (0.35, 0.55, 0.92))
 HOVER_COLOR = (1.0, 0.85, 0.3)
 PP_COLOR = (0.85, 0.71, 0.29)    # push/pull arrow on a face (brand gold)
+FILLET_COLOR = (0.44, 0.74, 0.86)   # fillet radius handle on edges (teal)
 PAD_ALPHA = 0.35
 SIZE_PX = 78.0            # on-screen gumball radius
 SHAFT0, SHAFT1 = 0.18, 1.0
@@ -57,7 +58,9 @@ class Gumball:
             return False
         if self.drag is not None:            # a drag stays live to its end
             return True
-        return bool(vp.selection.ids) or self._pushpull_target() is not None
+        return (bool(vp.selection.ids)
+                or self._pushpull_target() is not None
+                or self._fillet_target() is not None)
 
     def _pushpull_target(self):
         """For a single selected planar face, return
@@ -96,11 +99,56 @@ class Gumball:
         t2 = np.cross(normal, t1)
         return oid, fidx, centroid, (t1, t2, normal)
 
+    def _fillet_target(self):
+        """For one or more selected edges on a single solid, return
+        (obj_id, [edge_index...], anchor, (t1, t2, outward)); else None.
+
+        Turns the gumball into an interactive fillet: a single outward
+        handle at the edges' midpoint that sets the radius and rebuilds the
+        solid live (via geometry.fillet_edges). Any number of edges fillet
+        together at one radius."""
+        subs = getattr(self.vp.selection, "subobjects", None)
+        if not subs:
+            return None
+        edges = [(oid, idx) for (oid, kind, idx) in subs if kind == "edge"]
+        if not edges:
+            return None
+        oid = edges[0][0]
+        idxs = [idx for (o, idx) in edges if o == oid]   # one solid at a time
+        obj = self.vp.scene.get(oid)
+        if obj is None:
+            return None
+        try:
+            elist = g.edges_of(obj.shape)
+            if any(not (0 <= i < len(elist)) for i in idxs):
+                return None
+            mids = [np.asarray(g.centroid(elist[i]), float) for i in idxs]
+            solid_c = np.asarray(g.centroid(obj.shape), float)
+        except g.GeometryError:
+            return None
+        anchor = np.mean(mids, axis=0)
+        out = anchor - solid_c
+        length = float(np.linalg.norm(out))
+        out = out / length if length > 1e-9 else np.array([0.0, 0.0, 1.0])
+        ref = (np.array([1.0, 0.0, 0.0]) if abs(out[0]) < 0.9
+               else np.array([0.0, 1.0, 0.0]))
+        t1 = np.cross(out, ref)
+        t1 = t1 / (np.linalg.norm(t1) or 1.0)
+        t2 = np.cross(out, t1)
+        return oid, idxs, anchor, (t1, t2, out)
+
     def _face_mode(self) -> bool:
         """Is the gumball acting as a face push/pull handle right now?"""
         if self.drag is not None:
             return bool(self.drag.get("pp"))
         return self._pushpull_target() is not None
+
+    def _fillet_mode(self) -> bool:
+        """Is the gumball acting as an edge fillet handle right now?"""
+        if self.drag is not None:
+            return bool(self.drag.get("fillet"))
+        return (self._pushpull_target() is None
+                and self._fillet_target() is not None)
 
     def anchor_and_axes(self):
         if self.drag is None:
@@ -108,6 +156,10 @@ class Gumball:
             if pp is not None:               # face push/pull takes priority
                 _, _, centroid, basis = pp
                 return centroid, basis
+            ft = self._fillet_target()
+            if ft is not None:               # then edge fillet
+                _, _, anchor, basis = ft
+                return anchor, basis
         objs = self.vp.selection.objects()
         if not objs:
             return None
@@ -155,6 +207,9 @@ class Gumball:
             return
         if self._face_mode():
             self._paint_pushpull(mvp)
+            return
+        if self._fillet_mode():
+            self._paint_fillet(mvp)
             return
         state = self._draw_anchor()
         if state is None:
@@ -233,6 +288,36 @@ class Gumball:
         c2, c3 = anchor - (u + v) * r, anchor - (u - v) * r
         self._lines(mvp, np.asarray([c0, c1, c1, c2, c2, c3, c3, c0],
                                     np.float32), (*col, 0.5), 1.4)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        self.vp._line_width(1.0)
+
+    def _paint_fillet(self, mvp):
+        """A single outward arrow at the selected edges' midpoint whose length
+        sets the fillet radius, plus a small quarter-round arc as a hint."""
+        state = self._draw_anchor()
+        if state is None:
+            return
+        anchor, axes = state
+        s = self._size_world(anchor)
+        u, v, n = axes[0], axes[1], axes[2]
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        hot = (self.hover == ("move", 2)
+               or (self.drag is not None
+                   and self.drag["handle"] == ("move", 2)))
+        col = HOVER_COLOR if hot else FILLET_COLOR
+        self._lines(mvp, np.asarray(
+            [anchor + n * SHAFT0 * s, anchor + n * SHAFT1 * s], np.float32),
+            (*col, 1.0), 2.6)
+        self._cone(mvp, anchor, n, u, v, s, (*col, 1.0))
+        # quarter-round arc (fillet motif) in the n-u plane at the anchor
+        r = 0.42 * s
+        pts = []
+        for k in range(13):
+            a = k / 12 * (math.pi / 2)
+            pts.append(anchor + r * (n * math.cos(a) + u * math.sin(a)))
+        arr = np.asarray(pts, np.float32)
+        segs = np.stack([arr[:-1], arr[1:]], axis=1).reshape(-1, 3)
+        self._lines(mvp, segs, (*col, 0.7), 1.6)
         GL.glEnable(GL.GL_DEPTH_TEST)
         self.vp._line_width(1.0)
 
@@ -332,6 +417,14 @@ class Gumball:
                 return ("move", 2)
             return None
 
+        if self._fillet_mode():               # only the outward radius arrow
+            n = axes[2]
+            a = scr(anchor)
+            b = scr(anchor + n * CONE1 * s)
+            if a is not None and b is not None and _seg_dist(cursor, a, b) < 8:
+                return ("move", 2)
+            return None
+
         # scale knobs (smallest targets first)
         for i in range(3):
             p = scr(anchor + axes[i] * SCALE_POS * s)
@@ -384,6 +477,7 @@ class Gumball:
         anchor, axes = state
         vp = self.vp
         pp = self._pushpull_target()
+        ft = None if pp is not None else self._fillet_target()
         if pp is not None:                    # face push/pull mode
             if handle != ("move", 2):
                 return False
@@ -392,6 +486,14 @@ class Gumball:
                 return False
             originals = {pp[0]: obj.shape}
             self.vp.window_checkpoint("push/pull")
+        elif ft is not None:                  # edge fillet mode
+            if handle != ("move", 2):
+                return False
+            obj = vp.scene.get(ft[0])
+            if obj is None:
+                return False
+            originals = {ft[0]: obj.shape}
+            self.vp.window_checkpoint("fillet")
         else:
             objs = vp.selection.objects()
             if not objs:
@@ -433,6 +535,7 @@ class Gumball:
             "handle": handle, "anchor": anchor, "axes": axes,
             "originals": originals,
             "pp": (pp[0], pp[1]) if pp is not None else None,
+            "fillet": (ft[0], list(ft[1])) if ft is not None else None,
             "ref": ref, "last_label": "", "offset": np.zeros(3),
             "typed": "", "armed": False, "moved": False,
         }
@@ -511,6 +614,22 @@ class Gumball:
                         pass
                 d["offset"] = np.asarray(axes[i] * value, float)
                 label = "push/pull " + vp.scene.format_length(float(value))
+            elif d.get("fillet"):             # edge fillet, radius = value
+                oid, idxs = d["fillet"]
+                orig = d["originals"].get(oid)
+                radius = float(value)
+                if orig is not None and vp.scene.get(oid) is not None:
+                    if radius > 1e-4:
+                        try:
+                            edges = [g.edges_of(orig)[k] for k in idxs]
+                            vp.scene.replace_shape(
+                                oid, g.fillet_edges(orig, radius, edges=edges))
+                        except (g.GeometryError, IndexError):
+                            pass          # radius too big — keep last good
+                    else:
+                        vp.scene.replace_shape(oid, orig)   # 0 → no fillet
+                d["offset"] = np.asarray(axes[i] * max(radius, 0.0), float)
+                label = "fillet " + vp.scene.format_length(float(radius))
             else:
                 delta = axes[i] * value
                 d["offset"] = np.asarray(delta, float)
@@ -602,10 +721,22 @@ class Gumball:
 
     def end_drag(self):
         d = self.drag
-        if d is not None and d.get("pp") \
-                and float(np.linalg.norm(d["offset"])) > 1e-9:
-            self._resync_face(d)
+        if d is not None and float(np.linalg.norm(d["offset"])) > 1e-9:
+            if d.get("pp"):
+                self._resync_face(d)
+            elif d.get("fillet"):
+                self._clear_filleted_edges(d)
         self.drag = None
+
+    def _clear_filleted_edges(self, d):
+        """A committed fillet consumes the picked edges (their indices now
+        point at unrelated edges of the rebuilt solid), so drop them from the
+        sub-object selection rather than leave the handle on stale edges."""
+        oid, idxs = d["fillet"]
+        sel = self.vp.selection
+        for i in idxs:
+            if (oid, "edge", i) in sel.subobjects:
+                sel.toggle_subobject(oid, "edge", i)
 
     def _resync_face(self, d):
         """push_pull rebuilds the solid, so the picked face index goes stale.

@@ -147,3 +147,75 @@ def test_pushpull_rejects_wrong_handle():
     # in face mode only the normal move handle is valid
     assert gb.begin_drag(("rot", 1), 5.0, 5.0, 0) is False
     assert gb.drag is None
+
+
+# --------------------------------------------------------------- edge fillet
+
+def test_edge_selection_activates_fillet():
+    scene, sel, obj, _ = _box_scene()
+    gb = Gumball(_VP(scene, sel))
+    sel.toggle_subobject(obj.id, "edge", 0)
+    assert gb.active() is True
+    assert gb._fillet_mode() is True
+    tgt = gb._fillet_target()
+    assert tgt is not None
+    oid, idxs, anchor, (t1, t2, out) = tgt
+    assert oid == obj.id and idxs == [0]
+    assert np.linalg.norm(out) == pytest.approx(1.0, abs=1e-6)
+    # the handle points away from the solid centre
+    solid_c = np.asarray(g.centroid(obj.shape), float)
+    assert np.dot(out, anchor - solid_c) > 0
+
+
+def test_fillet_via_gumball_reverts_at_zero():
+    scene, sel, obj, _ = _box_scene()
+    gb = Gumball(_VP(scene, sel))
+    sel.toggle_subobject(obj.id, "edge", 0)
+    assert gb.begin_drag(("move", 2), 5.0, 5.0, 0) is True
+    assert gb.drag["fillet"] == (obj.id, [0])
+
+    gb.apply_scalar(2.0)                       # a fillet shaves a little
+    v = g.volume(scene.get(obj.id).shape)
+    assert 980.0 < v < 1000.0
+
+    gb.apply_scalar(0.0)                       # radius 0 -> original solid back
+    assert g.volume(scene.get(obj.id).shape) == pytest.approx(1000.0, abs=1)
+
+
+def test_fillet_multi_edge_then_selection_cleared():
+    scene, sel, obj, _ = _box_scene()
+    gb = Gumball(_VP(scene, sel))
+    for i in (0, 2, 4):
+        sel.toggle_subobject(obj.id, "edge", i)
+    tgt = gb._fillet_target()
+    assert tgt is not None and sorted(tgt[1]) == [0, 2, 4]
+
+    assert gb.begin_drag(("move", 2), 5.0, 5.0, 0) is True
+    gb.apply_scalar(1.5)
+    assert g.volume(scene.get(obj.id).shape) < 1000.0
+
+    gb.end_drag()
+    # a committed fillet consumes the edges -> they leave the selection
+    for i in (0, 2, 4):
+        assert (obj.id, "edge", i) not in sel.subobjects
+
+
+def test_face_push_pull_beats_edge_fillet_when_both_selected():
+    scene, sel, obj, top = _box_scene()
+    gb = Gumball(_VP(scene, sel))
+    sel.toggle_subobject(obj.id, "edge", 0)
+    sel.toggle_subobject(obj.id, "face", top)
+    assert gb._face_mode() is True
+    assert gb._fillet_mode() is False         # push/pull takes priority
+
+
+def test_oversized_fillet_keeps_last_good_shape():
+    scene, sel, obj, _ = _box_scene()
+    gb = Gumball(_VP(scene, sel))
+    sel.toggle_subobject(obj.id, "edge", 0)
+    gb.begin_drag(("move", 2), 5.0, 5.0, 0)
+    gb.apply_scalar(2.0)
+    good = g.volume(scene.get(obj.id).shape)
+    gb.apply_scalar(999.0)                     # too big: fillet_edges raises
+    # swallowed — the scene keeps the last valid shape, no crash
+    assert g.volume(scene.get(obj.id).shape) == pytest.approx(good, abs=1)

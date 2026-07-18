@@ -143,6 +143,10 @@ push/pull handle along the face normal — drag it, or type a distance, to
 extrude the face outward or carve it inward; the solid rebuilds live and
 the handle stays on the moved face for repeated pulls.
 
+Ctrl+Shift-click one or more **edges** and the gumball becomes a fillet
+handle — drag it outward, or type a radius, to round the edges; every
+selected edge fillets together at that radius, previewing live.
+
 ### Units
 
 `units` sets the document units (mm/cm/m/in/**feet-and-inches**) with an
