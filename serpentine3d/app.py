@@ -766,6 +766,9 @@ class MainWindow(QMainWindow):
 
     def offer_recovery(self):
         """Restore the newest crashed session, if any (called at startup)."""
+        if os.environ.get("SERP3D_NO_RECOVER") == "1":
+            # automation: never block startup on a modal recovery prompt
+            return
         candidates = self.autosave.find_recoverable()
         if not candidates:
             return
