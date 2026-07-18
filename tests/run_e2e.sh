@@ -10,7 +10,16 @@ set -euo pipefail
 DISPLAY_NUM="${E2E_DISPLAY:-:2}"
 WORK="$(mktemp -d /tmp/serp3d-e2e.XXXXXX)"
 VENV="${VENV:-.venv}"
+APP_PID=""
+XEPHYR_PID=""
 trap 'kill $APP_PID $XEPHYR_PID 2>/dev/null || true; rm -rf "$WORK"' EXIT
+
+# Any other running dev instance clobbers ~/.serpentine3d/rpc.port
+# (last-writer-wins), so the test client would drive the wrong window.
+# Only clear venv-launched dev instances — never the user's AppImage,
+# which runs from a mounted path.
+pkill -f "${VENV}/bin/python -m serpentine3d.app" 2>/dev/null || true
+sleep 1
 
 if ! [ -e "/tmp/.X11-unix/X${DISPLAY_NUM#:}" ]; then
     Xephyr "$DISPLAY_NUM" -screen 1600x1000 -title "Serp3D E2E" \
