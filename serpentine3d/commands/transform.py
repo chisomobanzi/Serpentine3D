@@ -409,3 +409,30 @@ def cmd_rotate3d(ctx):
     verb = "Rotated a copy of" if copy else "Rotated"
     ctx.echo(f"{verb} {len(objs)} object(s) {angle:g} degrees "
              "around the picked axis.")
+
+
+@command("setpt", aliases=("setpoints",))
+def cmd_setpt(ctx):
+    """Force chosen coordinates of every control point to one value —
+    the classic way to flatten walls onto a level (Z) or line things
+    up on an axis."""
+    objs = yield SelectReq("Select curves, surfaces or points",
+                           kinds=("curve", "surface", "point"))
+    target = yield PointReq(
+        "Target point",
+        choices={"X": ["No", "Yes"], "Y": ["No", "Yes"],
+                 "Z": ["Yes", "No"]})
+    axes = (ctx.opt("X", "No") == "Yes", ctx.opt("Y", "No") == "Yes",
+            ctx.opt("Z", "Yes") == "Yes")
+    if not any(axes):
+        ctx.echo("All axes set to No — nothing to do.")
+        return
+    n = 0
+    for o in objs:
+        try:
+            ctx.scene.replace_shape(o.id, g.set_points(o.shape, target, axes))
+            n += 1
+        except g.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+    tags = "".join(a for a, on in zip("XYZ", axes) if on)
+    ctx.echo(f"Set {tags} on {n} object(s).")

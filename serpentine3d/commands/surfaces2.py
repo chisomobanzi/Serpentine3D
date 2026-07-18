@@ -230,3 +230,34 @@ def cmd_extractisocurve(ctx):
             except g.GeometryError as exc:
                 ctx.echo(str(exc))
     ctx.echo(f"Extracted {made} isocurve(s).")
+
+
+@command("dupfaceborder")
+def cmd_dupfaceborder(ctx):
+    """Duplicate the border wires of Ctrl+Shift-picked faces as curves."""
+    from ..core import occ
+    from OCP.TopExp import TopExp_Explorer
+    picked = []
+    for (obj_id, kind, idx) in ctx.selection.subobjects:
+        if kind != "face":
+            continue
+        obj = ctx.scene.get(obj_id)
+        if obj is None:
+            continue
+        faces = g.faces_of(obj.shape)
+        if 0 <= idx < len(faces):
+            picked.append((obj, faces[idx]))
+    if not picked:
+        ctx.echo("Ctrl+Shift-click faces first, then run DupFaceBorder.")
+        yield from ()
+        return
+    made = 0
+    for obj, face in picked:
+        exp = TopExp_Explorer(face, occ.WIRE)
+        while exp.More():
+            ctx.scene.add(g.copy_shape(exp.Current()),
+                          layer_id=obj.layer_id)
+            made += 1
+            exp.Next()
+    ctx.echo(f"Duplicated {made} border wire(s) as curves.")
+    yield from ()

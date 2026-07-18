@@ -234,6 +234,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `blendcrv` (`blend`) | Blendcrv |
 | `dupborder` | Dupborder |
 | `dupedge` | Duplicate Ctrl+Shift-picked edges as curves. |
+| `dupfaceborder` | Duplicate the border wires of Ctrl+Shift-picked faces as curves. |
 | `edgesrf` (`srfedges`) | Edgesrf |
 | `extractisocurve` (`isocurve`) | Extractisocurve |
 | `extrude` (`ext`, `extrudecrv`) | Extrude |
@@ -269,4 +270,5 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `rotate3d` (`ro3`) | Rotate around an arbitrary axis picked as two points. |
 | `scale` (`sc`) | Scale about a base point: type a factor, or grab a reference |
 | `scalenu` | Scalenu |
+| `setpt` (`setpoints`) | Force chosen coordinates of every control point to one value — |
 

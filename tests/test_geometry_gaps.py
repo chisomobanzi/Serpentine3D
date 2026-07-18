@@ -176,3 +176,57 @@ def test_smooth_closed_curve_stays_closed():
     smoothed = g.smooth_curve(wavy, strength=0.3, iterations=5)
     assert g.is_closed_curve(smoothed)
     assert g.curve_length(smoothed) < g.curve_length(wavy)
+
+
+# --- setpt / polyline smooth -------------------------------------------------
+
+def test_set_points_flattens_curve_z():
+    wavy = g.make_interp_curve([(0, 0, 0), (5, 2, 3), (10, -1, 6),
+                                (15, 3, 2)])
+    flat = g.set_points(wavy, (0, 0, 0), axes=(False, False, True))
+    (mn, mx) = g.bbox(flat)
+    assert mn[2] == pytest.approx(0, abs=1e-6)
+    assert mx[2] == pytest.approx(0, abs=1e-6)
+    assert mx[0] == pytest.approx(15, abs=0.3)
+
+
+def test_set_points_polyline_keeps_polyline():
+    pl = g.make_polyline([(0, 0, 1), (5, 0, 4), (5, 5, 2)])
+    flat = g.set_points(pl, (0, 0, 0), axes=(False, False, True))
+    (mn, mx) = g.bbox(flat)
+    assert mx[2] == pytest.approx(0, abs=1e-6)
+    # still two straight segments of the projected lengths
+    assert g.curve_length(flat) == pytest.approx(10.0)
+
+
+def test_set_points_align_x_on_points():
+    pt = g.make_point((3, 4, 5))
+    moved = g.set_points(pt, (10, 0, 0), axes=(True, False, False))
+    assert g.point_coords(moved) == pytest.approx((10, 4, 5))
+
+
+def test_set_points_surface():
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    srf = g.extrude(line, (0, 1, 0.3), 5.0)   # tilted sheet
+    flat = g.set_points(srf, (0, 0, 2), axes=(False, False, True))
+    (mn, mx) = g.bbox(flat)
+    assert mn[2] == pytest.approx(2, abs=1e-6)
+    assert mx[2] == pytest.approx(2, abs=1e-6)
+
+
+def test_smooth_polyline_stays_polyline():
+    pts = [(x, (2 if x % 2 else -2), 0) for x in range(9)]
+    zig = g.make_polyline(pts)
+    smoothed = g.smooth_curve(zig, strength=0.5, iterations=4)
+    assert g.curve_length(smoothed) < g.curve_length(zig)
+    (s0, s1) = g.curve_endpoints(smoothed)
+    assert s0 == pytest.approx((0, -2, 0), abs=1e-9)
+    assert s1 == pytest.approx((8, -2, 0), abs=1e-9)
+
+
+def test_smooth_closed_polyline():
+    sq = g.make_polyline([(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0)],
+                         closed=True)
+    smoothed = g.smooth_curve(sq, strength=0.5, iterations=3)
+    assert g.is_closed_curve(smoothed)
+    assert g.curve_length(smoothed) < 40.0

@@ -282,3 +282,56 @@ def test_smooth_command(env):
     proc.finish_selection()
     proc.provide_text("0.4")
     assert g.curve_length(scene.get(zig.id).shape) < before
+
+
+def test_setpt_command_flatten(env):
+    scene, sel, hist, ctx, proc = env
+    wavy = scene.add(g.make_interp_curve([(0, 0, 0), (5, 2, 3),
+                                          (10, -1, 6)]))
+    proc.run("setpt")
+    proc.click_object(wavy.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,1")
+    assert not proc.busy
+    (mn, mx) = g.bbox(scene.get(wavy.id).shape)
+    assert mn[2] == pytest.approx(1, abs=1e-6)
+    assert mx[2] == pytest.approx(1, abs=1e-6)
+
+
+def test_setpt_command_align_x(env):
+    scene, sel, hist, ctx, proc = env
+    p = scene.add(g.make_point((3, 4, 5)))
+    proc.run("setpt")
+    proc.click_object(p.id)
+    proc.finish_selection()
+    proc.provide_text("X=Yes")
+    proc.provide_text("Z=No")
+    proc.provide_text("7,0,0")
+    assert g.point_coords(scene.get(p.id).shape) == pytest.approx((7, 4, 5))
+
+
+def test_dupfaceborder_command(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 2, 3, 4))
+    sel.subobjects.append((box.id, "face", 0))
+    proc.run("dupfaceborder")
+    assert not proc.busy
+    curves = [o for o in scene.all() if o.kind == "curve"]
+    assert len(curves) == 1
+    # one rectangular border of some box face
+    assert g.is_closed_curve(curves[0].shape)
+    assert g.curve_length(curves[0].shape) in (
+        pytest.approx(10.0), pytest.approx(12.0), pytest.approx(14.0))
+
+
+def test_smooth_command_on_polyline(env):
+    scene, sel, hist, ctx, proc = env
+    pts = [(x, (2 if x % 2 else -2), 0) for x in range(9)]
+    zig = scene.add(g.make_polyline(pts))
+    before = g.curve_length(zig.shape)
+    proc.run("smooth")
+    proc.click_object(zig.id)
+    proc.finish_selection()
+    proc.provide_text("0.5")
+    after = scene.get(zig.id)
+    assert g.curve_length(after.shape) < before

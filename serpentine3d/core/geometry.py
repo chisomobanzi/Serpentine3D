@@ -1002,9 +1002,19 @@ def _face_bspline_surface(shape):
         return surf.Copy(), face
     try:
         return GeomConvert.SurfaceToBSplineSurface_s(surf), face
-    except Exception as exc:
-        raise GeometryError(
-            f"Surface cannot be converted to NURBS: {exc}") from exc
+    except Exception:
+        # infinite analytic surfaces (planes...) need bounding first
+        try:
+            from OCP.BRepAdaptor import BRepAdaptor_Surface
+            from OCP.Geom import Geom_RectangularTrimmedSurface
+            ba = BRepAdaptor_Surface(face)
+            trimmed = Geom_RectangularTrimmedSurface(
+                surf, ba.FirstUParameter(), ba.LastUParameter(),
+                ba.FirstVParameter(), ba.LastVParameter())
+            return GeomConvert.SurfaceToBSplineSurface_s(trimmed), face
+        except Exception as exc:
+            raise GeometryError(
+                f"Surface cannot be converted to NURBS: {exc}") from exc
 
 
 def surface_control_points(shape) -> tuple[list[Point], tuple[int, int]]:
@@ -1702,6 +1712,21 @@ def tween_curves(curve_a, curve_b, count: int = 1,
 def smooth_curve(shape, strength: float = 0.2, iterations: int = 5):
     """Laplacian-smooth a curve's control points (endpoints stay put)."""
     strength = min(max(float(strength), 0.0), 1.0)
+    if shape.ShapeType() == occ.WIRE:
+        # polylines: relax the vertices themselves, stay a polyline
+        pts, closed = _wire_points(shape)
+        if closed:
+            pts = pts + []
+        n = len(pts)
+        for _ in range(max(1, int(iterations))):
+            ref = list(pts)
+            rng = range(n) if closed else range(1, n - 1)
+            for i in rng:
+                p, a, b = ref[i], ref[(i - 1) % n], ref[(i + 1) % n]
+                pts[i] = tuple(
+                    c + ((x + y) / 2 - c) * strength
+                    for c, x, y in zip(p, a, b))
+        return make_polyline(pts, closed=closed)
     bs = _edge_bspline(shape)
     n = bs.NbPoles()
     if n < 3:
@@ -1731,3 +1756,73 @@ def smooth_curve(shape, strength: float = 0.2, iterations: int = 5):
                 bs.SetPole(1, p)
                 bs.SetPole(n, p)
     return BRepBuilderAPI_MakeEdge(bs).Edge()
+
+
+def _wire_points(shape) -> tuple[list[Point], bool]:
+    """Ordered vertex points of a wire of straight segments, plus closed?"""
+    from OCP.BRepTools import BRepTools_WireExplorer
+    from OCP.GeomAbs import GeomAbs_CurveType
+    wire = occ.to_wire(shape)
+    pts = []
+    exp = BRepTools_WireExplorer(wire)
+    last_edge = None
+    while exp.More():
+        edge = exp.Current()
+        if (occ.edge_adaptor(edge).GetType()
+                != GeomAbs_CurveType.GeomAbs_Line):
+            raise GeometryError("Only straight-segment polylines supported "
+                                "here (explode curves first)")
+        pts.append(pnt_tuple(occ.point_of_vertex(exp.CurrentVertex())))
+        last_edge = edge
+        exp.Next()
+    if last_edge is None:
+        raise GeometryError("Empty wire")
+    closed = wire.Closed()
+    if not closed:
+        ad = occ.edge_adaptor(last_edge)
+        p_end = ad.Value(ad.LastParameter())
+        end = (p_end.X(), p_end.Y(), p_end.Z())
+        if _d3(end, pts[-1]) < 1e-9:   # reversed final edge
+            p_end = ad.Value(ad.FirstParameter())
+            end = (p_end.X(), p_end.Y(), p_end.Z())
+        pts.append(end)
+    return pts, closed
+
+
+def _d3(a: Point, b: Point) -> float:
+    return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+
+
+def set_points(shape, target: Point,
+               axes: tuple[bool, bool, bool] = (False, False, True)):
+    """Rhino SetPt: force chosen coordinates of every control point /
+    vertex to the target's value (default: flatten Z)."""
+    if not any(axes):
+        raise GeometryError("Pick at least one axis to set")
+
+    def _snap(p: Point) -> Point:
+        return tuple(t if on else c for c, t, on in zip(p, target, axes))
+
+    kind = shape_kind(shape)
+    if kind == "point":
+        return make_point(_snap(point_coords(shape)))
+    if kind == "curve":
+        if shape.ShapeType() == occ.WIRE:
+            pts, closed = _wire_points(shape)
+            if closed:
+                pts = pts  # make_polyline closes via flag
+            return make_polyline([_snap(p) for p in pts], closed=closed)
+        bs = _edge_bspline(shape)
+        for i in range(1, bs.NbPoles() + 1):
+            bs.SetPole(i, _pnt(_snap(pnt_tuple(bs.Pole(i)))))
+        return BRepBuilderAPI_MakeEdge(bs).Edge()
+    if kind == "surface":
+        bs, _ = _face_bspline_surface(shape)
+        for i in range(1, bs.NbUPoles() + 1):
+            for j in range(1, bs.NbVPoles() + 1):
+                bs.SetPole(i, j, _pnt(_snap(pnt_tuple(bs.Pole(i, j)))))
+        mk = BRepBuilderAPI_MakeFace(bs, tol())
+        if not mk.IsDone():
+            raise GeometryError("SetPt failed on this surface")
+        return mk.Face()
+    raise GeometryError(f"SetPt does not support {kind}s")
