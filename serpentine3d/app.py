@@ -696,6 +696,17 @@ class MainWindow(QMainWindow):
         self.command_line.echo("New document.")
         self.mark_saved()
 
+    def start_new(self, units: str = "mm"):
+        """Fresh document in the given units (no confirm) — used by the
+        welcome screen."""
+        self.history.checkpoint("new")
+        self.scene.clear()
+        self.scene.units = units
+        self.scene.notify()
+        self.ctx.current_path = None
+        self.mark_saved()
+        self.command_line.echo(f"New model ({units}).")
+
     def _file_open(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open", "",
                                               self._FILTERS)
@@ -1167,6 +1178,10 @@ def run_app(app, splash=None):
             except Exception as exc:                          # noqa: BLE001
                 window.command_line.echo(f"Could not open {arg}: {exc}")
             break
+
+    from .ui.welcome import WelcomeScreen, should_show as _welcome
+    if _welcome(window):
+        WelcomeScreen(window).exec()
     return app.exec()
 
 

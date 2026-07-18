@@ -78,3 +78,35 @@ def test_push_recent_dedupe_cap_order():
         r = push_recent(r, f"f{i}.serp", cap=10)
     assert len(r) == 10
     assert os.path.basename(r[0]) == "f14.serp"   # newest first
+
+
+def test_welcome_show_guards(monkeypatch):
+    from serpentine3d.ui import welcome
+    from PySide6.QtWidgets import QApplication
+
+    class _Cfg:
+        def __init__(self, d):
+            self.d = d
+        def get(self, key, default=None):
+            return self.d.get(key, default)
+
+    def win(show=True, current_path=None):
+        w = type("W", (), {})()
+        w.cfg = _Cfg({"show_welcome": show})
+        w.ctx = type("C", (), {"current_path": current_path})()
+        return w
+
+    monkeypatch.delenv("SERP3D_NO_WELCOME", raising=False)
+    # headless platforms never show it (would block automation)
+    monkeypatch.setattr(QApplication, "platformName",
+                        staticmethod(lambda: "offscreen"))
+    assert welcome.should_show(win()) is False
+
+    # on a real platform: shows by default, off when toggled or a doc is open
+    monkeypatch.setattr(QApplication, "platformName",
+                        staticmethod(lambda: "xcb"))
+    assert welcome.should_show(win()) is True
+    assert welcome.should_show(win(show=False)) is False
+    assert welcome.should_show(win(current_path="/x.serp")) is False
+    monkeypatch.setenv("SERP3D_NO_WELCOME", "1")
+    assert welcome.should_show(win()) is False

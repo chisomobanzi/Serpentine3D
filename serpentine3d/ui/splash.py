@@ -139,6 +139,19 @@ class SplashScreen(QSplashScreen):
             painter.drawLine(x0, y, int(x0 + (x1 - x0) * self._progress), y)
 
 
+def mark_pixmap(width: int) -> QPixmap:
+    """The gold serpentine mark as a transparent QPixmap (shared with the
+    welcome screen)."""
+    h = round(width * 164 / 176)
+    pm = QPixmap(width, h)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    QSvgRenderer(QByteArray(_MARK_SVG)).render(p)
+    p.end()
+    return pm
+
+
 def should_show() -> bool:
     """Skip the splash for headless/automation runs."""
     if os.environ.get("SERP3D_NO_SPLASH") == "1":
