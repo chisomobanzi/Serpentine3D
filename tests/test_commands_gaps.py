@@ -446,3 +446,32 @@ def test_radius_command(env):
     proc.provide_text("7,0,0")
     assert not proc.busy
     assert any("Radius: 7" in m for m in msgs)
+
+
+def test_scale1d_command(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 10, 10, 10))
+    proc.run("scale1d")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")
+    proc.provide_text("10,0,0")
+    proc.provide_text("2")
+    (mn, mx) = g.bbox(scene.get(box.id).shape)
+    assert mx[0] == pytest.approx(20, abs=1e-6)
+    assert mx[1] == pytest.approx(10, abs=1e-6)
+    assert mx[2] == pytest.approx(10, abs=1e-6)
+
+
+def test_scale2d_command(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 10, 10, 10))
+    proc.run("scale2d")
+    proc.click_object(box.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")
+    proc.provide_text("3")
+    (mn, mx) = g.bbox(scene.get(box.id).shape)
+    assert mx[0] == pytest.approx(30, abs=1e-5)
+    assert mx[1] == pytest.approx(30, abs=1e-5)
+    assert mx[2] == pytest.approx(10, abs=1e-5)

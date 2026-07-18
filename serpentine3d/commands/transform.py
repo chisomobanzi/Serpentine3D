@@ -454,3 +454,87 @@ def cmd_projecttocplane(ctx):
         except g.GeometryError as exc:
             ctx.echo(f"{o.name}: {exc}")
     ctx.echo(f"Flattened {n} object(s) onto the CPlane.")
+
+
+@command("scale1d")
+def cmd_scale1d(ctx):
+    """Stretch along one direction only (base + reference define the
+    axis; drag the reference to its new position or type a factor)."""
+    import math
+    objs = yield SelectReq("Select objects to scale in one direction")
+    base = yield PointReq("Base point")
+    ref = yield PointReq("Reference point (sets the axis)",
+                         rubber_from=base)
+    axis = tuple(b - a for a, b in zip(base, ref))
+    d0 = math.dist(base, ref)
+    if d0 < 1e-12:
+        ctx.echo("Reference point is on the base point — cancelled.")
+        return
+
+    def _factor(p):
+        if isinstance(p, float):
+            return p
+        # project the pick onto the axis to get the new length
+        v = [c - b for b, c in zip(base, p)]
+        along = sum(x * a for x, a in zip(v, axis)) / d0
+        return along / d0
+
+    def _preview(p):
+        f = _factor(p)
+        if abs(f) < 1e-9:
+            return None
+        return _ghost(objs, lambda s: g.scale_along_axis(s, base, axis, f))
+
+    p2 = yield PointReq("New reference point (or type factor)",
+                        rubber_from=base, allow_number=True,
+                        preview_fn=_preview)
+    factor = _factor(p2)
+    if abs(factor) < 1e-9:
+        ctx.echo("Zero scale factor — cancelled.")
+        return
+    for o in objs:
+        ctx.scene.replace_shape(
+            o.id, g.scale_along_axis(o.shape, base, axis, factor))
+    ctx.echo(f"Scaled {len(objs)} object(s) by {factor:g} along the axis.")
+
+
+@command("scale2d")
+def cmd_scale2d(ctx):
+    """Scale in the CPlane only (thickness along the CPlane normal is
+    kept)."""
+    import math
+    objs = yield SelectReq("Select objects to scale in the CPlane")
+    base = yield PointReq("Base point")
+    normal = tuple(ctx.cplane.normal)
+
+    def _apply(s, f):
+        return g.scale_along_axis(g.scale(s, base, f), base, normal, 1.0 / f)
+
+    ref = yield PointReq("Scale factor, or first reference point",
+                         rubber_from=base, allow_number=True)
+    if isinstance(ref, float):
+        factor = ref
+    else:
+        d0 = math.dist(base, ref)
+        if d0 < 1e-12:
+            ctx.echo("Reference point is on the base point — cancelled.")
+            return
+
+        def _factor(p):
+            return p if isinstance(p, float) else math.dist(base, p) / d0
+
+        def _preview(p):
+            f = _factor(p)
+            return None if abs(f) < 1e-9 \
+                else _ghost(objs, lambda s: _apply(s, f))
+
+        p2 = yield PointReq("Second reference point (drag to scale)",
+                            rubber_from=base, allow_number=True,
+                            preview_fn=_preview)
+        factor = _factor(p2)
+    if abs(factor) < 1e-9:
+        ctx.echo("Zero scale factor — cancelled.")
+        return
+    for o in objs:
+        ctx.scene.replace_shape(o.id, _apply(o.shape, factor))
+    ctx.echo(f"Scaled {len(objs)} object(s) by {factor:g} in the CPlane.")

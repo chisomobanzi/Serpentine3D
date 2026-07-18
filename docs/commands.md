@@ -278,6 +278,8 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `rotate` (`ro`) | Rotate around the CPlane normal: type an angle, or pick a |
 | `rotate3d` (`ro3`) | Rotate around an arbitrary axis picked as two points. |
 | `scale` (`sc`) | Scale about a base point: type a factor, or grab a reference |
+| `scale1d` | Stretch along one direction only (base + reference define the |
+| `scale2d` | Scale in the CPlane only (thickness along the CPlane normal is |
 | `scalenu` | Scalenu |
 | `setpt` (`setpoints`) | Force chosen coordinates of every control point to one value — |
 
