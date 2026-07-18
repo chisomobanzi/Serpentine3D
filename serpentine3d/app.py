@@ -262,6 +262,30 @@ class MainWindow(QMainWindow):
             lambda: self.history.checkpoint("edit control point"))
         vp.escapePressed.connect(self._cancel)
         vp.enterShortcut.connect(self._rmb_enter)
+        vp.popupRequested.connect(self._show_mmb_popup)
+
+    def _show_palette(self):
+        from .ui.palette import CommandPalette
+        CommandPalette.popup(self, self.command_line.run_command)
+
+    def _show_mmb_popup(self):
+        """Middle-click popup: recent commands + staples (Rhino-style)."""
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        recent = self.command_line.recent_commands()
+        for name in recent:
+            menu.addAction(name, lambda n=name:
+                           self.command_line.run_command(n))
+        if recent:
+            menu.addSeparator()
+        for name in ("line", "circle", "extrude", "move", "zoomextents"):
+            if name not in recent:
+                menu.addAction(name, lambda n=name:
+                               self.command_line.run_command(n))
+        menu.addSeparator()
+        menu.addAction("Command palette…", self._show_palette)
+        menu.exec(QCursor.pos())
 
     def all_viewports(self) -> list:
         return ([self.viewport]
@@ -432,6 +456,8 @@ class MainWindow(QMainWindow):
                      lambda: self.run_command("exportpdf"))
 
         m_tools = mb.addMenu("&Tools")
+        self._action(m_tools, "Command Palette...", "Ctrl+Shift+P",
+                     self._show_palette)
         self._action(m_tools, "Python Console", "Ctrl+`",
                      self._toggle_console)
         self._action(m_tools, "Settings...", "Ctrl+,", self._show_settings)

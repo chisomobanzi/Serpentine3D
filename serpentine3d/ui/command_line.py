@@ -151,6 +151,25 @@ class CommandLine(QWidget):
     def focus(self):
         self.input.setFocus()
 
+    def run_command(self, text: str):
+        """Run as if typed at the prompt (records history)."""
+        text = text.strip()
+        if text:
+            self._history.append(text)
+            self._hist_pos = len(self._history)
+            self.submitted.emit(text)
+
+    def recent_commands(self, limit: int = 12) -> list[str]:
+        """Distinct command names, most recent first."""
+        out: list[str] = []
+        for t in reversed(self._history):
+            name = t.strip().split()[0].lower() if t.strip() else ""
+            if name and name not in out:
+                out.append(name)
+            if len(out) >= limit:
+                break
+        return out
+
     # -- internals --
 
     def _submit(self):

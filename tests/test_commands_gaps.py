@@ -475,3 +475,15 @@ def test_scale2d_command(env):
     assert mx[0] == pytest.approx(30, abs=1e-5)
     assert mx[1] == pytest.approx(30, abs=1e-5)
     assert mx[2] == pytest.approx(10, abs=1e-5)
+
+
+def test_fuzzy_score_ranking():
+    from serpentine3d.ui.palette import fuzzy_score
+    assert fuzzy_score("", "line") == 0
+    assert fuzzy_score("xyz", "line") is None
+    exact = fuzzy_score("line", "line")
+    sub = fuzzy_score("lin", "polyline")
+    assert exact is not None and sub is not None
+    assert exact > sub
+    # word-start bonus: 'ze' should hit zoomextents strongly
+    assert fuzzy_score("ze", "zoomextents") > fuzzy_score("ze", "size")

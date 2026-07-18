@@ -400,6 +400,7 @@ class Viewport(QOpenGLWidget):
     cvEditBegan = Signal()                  # control-point drag started
     escapePressed = Signal()
     enterShortcut = Signal()                # right-click without dragging
+    popupRequested = Signal()               # middle-click without dragging
     displayModeChanged = Signal()           # shaded/rendered/... changed
     _tessDone = Signal()                    # a background mesh finished
 
@@ -1809,6 +1810,8 @@ class Viewport(QOpenGLWidget):
         self._last_mouse = ev.position()
         if ev.button() == Qt.MouseButton.RightButton:
             self._rmb_press = ev.position()
+        if ev.button() == Qt.MouseButton.MiddleButton:
+            self._mmb_press = ev.position()
         if ev.button() == Qt.MouseButton.LeftButton:
             pos = ev.position()
             # resolve a gumball armed for numeric entry before anything else
@@ -1934,6 +1937,14 @@ class Viewport(QOpenGLWidget):
                     (pos - press).manhattanLength() <= 4:
                 # a click, not an orbit/pan drag: Rhino-style Enter
                 self.enterShortcut.emit()
+                return
+        if ev.button() == Qt.MouseButton.MiddleButton:
+            press = getattr(self, "_mmb_press", None)
+            self._mmb_press = None
+            if press is not None and \
+                    (ev.position() - press).manhattanLength() <= 4:
+                # a click, not an orbit drag: recent-commands popup
+                self.popupRequested.emit()
                 return
         if ev.button() != Qt.MouseButton.LeftButton:
             if (ev.button() == self._nav_button()
