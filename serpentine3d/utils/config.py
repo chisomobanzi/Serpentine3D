@@ -44,6 +44,8 @@ DEFAULTS = {
     "grid_snap": False,
     "grid_snap_step": 1.0,
     "default_units": "mm",
+    "recent_files": [],                # most-recent-first document paths
+    "show_welcome": True,              # start screen on launch
     "aliases": {},                     # alias -> command name
     "shortcuts": {},                   # key sequence -> command name
     "display": {
@@ -98,6 +100,14 @@ class Config:
             node = node.setdefault(k, {})
         node[keys[-1]] = value
         self.save()
+
+
+def push_recent(paths: list, path: str, cap: int = 10) -> list:
+    """Return `paths` with `path` promoted to the front (absolute, deduped,
+    capped). Pure — the caller persists the result."""
+    ap = os.path.abspath(path)
+    out = [ap] + [p for p in paths if os.path.abspath(p) != ap]
+    return out[:cap]
 
 
 def _merge(base: dict, override: dict):

@@ -370,6 +370,8 @@ class MainWindow(QMainWindow):
         m_file = mb.addMenu("&File")
         self._action(m_file, "New", "Ctrl+N", lambda: self._file_new())
         self._action(m_file, "Open...", "Ctrl+O", self._file_open)
+        self._recent_menu = m_file.addMenu("Open Recent")
+        self._rebuild_recent_menu()
         m_file.addSeparator()
         self._action(m_file, "Save", "Ctrl+S", self._file_save)
         self._action(m_file, "Save As...", "Ctrl+Shift+S",
@@ -697,8 +699,12 @@ class MainWindow(QMainWindow):
     def _file_open(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open", "",
                                               self._FILTERS)
-        if not path:
-            return
+        if path:
+            self._open_path(path)
+
+    def _open_path(self, path: str):
+        """Open a file by path (shared by the dialog, Recent menu and the
+        welcome screen)."""
         try:
             self.history.checkpoint("open")
             fileio.import_file(self.scene, path)
@@ -708,9 +714,50 @@ class MainWindow(QMainWindow):
                 f"Opened {path}: {len(self.scene.all())} object(s).")
             self.viewport.zoom_extents()
             self.mark_saved()
+            self.add_recent(path)
         except Exception as exc:                              # noqa: BLE001
             self.history.discard_checkpoint()
             QMessageBox.warning(self, "Open failed", str(exc))
+
+    # -- recent files (MRU) --
+    def recent_files(self) -> list:
+        """Recently opened/saved paths, most recent first, existing only."""
+        return [p for p in self.cfg.get("recent_files", default=[])
+                if os.path.exists(p)]
+
+    def add_recent(self, path: str):
+        from .utils.config import push_recent
+        self.cfg.set("recent_files",
+                     push_recent(self.cfg.get("recent_files", default=[]),
+                                 path))
+        self._rebuild_recent_menu()
+
+    def _rebuild_recent_menu(self):
+        menu = getattr(self, "_recent_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        files = self.recent_files()
+        if not files:
+            act = menu.addAction("(no recent files)")
+            act.setEnabled(False)
+            return
+        for p in files:
+            menu.addAction(os.path.basename(p),
+                           lambda checked=False, path=p: self._open_recent(path))
+        menu.addSeparator()
+        menu.addAction("Clear Recent", self._clear_recent)
+
+    def _open_recent(self, path: str):
+        if os.path.exists(path):
+            self._open_path(path)
+        else:
+            QMessageBox.warning(self, "Open", f"File no longer exists:\n{path}")
+            self._rebuild_recent_menu()      # prune it from the menu
+
+    def _clear_recent(self):
+        self.cfg.set("recent_files", [])
+        self._rebuild_recent_menu()
 
     def _file_save(self, force_dialog: bool = False):
         path = self.ctx.current_path
@@ -726,6 +773,7 @@ class MainWindow(QMainWindow):
             self.ctx.current_path = path
             self.command_line.echo(f"Saved {path}")
             self.mark_saved()
+            self.add_recent(path)
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Save failed", str(exc))
 
@@ -1115,6 +1163,7 @@ def run_app(app, splash=None):
                 window.command_line.echo(
                     f"Opened {arg}: {len(window.scene.all())} object(s).")
                 window.viewport.zoom_extents()
+                window.add_recent(arg)
             except Exception as exc:                          # noqa: BLE001
                 window.command_line.echo(f"Could not open {arg}: {exc}")
             break

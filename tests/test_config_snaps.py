@@ -61,3 +61,20 @@ def test_alias_runtime_registration():
     assert resolve("qq").name == "circle"
     remove_alias("qq")
     assert resolve("qq") is None
+
+
+def test_push_recent_dedupe_cap_order():
+    from serpentine3d.utils.config import push_recent
+    import os
+    r = []
+    r = push_recent(r, "a.serp")
+    r = push_recent(r, "b.serp")
+    r = push_recent(r, "a.serp")          # re-adding promotes to front
+    assert [os.path.basename(p) for p in r] == ["a.serp", "b.serp"]
+    assert all(os.path.isabs(p) for p in r)   # stored absolute
+    # cap
+    r = []
+    for i in range(15):
+        r = push_recent(r, f"f{i}.serp", cap=10)
+    assert len(r) == 10
+    assert os.path.basename(r[0]) == "f14.serp"   # newest first
