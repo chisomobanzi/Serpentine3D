@@ -152,6 +152,57 @@ def test_3dm_trimmed_planar_face(tmp_path):
     assert area == pytest.approx(_m.pi * 25, rel=0.01)
 
 
+def test_3dm_capped_cylinder_becomes_solid(tmp_path):
+    """A multi-face capped-cylinder brep with no render mesh must import
+    with exactly trimmed disc caps and sew into a closed solid — the old
+    heuristic left the caps untrimmed (area/volume inflated)."""
+    import math as _m
+    import rhino3dm as r3
+    model = r3.File3dm()
+    cyl = r3.Cylinder(r3.Circle(r3.Point3d(0, 0, 0), 5.0), 12.0)
+    model.Objects.AddBrep(r3.Brep.CreateFromCylinder(cyl, True, True))
+    path = str(tmp_path / "capped_cyl.3dm")
+    assert model.Write(path, 7)
+
+    scene = Scene()
+    fileio.import_file(scene, path)
+    obj = scene.all()[0]
+    assert obj.kind == "solid"
+    assert g.is_valid(obj.shape)
+    # 2*pi*5*12 side + 2*pi*25 caps = 534.07;  pi*25*12 = 942.48
+    assert g.surface_area(obj.shape) == pytest.approx(534.07, rel=0.01)
+    assert g.volume(obj.shape) == pytest.approx(942.48, rel=0.01)
+
+
+def test_3dm_sphere_area(tmp_path):
+    import math as _m
+    import rhino3dm as r3
+    model = r3.File3dm()
+    model.Objects.AddBrep(
+        r3.Brep.CreateFromSphere(r3.Sphere(r3.Point3d(0, 0, 0), 4.0)))
+    path = str(tmp_path / "sph.3dm")
+    assert model.Write(path, 7)
+    scene = Scene()
+    fileio.import_file(scene, path)
+    obj = scene.all()[0]
+    assert g.surface_area(obj.shape) == pytest.approx(4 * _m.pi * 16,
+                                                      rel=0.01)
+
+
+def test_3dm_box_solid(tmp_path):
+    import rhino3dm as r3
+    model = r3.File3dm()
+    box = r3.Box(r3.BoundingBox(r3.Point3d(0, 0, 0), r3.Point3d(2, 3, 4)))
+    model.Objects.AddBrep(r3.Brep.CreateFromBox(box))
+    path = str(tmp_path / "box.3dm")
+    assert model.Write(path, 7)
+    scene = Scene()
+    fileio.import_file(scene, path)
+    obj = scene.all()[0]
+    assert obj.kind == "solid"
+    assert g.volume(obj.shape) == pytest.approx(24.0, rel=1e-6)
+
+
 def test_surface_control_points():
     circle = g.make_circle((0, 0, 0), 4)
     c2 = g.make_circle((0, 0, 8), 2)

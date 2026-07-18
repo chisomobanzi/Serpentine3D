@@ -216,48 +216,113 @@ def _classify_by_mesh(pieces: list, mesh_shape, tol: float) -> list:
     return kept
 
 
-def _wire_trimmed_planar(face, edges: list):
-    """Exact trim for planar faces whose edges form closed wires."""
-    from ..core.occ import BRepBuilderAPI_MakeFace
-    try:
-        wires = []
-        remaining = list(edges)
-        while remaining:
-            wire = geometry.join_curves([remaining.pop(0)])
-            # greedy grow
-            grown = True
-            while grown:
-                grown = False
-                for e in list(remaining):
-                    try:
-                        wire = geometry.join_curves([wire, e])
-                        remaining.remove(e)
-                        grown = True
-                    except geometry.GeometryError:
-                        continue
+def _group_closed_wires(edges: list) -> list:
+    """Greedily join edges end-to-end into closed wires."""
+    wires = []
+    remaining = list(edges)
+    while remaining:
+        wire = geometry.join_curves([remaining.pop(0)])
+        grown = True
+        while grown:
+            grown = False
+            for e in list(remaining):
+                try:
+                    wire = geometry.join_curves([wire, e])
+                    remaining.remove(e)
+                    grown = True
+                except geometry.GeometryError:
+                    continue
+        if geometry.is_closed_curve(wire):
             wires.append(wire)
-        closed = [w for w in wires if geometry.is_closed_curve(w)]
-        if not closed:
-            return None
-        # largest loop is the boundary; the rest are holes
-        closed.sort(key=lambda w: -geometry.curve_length(w))
-        mk = BRepBuilderAPI_MakeFace(
-            geometry.occ.to_wire(geometry.to_wire(closed[0])), True)
-        if not mk.IsDone():
-            return None
-        from ..core.occ import TopAbs_Orientation
-        for hole in closed[1:]:
-            w = geometry.occ.to_wire(geometry.to_wire(hole))
-            mk.Add(geometry.occ.to_wire(w.Reversed()))
-        if not mk.IsDone():
-            return None
-        return mk.Face()
+    return wires
+
+
+def _edges_on_surface(surf, edges: list, tol: float) -> list:
+    """The subset of edges lying on `surf` (sampled projection test)."""
+    from OCP.GeomAPI import GeomAPI_ProjectPointOnSurf
+    on = []
+    for e in edges:
+        try:
+            ad = geometry.occ.edge_adaptor(geometry.occ.to_edge(e))
+        except Exception:
+            continue
+        t0, t1 = ad.FirstParameter(), ad.LastParameter()
+        hit = True
+        for i in range(6):
+            p = ad.Value(t0 + (t1 - t0) * i / 5)
+            proj = GeomAPI_ProjectPointOnSurf(p, surf)
+            if proj.NbPoints() == 0 or proj.LowerDistance() > tol:
+                hit = False
+                break
+        if hit:
+            on.append(e)
+    return on
+
+
+def _trimmed_face(surf, edges: list):
+    """Build an exactly trimmed face from a surface and its boundary edges.
+
+    Rhino .3dm keeps 2D trim pcurves, but rhino3dm does not expose them, so
+    the loops are rebuilt from the brep's 3D edges and OCCT projects them
+    back onto the surface. Periodic surfaces (cylinders/cones) treat extra
+    loops as further boundaries; bounded surfaces treat them as holes.
+    """
+    import numpy as np
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.GeomAdaptor import GeomAdaptor_Surface
+    from OCP.ShapeFix import ShapeFix_Face
+
+    wires = _group_closed_wires(edges)
+    if not wires:
+        return None
+    try:
+        ga = GeomAdaptor_Surface(surf)
+        periodic = ga.IsUPeriodic() or ga.IsVPeriodic()
+
+        def diag(w):
+            (mn, mx) = geometry.bbox(w)
+            return float(np.linalg.norm(np.subtract(mx, mn)))
+
+        wires.sort(key=diag, reverse=True)
+
+        def attempt(flip_outer):
+            outer = geometry.occ.to_wire(geometry.to_wire(wires[0]))
+            if flip_outer:
+                outer = geometry.occ.to_wire(outer.Reversed())
+            mk = BRepBuilderAPI_MakeFace(surf, outer, True)
+            if not mk.IsDone():
+                return None
+            # On a bounded surface the extra loops are holes and run
+            # opposite the outer; on a periodic surface they are further
+            # boundary loops of the band and keep their orientation.
+            for w in wires[1:]:
+                wire = geometry.occ.to_wire(geometry.to_wire(w))
+                if not periodic:
+                    wire = geometry.occ.to_wire(wire.Reversed())
+                if flip_outer:
+                    wire = geometry.occ.to_wire(wire.Reversed())
+                mk.Add(wire)
+            fix = ShapeFix_Face(geometry.occ.to_face(mk.Face()))
+            fix.Perform()
+            face = fix.Face()
+            if face is None or face.IsNull() or not geometry.is_valid(face):
+                return None
+            area = geometry.surface_area(face)
+            if not np.isfinite(area) or area <= 1e-9:
+                return None
+            return face
+
+        # The loop's winding relative to the surface UV is unknown, so the
+        # trimmed region may come out as the infinite complement (reversed
+        # normal, invalid). Retry with the outer boundary reversed.
+        return attempt(False) or attempt(True)
     except Exception:
         return None
 
 
 def _import_brep(brep) -> list:
     """Faces of a Rhino brep as OCC faces, recovering trims when possible."""
+    from OCP.BRep import BRep_Tool
     occ_edges = _brep_edges_to_occ(brep)
     faces = []
     for fi in range(len(brep.Faces)):
@@ -272,24 +337,30 @@ def _import_brep(brep) -> list:
                 faces.append(mesh)
             continue
 
+        (mn, mx) = geometry.bbox(face)
+        import numpy as np
+        span = float(np.linalg.norm(np.subtract(mx, mn)))
+        tol = max(span * 0.02, 1e-4)
+
+        # Preferred path: rebuild the exact trim from the brep's 3D edges
+        # that lie on this face's surface. Works with no render mesh and
+        # for any face count, unlike the split-and-classify fallback.
+        surf = BRep_Tool.Surface_s(geometry.occ.to_face(face))
+        boundary = _edges_on_surface(surf, occ_edges, max(span * 1e-4, 1e-6))
+        exact = _trimmed_face(surf, boundary) if boundary else None
+        if exact is not None:
+            faces.append(exact)
+            continue
+
         pieces = _split_face_by_edges(face, occ_edges)
         if pieces:
             # trimmed face: resolve which pieces are real
-            (mn, mx) = geometry.bbox(face)
-            import numpy as np
-            tol = max(float(np.linalg.norm(np.subtract(mx, mn))) * 0.02,
-                      1e-4)
             resolved = None
             mesh = _face_mesh_shape(rface)
             if mesh is not None:
                 kept = _classify_by_mesh(pieces, mesh, tol)
                 if kept:
                     resolved = kept
-            if resolved is None and rface.IsPlanar() \
-                    and len(brep.Faces) == 1:
-                exact = _wire_trimmed_planar(face, occ_edges)
-                if exact is not None:
-                    resolved = [exact]
             if resolved is None:
                 resolved = [mesh] if mesh is not None else [face]
             faces.extend(resolved)
@@ -302,11 +373,38 @@ def _import_brep(brep) -> list:
     if len(faces) == 1:
         return faces
     from ..core.occ import BRepBuilderAPI_Sewing
-    sew = BRepBuilderAPI_Sewing(1e-6)
+    import numpy as np
+    # sew tolerance scaled to model size: NURBS-approximated shared edges
+    # rarely match to 1e-6, which would leave watertight shells open
+    box = geometry.make_compound(faces)
+    (mn, mx) = geometry.bbox(box)
+    span = float(np.linalg.norm(np.subtract(mx, mn)))
+    sew = BRepBuilderAPI_Sewing(max(span * 1e-5, 1e-6))
     for f in faces:
         sew.Add(f)
     sew.Perform()
-    return [sew.SewedShape()]
+    return [_shell_to_solid(sew.SewedShape())]
+
+
+def _shell_to_solid(shape):
+    """Promote a closed shell to a solid; return `shape` unchanged if open
+    or already a solid."""
+    if shape is None or shape.IsNull():
+        return shape
+    if shape.ShapeType() == geometry.occ.SHELL:
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeSolid
+        from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+        shell = geometry.occ.to_shell(shape)
+        if shell.Closed():
+            try:
+                mk = BRepBuilderAPI_MakeSolid(shell)
+                if mk.IsDone():
+                    solid = mk.Solid()
+                    if geometry.is_valid(solid):
+                        return solid
+            except Exception:
+                pass
+    return shape
 
 
 def _face_mesh_shape(rface):
