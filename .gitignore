@@ -13,3 +13,6 @@ dist/
 screenshots/
 .tokensave/
 packaging/windows/Output/
+*.dmg
+packaging/macos/serp3d.icns
+packaging/macos/*.iconset/
