@@ -1,9 +1,14 @@
-"""Startup splash screen — shown while the main window builds.
+"""Startup splash screen — shown while the geometry kernel and main window
+load.
 
-A frameless, translucent panel in the app's dark/amber identity: the gold
-serpentine mark, the wordmark, a drafting-style footer stamp, and a status
-line + progress hairline that advance as the app initialises. Closes the
-moment the main window appears.
+Built on Qt's QSplashScreen, which is designed for the "show, then do
+blocking init" case and reliably paints its first frame on show — a custom
+QWidget does not, because the ~2s kernel import is a pure C dlopen that
+pumps no Qt events, so a custom splash would map but never paint.
+
+The static art (dark drafting-sheet panel, gold serpentine mark, wordmark,
+footer stamp, corner registration ticks) is baked into a pixmap once; the
+status line and progress hairline are drawn live in drawContents().
 """
 
 from __future__ import annotations
@@ -12,14 +17,13 @@ import os
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import (
-    QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen,
+    QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap,
 )
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QSplashScreen
 
-# The brand mark, kept in sync with assets/logo-mark.svg. Embedded rather
-# than loaded from a file so it works identically in source and packaged
-# builds without touching every packaging config.
+# Brand mark, kept in sync with assets/logo-mark.svg. Embedded so it works
+# identically in source and packaged builds with no packaging changes.
 _MARK_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="50 46 176 164">
   <defs><linearGradient id="gold" x1="0" y1="0" x2="0.4" y2="1">
     <stop offset="0" stop-color="#e8ca62"/><stop offset="0.55" stop-color="#d8b44a"/>
@@ -34,7 +38,6 @@ _MARK_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="50 46 176 164">
     <rect x="202" y="88" width="12" height="12" fill="none"/>
   </g></svg>"""
 
-# palette (matches the app tile + theme)
 _BG_TOP = QColor("#232428")
 _BG_BOT = QColor("#161719")
 _BORDER = QColor("#3a3b40")
@@ -46,113 +49,94 @@ _MUTED = QColor("#85868a")
 _W, _H = 480, 320
 
 
-class SplashScreen(QWidget):
+def _base_pixmap(version: str) -> QPixmap:
+    screen = QApplication.primaryScreen()
+    dpr = screen.devicePixelRatio() if screen else 1.0
+    pm = QPixmap(int(_W * dpr), int(_H * dpr))
+    pm.setDevicePixelRatio(dpr)
+    p = QPainter(pm)
+    p.setRenderHints(QPainter.RenderHint.Antialiasing
+                     | QPainter.RenderHint.TextAntialiasing)
+
+    # opaque panel (rectangular — reads as a drafting sheet)
+    grad = QLinearGradient(0, 0, 0, _H)
+    grad.setColorAt(0, _BG_TOP)
+    grad.setColorAt(1, _BG_BOT)
+    p.fillRect(0, 0, _W, _H, grad)
+    p.setPen(QPen(_BORDER, 1.4))
+    p.drawRect(QRectF(0.7, 0.7, _W - 1.4, _H - 1.4))
+
+    # corner registration ticks (drafting identity)
+    p.setPen(QPen(_TICK, 1))
+    m, t = 15, 10
+    for cx, cy, dx, dy in ((m, m, 1, 1), (_W - m, m, -1, 1),
+                           (m, _H - m, 1, -1), (_W - m, _H - m, -1, -1)):
+        p.drawLine(cx, cy, cx + dx * t, cy)
+        p.drawLine(cx, cy, cx, cy + dy * t)
+
+    # mark, nudged left so the S body reads centred (the handle pulls right)
+    mw, mh = 130, 121
+    QSvgRenderer(QByteArray(_MARK_SVG)).render(
+        p, QRectF((_W - mw) / 2 - 7, 40, mw, mh))
+
+    # wordmark
+    wf = QFont()
+    wf.setStyleHint(QFont.StyleHint.SansSerif)
+    wf.setPointSizeF(25)
+    wf.setWeight(QFont.Weight.DemiBold)
+    wf.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 100.5)
+    p.setFont(wf)
+    p.setPen(_WORDMARK)
+    p.drawText(QRectF(0, 168, _W, 42),
+               Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+               "Serpentine3D")
+
+    # short gold rule under the wordmark
+    p.setPen(QPen(_GOLD, 2))
+    p.drawLine(int(_W / 2 - 22), 214, int(_W / 2 + 22), 214)
+
+    # footer stamp
+    ff = QFont("monospace")
+    ff.setStyleHint(QFont.StyleHint.Monospace)
+    ff.setPointSizeF(8.5)
+    ff.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 112)
+    p.setFont(ff)
+    p.setPen(_MUTED)
+    p.drawText(QRectF(0, _H - 40, _W, 18), Qt.AlignmentFlag.AlignHCenter,
+               f"v{version}  ·  MIT  ·  OPEN SOURCE")
+    p.end()
+    return pm
+
+
+class SplashScreen(QSplashScreen):
     def __init__(self, version: str = "0.3.1"):
-        super().__init__(None, Qt.WindowType.SplashScreen
-                         | Qt.WindowType.FramelessWindowHint
-                         | Qt.WindowType.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(_W, _H)
-        self._mark = QSvgRenderer(QByteArray(_MARK_SVG))
+        super().__init__(_base_pixmap(version))
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self._status = ""
         self._progress = 0.0
-        self._footer = f"v{version}  ·  MIT  ·  OPEN SOURCE"
-        self._center_on_screen()
-
-    def _center_on_screen(self):
-        screen = QApplication.primaryScreen()
-        if screen is not None:
-            geo = screen.availableGeometry()
-            self.move(geo.center().x() - _W // 2, geo.center().y() - _H // 2)
 
     def message(self, text: str, progress: float | None = None):
-        """Update the status line (and optional 0..1 progress), repaint now."""
+        """Update status line (+ optional 0..1 progress) and repaint now."""
         self._status = text
         if progress is not None:
             self._progress = max(0.0, min(1.0, progress))
         self.repaint()
         QApplication.processEvents()
 
-    def finish(self, window):
-        self.close()
-        self.deleteLater()
-
-    # -- painting --
-    def paintEvent(self, _event):
-        p = QPainter(self)
-        p.setRenderHints(QPainter.RenderHint.Antialiasing
-                         | QPainter.RenderHint.TextAntialiasing)
-        r = QRectF(1, 1, _W - 2, _H - 2)
-
-        panel = QPainterPath()
-        panel.addRoundedRect(r, 18, 18)
-        grad = QLinearGradient(0, 0, 0, _H)
-        grad.setColorAt(0, _BG_TOP)
-        grad.setColorAt(1, _BG_BOT)
-        p.fillPath(panel, grad)
-        p.setPen(QPen(_BORDER, 1.2))
-        p.drawPath(panel)
-
-        self._draw_ticks(p)
-
-        # mark, centred in the upper third; nudged left so the S body reads
-        # centred (the tangent handle otherwise pulls it right)
-        mw, mh = 130, 121
-        self._mark.render(p, QRectF((_W - mw) / 2 - 7, 40, mw, mh))
-
-        # wordmark
-        wf = QFont()
-        wf.setStyleHint(QFont.StyleHint.SansSerif)
-        wf.setPointSizeF(25)
-        wf.setWeight(QFont.Weight.DemiBold)
-        wf.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 100.5)
-        p.setFont(wf)
-        p.setPen(_WORDMARK)
-        p.drawText(QRectF(0, 168, _W, 42),
-                   Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-                   "Serpentine3D")
-
-        # short gold rule under the wordmark (drafting accent)
-        p.setPen(QPen(_GOLD, 2))
-        p.drawLine(int(_W / 2 - 22), 214, int(_W / 2 + 22), 214)
-
-        # status line
+    def drawContents(self, painter: QPainter):
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         sf = QFont()
         sf.setPointSizeF(10.5)
-        p.setFont(sf)
-        p.setPen(_MUTED)
-        p.drawText(QRectF(0, 236, _W, 20),
-                   Qt.AlignmentFlag.AlignHCenter, self._status)
-
-        # footer stamp (mono, spaced, uppercase)
-        ff = QFont("monospace")
-        ff.setStyleHint(QFont.StyleHint.Monospace)
-        ff.setPointSizeF(8.5)
-        ff.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 112)
-        p.setFont(ff)
-        p.setPen(_MUTED)
-        p.drawText(QRectF(0, _H - 40, _W, 18),
-                   Qt.AlignmentFlag.AlignHCenter, self._footer)
-
-        # progress hairline along the bottom edge
+        painter.setFont(sf)
+        painter.setPen(_MUTED)
+        painter.drawText(QRectF(0, 236, _W, 20),
+                         Qt.AlignmentFlag.AlignHCenter, self._status)
         if self._progress > 0:
-            y = _H - 3
-            x0, x1 = 20, _W - 20
-            p.setPen(QPen(QColor(_GOLD.red(), _GOLD.green(), _GOLD.blue(), 90),
-                          2))
-            p.drawLine(x0, y, x1, y)
-            p.setPen(QPen(_GOLD, 2))
-            p.drawLine(x0, y, int(x0 + (x1 - x0) * self._progress), y)
-        p.end()
-
-    def _draw_ticks(self, p: QPainter):
-        """Registration ticks in the corners — echoes the drafting identity."""
-        p.setPen(QPen(_TICK, 1))
-        m, t = 14, 9          # margin, tick length
-        for cx, cy, dx, dy in ((m, m, 1, 1), (_W - m, m, -1, 1),
-                               (m, _H - m, 1, -1), (_W - m, _H - m, -1, -1)):
-            p.drawLine(cx, cy, cx + dx * t, cy)
-            p.drawLine(cx, cy, cx, cy + dy * t)
+            y, x0, x1 = _H - 4, 20, _W - 20
+            painter.setPen(QPen(QColor(216, 180, 74, 90), 2))
+            painter.drawLine(x0, y, x1, y)
+            painter.setPen(QPen(_GOLD, 2))
+            painter.drawLine(x0, y, int(x0 + (x1 - x0) * self._progress), y)
 
 
 def should_show() -> bool:
