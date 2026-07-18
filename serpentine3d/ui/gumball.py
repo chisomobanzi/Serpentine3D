@@ -32,6 +32,12 @@ PAD_ALPHA = 0.35
 SIZE_PX = 78.0            # on-screen gumball radius
 SHAFT0, SHAFT1 = 0.18, 1.0
 CONE1 = 1.22
+
+
+def _alt_held(modifiers) -> bool:
+    """Alt state, robust to a Qt KeyboardModifiers flag or a plain int."""
+    m = getattr(modifiers, "value", modifiers)          # Qt flag -> int
+    return bool(int(m) & int(Qt.KeyboardModifier.AltModifier.value))
 SCALE_POS = 0.6
 ARC_R = 0.82
 PAD0, PAD1 = 0.28, 0.5
@@ -66,10 +72,12 @@ class Gumball:
         """For a single selected planar face, return
         (obj_id, face_index, centroid, (t1, t2, normal)); else None.
 
-        This is what turns the gumball into a face push/pull handle: a
-        normal-aligned arrow that moves the face in/out and rebuilds the
-        solid (via geometry.push_pull). Non-planar faces have no single
-        normal, so they get no handle."""
+        This is what turns the gumball into a face handle: an axis-aligned
+        arrow that moves the face in/out and rebuilds the solid. A planar
+        face pushes/pulls along its normal (geometry.push_pull); a curved
+        face offsets along its outward direction (geometry.offset_face), so
+        e.g. a cylinder's wall grows/shrinks its radius. Returns
+        (oid, face_index, centroid, (t1, t2, axis), planar)."""
         subs = getattr(self.vp.selection, "subobjects", None)
         if not subs:
             return None
@@ -84,20 +92,28 @@ class Gumball:
             flist = g.faces_of(obj.shape)
             if not (0 <= fidx < len(flist)):
                 return None
-            normal = np.asarray(g.face_normal(flist[fidx]), float)
-            centroid = np.asarray(g.centroid(flist[fidx]), float)
+            face = flist[fidx]
+            try:
+                axis = np.asarray(g.face_normal(face), float)   # planar
+                centroid = np.asarray(g.centroid(face), float)
+                planar = True
+            except g.GeometryError:          # curved -> offset along outward
+                pt, nrm = g.face_point_normal(face)   # sampled on the surface
+                centroid = np.asarray(pt, float)
+                axis = np.asarray(nrm, float)
+                planar = False
         except g.GeometryError:
-            return None                      # non-planar: no push/pull
-        length = float(np.linalg.norm(normal))
+            return None
+        length = float(np.linalg.norm(axis))
         if length < 1e-9:
             return None
-        normal = normal / length
-        ref = (np.array([1.0, 0.0, 0.0]) if abs(normal[0]) < 0.9
+        axis = axis / length
+        ref = (np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9
                else np.array([0.0, 1.0, 0.0]))
-        t1 = np.cross(normal, ref)
+        t1 = np.cross(axis, ref)
         t1 = t1 / (np.linalg.norm(t1) or 1.0)
-        t2 = np.cross(normal, t1)
-        return oid, fidx, centroid, (t1, t2, normal)
+        t2 = np.cross(axis, t1)
+        return oid, fidx, centroid, (t1, t2, axis), planar
 
     def _fillet_target(self):
         """For one or more selected edges on a single solid, return
@@ -154,7 +170,7 @@ class Gumball:
         if self.drag is None:
             pp = self._pushpull_target()
             if pp is not None:               # face push/pull takes priority
-                _, _, centroid, basis = pp
+                _, _, centroid, basis, _ = pp
                 return centroid, basis
             ft = self._fillet_target()
             if ft is not None:               # then edge fillet
@@ -535,7 +551,9 @@ class Gumball:
             "handle": handle, "anchor": anchor, "axes": axes,
             "originals": originals,
             "pp": (pp[0], pp[1]) if pp is not None else None,
+            "pp_planar": bool(pp[4]) if pp is not None else True,
             "fillet": (ft[0], list(ft[1])) if ft is not None else None,
+            "chamfer": ft is not None and _alt_held(modifiers),
             "ref": ref, "last_label": "", "offset": np.zeros(3),
             "typed": "", "armed": False, "moved": False,
         }
@@ -552,6 +570,8 @@ class Gumball:
                                                   vp.height())
         uniform = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
         d["moved"] = True
+        if d.get("fillet"):                  # hold Alt to chamfer instead
+            d["chamfer"] = _alt_held(modifiers)
         if kind == "pad":
             hit = ray_plane_any(origin, direction, anchor, axes[i])
             if hit is None:
@@ -603,33 +623,39 @@ class Gumball:
         kind, i = d["handle"]
         anchor, axes = d["anchor"], d["axes"]
         if kind == "move":
-            if d.get("pp"):                   # face push/pull, not translate
+            if d.get("pp"):                   # face push/pull or offset
                 oid, fidx = d["pp"]
                 orig = d["originals"].get(oid)
+                planar = d.get("pp_planar", True)
                 if orig is not None and vp.scene.get(oid) is not None:
                     try:
-                        vp.scene.replace_shape(
-                            oid, g.push_pull(orig, fidx, value))
+                        new = (g.push_pull(orig, fidx, value) if planar
+                               else g.offset_face(orig, fidx, value))
+                        vp.scene.replace_shape(oid, new)
                     except g.GeometryError:
                         pass
                 d["offset"] = np.asarray(axes[i] * value, float)
-                label = "push/pull " + vp.scene.format_length(float(value))
-            elif d.get("fillet"):             # edge fillet, radius = value
+                verb = "push/pull" if planar else "offset"
+                label = verb + " " + vp.scene.format_length(float(value))
+            elif d.get("fillet"):             # edge fillet/chamfer, radius=value
                 oid, idxs = d["fillet"]
                 orig = d["originals"].get(oid)
                 radius = float(value)
+                chamfer = bool(d.get("chamfer"))
                 if orig is not None and vp.scene.get(oid) is not None:
                     if radius > 1e-4:
                         try:
                             edges = [g.edges_of(orig)[k] for k in idxs]
                             vp.scene.replace_shape(
-                                oid, g.fillet_edges(orig, radius, edges=edges))
+                                oid, g.fillet_edges(orig, radius, edges=edges,
+                                                    chamfer=chamfer))
                         except (g.GeometryError, IndexError):
-                            pass          # radius too big — keep last good
+                            pass          # too big — keep last good
                     else:
                         vp.scene.replace_shape(oid, orig)   # 0 → no fillet
                 d["offset"] = np.asarray(axes[i] * max(radius, 0.0), float)
-                label = "fillet " + vp.scene.format_length(float(radius))
+                verb = "chamfer" if chamfer else "fillet"
+                label = verb + " " + vp.scene.format_length(float(radius))
             else:
                 delta = axes[i] * value
                 d["offset"] = np.asarray(delta, float)
@@ -722,8 +748,8 @@ class Gumball:
     def end_drag(self):
         d = self.drag
         if d is not None and float(np.linalg.norm(d["offset"])) > 1e-9:
-            if d.get("pp"):
-                self._resync_face(d)
+            if d.get("pp") and d.get("pp_planar", True):
+                self._resync_face(d)         # curved offsets keep their index
             elif d.get("fillet"):
                 self._clear_filleted_edges(d)
         self.drag = None

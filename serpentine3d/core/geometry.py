@@ -447,6 +447,28 @@ def face_normal(face) -> Point:
     return n
 
 
+def face_point_normal(face):
+    """A representative surface point and outward unit normal on `face`,
+    sampled at its mid-parameter — works for curved faces too (where the
+    area centroid can fall off the surface, e.g. a full cylinder wall).
+    Returns (point, normal) as 3-tuples; normal follows the face
+    orientation (outward on a solid)."""
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.BRepLProp import BRepLProp_SLProps
+    from OCP.TopAbs import TopAbs_Orientation
+    surf = BRepAdaptor_Surface(face)
+    u = 0.5 * (surf.FirstUParameter() + surf.LastUParameter())
+    v = 0.5 * (surf.FirstVParameter() + surf.LastVParameter())
+    props = BRepLProp_SLProps(surf, u, v, 1, 1e-7)
+    if not props.IsNormalDefined():
+        raise GeometryError("No surface normal at the sample point")
+    p, n = props.Value(), props.Normal()
+    normal = (n.X(), n.Y(), n.Z())
+    if face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED:
+        normal = (-normal[0], -normal[1], -normal[2])
+    return (p.X(), p.Y(), p.Z()), normal
+
+
 def push_pull(shape, face_index: int, distance: float) -> TopoDS_Shape:
     """SketchUp-style push/pull: extrude a planar face of a solid outward
     (positive) or carve it inward (negative)."""
@@ -467,6 +489,34 @@ def push_pull(shape, face_index: int, distance: float) -> TopoDS_Shape:
     else:
         result = boolean_difference(shape, prism)
     return unwrap_compound(result)
+
+
+def offset_face(shape, face_index: int, distance: float) -> TopoDS_Shape:
+    """Offset a single (typically non-planar) face of a solid along its
+    surface normal — e.g. push a cylinder's wall out to grow its radius.
+    Adjacent faces are extended (sharp) to meet the offset face."""
+    from OCP.BRepCheck import BRepCheck_Analyzer
+    from OCP.BRepOffset import BRepOffset_MakeOffset, BRepOffset_Mode
+    from OCP.GeomAbs import GeomAbs_JoinType
+    faces = faces_of(shape)
+    if not (0 <= face_index < len(faces)):
+        raise GeometryError("Face index out of range")
+    if abs(float(distance)) < tight():
+        raise GeometryError("Distance is zero")
+    mko = BRepOffset_MakeOffset()
+    mko.Initialize(shape, 0.0, tol(), BRepOffset_Mode.BRepOffset_Skin,
+                   True, False, GeomAbs_JoinType.GeomAbs_Intersection,
+                   False, False)
+    mko.SetOffsetOnFace(faces[face_index], float(distance))
+    mko.MakeOffsetShape()
+    out = mko.Shape()
+    if not mko.IsDone() or out is None or out.IsNull():
+        raise GeometryError("Face offset failed — the distance is probably "
+                            "too large for this face")
+    out = unwrap_compound(out)
+    if abs(volume(out)) < tight() or not BRepCheck_Analyzer(out).IsValid():
+        raise GeometryError("Face offset produced an invalid solid")
+    return out
 
 
 def cap_holes(shape) -> TopoDS_Shape:

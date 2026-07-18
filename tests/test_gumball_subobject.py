@@ -80,27 +80,14 @@ def test_planar_face_activates_pushpull():
     assert gb._face_mode() is True
     tgt = gb._pushpull_target()
     assert tgt is not None
-    oid, fidx, centroid, (t1, t2, n) = tgt
+    oid, fidx, centroid, (t1, t2, n), planar = tgt
     assert (oid, fidx) == (obj.id, top)
+    assert planar is True
     assert n[2] == pytest.approx(1.0, abs=1e-6)     # face normal is +z
     assert centroid[2] == pytest.approx(10.0, abs=1e-6)
     # axes are an orthonormal right-handed basis with normal last
     assert np.dot(t1, n) == pytest.approx(0, abs=1e-9)
     assert np.dot(t1, t2) == pytest.approx(0, abs=1e-9)
-
-
-def test_nonplanar_face_gets_no_handle():
-    scene = Scene()
-    cyl = scene.add(g.make_cylinder((0, 0, 0), 5, 10))
-    sel = SelectionManager(scene)
-    # the curved side is non-planar → face_normal raises → no push/pull
-    faces = g.faces_of(cyl.shape)
-    side = next(i for i, f in enumerate(faces)
-                if _is_nonplanar(f))
-    sel.toggle_subobject(cyl.id, "face", side)
-    gb = Gumball(_VP(scene, sel))
-    assert gb._pushpull_target() is None
-    assert gb.active() is False
 
 
 def _is_nonplanar(face):
@@ -109,6 +96,52 @@ def _is_nonplanar(face):
         return False
     except g.GeometryError:
         return True
+
+
+def _cyl_scene():
+    scene = Scene()
+    cyl = scene.add(g.make_cylinder((0, 0, 0), 5, 10))   # vol ~785.4
+    sel = SelectionManager(scene)
+    faces = g.faces_of(cyl.shape)
+    side = next(i for i, f in enumerate(faces) if _is_nonplanar(f))
+    return scene, sel, cyl, side
+
+
+def test_curved_face_gets_offset_handle():
+    scene, sel, cyl, side = _cyl_scene()
+    sel.toggle_subobject(cyl.id, "face", side)
+    gb = Gumball(_VP(scene, sel))
+    assert gb.active() is True
+    assert gb._face_mode() is True
+    tgt = gb._pushpull_target()
+    assert tgt is not None
+    oid, fidx, centroid, (t1, t2, axis), planar = tgt
+    assert (oid, fidx) == (cyl.id, side)
+    assert planar is False                    # curved -> offset, not push/pull
+    # the handle points radially outward (away from the axis at mid-height)
+    assert axis[2] == pytest.approx(0.0, abs=1e-6)
+    assert np.hypot(axis[0], axis[1]) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_offset_grows_cylinder_radius_via_gumball():
+    scene, sel, cyl, side = _cyl_scene()
+    sel.toggle_subobject(cyl.id, "face", side)
+    gb = Gumball(_VP(scene, sel))
+    assert gb.begin_drag(("move", 2), 5.0, 5.0, 0) is True
+    assert gb.drag["pp"] == (cyl.id, side)
+    assert gb.drag["pp_planar"] is False
+
+    gb.apply_scalar(2.0)                       # r 5 -> 7
+    assert g.volume(scene.get(cyl.id).shape) == pytest.approx(
+        np.pi * 49 * 10, abs=1)
+    gb.apply_scalar(-2.0)                      # r 5 -> 3, from original
+    assert g.volume(scene.get(cyl.id).shape) == pytest.approx(
+        np.pi * 9 * 10, abs=1)
+
+    gb.end_drag()
+    # the offset keeps the face index stable, so the handle stays put
+    assert (cyl.id, "face", side) in sel.subobjects
+    assert gb._pushpull_target() is not None
 
 
 def test_pushpull_extrudes_and_carves_via_gumball():
@@ -134,7 +167,7 @@ def test_pushpull_extrudes_and_carves_via_gumball():
     # re-point at the moved face so the gumball stays on it for the next pull
     tgt = gb._pushpull_target()
     assert tgt is not None, "gumball should stay on the moved face"
-    _, fidx, centroid, (_, _, n) = tgt
+    _, fidx, centroid, (_, _, n), _ = tgt
     assert n[2] == pytest.approx(1.0, abs=1e-6)     # still the top (+z) face
     assert centroid[2] == pytest.approx(7.0, abs=0.1)   # carved down to z=7
     assert (obj.id, "face", fidx) in sel.subobjects
@@ -219,3 +252,21 @@ def test_oversized_fillet_keeps_last_good_shape():
     gb.apply_scalar(999.0)                     # too big: fillet_edges raises
     # swallowed — the scene keeps the last valid shape, no crash
     assert g.volume(scene.get(obj.id).shape) == pytest.approx(good, abs=1)
+
+
+def test_chamfer_when_alt_held():
+    from PySide6.QtCore import Qt
+    scene, sel, obj, _ = _box_scene()
+    orig = obj.shape
+    gb = Gumball(_VP(scene, sel))
+    sel.toggle_subobject(obj.id, "edge", 0)
+    # Alt at grab -> chamfer instead of fillet
+    assert gb.begin_drag(("move", 2), 5.0, 5.0,
+                         Qt.KeyboardModifier.AltModifier) is True
+    assert gb.drag["chamfer"] is True
+    gb.apply_scalar(2.0)
+    cham = g.volume(scene.get(obj.id).shape)
+    assert cham < 1000.0
+    # a chamfer removes a different amount than a fillet of the same size
+    fil = g.volume(g.fillet_edges(orig, 2.0, edges=[g.edges_of(orig)[0]]))
+    assert abs(cham - fil) > 1.0
