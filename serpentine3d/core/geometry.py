@@ -1669,3 +1669,65 @@ def iso_curve(shape, point: Point, along: str = "u") -> TopoDS_Shape:
     if curve is None:
         raise GeometryError("No isocurve at this point")
     return BRepBuilderAPI_MakeEdge(curve, lo, hi).Edge()
+
+
+def tween_curves(curve_a, curve_b, count: int = 1,
+                 samples: int = 64) -> list:
+    """`count` intermediate curves blended between two curves."""
+    if count < 1:
+        raise GeometryError("Tween needs at least 1 intermediate curve")
+    pa = sample_curve(curve_a, samples)
+    pb = sample_curve(curve_b, samples)
+
+    def _d(p, q):
+        return sum((x - y) ** 2 for x, y in zip(p, q)) ** 0.5
+
+    # orient b to run the same way as a
+    if (_d(pa[0], pb[0]) + _d(pa[-1], pb[-1])
+            > _d(pa[0], pb[-1]) + _d(pa[-1], pb[0])):
+        pb = pb[::-1]
+    closed = is_closed_curve(curve_a) and is_closed_curve(curve_b)
+    out = []
+    for i in range(1, count + 1):
+        t = i / (count + 1)
+        pts = [tuple(a + (b - a) * t for a, b in zip(p, q))
+               for p, q in zip(pa, pb)]
+        if closed:
+            out.append(make_interp_curve(pts[:-1], closed=True))
+        else:
+            out.append(make_interp_curve(pts))
+    return out
+
+
+def smooth_curve(shape, strength: float = 0.2, iterations: int = 5):
+    """Laplacian-smooth a curve's control points (endpoints stay put)."""
+    strength = min(max(float(strength), 0.0), 1.0)
+    bs = _edge_bspline(shape)
+    n = bs.NbPoles()
+    if n < 3:
+        return copy_shape(shape)
+    periodic = bs.IsPeriodic()
+    seam = (not periodic
+            and bs.StartPoint().Distance(bs.EndPoint()) < 1e-9)
+
+    def _blend(p, a, b):
+        return gp_Pnt(p.X() + ((a.X() + b.X()) / 2 - p.X()) * strength,
+                      p.Y() + ((a.Y() + b.Y()) / 2 - p.Y()) * strength,
+                      p.Z() + ((a.Z() + b.Z()) / 2 - p.Z()) * strength)
+
+    for _ in range(max(1, int(iterations))):
+        poles = [bs.Pole(i) for i in range(1, n + 1)]
+        if periodic:
+            for i in range(n):
+                bs.SetPole(i + 1, _blend(poles[i], poles[(i - 1) % n],
+                                         poles[(i + 1) % n]))
+        else:
+            for i in range(1, n - 1):
+                bs.SetPole(i + 1, _blend(poles[i], poles[i - 1],
+                                         poles[i + 1]))
+            if seam:
+                # coincident end poles move together across the seam
+                p = _blend(poles[0], poles[n - 2], poles[1])
+                bs.SetPole(1, p)
+                bs.SetPole(n, p)
+    return BRepBuilderAPI_MakeEdge(bs).Edge()

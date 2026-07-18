@@ -375,3 +375,37 @@ def cmd_orient3pt(ctx):
                         preview_fn=_preview)
     made = _place(ctx, objs, _matrix(t3), ctx.opt("Copy", "No") == "Yes")
     ctx.echo(f"Oriented {len(made)} object(s) onto the target frame.")
+
+
+@command("rotate3d", aliases=("ro3",))
+def cmd_rotate3d(ctx):
+    """Rotate around an arbitrary axis picked as two points."""
+    import math
+
+    import numpy as np
+    objs = yield SelectReq("Select objects to rotate")
+    p1 = yield PointReq("Start of rotation axis")
+    p2 = yield PointReq("End of rotation axis", rubber_from=p1)
+    axis = tuple(np.subtract(p2, p1))
+    if float(np.linalg.norm(axis)) < 1e-12:
+        ctx.echo("Zero-length axis — cancelled.")
+        return
+
+    def _preview(a):
+        if not isinstance(a, float):
+            return None
+        return _ghost(objs, lambda s: g.rotate(s, p1, axis, a))
+
+    angle = yield NumberReq("Angle in degrees",
+                            choices={"Copy": ["No", "Yes"]},
+                            preview_fn=_preview)
+    copy = ctx.opt("Copy", "No") == "Yes"
+    for o in objs:
+        rotated = g.rotate(o.shape, p1, axis, angle)
+        if copy:
+            ctx.scene.add_from(rotated, o)
+        else:
+            ctx.scene.replace_shape(o.id, rotated)
+    verb = "Rotated a copy of" if copy else "Rotated"
+    ctx.echo(f"{verb} {len(objs)} object(s) {angle:g} degrees "
+             "around the picked axis.")

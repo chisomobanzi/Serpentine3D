@@ -31,6 +31,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `point` (`pt`) | Point |
 | `polyline` (`pl`, `pline`) | Polyline |
 | `rectangle` (`rect`, `rec`) | Rectangle |
+| `tweencurves` (`tween`) | Tweencurves |
 
 ## Deformation
 
@@ -51,6 +52,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 |---|---|
 | `1view` (`oneview`, `singleview`) | 1view |
 | `4view` (`fourview`, `quadview`) | Split the model area into Top / Front / Right / Perspective. |
+| `ai` (`assistant`) | Open the AI assistant panel — model by describing what you want. |
 | `area` | Area |
 | `back` | Back |
 | `bottom` | Bottom |
@@ -81,6 +83,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `selclippingplane` | Select every clipping plane object. |
 | `shaded` (`sh`) | Shaded |
 | `snap` | Snap |
+| `spacemouse` (`3dmouse`) | SpaceMouse status, on/off toggle, and a live axis readout for |
 | `technical` (`tech`) | Hidden-line technical display (parallel projection linework). |
 | `tolerance` | Show or set the document's absolute modelling tolerance. |
 | `top` | Top |
@@ -147,6 +150,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `selall` (`sa`) | Selall |
 | `selnone` (`sn`) | Selnone |
 | `show` (`unhide`) | Show |
+| `smooth` | Relax a curve's control points toward their neighbours. |
 | `split` | Split |
 | `trim` (`tr`) | Trim |
 | `undo` | Undo |
@@ -262,6 +266,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `orient` (`o2`) | Remap objects from two reference points to two target points |
 | `orient3pt` (`o3`) | Remap objects from three reference points to three target points |
 | `rotate` (`ro`) | Rotate around the CPlane normal: type an angle, or pick a |
+| `rotate3d` (`ro3`) | Rotate around an arbitrary axis picked as two points. |
 | `scale` (`sc`) | Scale about a base point: type a factor, or grab a reference |
 | `scalenu` | Scalenu |
 

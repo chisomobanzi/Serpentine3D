@@ -304,3 +304,28 @@ def cmd_boundingbox(ctx):
     obj = ctx.scene.add(g.make_box(tuple(mins), *map(float, size)))
     ctx.echo(f"Created {obj.name} "
              f"({size[0]:g} x {size[1]:g} x {size[2]:g}).")
+
+
+@command("smooth")
+def cmd_smooth(ctx):
+    """Relax a curve's control points toward their neighbours."""
+    objs = yield SelectReq("Select curves to smooth", kinds=("curve",))
+
+    def _preview(s):
+        try:
+            return g.make_compound(
+                [g.smooth_curve(o.shape, s, 5) for o in objs])
+        except g.GeometryError:
+            return None
+
+    strength = yield NumberReq("Smooth factor (0–1)", default=0.2,
+                               minimum=0.0, preview_fn=_preview)
+    n = 0
+    for o in objs:
+        try:
+            ctx.scene.replace_shape(o.id,
+                                    g.smooth_curve(o.shape, strength, 5))
+            n += 1
+        except g.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+    ctx.echo(f"Smoothed {n} curve(s).")

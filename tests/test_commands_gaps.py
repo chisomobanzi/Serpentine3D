@@ -229,3 +229,56 @@ def test_mirror_copy_preserves_attributes(env):
     copies = [o for o in scene.all() if o.id != obj.id]
     assert len(copies) == 1
     assert copies[0].color == (0.0, 1.0, 0.0)
+
+
+def test_rotate3d_command(env):
+    scene, sel, hist, ctx, proc = env
+    # line along X at z=0; rotate 90° around the X axis itself
+    obj = scene.add(g.make_line((0, 0, 0), (10, 0, 0)))
+    tip = scene.add(g.make_point((5, 3, 0)))
+    proc.run("rotate3d")
+    proc.click_object(tip.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")
+    proc.provide_text("10,0,0")
+    proc.provide_text("90")
+    assert not proc.busy
+    assert g.point_coords(scene.get(tip.id).shape) == pytest.approx(
+        (5, 0, 3), abs=1e-6)
+
+
+def test_rotate3d_copy_option(env):
+    scene, sel, hist, ctx, proc = env
+    tip = scene.add(g.make_point((5, 3, 0)))
+    proc.run("rotate3d")
+    proc.click_object(tip.id)
+    proc.finish_selection()
+    proc.provide_text("0,0,0")
+    proc.provide_text("10,0,0")
+    proc.provide_text("Copy=Yes")
+    proc.provide_text("90")
+    assert len(scene.all()) == 2
+
+
+def test_tweencurves_command(env):
+    scene, sel, hist, ctx, proc = env
+    a = scene.add(g.make_line((0, 0, 0), (10, 0, 0)))
+    b = scene.add(g.make_line((0, 10, 0), (10, 10, 0)))
+    proc.run("tweencurves")
+    proc.click_object(a.id)
+    proc.click_object(b.id)
+    proc.provide_text("2")
+    curves = [o for o in scene.all() if o.kind == "curve"]
+    assert len(curves) == 4  # 2 originals + 2 tweens
+
+
+def test_smooth_command(env):
+    scene, sel, hist, ctx, proc = env
+    pts = [(x, (2 if x % 2 else -2), 0) for x in range(9)]
+    zig = scene.add(g.make_interp_curve(pts))
+    before = g.curve_length(zig.shape)
+    proc.run("smooth")
+    proc.click_object(zig.id)
+    proc.finish_selection()
+    proc.provide_text("0.4")
+    assert g.curve_length(scene.get(zig.id).shape) < before

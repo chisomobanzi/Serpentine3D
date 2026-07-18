@@ -174,3 +174,17 @@ def cmd_divide(ctx):
             ctx.scene.add(g.make_point(p), layer_id=c.layer_id)
             total += 1
     ctx.echo(f"Placed {total} division points.")
+
+
+@command("tweencurves", aliases=("tween",))
+def cmd_tweencurves(ctx):
+    from .base import IntReq
+    first = yield SelectReq("Select first curve", kinds=("curve",),
+                            max_count=1)
+    second = yield SelectReq("Select second curve", kinds=("curve",),
+                             max_count=1, allow_preselected=False)
+    n = yield IntReq("Number of tween curves", default=1, minimum=1)
+    curves = g.tween_curves(first[0].shape, second[0].shape, int(n))
+    for c in curves:
+        ctx.scene.add(c, layer_id=first[0].layer_id)
+    ctx.echo(f"Created {len(curves)} tween curve(s).")

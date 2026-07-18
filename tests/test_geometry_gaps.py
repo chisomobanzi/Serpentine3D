@@ -129,3 +129,50 @@ def test_iso_curve_on_cylinder():
     assert g.curve_length(around) == pytest.approx(2 * math.pi * 3, rel=1e-4)
     up = g.iso_curve(cyl, (3, 0, 5), along="v")
     assert g.curve_length(up) == pytest.approx(10, rel=1e-6)
+
+
+# --- tween / smooth ----------------------------------------------------------
+
+def test_tween_curves_between_lines():
+    a = g.make_line((0, 0, 0), (10, 0, 0))
+    b = g.make_line((0, 10, 0), (10, 10, 0))
+    mids = g.tween_curves(a, b, 3)
+    assert len(mids) == 3
+    (mn, mx) = g.bbox(mids[1])
+    assert mn[1] == pytest.approx(5, abs=0.05)
+    assert mx[1] == pytest.approx(5, abs=0.05)
+
+
+def test_tween_orients_reversed_curve():
+    a = g.make_line((0, 0, 0), (10, 0, 0))
+    b = g.make_line((10, 10, 0), (0, 10, 0))   # opposite direction
+    mid = g.tween_curves(a, b, 1)[0]
+    # a straight mid line, not a crossing bowtie
+    assert g.curve_length(mid) == pytest.approx(10, rel=1e-3)
+
+
+def test_tween_closed_curves():
+    a = g.make_circle((0, 0, 0), 10)
+    b = g.make_circle((0, 0, 10), 4)
+    mid = g.tween_curves(a, b, 1)[0]
+    assert g.is_closed_curve(mid)
+    (mn, mx) = g.bbox(mid)
+    assert mx[0] == pytest.approx(7, rel=0.05)
+
+
+def test_smooth_curve_flattens_zigzag():
+    pts = [(x, (2 if x % 2 else -2), 0) for x in range(9)]
+    zig = g.make_interp_curve(pts)
+    smoothed = g.smooth_curve(zig, strength=0.4, iterations=10)
+    assert g.curve_length(smoothed) < g.curve_length(zig)
+    (s0, s1) = g.curve_endpoints(smoothed)
+    assert s0 == pytest.approx((0, -2, 0), abs=1e-6)
+    assert s1 == pytest.approx((8, -2, 0), abs=1e-6)
+
+
+def test_smooth_closed_curve_stays_closed():
+    pts = [(10, 0, 0), (5, 4, 0), (0, 0, 0), (5, -6, 2)]
+    wavy = g.make_interp_curve(pts, closed=True)
+    smoothed = g.smooth_curve(wavy, strength=0.3, iterations=5)
+    assert g.is_closed_curve(smoothed)
+    assert g.curve_length(smoothed) < g.curve_length(wavy)
