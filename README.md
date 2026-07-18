@@ -11,7 +11,7 @@ a construction plane, STEP/OBJ interchange, and a dark, focused interface.
 Named for the serpentine stone of Zimbabwean Shona sculpture, and for the
 S-curve at the heart of NURBS geometry.
 
-![Serpentine3D screenshot](assets/showcase.png)
+![Two interlinked bands modelled and rendered in Serpentine3D](assets/showcase.webp)
 
 ## Why
 
