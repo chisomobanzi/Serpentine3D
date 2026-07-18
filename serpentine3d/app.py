@@ -7,7 +7,7 @@ import signal
 import sys
 
 import numpy as np
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QMainWindow, QMessageBox,
@@ -32,12 +32,18 @@ APP_TITLE = "Serpentine3D"
 
 
 class MainWindow(QMainWindow):
+    # emitted from the background update-check thread; handled on the main
+    # thread so the notice is shown Qt-safely
+    updateAvailable = Signal(object)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
         self.resize(1440, 900)
 
         # core state
+        self._pending_update = None
+        self.updateAvailable.connect(self._on_update_available)
         from .utils.config import Config
         self.cfg = Config()
         self.scene = Scene()
@@ -471,6 +477,8 @@ class MainWindow(QMainWindow):
 
         m_help = mb.addMenu("&Help")
         self._action(m_help, "Commands", None, self._show_commands)
+        self._action(m_help, "Check for Updates…", None,
+                     self._check_updates_manual)
         self._action(m_help, "About", None, self._about)
 
     def plugin_menu_action(self, label: str, fn):
@@ -1002,6 +1010,73 @@ class MainWindow(QMainWindow):
             "OpenCASCADE geometry kernel · Qt · MCP-enabled.<br>"
             "Named for the serpentine stone of Zimbabwean Shona sculpture.")
 
+    # -- update notifier -------------------------------------------------
+    def start_update_check(self):
+        """Kick off a background check for a newer release (launch-time).
+        Non-blocking and fail-silent; skipped when turned off/headless."""
+        import os
+        if self.cfg.get("check_updates", default=True) is False:
+            return
+        if os.environ.get("SERP3D_NO_UPDATE_CHECK") == "1":
+            return
+        from PySide6.QtWidgets import QApplication
+        if QApplication.platformName() in ("offscreen", "minimal", "vnc"):
+            return                           # headless/automation: no network
+        import platform
+        import threading
+        from . import __version__
+        from .utils.updates import check_for_update
+
+        def worker():
+            rel = check_for_update(__version__, platform.system())
+            if rel:
+                self.updateAvailable.emit(rel)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_available(self, rel):
+        """Main-thread slot: a newer release was found on launch."""
+        self._pending_update = rel
+        self.statusBar().showMessage(
+            f"Serpentine3D {rel['version']} is available — "
+            f"Help ▸ Check for Updates to download.", 12000)
+
+    def _check_updates_manual(self):
+        """Help ▸ Check for Updates: synchronous, always reports back."""
+        import platform
+        from . import __version__
+        from .utils.updates import check_for_update
+        rel = self._pending_update or check_for_update(
+            __version__, platform.system())
+        self._show_update_result(rel)
+
+    def _show_update_result(self, rel):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from . import __version__
+        if not rel:
+            QMessageBox.information(
+                self, "Serpentine3D",
+                f"You’re up to date — v{__version__} is the latest release.")
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Update available")
+        box.setText(f"<b>Serpentine3D {rel['version']}</b> is available.")
+        box.setInformativeText(f"You have v{__version__}.")
+        dl = box.addButton("Download", QMessageBox.ButtonRole.AcceptRole)
+        notes = box.addButton("Release Notes",
+                              QMessageBox.ButtonRole.ActionRole)
+        box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        url = None
+        if clicked is dl:
+            url = rel.get("download") or rel.get("url")
+        elif clicked is notes:
+            url = rel.get("url")
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
     def _update_status(self):
         n = len(self.scene.all())
         sel = len(self.selection.ids)
@@ -1182,6 +1257,7 @@ def run_app(app, splash=None):
     from .ui.welcome import WelcomeScreen, should_show as _welcome
     if _welcome(window):
         WelcomeScreen(window).exec()
+    window.start_update_check()
     return app.exec()
 
 
