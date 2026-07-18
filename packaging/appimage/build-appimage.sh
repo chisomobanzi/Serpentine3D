@@ -57,4 +57,15 @@ fi
 cd "$DIST"
 "${BUILDER[@]}" build app --python-version "$PYVER" "$RECIPE"
 
-ls -lh "$DIST"/*.AppImage
+BUILT="$(ls "$DIST"/Serpentine3D-*.AppImage 2>/dev/null | head -1)"
+ls -lh "$BUILT"
+
+# Keep the desktop-installed copy (what the dock/launcher runs) in sync
+# with this build, so a rebuild is immediately live and never drifts from
+# dist/. Only touches an existing install; skip with SERP3D_NO_INSTALL_REFRESH=1.
+INSTALLED="$HOME/Applications/Serpentine3D.AppImage"
+if [ -n "$BUILT" ] && [ -f "$INSTALLED" ] \
+        && [ "${SERP3D_NO_INSTALL_REFRESH:-}" != "1" ]; then
+    install -m 755 "$BUILT" "$INSTALLED"
+    echo "Refreshed installed copy: $INSTALLED"
+fi
