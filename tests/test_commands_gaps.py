@@ -335,3 +335,114 @@ def test_smooth_command_on_polyline(env):
     proc.provide_text("0.5")
     after = scene.get(zig.id)
     assert g.curve_length(after.shape) < before
+
+
+def test_chamfer_command(env):
+    scene, sel, hist, ctx, proc = env
+    a = scene.add(g.make_line((0, 0, 0), (10, 0, 0)))
+    b = scene.add(g.make_line((10, 0, 0), (10, 10, 0)))
+    proc.run("chamfer")
+    proc.click_object(a.id)
+    proc.click_object(b.id)
+    proc.provide_text("2")
+    assert not proc.busy
+    assert len(scene.all()) == 1
+    joined = scene.all()[0]
+    assert g.curve_length(joined.shape) == pytest.approx(16 + 8 ** 0.5)
+
+
+def test_selprev_command(env):
+    scene, sel, hist, ctx, proc = env
+    a = scene.add(g.make_line((0, 0, 0), (1, 0, 0)))
+    b = scene.add(g.make_line((0, 1, 0), (1, 1, 0)))
+    sel.set([a.id, b.id])
+    sel.clear()
+    assert sel.ids == []
+    proc.run("selprev")
+    assert sorted(sel.ids) == sorted([a.id, b.id])
+
+
+def test_matchprops_command(env):
+    scene, sel, hist, ctx, proc = env
+    used = scene.layers.create("Walls")
+    src = scene.add(g.make_line((0, 0, 0), (1, 0, 0)), layer_id=used.id)
+    scene.update(src.id, color=(1, 0, 0), material={"opacity": 0.4})
+    dst = scene.add(g.make_line((0, 5, 0), (1, 5, 0)))
+    proc.run("matchprops")
+    proc.click_object(src.id)
+    proc.click_object(dst.id)
+    proc.finish_selection()
+    d = scene.get(dst.id)
+    assert d.layer_id == used.id
+    assert d.color == (1, 0, 0)
+    assert d.material == {"opacity": 0.4}
+
+
+def test_changelayer_command(env):
+    scene, sel, hist, ctx, proc = env
+    obj = scene.add(g.make_line((0, 0, 0), (1, 0, 0)))
+    proc.run("changelayer")
+    proc.click_object(obj.id)
+    proc.finish_selection()
+    proc.provide_text("Set Walls")
+    layer = scene.layers.find_by_name("Set Walls")
+    assert layer is not None
+    assert scene.get(obj.id).layer_id == layer.id
+
+
+def test_audit_command(env):
+    scene, sel, hist, ctx, proc = env
+    msgs = []
+    ctx.add_echo_listener(msgs.append)
+    scene.add(g.make_box((0, 0, 0), 1, 1, 1))
+    proc.run("audit")
+    assert "valid" in "\n".join(msgs)
+
+
+def test_projecttocplane_command(env):
+    scene, sel, hist, ctx, proc = env
+    wavy = scene.add(g.make_interp_curve([(0, 0, 1), (5, 2, 4),
+                                          (10, -1, 2)]))
+    proc.run("projecttocplane")
+    proc.click_object(wavy.id)
+    proc.finish_selection()
+    (mn, mx) = g.bbox(scene.get(wavy.id).shape)
+    assert mn[2] == pytest.approx(0, abs=1e-6)
+    assert mx[2] == pytest.approx(0, abs=1e-6)
+
+
+def test_angle_command(env):
+    scene, sel, hist, ctx, proc = env
+    msgs = []
+    ctx.add_echo_listener(msgs.append)
+    proc.run("angle")
+    proc.provide_text("0,0,0")
+    proc.provide_text("10,0,0")
+    proc.provide_text("0,10,0")
+    assert any("90" in m for m in msgs)
+
+
+def test_geometry_chamfer_and_project():
+    a = g.make_line((0, 0, 0), (10, 0, 0))
+    b = g.make_line((10, 0, 0), (10, 10, 0))
+    ea, bevel, eb = g.chamfer_curves(a, b, 2.0)
+    total = g.curve_length(g.join_curves([ea, bevel, eb]))
+    assert total == pytest.approx(16 + 8 ** 0.5)
+
+    tilted = g.make_line((0, 0, 5), (10, 0, 8))
+    flat = g.project_to_plane(tilted, (0, 0, 2), (0, 0, 1))
+    (mn, mx) = g.bbox(flat)
+    assert mn[2] == pytest.approx(2, abs=1e-6)
+    assert mx[2] == pytest.approx(2, abs=1e-6)
+
+
+def test_radius_command(env):
+    scene, sel, hist, ctx, proc = env
+    msgs = []
+    ctx.add_echo_listener(msgs.append)
+    circle = scene.add(g.make_circle((0, 0, 0), 7))
+    proc.run("radius")
+    proc.click_object(circle.id)
+    proc.provide_text("7,0,0")
+    assert not proc.busy
+    assert any("Radius: 7" in m for m in msgs)

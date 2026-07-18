@@ -1793,6 +1793,31 @@ def _d3(a: Point, b: Point) -> float:
     return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
 
 
+def _map_points(shape, fn, verb: str = "This operation"):
+    """New shape with every control point / vertex passed through fn."""
+    kind = shape_kind(shape)
+    if kind == "point":
+        return make_point(fn(point_coords(shape)))
+    if kind == "curve":
+        if shape.ShapeType() == occ.WIRE:
+            pts, closed = _wire_points(shape)
+            return make_polyline([fn(p) for p in pts], closed=closed)
+        bs = _edge_bspline(shape)
+        for i in range(1, bs.NbPoles() + 1):
+            bs.SetPole(i, _pnt(fn(pnt_tuple(bs.Pole(i)))))
+        return BRepBuilderAPI_MakeEdge(bs).Edge()
+    if kind == "surface":
+        bs, _ = _face_bspline_surface(shape)
+        for i in range(1, bs.NbUPoles() + 1):
+            for j in range(1, bs.NbVPoles() + 1):
+                bs.SetPole(i, j, _pnt(fn(pnt_tuple(bs.Pole(i, j)))))
+        mk = BRepBuilderAPI_MakeFace(bs, tol())
+        if not mk.IsDone():
+            raise GeometryError(f"{verb} failed on this surface")
+        return mk.Face()
+    raise GeometryError(f"{verb} does not support {kind}s")
+
+
 def set_points(shape, target: Point,
                axes: tuple[bool, bool, bool] = (False, False, True)):
     """Rhino SetPt: force chosen coordinates of every control point /
@@ -1803,26 +1828,36 @@ def set_points(shape, target: Point,
     def _snap(p: Point) -> Point:
         return tuple(t if on else c for c, t, on in zip(p, target, axes))
 
-    kind = shape_kind(shape)
-    if kind == "point":
-        return make_point(_snap(point_coords(shape)))
-    if kind == "curve":
-        if shape.ShapeType() == occ.WIRE:
-            pts, closed = _wire_points(shape)
-            if closed:
-                pts = pts  # make_polyline closes via flag
-            return make_polyline([_snap(p) for p in pts], closed=closed)
-        bs = _edge_bspline(shape)
-        for i in range(1, bs.NbPoles() + 1):
-            bs.SetPole(i, _pnt(_snap(pnt_tuple(bs.Pole(i)))))
-        return BRepBuilderAPI_MakeEdge(bs).Edge()
-    if kind == "surface":
-        bs, _ = _face_bspline_surface(shape)
-        for i in range(1, bs.NbUPoles() + 1):
-            for j in range(1, bs.NbVPoles() + 1):
-                bs.SetPole(i, j, _pnt(_snap(pnt_tuple(bs.Pole(i, j)))))
-        mk = BRepBuilderAPI_MakeFace(bs, tol())
-        if not mk.IsDone():
-            raise GeometryError("SetPt failed on this surface")
-        return mk.Face()
-    raise GeometryError(f"SetPt does not support {kind}s")
+    return _map_points(shape, _snap, "SetPt")
+
+
+def project_to_plane(shape, origin: Point, normal: Point):
+    """Flatten a curve/surface/point onto the plane through origin."""
+    import numpy as np
+    o = np.asarray(origin, float)
+    n = np.asarray(normal, float)
+    n = n / np.linalg.norm(n)
+
+    def _proj(p: Point) -> Point:
+        v = np.asarray(p, float)
+        return tuple(v - float(np.dot(v - o, n)) * n)
+
+    return _map_points(shape, _proj, "ProjectToCPlane")
+
+
+def chamfer_curves(edge_a, edge_b, d1: float, d2: float | None = None):
+    """Chamfer two line/arc edges: returns (trimmed_a, bevel, trimmed_b)."""
+    from OCP.ChFi2d import ChFi2d_ChamferAPI
+    if d1 <= 0:
+        raise GeometryError("Chamfer distance must be positive")
+    if d2 is None:
+        d2 = d1
+    api = ChFi2d_ChamferAPI(occ.to_edge(edge_a), occ.to_edge(edge_b))
+    if not api.Perform():
+        raise GeometryError("Chamfer failed (curves may not meet)")
+    ea_out = occ.TopoDS_Edge()
+    eb_out = occ.TopoDS_Edge()
+    bevel = api.Result(ea_out, eb_out, float(d1), float(d2))
+    if bevel.IsNull():
+        raise GeometryError("Chamfer produced no result")
+    return ea_out, bevel, eb_out

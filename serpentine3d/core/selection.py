@@ -7,6 +7,7 @@ class SelectionManager:
     def __init__(self, scene):
         self.scene = scene
         self._ids: list[str] = []      # ordered
+        self.previous_ids: list[str] = []   # last non-empty selection
         self.subobjects: list = []     # [(obj_id, "edge"|"face", index)]
         self._listeners: list = []
         self.filter_kinds: set = set()   # e.g. {"curve"}; empty = any
@@ -38,6 +39,8 @@ class SelectionManager:
         return obj_id in self._ids
 
     def set(self, ids: list[str]):
+        if self._ids:
+            self.previous_ids = list(self._ids)
         self._ids = [i for i in ids if i in self.scene.objects]
         self.subobjects = []
         self._notify()
@@ -67,6 +70,8 @@ class SelectionManager:
 
     def clear(self):
         if self._ids or self.subobjects:
+            if self._ids:
+                self.previous_ids = list(self._ids)
             self._ids = []
             self.subobjects = []
             self._notify()

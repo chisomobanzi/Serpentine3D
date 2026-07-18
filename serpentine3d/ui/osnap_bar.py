@@ -54,6 +54,11 @@ class OsnapBar(QWidget):
         self._grid.setChecked(viewport.grid_snap)
         self._grid.toggled.connect(self._grid_toggled)
         layout.addWidget(self._grid)
+        self._ortho = self._button(
+            "Ortho", "Constrain picks to CPlane axes (Shift overrides)")
+        self._ortho.setChecked(viewport.ortho)
+        self._ortho.toggled.connect(self._ortho_toggled)
+        layout.addWidget(self._ortho)
         layout.addStretch(1)
 
     def _button(self, text: str, tip: str) -> QToolButton:
@@ -80,9 +85,15 @@ class OsnapBar(QWidget):
         if self.config:
             self.config.set("grid_snap", on)
 
+    def _ortho_toggled(self, on: bool):
+        self.viewport.ortho = on
+        if self.config:
+            self.config.set("ortho", on)
+
     def refresh(self):
         """Sync button states from viewport (after commands toggle them)."""
         self._master.setChecked(self.viewport.snaps.enabled)
         for t, btn in self._buttons.items():
             btn.setChecked(self.viewport.snaps.types.get(t, False))
         self._grid.setChecked(self.viewport.grid_snap)
+        self._ortho.setChecked(self.viewport.ortho)

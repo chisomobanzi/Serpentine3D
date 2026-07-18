@@ -667,3 +667,55 @@ def cmd_ai(ctx):
     """Open the AI assistant panel — model by describing what you want."""
     ctx.window.show_ai_panel()
     yield from ()
+
+
+@command("ortho", mutates=False)
+def cmd_ortho(ctx):
+    """Toggle ortho: picked points lock to CPlane axes from the last
+    point (hold Shift for the momentary opposite)."""
+    vp = _vp(ctx)
+    vp.ortho = not vp.ortho
+    if getattr(ctx, "window", None) is not None:
+        bar = getattr(ctx.window, "osnap_bar", None)
+        if bar is not None:
+            bar.refresh()
+    ctx.echo(f"Ortho {'on' if vp.ortho else 'off'}.")
+    yield from ()
+
+
+@command("angle", mutates=False)
+def cmd_angle(ctx):
+    """Angle at a vertex point between two directions."""
+    import math
+
+    import numpy as np
+    pv = yield PointReq("Vertex point")
+    p1 = yield PointReq("First direction point", rubber_from=pv)
+    p2 = yield PointReq("Second direction point", rubber_from=pv)
+    v1 = np.subtract(p1, pv)
+    v2 = np.subtract(p2, pv)
+    n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
+    if n1 < 1e-12 or n2 < 1e-12:
+        ctx.echo("Degenerate direction — cancelled.")
+        return
+    cosang = float(np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0))
+    a = math.degrees(math.acos(cosang))
+    ctx.echo(f"Angle: {a:.4g} degrees ({360 - a if a else 0:.4g} reflex)")
+
+
+@command("radius", mutates=False)
+def cmd_radius(ctx):
+    """Radius of curvature of a curve at a picked point."""
+    curves = yield SelectReq("Select curve", kinds=("curve",), max_count=1)
+    p = yield PointReq("Point on curve")
+    try:
+        info = g.curvature_at(curves[0].shape, p)
+    except g.GeometryError as exc:
+        ctx.echo(str(exc))
+        return
+    k = info["curvature"]
+    if k <= 1e-12:
+        ctx.echo("Curve is straight there (infinite radius).")
+    else:
+        ctx.echo(f"Radius: {ctx.scene.format_length(info['radius'])}"
+                 f"  (curvature {k:.6g})")

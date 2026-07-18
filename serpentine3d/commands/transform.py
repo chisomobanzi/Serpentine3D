@@ -436,3 +436,21 @@ def cmd_setpt(ctx):
             ctx.echo(f"{o.name}: {exc}")
     tags = "".join(a for a, on in zip("XYZ", axes) if on)
     ctx.echo(f"Set {tags} on {n} object(s).")
+
+
+@command("projecttocplane", aliases=("flatten",))
+def cmd_projecttocplane(ctx):
+    """Flatten curves/surfaces/points onto the construction plane."""
+    objs = yield SelectReq("Select objects to flatten",
+                           kinds=("curve", "surface", "point"))
+    origin = tuple(ctx.cplane.origin)
+    normal = tuple(ctx.cplane.normal)
+    n = 0
+    for o in objs:
+        try:
+            ctx.scene.replace_shape(
+                o.id, g.project_to_plane(o.shape, origin, normal))
+            n += 1
+        except g.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+    ctx.echo(f"Flattened {n} object(s) onto the CPlane.")

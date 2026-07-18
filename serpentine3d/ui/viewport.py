@@ -438,6 +438,7 @@ class Viewport(QOpenGLWidget):
         self.grid_snap_step = (float(config.get("grid_snap_step",
                                                 default=1.0))
                                if config else 1.0)
+        self.ortho = bool(config.get("ortho")) if config else False
         self.cv_enabled: set[str] = set()   # objects showing control points
         self.comb_enabled: set[str] = set() # curvature combs on curves
         self.draft_angle = 3.0              # draft analysis threshold (deg)
@@ -1657,10 +1658,11 @@ class Viewport(QOpenGLWidget):
         if self.grid_snap:
             hit = np.asarray(
                 self.cplane.snap_to_grid(hit, self.grid_snap_step))
-        # ortho: Shift constrains to the dominant CPlane axis from the base
-        if (self.snap_base is not None
-                and QApplication.queryKeyboardModifiers()
-                & Qt.KeyboardModifier.ShiftModifier):
+        # ortho constrains to the dominant CPlane axis from the base point;
+        # Shift is the momentary override (toggles the persistent setting)
+        shift = bool(QApplication.queryKeyboardModifiers()
+                     & Qt.KeyboardModifier.ShiftModifier)
+        if self.snap_base is not None and (self.ortho != shift):
             bu, bv, bw = self.cplane.from_world(self.snap_base)
             u, v, w = self.cplane.from_world(hit)
             if abs(u - bu) >= abs(v - bv):

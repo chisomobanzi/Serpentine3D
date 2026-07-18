@@ -218,3 +218,56 @@ def cmd_what(ctx):
         ctx.echo("\n".join(lines))
     if not objs:
         ctx.echo("Nothing selected.")
+
+
+@command("matchprops", aliases=("matchproperties",))
+def cmd_matchprops(ctx):
+    """Copy layer, colour and material from one object to others."""
+    src = yield SelectReq("Select source object", max_count=1)
+    targets = yield SelectReq("Select objects to change",
+                              allow_preselected=False)
+    s = src[0]
+    n = 0
+    for o in targets:
+        if o.id == s.id:
+            continue
+        ctx.scene.update(o.id, layer_id=s.layer_id, color=s.color,
+                         material=dict(s.material) if s.material else None)
+        n += 1
+    ctx.echo(f"Matched properties on {n} object(s) from {s.name}.")
+
+
+@command("changelayer", aliases=("tolayer",))
+def cmd_changelayer(ctx):
+    """Move objects to a layer by name (created if missing)."""
+    objs = yield SelectReq("Select objects to move to a layer")
+    name = yield TextReq("Layer name")
+    name = name.strip()
+    if not name:
+        ctx.echo("No layer name given.")
+        return
+    layer = ctx.scene.layers.find_by_name(name)
+    if layer is None:
+        layer = ctx.scene.layers.create(name)
+        ctx.echo(f"Created layer {layer.name}.")
+    for o in objs:
+        ctx.scene.update(o.id, layer_id=layer.id)
+    ctx.scene.notify("layers")
+    ctx.echo(f"Moved {len(objs)} object(s) to {layer.name}.")
+
+
+@command("audit", mutates=False)
+def cmd_audit(ctx):
+    """Check every object's geometry for validity."""
+    bad = []
+    for o in ctx.scene.all():
+        try:
+            if not g.is_valid(o.shape):
+                bad.append(o.name)
+        except Exception:
+            bad.append(o.name)
+    if bad:
+        ctx.echo(f"{len(bad)} invalid object(s): " + ", ".join(bad))
+    else:
+        ctx.echo(f"All {len(ctx.scene.all())} object(s) are valid.")
+    yield from ()

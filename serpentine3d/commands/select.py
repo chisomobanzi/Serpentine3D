@@ -169,3 +169,16 @@ def cmd_seldup(ctx):
     ctx.echo(f"Selected {len(dups)} duplicate object(s)."
              if dups else "No duplicates found.")
     yield from ()
+
+
+@command("selprev", mutates=False)
+def cmd_selprev(ctx):
+    """Restore the previous selection."""
+    prev = [i for i in ctx.selection.previous_ids
+            if ctx.scene.get(i) is not None]
+    if not prev:
+        ctx.echo("No previous selection.")
+    else:
+        ctx.selection.set(prev)
+        ctx.echo(f"Restored {len(prev)} object(s).")
+    yield from ()

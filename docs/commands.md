@@ -53,6 +53,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `1view` (`oneview`, `singleview`) | 1view |
 | `4view` (`fourview`, `quadview`) | Split the model area into Top / Front / Right / Perspective. |
 | `ai` (`assistant`) | Open the AI assistant panel — model by describing what you want. |
+| `angle` | Angle at a vertex point between two directions. |
 | `area` | Area |
 | `back` | Back |
 | `bottom` | Bottom |
@@ -73,11 +74,13 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `length` (`len`) | Length |
 | `namedview` (`nv`) | Namedview |
 | `newviewport` (`newvp`, `splitview`) | Open an extra live viewport in a dockable panel — drag its title |
+| `ortho` | Toggle ortho: picked points lock to CPlane axes from the last |
 | `osnap` | Toggle one object-snap type (or All = the master switch) — |
 | `perspective` (`persp`) | Perspective |
 | `pictureframe` (`picture`) | Place a reference image in the model (trace over photos/plans). |
 | `pointsoff` (`pf`) | Pointsoff |
 | `pointson` (`po`) | Show control points for selected curves and surfaces (F10). |
+| `radius` | Radius of curvature of a curve at a picked point. |
 | `rendered` (`render`) | Environment-lit display with materials and a ground shadow. |
 | `right` | Right |
 | `selclippingplane` | Select every clipping plane object. |
@@ -134,6 +137,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | Command | Does |
 |---|---|
 | `boundingbox` (`bb`) | Create the world-aligned bounding box of the selection. |
+| `chamfer` | Bevel the corner between two curves with straight cut-offs. |
 | `delete` (`del`, `erase`) | Delete |
 | `explode` (`x`) | Explode |
 | `fillet` | Fillet |
@@ -175,13 +179,16 @@ F1 opens this list inside the app). Aliases in parentheses.
 
 | Command | Does |
 |---|---|
+| `audit` | Check every object's geometry for validity. |
 | `block` | Turn a selection into a reusable block definition + one instance. |
 | `blocklist` (`blockmanager`) | Blocklist |
 | `breptomesh` (`meshify`) | Convert BREP objects into lightweight native meshes. |
+| `changelayer` (`tolayer`) | Move objects to a layer by name (created if missing). |
 | `count` | Count objects: totals by block, kind and layer (for takeoffs). |
 | `group` | Group |
 | `insert` | Insert |
 | `lock` | Lock |
+| `matchprops` (`matchproperties`) | Copy layer, colour and material from one object to others. |
 | `meshtobrep` | Convert mesh objects into exact BREP shells (slow for big meshes). |
 | `purge` | Remove empty layers and unused block definitions. |
 | `ungroup` | Ungroup |
@@ -201,6 +208,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `sellast` | Sellast |
 | `sellayer` | Sellayer |
 | `selname` | Select objects whose name contains the given text. |
+| `selprev` | Restore the previous selection. |
 | `selsolid` (`selsolids`) | Selsolid |
 | `selsrf` (`selsurfaces`) | Selsrf |
 | `unisolate` | Unisolate |
@@ -266,6 +274,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `move` (`m`) | Move |
 | `orient` (`o2`) | Remap objects from two reference points to two target points |
 | `orient3pt` (`o3`) | Remap objects from three reference points to three target points |
+| `projecttocplane` (`flatten`) | Flatten curves/surfaces/points onto the construction plane. |
 | `rotate` (`ro`) | Rotate around the CPlane normal: type an angle, or pick a |
 | `rotate3d` (`ro3`) | Rotate around an arbitrary axis picked as two points. |
 | `scale` (`sc`) | Scale about a base point: type a factor, or grab a reference |

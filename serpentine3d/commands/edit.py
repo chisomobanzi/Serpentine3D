@@ -329,3 +329,30 @@ def cmd_smooth(ctx):
         except g.GeometryError as exc:
             ctx.echo(f"{o.name}: {exc}")
     ctx.echo(f"Smoothed {n} curve(s).")
+
+
+@command("chamfer")
+def cmd_chamfer(ctx):
+    """Bevel the corner between two curves with straight cut-offs."""
+    a = yield SelectReq("Select first curve to chamfer", kinds=("curve",),
+                        max_count=1)
+    b = yield SelectReq("Select second curve", kinds=("curve",),
+                        max_count=1, allow_preselected=False)
+    from .base import TextReq
+    from ..utils.units import parse_length
+    t = yield TextReq("Chamfer distance (or d1,d2)", default="1")
+    if "," in t:
+        s1, _, s2 = t.partition(",")
+        d1 = parse_length(s1, ctx.scene.units)
+        d2 = parse_length(s2, ctx.scene.units)
+    else:
+        d1 = parse_length(t, ctx.scene.units)
+        d2 = None
+    if d1 is None:
+        ctx.echo("Could not parse distance.")
+        return
+    ea, bevel, eb = g.chamfer_curves(a[0].shape, b[0].shape, d1, d2)
+    joined = g.join_curves([ea, bevel, eb])
+    ctx.scene.remove(b[0].id)
+    new = ctx.scene.replace_shape(a[0].id, joined)
+    ctx.echo(f"Chamfered into {new.name}.")
