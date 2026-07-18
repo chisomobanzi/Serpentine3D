@@ -66,6 +66,7 @@ class Gumball:
             return True
         return (bool(vp.selection.ids)
                 or self._pushpull_target() is not None
+                or self._multiface_target() is not None
                 or self._fillet_target() is not None)
 
     def _pushpull_target(self):
@@ -115,6 +116,64 @@ class Gumball:
         t2 = np.cross(axis, t1)
         return oid, fidx, centroid, (t1, t2, axis), planar
 
+    def _face_axis(self, face):
+        """(centroid/sample-point, outward unit normal) for a face, planar
+        or curved; None if it has no usable normal."""
+        try:
+            nrm = np.asarray(g.face_normal(face), float)     # planar
+            c = np.asarray(g.centroid(face), float)
+        except g.GeometryError:
+            pt, nrm = g.face_point_normal(face)              # curved
+            c, nrm = np.asarray(pt, float), np.asarray(nrm, float)
+        length = float(np.linalg.norm(nrm))
+        if length < 1e-9:
+            return None
+        return c, nrm / length
+
+    def _multiface_target(self):
+        """For 2+ selected faces on one solid, return
+        (obj_id, [face_index...], anchor, (t1, t2, axis)); else None.
+
+        All the faces offset by the same distance along their own normals
+        (geometry.offset_faces) — inflate/deflate a shape, grow a slab from
+        both sides, etc. The handle sits at the faces' mean point along the
+        summed outward normal (first face's normal if they cancel)."""
+        subs = getattr(self.vp.selection, "subobjects", None)
+        if not subs:
+            return None
+        faces = [(oid, idx) for (oid, kind, idx) in subs if kind == "face"]
+        if len(faces) < 2:
+            return None
+        oid = faces[0][0]
+        idxs = [idx for (o, idx) in faces if o == oid]
+        if len(idxs) < 2:                    # need 2+ on the same solid
+            return None
+        obj = self.vp.scene.get(oid)
+        if obj is None:
+            return None
+        try:
+            flist = g.faces_of(obj.shape)
+            if any(not (0 <= i < len(flist)) for i in idxs):
+                return None
+            axes = [self._face_axis(flist[i]) for i in idxs]
+        except g.GeometryError:
+            return None
+        if any(a is None for a in axes):
+            return None
+        pts = [c for c, _ in axes]
+        normals = [n for _, n in axes]
+        anchor = np.mean(pts, axis=0)
+        axis = np.sum(normals, axis=0)
+        if np.linalg.norm(axis) < 1e-6:      # opposing faces cancel
+            axis = normals[0]
+        axis = axis / (np.linalg.norm(axis) or 1.0)
+        ref = (np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9
+               else np.array([0.0, 1.0, 0.0]))
+        t1 = np.cross(axis, ref)
+        t1 = t1 / (np.linalg.norm(t1) or 1.0)
+        t2 = np.cross(axis, t1)
+        return oid, idxs, anchor, (t1, t2, axis)
+
     def _fillet_target(self):
         """For one or more selected edges on a single solid, return
         (obj_id, [edge_index...], anchor, (t1, t2, outward)); else None.
@@ -154,10 +213,11 @@ class Gumball:
         return oid, idxs, anchor, (t1, t2, out)
 
     def _face_mode(self) -> bool:
-        """Is the gumball acting as a face push/pull handle right now?"""
+        """Is the gumball acting as a face push/pull or offset handle now?"""
         if self.drag is not None:
-            return bool(self.drag.get("pp"))
-        return self._pushpull_target() is not None
+            return bool(self.drag.get("pp") or self.drag.get("multiface"))
+        return (self._pushpull_target() is not None
+                or self._multiface_target() is not None)
 
     def _fillet_mode(self) -> bool:
         """Is the gumball acting as an edge fillet handle right now?"""
@@ -172,6 +232,10 @@ class Gumball:
             if pp is not None:               # face push/pull takes priority
                 _, _, centroid, basis, _ = pp
                 return centroid, basis
+            mf = self._multiface_target()
+            if mf is not None:               # then multi-face offset
+                _, _, anchor, basis = mf
+                return anchor, basis
             ft = self._fillet_target()
             if ft is not None:               # then edge fillet
                 _, _, anchor, basis = ft
@@ -493,7 +557,9 @@ class Gumball:
         anchor, axes = state
         vp = self.vp
         pp = self._pushpull_target()
-        ft = None if pp is not None else self._fillet_target()
+        mf = None if pp is not None else self._multiface_target()
+        ft = (None if (pp is not None or mf is not None)
+              else self._fillet_target())
         if pp is not None:                    # face push/pull mode
             if handle != ("move", 2):
                 return False
@@ -502,6 +568,14 @@ class Gumball:
                 return False
             originals = {pp[0]: obj.shape}
             self.vp.window_checkpoint("push/pull")
+        elif mf is not None:                  # multi-face offset mode
+            if handle != ("move", 2):
+                return False
+            obj = vp.scene.get(mf[0])
+            if obj is None:
+                return False
+            originals = {mf[0]: obj.shape}
+            self.vp.window_checkpoint("push faces")
         elif ft is not None:                  # edge fillet mode
             if handle != ("move", 2):
                 return False
@@ -552,6 +626,7 @@ class Gumball:
             "originals": originals,
             "pp": (pp[0], pp[1]) if pp is not None else None,
             "pp_planar": bool(pp[4]) if pp is not None else True,
+            "multiface": (mf[0], list(mf[1])) if mf is not None else None,
             "fillet": (ft[0], list(ft[1])) if ft is not None else None,
             "chamfer": ft is not None and _alt_held(modifiers),
             "ref": ref, "last_label": "", "offset": np.zeros(3),
@@ -637,6 +712,22 @@ class Gumball:
                 d["offset"] = np.asarray(axes[i] * value, float)
                 verb = "push/pull" if planar else "offset"
                 label = verb + " " + vp.scene.format_length(float(value))
+            elif d.get("multiface"):          # offset every selected face
+                oid, idxs = d["multiface"]
+                orig = d["originals"].get(oid)
+                if orig is not None and vp.scene.get(oid) is not None:
+                    if abs(value) > 1e-4:
+                        try:
+                            vp.scene.replace_shape(
+                                oid, g.offset_faces(orig,
+                                                    {k: value for k in idxs}))
+                        except g.GeometryError:
+                            pass          # too big — keep last good
+                    else:
+                        vp.scene.replace_shape(oid, orig)   # 0 → original
+                d["offset"] = np.asarray(axes[i] * value, float)
+                label = (f"push {len(idxs)} faces "
+                         + vp.scene.format_length(float(value)))
             elif d.get("fillet"):             # edge fillet/chamfer, radius=value
                 oid, idxs = d["fillet"]
                 orig = d["originals"].get(oid)

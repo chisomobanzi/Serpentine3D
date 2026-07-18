@@ -548,3 +548,51 @@ def test_edge_chain_and_variable_fillet():
     var = g.fillet_edges(box, (1.0, 3.0), edges=[g.edges_of(box)[0]])
     assert g.shape_kind(var) == "solid"
     assert 900 < g.volume(var) < 1000
+
+
+# --------------------------------------------------------- offset_faces
+
+
+def _box_faces_by_z():
+    box = g.make_box((0, 0, 0), 10, 10, 10)
+    faces = g.faces_of(box)
+    top = next(i for i, f in enumerate(faces) if g.face_normal(f)[2] > 0.9)
+    bot = next(i for i, f in enumerate(faces) if g.face_normal(f)[2] < -0.9)
+    sides = [i for i in range(len(faces)) if i not in (top, bot)]
+    return box, top, bot, sides
+
+
+def test_offset_faces_grows_two_opposite_faces():
+    box, top, bot, _ = _box_faces_by_z()
+    out = g.offset_faces(box, {top: 5.0, bot: 5.0})   # height 10 -> 20
+    assert g.volume(out) == pytest.approx(2000.0, abs=1)
+
+
+def test_offset_faces_grows_footprint():
+    box, _, _, sides = _box_faces_by_z()
+    out = g.offset_faces(box, {s: 2.0 for s in sides})   # 10x10 -> 14x14
+    assert g.volume(out) == pytest.approx(1960.0, abs=1)
+
+
+def test_offset_faces_single_entry_matches_push():
+    box, top, _, _ = _box_faces_by_z()
+    out = g.offset_faces(box, {top: 5.0})
+    assert g.volume(out) == pytest.approx(1500.0, abs=1)
+
+
+def test_offset_faces_rejects_carve_through():
+    box, top, _, _ = _box_faces_by_z()
+    with pytest.raises(g.GeometryError):
+        g.offset_faces(box, {top: -20.0})
+
+
+def test_offset_faces_rejects_bad_index():
+    box, _, _, _ = _box_faces_by_z()
+    with pytest.raises(g.GeometryError):
+        g.offset_faces(box, {999: 2.0})
+
+
+def test_offset_faces_rejects_empty():
+    box, _, _, _ = _box_faces_by_z()
+    with pytest.raises(g.GeometryError):
+        g.offset_faces(box, {})

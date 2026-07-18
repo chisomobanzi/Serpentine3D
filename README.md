@@ -143,7 +143,9 @@ handle along the face normal — drag it, or type a distance, to extrude the
 face outward or carve it inward; the solid rebuilds live and the handle
 stays on the moved face for repeated pulls. A **curved face** (a cylinder
 or cone wall, a sphere) offsets instead — push it to grow or shrink the
-radius, adjacent faces extending to meet it.
+radius, adjacent faces extending to meet it. Select **several faces** and
+one handle offsets them all together, each along its own normal — inflate a
+shape, or grow a slab from both sides at once.
 
 Ctrl+Shift-click one or more **edges** and the gumball becomes a fillet
 handle — drag it outward, or type a radius, to round the edges; every

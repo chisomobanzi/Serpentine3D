@@ -254,6 +254,55 @@ def test_oversized_fillet_keeps_last_good_shape():
     assert g.volume(scene.get(obj.id).shape) == pytest.approx(good, abs=1)
 
 
+# ------------------------------------------------------------- multi-face
+
+def _box_top_bottom():
+    scene, sel, obj, top = _box_scene()
+    faces = g.faces_of(obj.shape)
+    bot = next(i for i, f in enumerate(faces) if g.face_normal(f)[2] < -0.9)
+    return scene, sel, obj, top, bot
+
+
+def test_two_faces_activate_multiface():
+    scene, sel, obj, top, bot = _box_top_bottom()
+    gb = Gumball(_VP(scene, sel))
+    sel.toggle_subobject(obj.id, "face", top)
+    sel.toggle_subobject(obj.id, "face", bot)
+    assert gb.active() is True
+    assert gb._face_mode() is True
+    assert gb._pushpull_target() is None       # 1-face handle doesn't fire
+    mf = gb._multiface_target()
+    assert mf is not None
+    oid, idxs, anchor, basis = mf
+    assert oid == obj.id and set(idxs) == {top, bot}
+
+
+def test_single_face_is_pushpull_not_multiface():
+    scene, sel, obj, top = _box_scene()
+    gb = Gumball(_VP(scene, sel))
+    sel.toggle_subobject(obj.id, "face", top)
+    assert gb._pushpull_target() is not None
+    assert gb._multiface_target() is None
+
+
+def test_multiface_offsets_all_faces_via_gumball():
+    scene, sel, obj, top, bot = _box_top_bottom()
+    gb = Gumball(_VP(scene, sel))
+    sel.toggle_subobject(obj.id, "face", top)
+    sel.toggle_subobject(obj.id, "face", bot)
+    assert gb.begin_drag(("move", 2), 5.0, 5.0, 0) is True
+    assert set(gb.drag["multiface"][1]) == {top, bot}
+
+    gb.apply_scalar(5.0)                        # both grow 5 -> height 20
+    assert g.volume(scene.get(obj.id).shape) == pytest.approx(2000.0, abs=1)
+    gb.apply_scalar(0.0)                        # revert to original
+    assert g.volume(scene.get(obj.id).shape) == pytest.approx(1000.0, abs=1)
+
+    gb.end_drag()
+    # offsets keep face indices stable, so the faces stay selected for reuse
+    assert gb._multiface_target() is not None
+
+
 def test_chamfer_when_alt_held():
     from PySide6.QtCore import Qt
     scene, sel, obj, _ = _box_scene()

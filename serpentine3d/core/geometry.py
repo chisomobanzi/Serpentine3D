@@ -491,32 +491,46 @@ def push_pull(shape, face_index: int, distance: float) -> TopoDS_Shape:
     return unwrap_compound(result)
 
 
-def offset_face(shape, face_index: int, distance: float) -> TopoDS_Shape:
-    """Offset a single (typically non-planar) face of a solid along its
-    surface normal — e.g. push a cylinder's wall out to grow its radius.
-    Adjacent faces are extended (sharp) to meet the offset face."""
+def offset_faces(shape, offsets: dict) -> TopoDS_Shape:
+    """Offset one or more faces of a solid at once, each along its own
+    surface normal by its own distance (positive grows the solid). Adjacent
+    faces extend (sharp) to meet the moved faces; planar and curved faces,
+    and any mix, are handled together. `offsets` maps face_index ->
+    distance — e.g. push a cylinder wall to change its radius, or grow a
+    slab from both faces at once."""
     from OCP.BRepCheck import BRepCheck_Analyzer
     from OCP.BRepOffset import BRepOffset_MakeOffset, BRepOffset_Mode
     from OCP.GeomAbs import GeomAbs_JoinType
     faces = faces_of(shape)
-    if not (0 <= face_index < len(faces)):
-        raise GeometryError("Face index out of range")
-    if abs(float(distance)) < tight():
-        raise GeometryError("Distance is zero")
+    if not offsets:
+        raise GeometryError("No faces to offset")
+    for idx, dist in offsets.items():
+        if not (0 <= idx < len(faces)):
+            raise GeometryError("Face index out of range")
+        if abs(float(dist)) < tight():
+            raise GeometryError("Distance is zero")
     mko = BRepOffset_MakeOffset()
     mko.Initialize(shape, 0.0, tol(), BRepOffset_Mode.BRepOffset_Skin,
                    True, False, GeomAbs_JoinType.GeomAbs_Intersection,
                    False, False)
-    mko.SetOffsetOnFace(faces[face_index], float(distance))
+    for idx, dist in offsets.items():
+        mko.SetOffsetOnFace(faces[idx], float(dist))
     mko.MakeOffsetShape()
     out = mko.Shape()
     if not mko.IsDone() or out is None or out.IsNull():
-        raise GeometryError("Face offset failed — the distance is probably "
-                            "too large for this face")
+        raise GeometryError("Face offset failed — a distance is probably too "
+                            "large for its face")
     out = unwrap_compound(out)
     if abs(volume(out)) < tight() or not BRepCheck_Analyzer(out).IsValid():
         raise GeometryError("Face offset produced an invalid solid")
     return out
+
+
+def offset_face(shape, face_index: int, distance: float) -> TopoDS_Shape:
+    """Offset a single (typically non-planar) face of a solid along its
+    surface normal — e.g. push a cylinder's wall out to grow its radius.
+    A thin wrapper over offset_faces."""
+    return offset_faces(shape, {face_index: distance})
 
 
 def cap_holes(shape) -> TopoDS_Shape:
