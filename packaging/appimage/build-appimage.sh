@@ -41,7 +41,7 @@ fi
 
 # {{ python-executable }} is substituted by python-appimage at build time
 cat > "$RECIPE/entrypoint.sh" << 'EOF'
-{{ python-executable }} -m serpentine3d.app "$@"
+{{ python-executable }} -m serpentine3d "$@"
 EOF
 
 # no spaces: python-appimage word-splits requirement lines when invoking pip

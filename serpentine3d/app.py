@@ -1062,29 +1062,22 @@ def _selftest() -> int:
     return 0 if ok else 1
 
 
-def main():
-    if "--selftest" in sys.argv:
-        raise SystemExit(_selftest())
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    set_default_gl_format()
-    app = QApplication(sys.argv)
+def run_app(app, splash=None):
+    """Build the main window and run the event loop.
+
+    `app` is an already-created QApplication; `splash` is an optional
+    SplashScreen already on screen (see serpentine3d.launcher, which shows
+    it before the geometry kernel imports so it covers the slow cold start).
+    """
     app.setApplicationName(APP_TITLE)
     # GNOME matches windows to the launcher (icon, grouping, pinning)
     # by this name — must equal the installed serpentine3d.desktop
     app.setDesktopFileName("serpentine3d")
     app.setStyleSheet(theme.QSS)
 
-    splash = None
-    from .ui.splash import SplashScreen, should_show
-    if should_show():
-        from . import __version__
-        splash = SplashScreen(__version__)
-        splash.show()
-        splash.message("Loading geometry kernel…", 0.15)
-
-    window = MainWindow()
     if splash:
         splash.message("Preparing workspace…", 0.7)
+    window = MainWindow()
 
     # RPC bridge for the MCP server (unless disabled)
     if os.environ.get("SERP3D_NO_RPC") != "1":
@@ -1126,6 +1119,22 @@ def main():
                 window.command_line.echo(f"Could not open {arg}: {exc}")
             break
     return app.exec()
+
+
+def main():
+    """Standalone entry (tests, `python -m serpentine3d.app`).
+
+    Real launches go through serpentine3d.launcher instead, which puts the
+    splash up before this module's geometry-kernel imports load. This path
+    has no early splash — by the time it runs, the kernel is already
+    imported — so it's kept for tests and simple invocations.
+    """
+    if "--selftest" in sys.argv:
+        raise SystemExit(_selftest())
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    set_default_gl_format()
+    app = QApplication(sys.argv)
+    return run_app(app, splash=None)
 
 
 if __name__ == "__main__":

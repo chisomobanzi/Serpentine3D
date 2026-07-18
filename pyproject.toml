@@ -25,8 +25,8 @@ docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 Homepage = "https://github.com/chisomobanzi/Serpentine3D"
 
 [project.scripts]
-serp3d = "serpentine3d.app:main"
-serp = "serpentine3d.app:main"          # short alias, like `code` for VS Code
+serp3d = "serpentine3d.launcher:main"
+serp = "serpentine3d.launcher:main"          # short alias, like `code` for VS Code
 serp3d-mcp = "serpentine3d.mcp_server.server:main"
 serp3d-batch = "serpentine3d.batch:main"
 
