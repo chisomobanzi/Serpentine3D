@@ -487,3 +487,41 @@ def test_fuzzy_score_ranking():
     assert exact > sub
     # word-start bonus: 'ze' should hit zoomextents strongly
     assert fuzzy_score("ze", "zoomextents") > fuzzy_score("ze", "size")
+
+
+def test_extendsrf_command(env):
+    scene, sel, hist, ctx, proc = env
+    sheet = scene.add(g.extrude(g.make_line((0, 0, 0), (10, 0, 0)),
+                                (0, 1, 0), 5.0))
+    face = g.faces_of(sheet.shape)[0]
+    idx = None
+    for i, e in enumerate(g.edges_of(face)):
+        (mn, mx) = g.bbox(e)
+        if abs(mn[1] - 5) < 1e-6 and abs(mx[1] - 5) < 1e-6:
+            idx = i
+    sel.subobjects.append((sheet.id, "edge", idx))
+    proc.run("extendsrf")
+    proc.provide_text("4")
+    assert not proc.busy
+    (mn, mx) = g.bbox(scene.get(sheet.id).shape)
+    assert mx[1] == pytest.approx(9, abs=1e-6)
+
+
+def test_blendsrf_command(env):
+    scene, sel, hist, ctx, proc = env
+    s1 = scene.add(g.extrude(g.make_line((0, 0, 0), (10, 0, 0)),
+                             (0, -1, 0), 5.0))
+    s2 = scene.add(g.extrude(g.make_line((0, 8, 3), (10, 8, 3)),
+                             (0, 1, 0), 5.0))
+
+    def edge_idx(obj, y):
+        for i, e in enumerate(g.edges_of(g.faces_of(obj.shape)[0])):
+            (mn, mx) = g.bbox(e)
+            if abs(mn[1] - y) < 1e-6 and abs(mx[1] - y) < 1e-6:
+                return i
+    sel.subobjects.append((s1.id, "edge", edge_idx(s1, 0.0)))
+    sel.subobjects.append((s2.id, "edge", edge_idx(s2, 8.0)))
+    proc.run("blendsrf")
+    assert not proc.busy
+    srfs = [o for o in scene.all() if o.kind == "surface"]
+    assert len(srfs) == 3

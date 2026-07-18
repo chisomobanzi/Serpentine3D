@@ -230,3 +230,60 @@ def test_smooth_closed_polyline():
     smoothed = g.smooth_curve(sq, strength=0.5, iterations=3)
     assert g.is_closed_curve(smoothed)
     assert g.curve_length(smoothed) < 40.0
+
+
+# --- extendsrf / blendsrf ----------------------------------------------------
+
+def _flat_sheet():
+    return g.extrude(g.make_line((0, 0, 0), (10, 0, 0)), (0, 1, 0), 5.0)
+
+
+def test_extend_surface_grows_area():
+    sheet = _flat_sheet()
+    before = g.surface_area(sheet)
+    # find the edge at y=5 (far boundary)
+    face = g.faces_of(sheet)[0]
+    idx = None
+    for i, e in enumerate(g.edges_of(face)):
+        (mn, mx) = g.bbox(e)
+        if abs(mn[1] - 5) < 1e-6 and abs(mx[1] - 5) < 1e-6:
+            idx = i
+    assert idx is not None
+    out = g.extend_surface(sheet, idx, 4.0)
+    assert g.surface_area(out) == pytest.approx(before + 40, rel=1e-6)
+    (mn, mx) = g.bbox(out)
+    assert mx[1] == pytest.approx(9, abs=1e-6)
+
+
+def test_extend_surface_curved():
+    # quarter cylinder extended along its straight edge direction
+    arc = g.make_arc_3pt((5, 0, 0), (3.54, 3.54, 0), (0, 5, 0))
+    sheet = g.extrude(arc, (0, 0, 1), 6.0)
+    face = g.faces_of(sheet)[0]
+    idx = None
+    for i, e in enumerate(g.edges_of(face)):
+        (mn, mx) = g.bbox(e)
+        if abs(mn[2] - 6) < 1e-6 and abs(mx[2] - 6) < 1e-6:
+            idx = i
+    assert idx is not None
+    out = g.extend_surface(sheet, idx, 3.0)
+    (mn, mx) = g.bbox(out)
+    assert mx[2] == pytest.approx(9, abs=1e-3)
+    assert g.surface_area(out) > g.surface_area(sheet) * 1.3
+
+
+def test_blend_surfaces():
+    s1 = g.extrude(g.make_line((0, 0, 0), (10, 0, 0)), (0, -1, 0), 5.0)
+    s2 = g.extrude(g.make_line((0, 8, 3), (10, 8, 3)), (0, 1, 0), 5.0)
+    f1, f2 = g.faces_of(s1)[0], g.faces_of(s2)[0]
+
+    def edge_at(face, y):
+        for e in g.edges_of(face):
+            (mn, mx) = g.bbox(e)
+            if abs(mn[1] - y) < 1e-6 and abs(mx[1] - y) < 1e-6:
+                return e
+    blend = g.blend_surfaces(f1, edge_at(f1, 0.0), f2, edge_at(f2, 8.0))
+    assert g.shape_kind(blend) == "surface"
+    assert g.surface_area(blend) > 80
+    (mn, mx) = g.bbox(blend)
+    assert mx[2] == pytest.approx(3, abs=0.4)

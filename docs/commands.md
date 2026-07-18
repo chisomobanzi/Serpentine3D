@@ -240,10 +240,12 @@ F1 opens this list inside the app). Aliases in parentheses.
 | Command | Does |
 |---|---|
 | `blendcrv` (`blend`) | Blendcrv |
+| `blendsrf` | G1 blend surface between two Ctrl+Shift-picked surface edges. |
 | `dupborder` | Dupborder |
 | `dupedge` | Duplicate Ctrl+Shift-picked edges as curves. |
 | `dupfaceborder` | Duplicate the border wires of Ctrl+Shift-picked faces as curves. |
 | `edgesrf` (`srfedges`) | Edgesrf |
+| `extendsrf` | Extend a surface past a Ctrl+Shift-picked boundary edge. |
 | `extractisocurve` (`isocurve`) | Extractisocurve |
 | `extrude` (`ext`, `extrudecrv`) | Extrude |
 | `helix` | Helix |

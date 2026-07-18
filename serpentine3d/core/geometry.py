@@ -1861,3 +1861,157 @@ def chamfer_curves(edge_a, edge_b, d1: float, d2: float | None = None):
     if bevel.IsNull():
         raise GeometryError("Chamfer produced no result")
     return ea_out, bevel, eb_out
+
+
+def _strip_from_rows(anchor_row, tangent_row, length, v_knots, v_mults,
+                     v_degree, weights_row=None):
+    """Degree-1-by-N ruled strip from a pole row along unit tangents."""
+    import numpy as np
+    from OCP.Geom import Geom_BSplineSurface
+    n = len(anchor_row)
+    poles = TColgp_Array1OfPnt(1, 2 * n)
+    # build a 2 x n grid: row 1 = anchor, row 2 = anchor + L * unit tangent
+    grid = []
+    for q, d in zip(anchor_row, tangent_row):
+        dv = np.asarray(d, float)
+        norm = float(np.linalg.norm(dv))
+        if norm < 1e-12:
+            dv = np.zeros(3)
+        else:
+            dv = dv / norm * float(length)
+        grid.append((tuple(q), tuple(np.asarray(q, float) + dv)))
+    u_knots = TColStd_Array1OfReal(1, 2)
+    u_knots.SetValue(1, 0.0)
+    u_knots.SetValue(2, 1.0)
+    u_mults = TColStd_Array1OfInteger(1, 2)
+    u_mults.SetValue(1, 2)
+    u_mults.SetValue(2, 2)
+    vk = TColStd_Array1OfReal(1, len(v_knots))
+    vm = TColStd_Array1OfInteger(1, len(v_mults))
+    for i, (k, m) in enumerate(zip(v_knots, v_mults), start=1):
+        vk.SetValue(i, float(k))
+        vm.SetValue(i, int(m))
+    from OCP.TColgp import TColgp_Array2OfPnt
+    from OCP.TColStd import TColStd_Array2OfReal
+    poles2 = TColgp_Array2OfPnt(1, 2, 1, n)
+    w2 = TColStd_Array2OfReal(1, 2, 1, n)
+    for j in range(n):
+        a, b = grid[j]
+        poles2.SetValue(1, j + 1, _pnt(a))
+        poles2.SetValue(2, j + 1, _pnt(b))
+        w = weights_row[j] if weights_row else 1.0
+        w2.SetValue(1, j + 1, float(w))
+        w2.SetValue(2, j + 1, float(w))
+    surf = Geom_BSplineSurface(poles2, w2, u_knots, vk, u_mults, vm,
+                               1, v_degree, False, False)
+    mk = BRepBuilderAPI_MakeFace(surf, tol())
+    if not mk.IsDone():
+        raise GeometryError("Extension strip failed")
+    return mk.Face()
+
+
+def extend_surface(shape, edge_index: int, length: float) -> TopoDS_Shape:
+    """Extend a single-face surface past one boundary edge by a tangent
+    ruled strip, sewn with the base into one shell."""
+    if length <= 0:
+        raise GeometryError("Extension length must be positive")
+    faces = faces_of(shape)
+    if len(faces) != 1:
+        raise GeometryError("ExtendSrf works on single surfaces")
+    face = faces[0]
+    edges = edges_of(face)
+    if not (0 <= edge_index < len(edges)):
+        raise GeometryError("Edge index out of range")
+    edge = edges[edge_index]
+    ad = occ.edge_adaptor(edge)
+    mid = ad.Value((ad.FirstParameter() + ad.LastParameter()) / 2)
+
+    bs, _ = _face_bspline_surface(face)
+    nu, nv = bs.NbUPoles(), bs.NbVPoles()
+    if nu < 2 or nv < 2:
+        raise GeometryError("Surface too simple to extend")
+    rational = bs.IsURational() or bs.IsVRational()
+
+    def pole(i, j):
+        return pnt_tuple(bs.Pole(i, j))
+
+    def weight(i, j):
+        return bs.Weight(i, j)
+
+    # candidate boundaries: (anchor_row, inner_row, along-V?)
+    candidates = {
+        "u0": ([pole(1, j) for j in range(1, nv + 1)],
+               [pole(2, j) for j in range(1, nv + 1)],
+               [weight(1, j) for j in range(1, nv + 1)], True),
+        "u1": ([pole(nu, j) for j in range(1, nv + 1)],
+               [pole(nu - 1, j) for j in range(1, nv + 1)],
+               [weight(nu, j) for j in range(1, nv + 1)], True),
+        "v0": ([pole(i, 1) for i in range(1, nu + 1)],
+               [pole(i, 2) for i in range(1, nu + 1)],
+               [weight(i, 1) for i in range(1, nu + 1)], False),
+        "v1": ([pole(i, nv) for i in range(1, nu + 1)],
+               [pole(i, nv - 1) for i in range(1, nu + 1)],
+               [weight(i, nv) for i in range(1, nu + 1)], False),
+    }
+
+    def row_dist(row):
+        import numpy as np
+        c = np.mean(np.asarray(row, float), axis=0)
+        return float(np.linalg.norm(c - (mid.X(), mid.Y(), mid.Z())))
+
+    key = min(candidates, key=lambda k: row_dist(candidates[k][0]))
+    anchor, inner, weights_row, along_v = candidates[key]
+    tangents = [tuple(a - b for a, b in zip(p, q))
+                for p, q in zip(anchor, inner)]
+    if along_v:
+        n_knots = bs.NbVKnots()
+        knots = [bs.VKnot(i) for i in range(1, n_knots + 1)]
+        mults = [bs.VMultiplicity(i) for i in range(1, n_knots + 1)]
+        degree = bs.VDegree()
+    else:
+        n_knots = bs.NbUKnots()
+        knots = [bs.UKnot(i) for i in range(1, n_knots + 1)]
+        mults = [bs.UMultiplicity(i) for i in range(1, n_knots + 1)]
+        degree = bs.UDegree()
+    strip = _strip_from_rows(anchor, tangents, length, knots, mults, degree,
+                             weights_row if rational else None)
+
+    from .occ import BRepBuilderAPI_Sewing
+    sew = BRepBuilderAPI_Sewing(tol())
+    sew.Add(face)
+    sew.Add(strip)
+    sew.Perform()
+    out = sew.SewedShape()
+    if out.IsNull():
+        raise GeometryError("Extension could not be joined to the surface")
+    return out
+
+
+def blend_surfaces(face_a, edge_a, face_b, edge_b) -> TopoDS_Shape:
+    """G1 blend surface between two surface edges (straight side rails)."""
+    import math
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeFilling
+    from OCP.GeomAbs import GeomAbs_Shape
+    (a0, a1) = curve_endpoints(edge_a)
+    (b0, b1) = curve_endpoints(edge_b)
+    if (math.dist(a0, b0) + math.dist(a1, b1)
+            > math.dist(a0, b1) + math.dist(a1, b0)):
+        b0, b1 = b1, b0
+    fill = BRepOffsetAPI_MakeFilling()
+    fill.Add(occ.to_edge(edge_a), occ.to_face(face_a),
+             GeomAbs_Shape.GeomAbs_G1, True)
+    fill.Add(occ.to_edge(edge_b), occ.to_face(face_b),
+             GeomAbs_Shape.GeomAbs_G1, True)
+    if math.dist(a0, b0) > 1e-9:
+        fill.Add(occ.to_edge(make_line(a0, b0)),
+                 GeomAbs_Shape.GeomAbs_C0, True)
+    if math.dist(a1, b1) > 1e-9:
+        fill.Add(occ.to_edge(make_line(a1, b1)),
+                 GeomAbs_Shape.GeomAbs_C0, True)
+    fill.Build()
+    if not fill.IsDone():
+        raise GeometryError("Blend failed between these edges")
+    result = fill.Shape()
+    if result.IsNull():
+        raise GeometryError("Blend produced no surface")
+    return result

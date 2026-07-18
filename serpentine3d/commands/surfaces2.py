@@ -261,3 +261,64 @@ def cmd_dupfaceborder(ctx):
             exp.Next()
     ctx.echo(f"Duplicated {made} border wire(s) as curves.")
     yield from ()
+
+
+def _picked_face_edges(ctx):
+    """[(obj, face_shape, edge_shape, edge_index)] from Ctrl+Shift picks."""
+    out = []
+    for (obj_id, kind, idx) in ctx.selection.subobjects:
+        if kind != "edge":
+            continue
+        obj = ctx.scene.get(obj_id)
+        if obj is None:
+            continue
+        edges = g.edges_of(obj.shape)
+        faces = g.faces_of(obj.shape)
+        if not (0 <= idx < len(edges)) or not faces:
+            continue
+        edge = edges[idx]
+        support = next(
+            (f for f in faces
+             if any(e.IsSame(edge) for e in g.edges_of(f))), faces[0])
+        out.append((obj, support, edge, idx))
+    return out
+
+
+@command("extendsrf")
+def cmd_extendsrf(ctx):
+    """Extend a surface past a Ctrl+Shift-picked boundary edge."""
+    picked = _picked_face_edges(ctx)
+    if not picked:
+        ctx.echo("Ctrl+Shift-click a surface boundary edge first, "
+                 "then run ExtendSrf.")
+        yield from ()
+        return
+    obj, _, _, idx = picked[0]
+
+    def _preview(d):
+        try:
+            return g.extend_surface(obj.shape, idx, d)
+        except g.GeometryError:
+            return None
+
+    length = yield LengthReq("Extension length", minimum=1e-9, default=1.0,
+                             preview_fn=_preview)
+    ctx.scene.replace_shape(obj.id, g.extend_surface(obj.shape, idx, length))
+    ctx.echo(f"Extended {obj.name} by {length:g}.")
+
+
+@command("blendsrf")
+def cmd_blendsrf(ctx):
+    """G1 blend surface between two Ctrl+Shift-picked surface edges."""
+    picked = _picked_face_edges(ctx)
+    if len(picked) != 2:
+        ctx.echo("Ctrl+Shift-click one edge on each of two surfaces, "
+                 "then run BlendSrf.")
+        yield from ()
+        return
+    (oa, fa, ea, _), (ob, fb, eb, _) = picked
+    blend = g.blend_surfaces(fa, ea, fb, eb)
+    obj = ctx.scene.add(blend, layer_id=oa.layer_id)
+    ctx.echo(f"Created blend {obj.name} between "
+             f"{oa.name} and {ob.name}.")
+    yield from ()
