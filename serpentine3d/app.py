@@ -1073,7 +1073,18 @@ def main():
     # by this name — must equal the installed serpentine3d.desktop
     app.setDesktopFileName("serpentine3d")
     app.setStyleSheet(theme.QSS)
+
+    splash = None
+    from .ui.splash import SplashScreen, should_show
+    if should_show():
+        from . import __version__
+        splash = SplashScreen(__version__)
+        splash.show()
+        splash.message("Loading geometry kernel…", 0.15)
+
     window = MainWindow()
+    if splash:
+        splash.message("Preparing workspace…", 0.7)
 
     # RPC bridge for the MCP server (unless disabled)
     if os.environ.get("SERP3D_NO_RPC") != "1":
@@ -1095,7 +1106,11 @@ def main():
     if loaded:
         window.command_line.echo("Plugins: " + ", ".join(loaded))
 
+    if splash:
+        splash.message("Ready", 1.0)
     window.show()
+    if splash:
+        splash.finish(window)
     window.offer_recovery()
 
     for arg in app.arguments()[1:]:

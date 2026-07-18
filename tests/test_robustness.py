@@ -194,6 +194,7 @@ def test_plugin_loading(tmp_path, monkeypatch, env):
     echoes = []
     ctx.add_echo_listener(echoes.append)
     proc.run("helloplugin")
-    assert any("plugin says hello 0.3.0" in e for e in echoes)
+    from serpentine3d import __version__
+    assert any(f"plugin says hello {__version__}" in e for e in echoes)
     # loading again is a no-op
     assert plugins.load_plugins() == []
