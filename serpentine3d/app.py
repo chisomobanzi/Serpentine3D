@@ -75,8 +75,9 @@ class MainWindow(QMainWindow):
         # widget collapses to nothing so the docks fill the whole window.
         self.setDockNestingEnabled(True)
         self._central_stub = QWidget()
-        self._central_stub.setMaximumSize(0, 0)
+        self._central_stub.setFixedSize(0, 0)
         self.setCentralWidget(self._central_stub)
+        self._central_stub.hide()   # visible, it still reserves layout space
         self._primary_dock = self._dock_viewport(
             self.viewport, "Perspective", closable=False)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,
@@ -86,33 +87,41 @@ class MainWindow(QMainWindow):
         self.command_line = CommandLine()
         self.osnap_bar = OsnapBar(self.viewport, self.cfg)
         cmd_container = QWidget()
+        from PySide6.QtWidgets import QSizePolicy
+        cmd_container.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                    QSizePolicy.Policy.Fixed)   # never balloon
         cmd_layout = QVBoxLayout(cmd_container)
         cmd_layout.setContentsMargins(0, 0, 0, 0)
         cmd_layout.setSpacing(0)
         cmd_layout.addWidget(self.space_tabs)   # Model / Layout, active pane
         cmd_layout.addWidget(self.command_line)
         cmd_layout.addWidget(self.osnap_bar)
-        cmd_dock = QDockWidget("Command", self)
-        cmd_dock.setObjectName("commandDock")
-        cmd_dock.setWidget(cmd_container)
-        cmd_dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-        cmd_dock.setTitleBarWidget(_EmptyTitleBar())
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, cmd_dock)
+        self._cmd_dock = QDockWidget("Command", self)
+        self._cmd_dock.setObjectName("commandDock")
+        self._cmd_dock.setWidget(cmd_container)
+        self._cmd_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        self._cmd_dock.setTitleBarWidget(_EmptyTitleBar())
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea,
+                           self._cmd_dock)
 
         self.properties = PropertiesPanel(self.scene, self.selection,
                                           self.history)
-        prop_dock = QDockWidget("Properties", self)
-        prop_dock.setObjectName("propertiesDock")
-        prop_dock.setWidget(self.properties)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, prop_dock)
+        self._prop_dock = QDockWidget("Properties", self)
+        self._prop_dock.setObjectName("propertiesDock")
+        self._prop_dock.setWidget(self.properties)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
+                           self._prop_dock)
 
         self.layers_panel = LayersPanel(self.scene, self.history)
-        layer_dock = QDockWidget("Layers", self)
-        layer_dock.setObjectName("layersDock")
-        layer_dock.setWidget(self.layers_panel)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, layer_dock)
-        self.resizeDocks([prop_dock, layer_dock], [280, 280],
-                         Qt.Orientation.Horizontal)
+        self._layer_dock = QDockWidget("Layers", self)
+        self._layer_dock.setObjectName("layersDock")
+        self._layer_dock.setWidget(self.layers_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
+                           self._layer_dock)
+        # proportions are set post-show in _balance_docks (a pre-show
+        # resizeDocks gets redistributed once the layout is realised)
+        QTimer.singleShot(0, self._balance_docks)
         self._ai_dock = None                # created on first use
 
         # command engine
@@ -201,9 +210,22 @@ class MainWindow(QMainWindow):
         if closable:
             feats |= QDockWidget.DockWidgetFeature.DockWidgetClosable
         dock.setFeatures(feats)
+        from PySide6.QtWidgets import QSizePolicy
+        vp.setSizePolicy(QSizePolicy.Policy.Expanding,   # claim the leftover
+                         QSizePolicy.Policy.Expanding)   # space, not the panels
         vp.setMinimumSize(200, 150)   # a hint-less GL widget collapses to 0px
         dock.setWidget(vp)
         return dock
+
+    def _balance_docks(self):
+        """Give the primary viewport the bulk of the window and keep the
+        side panels + command strip compact. Runs once after show, when the
+        dock layout is realised."""
+        w = max(self.width(), 800)
+        self.resizeDocks([self._primary_dock, self._prop_dock],
+                         [w - 300, 280], Qt.Orientation.Horizontal)
+        # the command strip spans the bottom full-width, so resize it alone
+        self.resizeDocks([self._cmd_dock], [96], Qt.Orientation.Vertical)
 
     def new_viewport_dock(self, area: str = "Right", space: str = "model"):
         """A fully live extra viewport in a dockable/floatable panel."""
