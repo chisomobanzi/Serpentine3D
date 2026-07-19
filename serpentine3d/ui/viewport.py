@@ -1877,7 +1877,9 @@ class Viewport(QOpenGLWidget):
             speed = (float(self.config.get("mouse", "orbit_speed",
                                            default=1.0))
                      if self.config else 1.0)
-            if ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            from .camera import drag_pans
+            shift = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            if drag_pans(self.camera.projection, shift):
                 self.camera.pan(dx, dy, self.height())
             else:
                 self.camera.orbit(dx * speed, dy * speed)

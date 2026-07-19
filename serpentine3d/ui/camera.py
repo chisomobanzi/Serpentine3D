@@ -6,9 +6,18 @@ import math
 
 import numpy as np
 
-from ..utils.math3d import look_at, normalize, perspective
+from ..utils.math3d import look_at, normalize, ortho, perspective
 
 Z_UP = np.array([0.0, 0.0, 1.0])
+
+
+def drag_pans(projection: str, shift: bool) -> bool:
+    """Which navigation a nav-button drag performs. A plain drag orbits in
+    perspective and pans in a parallel (orthographic) view; Shift inverts
+    it. So a Top view drags-to-pan like a drawing, and you can still orbit
+    it into an axonometric view with Shift held."""
+    return (projection == "parallel") != bool(shift)
+
 
 # cinema sensor presets: (width, height) in millimetres
 SENSORS = {
@@ -29,6 +38,7 @@ class Camera:
         self.elevation = math.radians(30.0)    # from XY plane
         self.fov = 45.0
         self.sensor_name = "Super35"
+        self.projection = "perspective"        # or "parallel" (orthographic)
 
     @property
     def sensor(self) -> tuple[float, float]:
@@ -68,6 +78,14 @@ class Camera:
 
     def proj_matrix(self, width: int, height: int) -> np.ndarray:
         aspect = width / max(height, 1)
+        if self.projection == "parallel":
+            # match the perspective scale at the target plane, so switching
+            # projection and zooming (distance) stay visually consistent
+            half_h = self.distance * math.tan(math.radians(self.fov) / 2)
+            half_w = half_h * aspect
+            depth = self.distance * 100.0 + 1000.0   # slab centred on target
+            return ortho(-half_w, half_w, -half_h, half_h,
+                         self.distance - depth, self.distance + depth)
         near = max(self.distance * 0.001, 0.01)
         far = self.distance * 100.0 + 1000.0
         return perspective(self.fov, aspect, near, far)
@@ -127,6 +145,8 @@ class Camera:
         if name not in views:
             raise ValueError(f"Unknown view '{name}'")
         self.azimuth, self.elevation = views[name]
+        # the named axis views are orthographic; only Perspective foreshortens
+        self.projection = "perspective" if name == "perspective" else "parallel"
 
     # -- picking ----------------------------------------------------------------
 
@@ -136,9 +156,15 @@ class Camera:
         x_ndc = (2.0 * px / max(width, 1)) - 1.0
         y_ndc = 1.0 - (2.0 * py / max(height, 1))
         aspect = width / max(height, 1)
-        tan_f = math.tan(math.radians(self.fov) / 2)
         fwd = normalize(self.target - self.position)
         right, up = self.right_up()
+        if self.projection == "parallel":
+            # parallel rays: shared direction, origin spread over the view plane
+            half_h = self.distance * math.tan(math.radians(self.fov) / 2)
+            origin = (self.position + right * (x_ndc * half_h * aspect)
+                      + up * (y_ndc * half_h))
+            return origin, fwd
+        tan_f = math.tan(math.radians(self.fov) / 2)
         direction = normalize(
             fwd + right * (x_ndc * tan_f * aspect) + up * (y_ndc * tan_f))
         return self.position.copy(), direction
@@ -156,5 +182,11 @@ class Camera:
         out = np.empty((n, 3))
         out[:, 0] = (ndc[:, 0] + 1) * 0.5 * width
         out[:, 1] = (1 - ndc[:, 1]) * 0.5 * height
-        out[:, 2] = w[:, 0]
+        if self.projection == "parallel":
+            # w is a constant 1 in parallel projection, so the "in front of
+            # camera" sign must come from the forward distance instead
+            fwd = normalize(self.target - self.position)
+            out[:, 2] = (np.asarray(points, float) - self.position) @ fwd
+        else:
+            out[:, 2] = w[:, 0]
         return out
