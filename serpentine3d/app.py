@@ -66,26 +66,21 @@ class MainWindow(QMainWindow):
             "QTabBar::tab:selected { background: #4a3f28; color: #f0d9a8; }")
         self._tabs_updating = False
         self.space_tabs.currentChanged.connect(self._space_tab_changed)
-        from PySide6.QtWidgets import QGridLayout
         self.aux_viewports: list = []           # Top/Front/Right in quad mode
+        self.aux_docks: list = []               # their dock wrappers
         self.dock_viewports: list = []          # user-created dockable panes
         self._active_vp = self.viewport
-        self._view_grid = QWidget()
-        grid = QGridLayout(self._view_grid)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(2)
-        grid.addWidget(self.viewport, 0, 0, 2, 2)
-        grid.setRowStretch(0, 1)
-        grid.setRowStretch(1, 1)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        central = QWidget()
-        central_layout = QVBoxLayout(central)
-        central_layout.setContentsMargins(0, 0, 0, 0)
-        central_layout.setSpacing(0)
-        central_layout.addWidget(self._view_grid, 1)
-        central_layout.addWidget(self.space_tabs)
-        self.setCentralWidget(central)
+        # Every viewport lives in a dock, so any of them — the main one
+        # included — can be dragged out to float or re-docked. The central
+        # widget collapses to nothing so the docks fill the whole window.
+        self.setDockNestingEnabled(True)
+        self._central_stub = QWidget()
+        self._central_stub.setMaximumSize(0, 0)
+        self.setCentralWidget(self._central_stub)
+        self._primary_dock = self._dock_viewport(
+            self.viewport, "Perspective", closable=False)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,
+                           self._primary_dock)
 
         from .ui.osnap_bar import OsnapBar
         self.command_line = CommandLine()
@@ -94,6 +89,7 @@ class MainWindow(QMainWindow):
         cmd_layout = QVBoxLayout(cmd_container)
         cmd_layout.setContentsMargins(0, 0, 0, 0)
         cmd_layout.setSpacing(0)
+        cmd_layout.addWidget(self.space_tabs)   # Model / Layout, active pane
         cmd_layout.addWidget(self.command_line)
         cmd_layout.addWidget(self.osnap_bar)
         cmd_dock = QDockWidget("Command", self)
@@ -194,6 +190,21 @@ class MainWindow(QMainWindow):
             self._set_active_viewport(obj)
         return super().eventFilter(obj, ev)
 
+    def _dock_viewport(self, vp, title: str, closable: bool = True):
+        """Wrap a viewport in a floatable/movable QDockWidget so it can be
+        torn off. Not closable for the primary — there's always one view."""
+        dock = QDockWidget(title, self)
+        self._dock_seq = getattr(self, "_dock_seq", 0) + 1
+        dock.setObjectName(f"viewportDock{self._dock_seq}")
+        feats = (QDockWidget.DockWidgetFeature.DockWidgetMovable
+                 | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        if closable:
+            feats |= QDockWidget.DockWidgetFeature.DockWidgetClosable
+        dock.setFeatures(feats)
+        vp.setMinimumSize(200, 150)   # a hint-less GL widget collapses to 0px
+        dock.setWidget(vp)
+        return dock
+
     def new_viewport_dock(self, area: str = "Right", space: str = "model"):
         """A fully live extra viewport in a dockable/floatable panel."""
         vp = Viewport(self.scene, self.selection, self.cfg)
@@ -202,12 +213,9 @@ class MainWindow(QMainWindow):
         vp.camera.elevation = self.viewport.camera.elevation
         vp.camera.target = self.viewport.camera.target.copy()
         vp.camera.distance = self.viewport.camera.distance
-        vp.setMinimumSize(360, 260)   # a size-hint-less GL widget would
-        self._wire_viewport(vp)        # otherwise collapse the dock to 0px
+        self._wire_viewport(vp)
         self.dock_viewports.append(vp)
-        dock = QDockWidget("Viewport", self)
-        dock.setObjectName(f"viewportDock{len(self.dock_viewports)}")
-        dock.setWidget(vp)
+        dock = self._dock_viewport(vp, "Viewport", closable=True)
         areas = {"Right": Qt.DockWidgetArea.RightDockWidgetArea,
                  "Left": Qt.DockWidgetArea.LeftDockWidgetArea,
                  "Top": Qt.DockWidgetArea.TopDockWidgetArea,
@@ -299,35 +307,36 @@ class MainWindow(QMainWindow):
                 + [v for v in self.dock_viewports if self._pane_alive(v)])
 
     def set_view_layout(self, mode: str):
-        """'single' or 'quad' (Top / Front / Right around Perspective)."""
-        grid = self._view_grid.layout()
-        if mode == "quad" and not self.aux_viewports:
-            import math
-            angles = [(-math.pi / 2, math.radians(89.9)),   # Top
-                      (-math.pi / 2, 0.0),                  # Front
-                      (0.0, 0.0)]                           # Right
-            for az, el in angles:
+        """'single' or 'quad' (Top / Front / Right alongside Perspective).
+        With every viewport a dock, quad just shows three aux viewport docks
+        tiled beside the primary — and you can drag them anywhere from there.
+        """
+        if mode == "quad" and not self.aux_docks:
+            for title, view in (("Top", "top"), ("Front", "front"),
+                                ("Right", "right")):
                 aux = Viewport(self.scene, self.selection, self.cfg)
-                aux.camera.azimuth = az
-                aux.camera.elevation = el
+                aux.set_view(view)                 # named orthographic view
                 aux.cplane = self.viewport.cplane
+                aux.camera.target = self.viewport.camera.target.copy()
+                aux.camera.distance = self.viewport.camera.distance
                 self._wire_viewport(aux)
                 self.aux_viewports.append(aux)
+                self.aux_docks.append(self._dock_viewport(aux, title))
+            top, front, right = self.aux_docks           # initial 2x2 tiling
+            self.splitDockWidget(self._primary_dock, top,
+                                 Qt.Orientation.Horizontal)   # persp | top
+            self.splitDockWidget(self._primary_dock, front,
+                                 Qt.Orientation.Vertical)     # persp / front
+            self.splitDockWidget(top, right,
+                                 Qt.Orientation.Vertical)     # top   / right
         if mode == "quad":
-            grid.removeWidget(self.viewport)
-            grid.addWidget(self.aux_viewports[0], 0, 0)   # top view
-            grid.addWidget(self.viewport, 0, 1)           # perspective
-            grid.addWidget(self.aux_viewports[1], 1, 0)   # front
-            grid.addWidget(self.aux_viewports[2], 1, 1)   # right
-            for aux in self.aux_viewports:
+            for aux, dock in zip(self.aux_viewports, self.aux_docks):
+                dock.show()
                 aux.show()
                 aux.zoom_extents()
         else:
-            for aux in self.aux_viewports:
-                grid.removeWidget(aux)
-                aux.hide()
-            grid.removeWidget(self.viewport)
-            grid.addWidget(self.viewport, 0, 0, 2, 2)
+            for dock in self.aux_docks:
+                dock.hide()
         self.viewport.update()
 
     # ------------------------------------------------------------ UI assembly
