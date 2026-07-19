@@ -356,10 +356,25 @@ class MainWindow(QMainWindow):
                 dock.show()
                 aux.show()
                 aux.zoom_extents()
+            # split builds the 2x2 structure but leaves lopsided sizes;
+            # even them out once the layout is realised
+            QTimer.singleShot(0, self._equalize_quad)
         else:
             for dock in self.aux_docks:
                 dock.hide()
         self.viewport.update()
+
+    def _equalize_quad(self):
+        """Make the quad an even 2x2 — equal columns and equal rows."""
+        if len(self.aux_docks) != 3:
+            return
+        top, front, right = self.aux_docks
+        h = Qt.Orientation.Horizontal
+        v = Qt.Orientation.Vertical
+        self.resizeDocks([self._primary_dock, top], [1000, 1000], h)  # columns
+        self.resizeDocks([front, right], [1000, 1000], h)
+        self.resizeDocks([self._primary_dock, front], [1000, 1000], v)  # rows
+        self.resizeDocks([top, right], [1000, 1000], v)
 
     # ------------------------------------------------------------ UI assembly
 
