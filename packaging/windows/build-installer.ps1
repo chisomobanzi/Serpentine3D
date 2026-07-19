@@ -18,11 +18,12 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
 Write-Host "=== bundle selftest ==="
 & ".\dist\serp3d\serp3d.exe" --selftest
-if ($LASTEXITCODE -ne 0) {
-    Get-Content (Join-Path $env:TEMP "serp3d-selftest.txt")
-    throw "bundle selftest failed"
-}
-Get-Content (Join-Path $env:TEMP "serp3d-selftest.txt")
+$selftestExit = $LASTEXITCODE
+# The frozen exe may run the selftest in a detached child, so its log file
+# can lag/land elsewhere — echo it if present, but never fail on a missing
+# file (the run above prints SELFTEST OK to the console either way).
+Get-Content (Join-Path $env:TEMP "serp3d-selftest.txt") -ErrorAction SilentlyContinue
+if ($selftestExit -ne 0) { throw "bundle selftest failed" }
 
 $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 if (-not (Test-Path $iscc)) { $iscc = "$env:ProgramFiles\Inno Setup 6\ISCC.exe" }
