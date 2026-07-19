@@ -402,6 +402,7 @@ class Viewport(QOpenGLWidget):
     enterShortcut = Signal()                # right-click without dragging
     popupRequested = Signal()               # middle-click without dragging
     displayModeChanged = Signal()           # shaded/rendered/... changed
+    viewChanged = Signal(str)               # named view set (top/perspective/…)
     _tessDone = Signal()                    # a background mesh finished
 
     def __init__(self, scene, selection, config=None, parent=None):
@@ -411,6 +412,7 @@ class Viewport(QOpenGLWidget):
         self.config = config
         self.camera = Camera()
         self.display_mode = "shaded"        # shaded | wireframe | ghosted
+        self._view_name = "perspective"     # last-picked named view (for HUD)
         self.grid_visible = True
         self.point_mode = False             # command wants a point click
         from ..core.cplane import CPlane
@@ -429,6 +431,8 @@ class Viewport(QOpenGLWidget):
         self._gumball_readout.setVisible(False)
         self._gumball_readout.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        from .viewport_hud import ViewportHud
+        self._hud = ViewportHud(self)       # top-left view/display chips
         self.history = None                 # set by the main window
         from ..core.snaps import SnapIndex
         self.snaps = SnapIndex(scene, config)
@@ -1568,6 +1572,8 @@ class Viewport(QOpenGLWidget):
 
     def set_view(self, name: str):
         self.camera.set_standard_view(name)
+        self._view_name = name
+        self.viewChanged.emit(name)
         self.update()
 
     def screenshot(self, path: str) -> bool:
