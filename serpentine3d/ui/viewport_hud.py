@@ -2,8 +2,8 @@
 
 A small row of translucent menu-chips pinned to the viewport's top-left
 corner. Each viewport owns its own, so split/quad layouts each get their own
-controls. Gaps between chips are click-through, so it never steals a drag
-meant for the scene.
+controls. The container is sized tightly to the chips so it barely covers
+any of the scene.
 """
 
 from __future__ import annotations
@@ -52,12 +52,12 @@ class ViewportHud(QWidget):
         self.vp = viewport
         self.setObjectName("hud")
         self.setStyleSheet(_QSS)
-        # the container itself is click-through; only the chips capture clicks
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # NB: do NOT set WA_TransparentForMouseEvents here — it makes the whole
+        # subtree (chips included) click-through, so the menus never open.
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        lay.setSpacing(4)
         self._view_btn = self._chip(_VIEWS, self.vp.set_view)
         self._mode_btn = self._chip(_MODES, self.vp.set_display_mode)
         lay.addWidget(self._view_btn)
@@ -75,8 +75,6 @@ class ViewportHud(QWidget):
         btn = QToolButton(self)
         btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        # children of a mouse-transparent parent still receive their own events
-        btn.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         menu = QMenu(btn)
         for label, key in items:
             act = menu.addAction(label)
