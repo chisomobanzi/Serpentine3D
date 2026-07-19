@@ -1,0 +1,50 @@
+name: Build Windows installer
+
+# Builds the PyInstaller bundle + Inno Setup installer on a Windows runner.
+# - workflow_dispatch: build and expose the .exe as a downloadable artifact.
+# - release published: also attach the .exe straight to that release.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write        # attach the asset to the release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package + build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+          python -m pip install pyinstaller
+
+      - name: Install Inno Setup 6
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        working-directory: packaging/windows
+        env:
+          QT_QPA_PLATFORM: offscreen     # headless runner: no display for the selftest
+        run: powershell -ExecutionPolicy Bypass -File build-installer.ps1 -Python python
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Serpentine3D-Setup-x86_64
+          path: packaging/windows/Output/Serpentine3D-Setup-x86_64.exe
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "packaging/windows/Output/Serpentine3D-Setup-x86_64.exe" --clobber
