@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="gold" x1="0.2" y1="0" x2="0.55" y2="1">
+      <stop offset="0" stop-color="#ecd06a"/>
+      <stop offset="0.5" stop-color="#d8b44a"/>
+      <stop offset="1" stop-color="#bd9235"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="244" height="244" rx="56" fill="#1b1c20"/>
+  <rect x="6.75" y="6.75" width="242.5" height="242.5" rx="55.25"
+        fill="none" stroke="#3a3b40" stroke-width="1.5"/>
+  <!-- serpentine S, centred on its visual middle (~126,130) -->
+  <g transform="translate(128,130) scale(1.02) translate(-126,-130)">
+    <path d="M 74,192 C 148,204 154,150 124,128 C 94,108 106,56 178,66"
+          fill="none" stroke="url(#gold)" stroke-width="31"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
