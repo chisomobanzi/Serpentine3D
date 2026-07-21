@@ -244,6 +244,7 @@ Settings live in `~/.config/serpentine3d/settings.json`.
 | `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps/surfaces import as untrimmed NURBS faces, export as meshes; layers preserved |
 | `.obj` | ✓ | ✓ | Tessellated mesh with `.mtl` colours |
 | `.fbx` | ✓ | ✓ | Autodesk FBX (binary) — tessellated meshes; imports/exports cleanly to Blender, Maya, Unreal, Unity |
+| `.stl` | ✓ | ✓ | 3D printing — exports watertight binary STL (or ASCII) for slicers; imports both |
 | `.dxf` | ✓ | ✓ | Curves/meshes with layers; layout sheets export at paper scale |
 | `.svg` | ✓ | ✓ | Paths import as curves (béziers exact); layouts export as vector SVG |
 | `.glb` | | ✓ | Binary glTF with materials (Unreal/Blender/web) |
@@ -303,7 +304,7 @@ serpentine3d/
 ├── commands/      # generator-based interactive commands (Rhino-style
 │                  #   prompt protocol, shared by GUI + MCP)
 ├── ui/            # Qt: GL viewport, command line, panels, dark theme
-├── fileio/        # .serp, STEP, 3DM, OBJ, FBX, DXF, SVG, GLB, USD
+├── fileio/        # .serp, STEP, 3DM, OBJ, FBX, STL, DXF, SVG, GLB, USD
 ├── scripting.py   # stable headless Document API (serp3d-batch)
 ├── mcp_server/    # stdio MCP server -> RPC bridge
 ├── api.py         # programmatic API over a running session

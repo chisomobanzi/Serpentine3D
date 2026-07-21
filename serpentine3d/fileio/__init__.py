@@ -29,6 +29,12 @@ def import_file(scene, path: str) -> int:
         for name, shape in named:
             scene.add(shape, name=name)
         return len(named)
+    if ext == ".stl":
+        from . import stl
+        named = stl.import_stl(path)
+        for name, shape in named:
+            scene.add(shape, name=name)
+        return len(named)
     if ext == ".dxf":
         from . import dxf as dxf_mod
         return dxf_mod.import_dxf(scene, path)
@@ -76,6 +82,10 @@ def export_file(scene, path: str, only_ids: list | None = None,
         from . import fbx
         fbx.export_fbx([(o.name, o.shape, scene.color_of(o))
                         for o in objs], path)
+        return
+    if ext == ".stl":
+        from . import stl
+        stl.export_stl([(o.name, o.shape) for o in objs], path)
         return
     if ext == ".3dm":
         from . import rhino
