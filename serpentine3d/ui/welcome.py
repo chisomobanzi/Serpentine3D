@@ -51,10 +51,17 @@ class WelcomeScreen(QDialog):
         self.win = window
         self.setObjectName("welcome")
         self.setWindowTitle("Welcome to Serpentine3D")
-        self.setModal(True)
+        # A NORMAL window type (not DIALOG) with no transient-for hint, so
+        # GNOME's attach-modal-dialogs can't glue it to the main window
+        # (drags it, can't resize). Still application-modal via exec().
+        self.setWindowFlags(Qt.WindowType.Window)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.setFixedSize(660, 460)
         self.setStyleSheet(_QSS)
         self._build()
+        if window is not None:                 # centre over the main window
+            c = window.frameGeometry().center()
+            self.move(c.x() - self.width() // 2, c.y() - self.height() // 2)
 
     def _build(self):
         outer = QVBoxLayout(self)

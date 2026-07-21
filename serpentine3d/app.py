@@ -762,7 +762,9 @@ class MainWindow(QMainWindow):
         self.command_line.echo(f"New model ({units}).")
 
     def _file_open(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open", "",
+        # parent=None so GNOME's attach-modal-dialogs can't glue the file
+        # chooser to the main window (it goes fullscreen and can't resize)
+        path, _ = QFileDialog.getOpenFileName(None, "Open", "",
                                               self._FILTERS)
         if path:
             self._open_path(path)
@@ -828,7 +830,7 @@ class MainWindow(QMainWindow):
         path = self.ctx.current_path
         if force_dialog or not path:
             path, _ = QFileDialog.getSaveFileName(
-                self, "Save", "untitled.serp", "Serpentine3D (*.serp)")
+                None, "Save", "untitled.serp", "Serpentine3D (*.serp)")
             if not path:
                 return
             if not path.endswith(".serp"):
@@ -843,7 +845,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Save failed", str(exc))
 
     def _file_import(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Import", "",
+        path, _ = QFileDialog.getOpenFileName(None, "Import", "",
                                               self._FILTERS)
         if not path:
             return
@@ -857,7 +859,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Import failed", str(exc))
 
     def _file_export(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export", "",
+        path, _ = QFileDialog.getSaveFileName(None, "Export", "",
                                               self._FILTERS)
         if not path:
             return
