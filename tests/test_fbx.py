@@ -1,8 +1,8 @@
 """FBX import/export (pure-Python, mesh-based) — TDD via round-trips.
 
-Export writes ASCII FBX (any DCC reads it); import handles ASCII and the
-binary form most tools actually produce. Meshes go out tessellated and come
-back as MeshShape, mirroring the OBJ path.
+Export writes binary FBX (Blender rejects ASCII); import handles both binary
+and ASCII. Meshes go out tessellated and come back as MeshShape, mirroring
+the OBJ path.
 """
 
 import os
@@ -19,17 +19,16 @@ def _bbox(v):
     return v.min(axis=0), v.max(axis=0)
 
 
-def test_export_is_ascii_fbx(tmp_path):
+def test_export_is_binary_fbx(tmp_path):
+    # Blender only imports binary FBX, so export must be binary.
     box = g.make_box((0, 0, 0), 10, 20, 30)
     p = str(tmp_path / "b.fbx")
     fbx.export_fbx([("mybox", box)], p)
     assert os.path.getsize(p) > 0
-    head = open(p, "rb").read(40)
-    assert b"FBX" in head
-    assert not head.startswith(b"Kaydara FBX Binary")
+    assert open(p, "rb").read(23).startswith(b"Kaydara FBX Binary")
 
 
-def test_ascii_roundtrip_box(tmp_path):
+def test_roundtrip_box(tmp_path):
     box = g.make_box((0, 0, 0), 10, 20, 30)
     p = str(tmp_path / "b.fbx")
     fbx.export_fbx([("mybox", box)], p)
@@ -54,22 +53,6 @@ def test_ascii_roundtrip_multiple_objects(tmp_path):
     names = {n for n, _ in out}
     assert any("boxA" in n for n in names)
     assert any("sphB" in n for n in names)
-
-
-def test_binary_roundtrip(tmp_path):
-    """The binary encoder (also used for tests) must round-trip through the
-    binary reader — this is what makes importing real-world .fbx work."""
-    box = g.make_box((0, 0, 0), 5, 6, 7)
-    from serpentine3d.core.tessellate import tessellate
-    m = tessellate(box)
-    geoms = [("bx", m.vertices, m.triangles, m.normals)]
-    p = str(tmp_path / "b_bin.fbx")
-    fbx._write_binary(geoms, p)
-    assert open(p, "rb").read(23).startswith(b"Kaydara FBX Binary")
-    out = fbx.import_fbx(p)
-    assert len(out) == 1 and "bx" in out[0][0]
-    lo, hi = _bbox(out[0][1].vertices)
-    assert np.allclose(hi - lo, [5, 6, 7], atol=0.02)
 
 
 def test_import_ngon_polygons(tmp_path):

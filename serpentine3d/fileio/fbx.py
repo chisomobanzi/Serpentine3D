@@ -1,13 +1,13 @@
 """FBX import / export — pure Python, mesh-based.
 
 Serpentine3D is a BREP modeller; FBX is a mesh/scene format, so this mirrors
-the OBJ path: export tessellates each shape and writes ASCII FBX (which every
-DCC reads); import parses ASCII *and* the binary form most tools produce, and
-returns MeshShape objects.
+the OBJ path: export tessellates each shape and writes a *binary* FBX (v7.4);
+import parses both binary and ASCII FBX and returns MeshShape objects.
 
-The ASCII writer is deliberately the export path — it is trivial to get right
-(no offsets/footers), and Blender/Maya/Unreal/Unity all import it. A compact
-binary writer (`_write_binary`) exists to round-trip-test the binary reader.
+Export is binary because Blender refuses ASCII FBX outright ("ASCII FBX files
+are not supported"), while binary is imported by Blender/Maya/Unreal/Unity.
+An ASCII writer (`_ascii_doc`/`_write_ascii_geometry`) is retained to exercise
+the ASCII reader in tests.
 """
 
 from __future__ import annotations
@@ -124,8 +124,7 @@ def export_fbx(named_shapes, path: str):
                if len(mesh.normals) else None)
         geoms.append((_safe(name), np.asarray(mesh.vertices, float),
                       poly, pvn, color))
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(_ascii_doc(geoms))
+    _write_fbx(path, geoms)                # binary: Blender rejects ASCII FBX
 
 
 def _write_ascii_geometry(path, name, verts, poly_indices, normals=None):
@@ -254,7 +253,11 @@ def _read_binary(data):
         if node["name"] == "Geometry":
             name, verts, idx = "mesh", None, None
             for p in node["props"]:
-                if isinstance(p, str) and p.startswith("Geometry::"):
+                if not isinstance(p, str):
+                    continue
+                if "\x00\x01" in p:          # binary form: "name\x00\x01Geometry"
+                    name = p.split("\x00\x01", 1)[0]
+                elif p.startswith("Geometry::"):   # ascii form
                     name = p.split("::", 1)[1]
             for c in node["children"]:
                 if c["name"] == "Vertices" and c["props"] is not None:
@@ -311,26 +314,122 @@ def _ser_node(node, start):
     return header + pb + cb, end
 
 
-def _write_binary(geoms, path):
-    """geoms: [(name, verts(Nx3), tris(Mx3), normals)] — round-trips with
-    _read_binary (used by tests; ASCII is the shipped export)."""
+_FOOT_MAGIC = bytes([0xf8, 0x5a, 0x8c, 0x6a, 0xde, 0xf5, 0xd9, 0x7e,
+                     0xec, 0xe9, 0x0c, 0xe3, 0x75, 0x05, 0xa8, 0x49])
+
+
+def _p(name, typ, sub, flags, *vals):
+    """A Properties70 'P' entry."""
+    props = [("S", name), ("S", typ), ("S", sub), ("S", flags)]
+    for v in vals:
+        props.append(("D", v) if isinstance(v, float)
+                     else ("I", v) if isinstance(v, int) else ("S", str(v)))
+    return ("P", props, [])
+
+
+def _build_document(geoms):
+    """Full FBX node tree (geoms: [(name, verts, poly, pvn, color)])."""
+    ng = len(geoms)
+    top = [
+        ("FBXHeaderExtension", [], [
+            ("FBXHeaderVersion", [("I", 1003)], []),
+            ("FBXVersion", [("I", 7400)], []),
+            ("Creator", [("S", "Serpentine3D")], []),
+        ]),
+        ("GlobalSettings", [], [
+            ("Version", [("I", 1000)], []),
+            ("Properties70", [], [
+                # Serpentine is Z-up (CAD convention); declare the Z-up axis
+                # system (as 3ds Max does) so importers preserve orientation
+                # instead of rotating our data as if it were Y-up.
+                _p("UpAxis", "int", "Integer", "", 2),
+                _p("UpAxisSign", "int", "Integer", "", 1),
+                _p("FrontAxis", "int", "Integer", "", 1),
+                _p("FrontAxisSign", "int", "Integer", "", -1),
+                _p("CoordAxis", "int", "Integer", "", 0),
+                _p("CoordAxisSign", "int", "Integer", "", 1),
+                # 100 = model units are cm-equivalents, so importers that map
+                # FBX cm -> their own metres bring geometry back 1:1 (Blender
+                # otherwise shrinks it 100x).
+                _p("UnitScaleFactor", "double", "Number", "", 100.0),
+                _p("OriginalUnitScaleFactor", "double", "Number", "", 100.0),
+            ]),
+        ]),
+        ("Documents", [], [
+            ("Count", [("I", 1)], []),
+            ("Document", [("L", 100000000), ("S", "Scene"), ("S", "Scene")], [
+                ("RootNode", [("I", 0)], []),
+            ]),
+        ]),
+        ("Definitions", [], [
+            ("Version", [("I", 100)], []),
+            ("Count", [("I", ng * 3)], []),
+            ("ObjectType", [("S", "Geometry")], [("Count", [("I", ng)], [])]),
+            ("ObjectType", [("S", "Model")], [("Count", [("I", ng)], [])]),
+            ("ObjectType", [("S", "Material")], [("Count", [("I", ng)], [])]),
+        ]),
+    ]
+    obj_children, conns = [], []
     gid = 1000000
-    geom_nodes = []
-    for name, verts, tris, _normals in geoms:
+    for name, verts, poly, pvn, color in geoms:
+        g, m, mat = gid, gid + 1, gid + 2
+        gid += 3
         v = np.asarray(verts, float).reshape(-1)
-        poly = _poly_indices_from_tris(np.asarray(tris))
-        geom_nodes.append((
-            "Geometry",
-            [("L", gid), ("S", f"Geometry::{_safe(name)}"), ("S", "Mesh")],
-            [("Vertices", [("d", v)], []),
-             ("PolygonVertexIndex", [("i", poly)], [])]))
-        gid += 1
-    objects = ("Objects", [], geom_nodes)
-    body = b""
-    pos = 27
-    b, pos = _ser_node(objects, pos)
-    body += b
+        gc = [("Vertices", [("d", v)], []),
+              ("PolygonVertexIndex", [("i", poly)], [])]
+        if pvn is not None:
+            n = np.asarray(pvn, float).reshape(-1)
+            gc += [("LayerElementNormal", [("I", 0)], [
+                        ("Version", [("I", 101)], []),
+                        ("Name", [("S", "")], []),
+                        ("MappingInformationType",
+                         [("S", "ByPolygonVertex")], []),
+                        ("ReferenceInformationType", [("S", "Direct")], []),
+                        ("Normals", [("d", n)], [])]),
+                   ("Layer", [("I", 0)], [
+                        ("Version", [("I", 100)], []),
+                        ("LayerElement", [], [
+                            ("Type", [("S", "LayerElementNormal")], []),
+                            ("TypedIndex", [("I", 0)], [])])])]
+        # Binary FBX encodes object names as "name\x00\x01Class" (not the
+        # ASCII "Class::name" form); Blender's importer splits on \x00\x01.
+        obj_children.append((
+            "Geometry", [("L", g), ("S", f"{name}\x00\x01Geometry"),
+                         ("S", "Mesh")], gc))
+        obj_children.append((
+            "Model", [("L", m), ("S", f"{name}\x00\x01Model"), ("S", "Mesh")],
+            [("Version", [("I", 232)], []),
+             ("Properties70", [], [
+                 _p("DefaultAttributeIndex", "int", "Integer", "", 0)])]))
+        col = color if color is not None else (0.72, 0.72, 0.72)
+        obj_children.append((
+            "Material", [("L", mat), ("S", f"{name}\x00\x01Material"),
+                         ("S", "")],
+            [("Version", [("I", 102)], []),
+             ("ShadingModel", [("S", "phong")], []),
+             ("Properties70", [], [
+                 _p("DiffuseColor", "Color", "", "A",
+                    float(col[0]), float(col[1]), float(col[2]))])]))
+        conns += [("C", [("S", "OO"), ("L", g), ("L", m)], []),
+                  ("C", [("S", "OO"), ("L", m), ("L", 0)], []),
+                  ("C", [("S", "OO"), ("L", mat), ("L", m)], [])]
+    top.append(("Objects", [], obj_children))
+    top.append(("Connections", [], conns))
+    return top
+
+
+def _write_fbx(path, geoms):
+    """Write a binary FBX (v7.4) document tools accept — Blender rejects
+    ASCII FBX, so this is the shipped export format."""
+    body, pos = b"", 27
+    for node in _build_document(geoms):
+        b, pos = _ser_node(node, pos)
+        body += b
     body += b"\x00" * 13                  # top-level list terminator
     header = _MAGIC + struct.pack("<I", 7400)
+    core = header + body
+    footer = b"\x00" * 16
+    footer += b"\x00" * ((16 - (len(core) + 16) % 16) % 16)
+    footer += struct.pack("<I", 7400) + b"\x00" * 120 + _FOOT_MAGIC
     with open(path, "wb") as f:
-        f.write(header + body + b"\x00" * 16)
+        f.write(core + footer)
