@@ -761,11 +761,31 @@ class MainWindow(QMainWindow):
         self.mark_saved()
         self.command_line.echo(f"New model ({units}).")
 
+    def _pick_file(self, *, save: bool, title: str, name: str = "",
+                   filters: str = "") -> str:
+        """A file chooser that behaves. On Linux the native GNOME chooser gets
+        glued to the main window and fills the screen under
+        attach-modal-dialogs, so use Qt's own dialog as a normal, resizable,
+        sensibly sized window (NORMAL window type dodges the attach). Native
+        elsewhere."""
+        import sys
+        dlg = QFileDialog(self, title, "", filters or self._FILTERS)
+        if save:
+            dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+            if name:
+                dlg.selectFile(name)
+        else:
+            dlg.setFileMode(QFileDialog.FileMode.ExistingFile)
+        if sys.platform.startswith("linux"):
+            dlg.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+            dlg.setWindowFlags(Qt.WindowType.Window)   # not DIALOG-type: no attach
+            dlg.resize(900, 580)
+        if dlg.exec() and dlg.selectedFiles():
+            return dlg.selectedFiles()[0]
+        return ""
+
     def _file_open(self):
-        # parent=None so GNOME's attach-modal-dialogs can't glue the file
-        # chooser to the main window (it goes fullscreen and can't resize)
-        path, _ = QFileDialog.getOpenFileName(None, "Open", "",
-                                              self._FILTERS)
+        path = self._pick_file(save=False, title="Open")
         if path:
             self._open_path(path)
 
@@ -829,8 +849,9 @@ class MainWindow(QMainWindow):
     def _file_save(self, force_dialog: bool = False):
         path = self.ctx.current_path
         if force_dialog or not path:
-            path, _ = QFileDialog.getSaveFileName(
-                None, "Save", "untitled.serp", "Serpentine3D (*.serp)")
+            path = self._pick_file(save=True, title="Save",
+                                   name="untitled.serp",
+                                   filters="Serpentine3D (*.serp)")
             if not path:
                 return
             if not path.endswith(".serp"):
@@ -845,8 +866,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Save failed", str(exc))
 
     def _file_import(self):
-        path, _ = QFileDialog.getOpenFileName(None, "Import", "",
-                                              self._FILTERS)
+        path = self._pick_file(save=False, title="Import")
         if not path:
             return
         try:
@@ -859,8 +879,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Import failed", str(exc))
 
     def _file_export(self):
-        path, _ = QFileDialog.getSaveFileName(None, "Export", "",
-                                              self._FILTERS)
+        path = self._pick_file(save=True, title="Export")
         if not path:
             return
         try:
