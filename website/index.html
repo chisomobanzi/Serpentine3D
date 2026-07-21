@@ -471,6 +471,52 @@
     .rise.d4 { animation-delay: 320ms; }
     @keyframes rise { to { opacity: 1; transform: none; } }
   }
+
+  /* ---- Rhino positioning line ---- */
+  .rhino {
+    margin: 20px 0 0; max-width: 60ch; font-size: 1.02rem; line-height: 1.5;
+    color: var(--ink-soft); border-left: 2px solid var(--redline);
+    padding: 4px 0 4px 15px;
+  }
+  .rhino strong { color: var(--ink); font-weight: 600; }
+  .rhino .rk { color: var(--redline); font-weight: 600; }
+
+  /* ---- sample scenes ---- */
+  .samples { margin: 58px 0 8px; }
+  .samples .sub { color: var(--ink-soft); max-width: 64ch; margin: 8px 0 0; }
+  .samples .sub code {
+    font-family: var(--mono); font-size: 0.86em; background: var(--panel);
+    border: 1px solid var(--hairline-soft); border-radius: 3px; padding: 0 5px;
+  }
+  .sample-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    margin-top: 24px;
+  }
+  @media (max-width: 860px) { .sample-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 460px) { .sample-grid { grid-template-columns: 1fr; } }
+  .sample-card {
+    display: block; text-decoration: none; color: inherit;
+    background: var(--panel); border: 1px solid var(--hairline);
+    border-radius: 8px; overflow: hidden; box-shadow: var(--shadow);
+    transition: transform .15s ease, border-color .15s ease;
+  }
+  .sample-card:hover { transform: translateY(-3px); border-color: var(--blue); }
+  .sample-thumb { aspect-ratio: 4 / 3; background: #14151a; }
+  .sample-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .sample-foot {
+    padding: 11px 13px 12px; display: flex; flex-direction: column; gap: 3px;
+    border-top: 1px solid var(--hairline-soft);
+  }
+  .sample-lvl {
+    font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--blue);
+  }
+  .sample-name { font-family: var(--display); font-size: 1.06rem; color: var(--ink); }
+  .sample-dl {
+    font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.08em;
+    color: var(--ink-soft);
+  }
+  .sample-card:hover .sample-dl { color: var(--blue); }
 </style>
 </head>
 <body>
@@ -492,6 +538,10 @@
     the exactness of Rhino — true curves, real dimensions, and drawing sheets a
     workshop can build from. <strong>Made by one person who needs it</strong>,
     not a software company.</p>
+
+    <p class="rhino rise d3"><strong>If you know <span class="rk">Rhino</span>,
+    you know Serpentine3D.</strong> The same commands and aliases — it even imports
+    your Rhino shortcuts, so your muscle memory carries straight over.</p>
 
     <div class="cta-row rise d4">
       <a class="btn" href="#issues">DOWNLOAD ↓</a>
@@ -600,6 +650,43 @@
           </div>
           <a class="btn" href="#issues">DOWNLOAD ↓</a>
         </div>
+      </div>
+    </div>
+
+    <div class="samples">
+      <h2>Start with a scene, not a blank viewport</h2>
+      <p class="sub">New here? Download a sample, then <code>File ▸ Open</code> it —
+      real geometry to explore and learn from, instead of floundering with
+      primitive shapes.</p>
+      <div class="sample-grid">
+        <a class="sample-card" href="samples/bracket.serp" download>
+          <div class="sample-thumb"><img src="samples/bracket.png"
+            alt="Filleted bracket — a plate with rounded corners and mounting holes" loading="lazy"></div>
+          <div class="sample-foot"><span class="sample-lvl">Beginner</span>
+            <span class="sample-name">Filleted bracket</span>
+            <span class="sample-dl">bracket.serp ↓</span></div>
+        </a>
+        <a class="sample-card" href="samples/vase.serp" download>
+          <div class="sample-thumb"><img src="samples/vase.png"
+            alt="Turned vase — a NURBS surface of revolution" loading="lazy"></div>
+          <div class="sample-foot"><span class="sample-lvl">Intermediate</span>
+            <span class="sample-name">Turned vase</span>
+            <span class="sample-dl">vase.serp ↓</span></div>
+        </a>
+        <a class="sample-card" href="samples/stool.serp" download>
+          <div class="sample-thumb"><img src="samples/stool.png"
+            alt="Cushioned stool with four tapered legs" loading="lazy"></div>
+          <div class="sample-foot"><span class="sample-lvl">Intermediate</span>
+            <span class="sample-name">Cushioned stool</span>
+            <span class="sample-dl">stool.serp ↓</span></div>
+        </a>
+        <a class="sample-card" href="samples/bands.serp" download>
+          <div class="sample-thumb"><img src="samples/bands.png"
+            alt="Two interlocking rings, teal and gold" loading="lazy"></div>
+          <div class="sample-foot"><span class="sample-lvl">Showcase</span>
+            <span class="sample-name">Interlocking rings</span>
+            <span class="sample-dl">bands.serp ↓</span></div>
+        </a>
       </div>
     </div>
 
