@@ -1,12 +1,25 @@
+<div align="center">
+
+<img src="assets/logo-256.png" alt="Serpentine3D" width="128">
+
 # Serpentine3D
 
-**An open-source NURBS surface modeller for Linux, with native AI integration via MCP.**
+**An open-source NURBS surface modeller for Linux, Windows & macOS — a Rhino-style freeform workflow with native AI integration.**
+
+[Download for Linux](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) ·
+[Windows](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) ·
+[macOS](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.4.0-arm64.dmg) ·
+[Website](https://chisomobanzi.github.io/Serpentine3D/)
+
+</div>
 
 Serpentine3D (`serp3d`) is a freeform surface modeller in the spirit of Rhinoceros 3D —
 BREP/NURBS geometry on the OpenCASCADE kernel, not meshes. It is built for set
 designers, architects, and industrial designers who want a genuine Rhino-style
-workflow on Linux: a command line that prompts for input, layers, object snaps to
-a construction plane, STEP/OBJ interchange, and a dark, focused interface.
+workflow: a command line that prompts for input, layers, object snaps to a
+construction plane, STEP/OBJ/FBX interchange, and a dark, focused interface.
+The whole modelling engine also runs headless, so the same geometry you build by
+hand can be scripted, batch-processed, or driven by an AI.
 
 Named for the serpentine stone of Zimbabwean Shona sculpture, and for the
 S-curve at the heart of NURBS geometry.
@@ -15,41 +28,66 @@ S-curve at the heart of NURBS geometry.
 
 ## Why
 
-- **No genuine open-source NURBS modeller exists for Linux.** FreeCAD is
-  parametric CAD; Blender is mesh-based. Serpentine3D fills the freeform
-  surface-modelling gap.
+- **No open-source freeform NURBS surface modeller exists.** FreeCAD is
+  parametric solid CAD; Blender is mesh-based. Serpentine3D fills the
+  freeform surface-modelling gap — on Linux, Windows and macOS alike.
 - **First CAD tool with native AI integration.** The bundled MCP server lets
   Claude (or any MCP client) see your viewport, create geometry, run any
   command, and manage the scene.
+- **Headless-first.** The modelling core is fully decoupled from the GUI —
+  script it (`serp3d-batch`), import it as a Python library, or drive it over
+  MCP. Repeatable, configurable, light, CI-friendly.
+
+<table>
+<tr>
+<td width="50%"><img src="assets/screenshot-surfaces.png" alt="Surfaces and solids on an exact BREP kernel"></td>
+<td width="50%"><img src="assets/screenshot-analysis.png" alt="Zebra surface-continuity analysis"></td>
+</tr>
+<tr>
+<td align="center"><em>Exact BREP surfaces &amp; solids on OpenCASCADE</em></td>
+<td align="center"><em>Zebra &amp; curvature surface analysis</em></td>
+</tr>
+</table>
 
 ## Install
 
-Requires Python 3.10+ on Linux with OpenGL 3.3.
+### Download
+
+| Platform | Download | Notes |
+|---|---|---|
+| **Linux** | [`Serpentine3D-x86_64.AppImage`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) | `chmod +x` and run — nothing to install |
+| **Windows** | [`Serpentine3D-Setup-x86_64.exe`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) | Installer (Inno Setup) |
+| **macOS** (Apple Silicon) | [`Serpentine3D-arm64.dmg`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.4.0-arm64.dmg) | Drag to Applications |
+
+Each download bundles the OpenCASCADE kernel and Python runtime — nothing else to
+install. The GUI needs a GPU with OpenGL 3.3 drivers, which any normal desktop
+has; GPU-less VMs and remote-desktop sessions that only expose OpenGL 1.1 get a
+clear message instead of a viewport. Headless use (`serp3d-batch`, the MCP
+server, file conversion) works anywhere.
+
+### From source
+
+Requires Python 3.10+.
 
 ```bash
-git clone <this-repo> && cd Serpentine3D
+git clone https://github.com/chisomobanzi/Serpentine3D && cd Serpentine3D
 python3 -m venv .venv
 .venv/bin/pip install -e .
 .venv/bin/serp3d        # launch
 ```
 
-The OpenCASCADE kernel ships as pip wheels (`cadquery-ocp`) — no conda, no
-system packages.
-
-**Windows (experimental):** the same pip install works on Windows —
-every dependency has prebuilt wheels, and the full test suite passes on
-Windows 10 (Python 3.12). The GUI needs a GPU with OpenGL 3.3 drivers,
-which any normal desktop has; GPU-less VMs and remote-desktop sessions
-only expose Windows' built-in OpenGL 1.1 and get a clear error message
-instead of a viewport. Headless use (`serp3d-batch`, MCP server, file
-conversion) works everywhere. macOS is untested — reports welcome.
+The OpenCASCADE kernel installs as pip wheels (`cadquery-ocp`) — no conda, no
+system packages. The same install works on Linux, Windows and macOS; the full
+test suite (360+ tests) passes on all three.
 
 ## The command line
 
 Everything works Rhino-style: type a command, answer its prompts. Prompts accept
 typed coordinates (`10,5,0`, relative `@5,0,0`) or viewport clicks on the
 construction plane. `Tab` completes command names, `Up`/`Down` recall history,
-`Enter` on an empty line repeats the last command, `Escape` cancels.
+`Enter` on an empty line repeats the last command, `Escape` cancels. As in Rhino,
+a **right-click in the viewport acts as Enter** — it runs whatever you've typed,
+commits a value mid-command, or repeats the last command.
 
 | | Commands |
 |---|---|
@@ -68,7 +106,7 @@ construction plane. `Tab` completes command names, `Up`/`Down` recall history,
 | **View** | `top` `front` `right` `perspective` `4view`/`1view` `zoomextents` `wireframe` `shaded` `ghosted` `rendered` `technical` `grid` `snap` |
 | **Render** | `material` (Matte/Plastic/Metal/Glass/custom PBR — flows into GLB/USD export) `rendered` |
 | **Layers** | `layer` (new/current/show/hide/rename/weight) — or use the Layers panel |
-| **Meshes** | heavy OBJ/3DM props stay native meshes (instant display); `meshtobrep` / `breptomesh` convert |
+| **Meshes** | heavy OBJ/3DM/FBX props stay native meshes (instant display); `meshtobrep` / `breptomesh` convert |
 | **Files** | `new` `open` `save` `import` `export` (`.serp` is a zip container with thumbnail + metadata) |
 | **Live** | `recordhistory` — loft/extrude/revolve outputs rebuild when their input curves are edited |
 
@@ -104,6 +142,8 @@ nudge the selection along the CPlane (Shift ×10, Ctrl ×0.1).
 Serpentine3D has a full two-space drafting workflow — model in 3D, document
 in 2D, print to PDF — without leaving the app:
 
+![A drafting sheet with dimensioned detail views and hidden-line rendering](assets/screenshot-drafting.png)
+
 - **Layouts** (`layout`): paper-space sheets (A4–A0, Letter, Tabloid or
   custom) with tabs at the bottom of the viewport: `[Model] [Sheet 1] …`
 - **Detail views** (`detail`): live windows into the model placed on the
@@ -133,6 +173,8 @@ in 2D, print to PDF — without leaving the app:
 
 ### The gumball
 
+![The gumball with a face selected for push/pull editing](assets/screenshot-gumball.png)
+
 Select anything and a **gumball** appears: drag the arrows to move along
 an axis, the pads to move in a plane, the circles to rotate (Shift snaps
 to 15°), the square knobs to scale along an axis (Shift = uniform).
@@ -161,13 +203,19 @@ optional model rescale. Every prompt then accepts unit input — `3'6"`,
 
 ### Scripting & automation
 
+The modelling engine runs with or without a GUI, so anything you can do by
+hand can be automated:
+
 - **Python console** (Tools menu, Ctrl+`): the live scene, geometry
   builders and the full API in an interactive session.
 - **`serpentine3d.scripting.Document`**: the same power headless —
   `doc.add(geo.make_box(...))`, `doc.run("filletedge", [...])`,
-  `doc.export("part.step")`.
+  `doc.export("part.step")`. The command layer is decoupled from Qt, so
+  every interactive command runs offscreen.
 - **`serp3d-batch script.py`**: run scripts from the command line / CI
   with `doc`, `geo` and `args` predefined. No display needed.
+- **MCP server** (`serp3d-mcp`): the same modelling surface as tools an AI
+  agent can call — full CRUD over the scene (see below).
 - **Autosave & crash recovery**: every 5 minutes (configurable); on
   launch after a crash Serpentine3D offers to restore the autosave.
 - Drop a `~/.config/serpentine3d/template.serp` to start every new
@@ -195,12 +243,15 @@ Settings live in `~/.config/serpentine3d/settings.json`.
 | `.step` / `.stp` | ✓ | ✓ | Exact BREP exchange via OCCT |
 | `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps/surfaces import as untrimmed NURBS faces, export as meshes; layers preserved |
 | `.obj` | ✓ | ✓ | Tessellated mesh with `.mtl` colours |
+| `.fbx` | ✓ | ✓ | Autodesk FBX (binary) — tessellated meshes; imports/exports cleanly to Blender, Maya, Unreal, Unity |
 | `.dxf` | ✓ | ✓ | Curves/meshes with layers; layout sheets export at paper scale |
 | `.svg` | ✓ | ✓ | Paths import as curves (béziers exact); layouts export as vector SVG |
 | `.glb` | | ✓ | Binary glTF with materials (Unreal/Blender/web) |
 | `.usda` | | ✓ | USD for virtual-production pipelines |
 
 ## The assistant (AI modelling)
+
+![The AI assistant modelling geometry alongside the viewport](assets/screenshot-assistant.png)
 
 Serpentine3D has a built-in AI assistant: open it from the View menu (or
 type `ai`, or Ctrl+Shift+A), describe what you want, and it builds real
@@ -252,7 +303,8 @@ serpentine3d/
 ├── commands/      # generator-based interactive commands (Rhino-style
 │                  #   prompt protocol, shared by GUI + MCP)
 ├── ui/            # Qt: GL viewport, command line, panels, dark theme
-├── fileio/        # .serp / STEP / OBJ
+├── fileio/        # .serp, STEP, 3DM, OBJ, FBX, DXF, SVG, GLB, USD
+├── scripting.py   # stable headless Document API (serp3d-batch)
 ├── mcp_server/    # stdio MCP server -> RPC bridge
 ├── api.py         # programmatic API over a running session
 └── rpc.py         # localhost JSON-RPC bridge
