@@ -88,7 +88,7 @@ class CommandLine(QWidget):
         self.input.setFont(mono)
         self.input.setPlaceholderText(
             "type a command (line, circle, extrude, loft, ...)")
-        self.input.returnPressed.connect(self._submit)
+        self.input.returnPressed.connect(self.submit_input)
         self.input.tabPressed.connect(self._complete)
         self.input.textEdited.connect(self._reset_tab)
         self.input.upPressed.connect(self.history_prev)
@@ -170,15 +170,18 @@ class CommandLine(QWidget):
                 break
         return out
 
-    # -- internals --
-
-    def _submit(self):
+    def submit_input(self):
+        """Submit the current input text exactly as pressing Enter does:
+        record history, clear the box, and emit `submitted`. Public so a
+        right-click in the viewport can act as Enter (Rhino-style)."""
         text = self.input.text()
         self.input.clear()
         if text.strip():
             self._history.append(text.strip())
         self._hist_pos = len(self._history)
         self.submitted.emit(text)
+
+    # -- internals --
 
     def _reset_tab(self):
         self._tab_matches = []

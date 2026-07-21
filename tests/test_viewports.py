@@ -183,6 +183,50 @@ def test_select_then_right_click_repeats_immediately(window):
     assert g.volume(window.scene.get(b.id).shape) == pytest.approx(8 * 27)
 
 
+def test_right_click_runs_typed_command(window):
+    """Rhino muscle memory: type a command and right-click to run it.
+    Right-click is Enter, so a typed name executes instead of repeating the
+    last command, and the input box clears like Enter does."""
+    window.command_line.input.setText("circle")
+    _rmb_click(window.viewport)
+    assert window.processor.busy                       # circle started
+    assert window.command_line.input.text() == ""      # consumed, like Enter
+    assert "circle" in window.processor.prompt_text().lower() \
+        or "center" in window.processor.prompt_text().lower()
+    window.processor.cancel()
+
+
+def test_right_click_commits_typed_value_midcommand(window):
+    """Mid-command, right-click commits whatever is typed (Enter), rather
+    than submitting an empty default and ignoring the text."""
+    from serpentine3d.core import geometry as g
+    window.processor.run("circle")
+    window.command_line.input.setText("0,0,0")
+    _rmb_click(window.viewport)                         # commit center
+    assert window.command_line.input.text() == ""
+    assert window.processor.busy                        # now wants radius
+    window.command_line.input.setText("5")
+    _rmb_click(window.viewport)                         # commit radius
+    assert not window.processor.busy
+    lo, hi = g.bbox(window.scene.all()[-1].shape)
+    assert (hi[0] - lo[0]) == pytest.approx(10, abs=0.01)
+
+
+def test_type_in_viewport_then_right_click_runs(window):
+    """End-to-end Rhino gesture: with the viewport focused, typing routes
+    into the command line and a right-click runs it -- never touching a box."""
+    from PySide6.QtTest import QTest
+    window.show()
+    vp = window.viewport
+    vp.setFocus()
+    QTest.keyClicks(vp, "c")                        # routes into the command line
+    QTest.keyClicks(window.command_line.input, "ircle")
+    assert window.command_line.input.text() == "circle"
+    _rmb_click(vp)
+    assert window.processor.busy                    # right-click ran it
+    window.processor.cancel()
+
+
 def test_sellast_recovers_released_selection(window):
     from serpentine3d.core import geometry as g
     obj = window.scene.add(g.make_box((0, 0, 0), 2, 2, 2))

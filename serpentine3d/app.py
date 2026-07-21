@@ -580,12 +580,18 @@ class MainWindow(QMainWindow):
         self._help_browser.raise_()
 
     def _rmb_enter(self):
-        """Right-click: Enter while busy; when idle, the first click after
-        a command ends is the 'done' gesture, the next one repeats."""
-        if not self.processor.busy and getattr(self, "_rmb_absorb", False):
+        """Right-click acts as Enter (Rhino-style): if a command is typed at
+        the prompt it runs that; mid-command it commits the typed value; on an
+        empty prompt it repeats the last command -- except the single click
+        right after a command ends is the 'done' gesture and is absorbed."""
+        typed = bool(self.command_line.input.text().strip())
+        if not typed and not self.processor.busy \
+                and getattr(self, "_rmb_absorb", False):
             self._rmb_absorb = False
             return
-        self._on_submit("")
+        # Route through the command line so a typed name/value is submitted
+        # exactly as Enter would (history, clear, then run/provide/repeat).
+        self.command_line.submit_input()
 
     def _on_option_chip(self, name: str):
         self.processor.set_option(name)
