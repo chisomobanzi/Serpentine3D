@@ -6,6 +6,7 @@ build/
 dist/
 .pytest_cache/
 *.serp
+!website/samples/*.serp   # downloadable sample scenes are site assets, not user data
 *.step
 *.stp
 *.obj
