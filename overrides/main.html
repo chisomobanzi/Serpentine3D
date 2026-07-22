@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  <!-- Privacy-friendly, cookieless analytics (GoatCounter), shared with the
+       landing page. Tracks docs pageviews + download-link clicks. -->
+  <script data-goatcounter="https://serpentine3d.goatcounter.com/count"
+          async src="/Serpentine3D/count.js"></script>
+  <script>
+    window.addEventListener("load", function () {
+      document.querySelectorAll('a[href*="releases/latest/download/"]').forEach(function (a) {
+        a.addEventListener("click", function () {
+          if (!window.goatcounter || !window.goatcounter.count) return;
+          var p = /AppImage/.test(a.href) ? "dl-linux"
+                : /\.exe/.test(a.href)    ? "dl-windows"
+                : /\.dmg/.test(a.href)    ? "dl-macos" : "dl-other";
+          window.goatcounter.count({ path: p, title: "Download", event: true });
+        });
+      });
+    });
+  </script>
+{% endblock %}
