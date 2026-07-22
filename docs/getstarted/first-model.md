@@ -43,6 +43,16 @@ radius: 5
 The block rebuilds with 5 mm rounded edges. (Prefer dragging? Hold
 ++ctrl+shift++ and click an edge to get a fillet handle on the gumball.)
 
+<figure markdown>
+  <video autoplay loop muted playsinline
+         style="width:100%;max-width:900px;height:auto;border-radius:6px">
+    <source src="../../assets/clips/fillet.webm" type="video/webm">
+    <source src="../../assets/clips/fillet.mp4" type="video/mp4">
+  </video>
+  <figcaption>A bigger radius rounds the edges further — the exact solid
+  rebuilds each time.</figcaption>
+</figure>
+
 ## 4. Look around
 
 - **Middle-mouse drag** orbits · **Shift + middle-drag** pans · **scroll** zooms
