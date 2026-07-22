@@ -237,6 +237,21 @@ def cmd_matchprops(ctx):
     ctx.echo(f"Matched properties on {n} object(s) from {s.name}.")
 
 
+@command("linetype", aliases=("lt", "setlinetype"))
+def cmd_linetype(ctx):
+    """Set the dash style of selected objects (Continuous/Dashed/…/ByLayer)."""
+    from ..core import linetype as lt
+    objs = yield SelectReq("Select objects to set linetype")
+    if not objs:
+        ctx.echo("Nothing selected.")
+        return
+    style = yield OptionReq("Linetype", options=["ByLayer", *lt.LINETYPES],
+                            default="ByLayer")
+    for o in objs:
+        ctx.scene.update(o.id, linetype=style)
+    ctx.echo(f"Set linetype '{style}' on {len(objs)} object(s).")
+
+
 @command("changelayer", aliases=("tolayer",))
 def cmd_changelayer(ctx):
     """Move objects to a layer by name (created if missing)."""

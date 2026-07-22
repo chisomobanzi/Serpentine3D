@@ -28,6 +28,7 @@ class Layer:
     visible: bool = True
     locked: bool = False
     lineweight: float = 1.4        # on-screen edge width in pixels
+    linetype: str = "Continuous"   # dash-pattern name (core/linetype.py)
 
 
 class LayerManager:
@@ -87,6 +88,10 @@ class LayerManager:
     def set_lineweight(self, layer_id: str, weight: float):
         self._layers[layer_id] = replace(self._layers[layer_id],
                                          lineweight=max(0.2, float(weight)))
+
+    def set_linetype(self, layer_id: str, name: str):
+        self._layers[layer_id] = replace(self._layers[layer_id],
+                                         linetype=name or "Continuous")
 
     def set_locked(self, layer_id: str, locked: bool):
         self._layers[layer_id] = replace(self._layers[layer_id], locked=locked)

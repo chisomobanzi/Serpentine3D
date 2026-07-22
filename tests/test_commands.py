@@ -786,7 +786,8 @@ def test_rhino_macro_mapping():
     assert map_rhino_macro("!_FilletEDge") == "filletedge"   # registry fall
     assert map_rhino_macro("!_BooleanSplit") == "booleansplit"
     assert map_rhino_macro("!_Grasshopper") is None
-    assert map_rhino_macro("-SetLinetype Dashed") is None
+    # SetLinetype now maps — Serpentine has a `linetype` command (setlinetype alias)
+    assert map_rhino_macro("-SetLinetype Dashed") == "linetype"
 
 
 def test_boundingbox_command(env):

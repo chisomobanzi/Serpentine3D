@@ -82,6 +82,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "visible": layer.visible,
                 "locked": layer.locked,
                 "lineweight": layer.lineweight,
+                "linetype": layer.linetype,
             }
             for layer in scene.layers.all()
         ],
@@ -99,6 +100,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "annotation": (dict(obj.annotation) if obj.annotation
                                else None),
                 "locked": obj.locked,
+                "linetype": obj.linetype,
                 "group": obj.group_id,
                 "block": obj.block_id,
                 "brep": (None if obj.kind == "mesh" else
@@ -140,11 +142,13 @@ def _load_doc(scene, doc: dict):
             layers.set_color("default", tuple(ld["color"]))
             layers.set_visible("default", ld.get("visible", True))
             layers.set_lineweight("default", ld.get("lineweight", 1.4))
+            layers.set_linetype("default", ld.get("linetype", "Continuous"))
             id_map[ld["id"]] = "default"
         else:
             layer = layers.create(ld["name"], tuple(ld["color"]))
             layers.set_visible(layer.id, ld.get("visible", True))
             layers.set_lineweight(layer.id, ld.get("lineweight", 1.4))
+            layers.set_linetype(layer.id, ld.get("linetype", "Continuous"))
             layers.set_locked(layer.id, ld.get("locked", False))
             id_map[ld["id"]] = layer.id
 
@@ -183,6 +187,8 @@ def _load_doc(scene, doc: dict):
             updates["clip_plane"] = dict(od["clip_plane"])
         if od.get("annotation"):
             updates["annotation"] = dict(od["annotation"])
+        if od.get("linetype") and od["linetype"] != "ByLayer":
+            updates["linetype"] = od["linetype"]
         if od.get("locked"):
             updates["locked"] = True
         if od.get("group"):

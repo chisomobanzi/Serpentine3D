@@ -175,7 +175,7 @@ def cmd_rename(ctx):
 def cmd_layer(ctx):
     action = yield OptionReq(
         "Layer action", options=["New", "Current", "Show", "Hide", "Rename",
-                                 "Weight"],
+                                 "Weight", "Linetype"],
         default="New")
     layers = ctx.scene.layers
     if action == "New":
@@ -209,6 +209,17 @@ def cmd_layer(ctx):
                                 default=layer.lineweight, minimum=0.2)
             layers.set_lineweight(layer.id, float(w))
             ctx.echo(f"Layer '{layer.name}' draws {w:g}px edges.")
+    elif action == "Linetype":
+        from ..core import linetype as lt
+        name = yield TextReq("Layer name")
+        layer = layers.find_by_name(name)
+        if layer is None:
+            ctx.echo(f"No layer named '{name}'.")
+        else:
+            style = yield OptionReq("Linetype", options=list(lt.LINETYPES),
+                                    default=layer.linetype)
+            layers.set_linetype(layer.id, style)
+            ctx.echo(f"Layer '{layer.name}' draws {style} lines.")
     elif action == "Rename":
         old = yield TextReq("Layer to rename")
         layer = layers.find_by_name(old)

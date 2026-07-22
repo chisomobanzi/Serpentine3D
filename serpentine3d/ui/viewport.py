@@ -243,11 +243,32 @@ def _compile(vert_src: str, frag_src: str) -> int:
     return prog
 
 
+def _dashed_edge_segments(mesh, pattern, scale):
+    """Rebuild the object's edge segments as dash segments: regroup the
+    flattened GL_LINES back into per-edge polylines (via edge_of_segment) and
+    run each through the linetype dasher."""
+    from ..core.linetype import dash_polyline
+    segs = mesh.edge_segments
+    eos = getattr(mesh, "edge_of_segment", None)
+    if eos is None or not len(segs):
+        return segs
+    out = []
+    eos = np.asarray(eos)
+    for edge_id in np.unique(eos):
+        es = segs[eos == edge_id]                 # (n, 2, 3) in edge order
+        poly = np.vstack([es[:, 0, :], es[-1:, 1, :]])
+        out.extend(dash_polyline(poly, pattern, scale))
+    if not out:
+        return np.zeros((0, 2, 3), np.float32)
+    return np.asarray(out, np.float32)
+
+
 class _GpuObject:
     """GPU buffers for one scene object."""
 
-    def __init__(self, mesh):
+    def __init__(self, mesh, dash=None, dash_key=None):
         self.mesh_id = id(mesh)
+        self.dash_key = dash_key                  # linetype identity for cache
         self.tri_vao = self.tri_count = 0
         self.line_vao = self.line_count = 0
         self.iso_vao = self.iso_count = 0
@@ -282,11 +303,14 @@ class _GpuObject:
                             GL.GL_STATIC_DRAW)
             self.tri_count = idx.size
         self.thick_vao = self.thick_count = 0
-        if len(mesh.edge_segments):
+        edge_segments = mesh.edge_segments
+        if dash and dash[0]:                          # (pattern, scale)
+            edge_segments = _dashed_edge_segments(mesh, dash[0], dash[1])
+        if len(edge_segments):
             self.line_vao, self.line_count = self._make_line_vao(
-                mesh.edge_segments)
+                edge_segments)
             self.thick_vao, self.thick_count = self._make_thick_vao(
-                mesh.edge_segments)
+                edge_segments)
         if len(mesh.iso_segments):
             self.iso_vao, self.iso_count = self._make_line_vao(
                 mesh.iso_segments)
@@ -897,6 +921,13 @@ class Viewport(QOpenGLWidget):
     # shapes with at least this many faces mesh in the background
     ASYNC_FACE_COUNT = 48
 
+    def _effective_linetype(self, obj) -> str:
+        """The object's dash style, resolving 'ByLayer' against its layer."""
+        from ..core import linetype as _lt
+        layer = self.scene.layers.get(obj.layer_id)
+        layer_lt = layer.linetype if layer is not None else "Continuous"
+        return _lt.resolve(getattr(obj, "linetype", "ByLayer"), layer_lt)
+
     def _sync_gpu(self):
         live = set()
         for obj in self.scene.all():
@@ -908,12 +939,18 @@ class Viewport(QOpenGLWidget):
                     del self._gpu[obj.id]
                 continue
             self._tess_pending.pop(obj.id, None)
-            if gpu is not None and gpu.mesh_id != id(obj.mesh):
+            lt_name = self._effective_linetype(obj)
+            if gpu is not None and (gpu.mesh_id != id(obj.mesh)
+                                    or gpu.dash_key != lt_name):
                 gpu.release()
                 gpu = None
                 del self._gpu[obj.id]
             if gpu is None:
-                self._gpu[obj.id] = _GpuObject(obj.mesh)
+                from ..core import linetype as _lt
+                dash = ((_lt.pattern_for(lt_name), 1.0)
+                        if lt_name != "Continuous" else None)
+                self._gpu[obj.id] = _GpuObject(obj.mesh, dash=dash,
+                                               dash_key=lt_name)
         for dead in set(self._gpu) - live:
             self._gpu[dead].release()
             del self._gpu[dead]
