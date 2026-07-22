@@ -483,6 +483,45 @@ def cmd_length(ctx):
     ctx.echo(f"Length: {ctx.scene.format_length(total)}")
 
 
+@command("printcheck", aliases=("printinfo",), mutates=False)
+def cmd_printcheck(ctx):
+    """Check selected objects for 3D-print readiness: watertight, manifold,
+    degenerate facets, thin walls, overhangs and print size."""
+    objs = yield SelectReq("Select objects to check for printing",
+                           kinds=("solid", "surface", "mesh"))
+    if not objs:
+        ctx.echo("Nothing selected.")
+        return
+    from ..core import printcheck as pc
+    u = ctx.scene.units
+    for o in objs:
+        try:
+            r = pc.analyze(o.shape)
+        except Exception as exc:                      # noqa: BLE001
+            ctx.echo(f"{o.name}: analysis failed ({exc})")
+            continue
+        head = "PRINT-READY" if r["ok"] else "NEEDS ATTENTION"
+        wt = "yes" if r["watertight"] else f"NO ({r['open_edges']} open edges)"
+        mf = ("yes" if r["manifold"]
+              else f"NO ({r['nonmanifold_edges']} bad edges)")
+        sx, sy, sz = r["size"]
+        lines = [f"{o.name} — {head}",
+                 f"  watertight: {wt} · manifold: {mf}",
+                 f"  size: {sx:.3g} x {sy:.3g} x {sz:.3g} {u}"]
+        if r.get("brep_valid") is False:
+            lines.append("  WARNING: geometry is invalid (self-intersections?)")
+        if r["degenerate"]:
+            lines.append(f"  degenerate facets: {r['degenerate']}")
+        if r["min_wall"] is not None:
+            tag = "  (THIN)" if r["thin"] else ""
+            lines.append(f"  min wall: {r['min_wall']:.3g} {u}{tag}")
+        pct = r["overhang_fraction"] * 100.0
+        note = " — may need supports" if pct > 1.0 else ""
+        lines.append(f"  overhangs >{r['overhang_deg']:.0f}°: "
+                     f"{pct:.1f}% of surface{note}")
+        ctx.echo("\n".join(lines))
+
+
 @command("curvature", mutates=False)
 def cmd_curvature(ctx):
     objs = yield SelectReq("Select curve", kinds=("curve",), max_count=1)

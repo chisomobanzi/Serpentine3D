@@ -102,7 +102,7 @@ commits a value mid-command, or repeats the last command.
 | **Organise** | `group`/`ungroup` `lock`/`unlockall` `block` `insert` `blocklist` `count` |
 | **Camera** | `camera` (lens mm, cinema sensors, placement, 2.39/1.85 frame guides) `units` `cplane` |
 | **Array** | `array` (grid) `arraypolar` `arraypath` (along a curve) |
-| **Analysis** | `distance` `length` `area` `volume` `curvature` `zebra` `curvaturegraph` (combs) `draftanalysis` |
+| **Analysis** | `distance` `length` `area` `volume` `curvature` `zebra` `curvaturegraph` (combs) `draftanalysis` `printcheck` (3D-print readiness: watertight, thin walls, overhangs, size) |
 | **View** | `top` `front` `right` `perspective` `4view`/`1view` `zoomextents` `wireframe` `shaded` `ghosted` `rendered` `technical` `grid` `snap` |
 | **Render** | `material` (Matte/Plastic/Metal/Glass/custom PBR — flows into GLB/USD export) `rendered` |
 | **Layers** | `layer` (new/current/show/hide/rename/weight) — or use the Layers panel |
@@ -245,6 +245,7 @@ Settings live in `~/.config/serpentine3d/settings.json`.
 | `.obj` | ✓ | ✓ | Tessellated mesh with `.mtl` colours |
 | `.fbx` | ✓ | ✓ | Autodesk FBX (binary) — tessellated meshes; imports/exports cleanly to Blender, Maya, Unreal, Unity |
 | `.stl` | ✓ | ✓ | 3D printing — watertight binary STL (or ASCII) for slicers, with draft→ultra mesh-quality presets on export; imports both |
+| `.3mf` | | ✓ | 3D printing — modern container (real units, colour, multi-part); Bambu Studio / PrusaSlicer / Cura prefer it over STL |
 | `.dxf` | ✓ | ✓ | Curves/meshes with layers; layout sheets export at paper scale |
 | `.svg` | ✓ | ✓ | Paths import as curves (béziers exact); layouts export as vector SVG |
 | `.glb` | | ✓ | Binary glTF with materials (Unreal/Blender/web) |
