@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0 — 2026-07-22
+
+The "interchange" release: real interoperability with the rest of the 3D
+world — FBX, STL and 3MF in and out — plus print-readiness checks, Rhino-style
+linetypes and draw order on drawing sheets, and a full documentation site.
+
+- **FBX import/export**: pure-Python, mesh-based FBX in both directions;
+  exports **binary** FBX so Blender, Maya, Unreal and Unity import it cleanly.
+- **STL for 3D printing**: import and export with **mesh-quality presets**
+  (deflection settings) so you choose how finely exact surfaces are sampled;
+  the quality dialog is untethered from the main window (GNOME fix).
+- **3MF export**: modern print format alongside STL.
+- **printcheck**: 3D-print readiness analysis — flags problems before you
+  send a model to the slicer.
+- **Linetypes on sheets**: dashed / dotted / hidden / center line styles
+  (Rhino parity), with hidden-line removal now computing per-shape visible
+  edges so dashed solids hide correctly in layout export (PDF/SVG).
+- **Draw order**: bring-to-front / send-to-back (Rhino parity).
+- **Drafting sheets**: a `+` button on the bottom tab bar to add a sheet.
+- **Command line**: right-click runs the typed command (Rhino-style).
+- **Documentation site**: a full MkDocs (Material) site — Diátaxis-structured
+  tutorials, how-to guides, reference and explanation — published to GitHub
+  Pages, with a landing page covering the headless/batch workflow, downloadable
+  sample scenes, and privacy-friendly (cookieless) analytics.
+- **Linux polish**: modal dialogs and file choosers untethered from the main
+  window (GNOME attach-modal-dialogs), using Qt's own sized file dialog.
+
 ## 0.3.0 — 2026-07-16
 
 The "daily-driver" release: everything learned from real playtesting,

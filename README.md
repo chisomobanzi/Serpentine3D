@@ -8,7 +8,7 @@
 
 [Download for Linux](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) ·
 [Windows](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) ·
-[macOS](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.4.0-arm64.dmg) ·
+[macOS](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.5.0-arm64.dmg) ·
 [Website](https://chisomobanzi.github.io/Serpentine3D/)
 
 </div>
@@ -57,7 +57,7 @@ S-curve at the heart of NURBS geometry.
 |---|---|---|
 | **Linux** | [`Serpentine3D-x86_64.AppImage`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) | `chmod +x` and run — nothing to install |
 | **Windows** | [`Serpentine3D-Setup-x86_64.exe`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) | Installer (Inno Setup) |
-| **macOS** (Apple Silicon) | [`Serpentine3D-arm64.dmg`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.4.0-arm64.dmg) | Drag to Applications |
+| **macOS** (Apple Silicon) | [`Serpentine3D-arm64.dmg`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.5.0-arm64.dmg) | Drag to Applications |
 
 Each download bundles the OpenCASCADE kernel and Python runtime — nothing else to
 install. The GUI needs a GPU with OpenGL 3.3 drivers, which any normal desktop

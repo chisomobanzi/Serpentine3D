@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PY="${1:-python3}"
-VERSION="0.4.0"
+VERSION="0.5.0"
 APPNAME="Serpentine3D"
 ARCH="$(uname -m)"
 DMG="${APPNAME}-${VERSION}-${ARCH}.dmg"
