@@ -17,6 +17,16 @@ size. This is also why mesh exports (STL, OBJ, glTF) have a quality/deflection
 setting: you're choosing how finely to sample exact surfaces. Heavy imported
 meshes stay native mesh objects so they display instantly.
 
+<figure markdown>
+  <video autoplay loop muted playsinline
+         style="width:100%;max-width:900px;height:auto;border-radius:6px">
+    <source src="../../assets/clips/pushpull.webm" type="video/webm">
+    <source src="../../assets/clips/pushpull.mp4" type="video/mp4">
+  </video>
+  <figcaption>Push/pull a face and the exact solid is rebuilt — then
+  re-tessellated for display.</figcaption>
+</figure>
+
 ## Commands are generators
 
 Every command is a Python **generator** that *yields typed requests* for the
