@@ -12,6 +12,14 @@ STEP / 3DM / OBJ / FBX / STL interchange. The whole modelling engine also
 runs headless, so anything you build by hand can be scripted, batch-processed
 or driven by an AI.
 
+<figure markdown>
+  <video autoplay loop muted playsinline
+         style="width:100%;max-width:1000px;height:auto;border-radius:8px">
+    <source src="assets/clips/bands.webm" type="video/webm">
+    <source src="assets/clips/bands.mp4" type="video/mp4">
+  </video>
+</figure>
+
 !!! tip "If you know Rhino"
     You'll feel at home — the same command-line workflow, the same aliases,
     the same object snaps, and it even imports your Rhino shortcuts. Not every

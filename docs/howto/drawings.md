@@ -7,6 +7,12 @@ Serpentine3D has two spaces, like Rhino:
   holds *detail views* (windows into the model), plus annotations that
   live on the paper.
 
+<figure markdown="span">
+  ![A drawing sheet with dimensioned detail views](../assets/img/drawing-sheet.png){ width="720" }
+  <figcaption>A sheet with plan / elevation / perspective details, dimensions
+  and hidden-line linework — all live windows into the 3D model.</figcaption>
+</figure>
+
 ## Layouts
 
 | Command | Does |

@@ -40,6 +40,12 @@ common Rhino preference).
 
 ## Control points & sub-objects
 
+<figure markdown="span">
+  ![The gumball on a selected solid](../assets/img/gumball.png){ width="640" }
+  <figcaption>The gumball: arrows move, arcs rotate, knobs scale — and
+  ++ctrl+shift++-click a face for push/pull.</figcaption>
+</figure>
+
 | Shortcut | Action |
 |---|---|
 | ++f10++ / ++f11++ | Show / hide control points (curves *and* surfaces) |

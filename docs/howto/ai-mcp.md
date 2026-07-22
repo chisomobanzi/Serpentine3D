@@ -4,6 +4,12 @@ Serpentine3D ships an [MCP](https://modelcontextprotocol.io) server so AI
 assistants can drive the modeller: create geometry, run any command,
 inspect and screenshot the scene.
 
+<figure markdown="span">
+  ![The AI assistant modelling in a live scene](../assets/img/ai-assistant.png){ width="820" }
+  <figcaption>The in-app assistant builds real geometry in your scene and can
+  see the viewport to check its own work.</figcaption>
+</figure>
+
 ## Wiring it up
 
 With the GUI running (it opens a local RPC bridge automatically), add
