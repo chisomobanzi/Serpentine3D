@@ -268,3 +268,16 @@ def _key_event(key):
     from PySide6.QtGui import QKeyEvent
     return QKeyEvent(QEvent.Type.KeyPress, key,
                      QtC.KeyboardModifier.NoModifier)
+
+
+def test_new_sheet_action_adds_layout_and_switches(window):
+    """The '+' next to the Model tab creates a paper-space sheet and jumps
+    to it, same as 'layout' > New but one click."""
+    n0 = len(window.scene.layouts)
+    lay = window._new_sheet("A3")
+    assert len(window.scene.layouts) == n0 + 1
+    assert lay.paper_w == 420.0 and lay.paper_h == 297.0     # A3 landscape
+    assert window.active_viewport.space == lay.id            # switched onto it
+    labels = [window.space_tabs.tabText(i)
+              for i in range(window.space_tabs.count())]
+    assert lay.name in labels                                # tab exists

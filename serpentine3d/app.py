@@ -93,7 +93,7 @@ class MainWindow(QMainWindow):
         cmd_layout = QVBoxLayout(cmd_container)
         cmd_layout.setContentsMargins(0, 0, 0, 0)
         cmd_layout.setSpacing(0)
-        cmd_layout.addWidget(self.space_tabs)   # Model / Layout, active pane
+        cmd_layout.addWidget(self._build_space_tab_row())   # tabs + "＋"
         cmd_layout.addWidget(self.command_line)
         cmd_layout.addWidget(self.osnap_bar)
         self._cmd_dock = QDockWidget("Command", self)
@@ -1004,6 +1004,59 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Recovery failed", str(exc))
 
     # ---------------------------------------------------------- space tabs
+
+    def _build_space_tab_row(self):
+        """The bottom space-tab strip: Model / sheet tabs plus a '+' button to
+        add a new sheet — click adds A3, the dropdown picks a size or opens the
+        full 'layout' options (custom size, portrait)."""
+        from PySide6.QtWidgets import QHBoxLayout, QMenu, QToolButton, QWidget
+        row = QWidget()
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(3)
+        hl.addWidget(self.space_tabs)
+
+        add = QToolButton()
+        add.setText("+")
+        add.setToolTip("New drafting sheet")
+        add.setAutoRaise(True)
+        add.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        add.setStyleSheet(
+            "QToolButton { padding: 1px 8px; background: #212226;"
+            " border: 1px solid #1b1c1f; color: #b9b9bd; font-size: 14px; }"
+            "QToolButton:hover { background: #2f3035; color: #e8e8ea; }"
+            "QToolButton::menu-button { border: none; width: 13px; }")
+        add.clicked.connect(lambda: self._new_sheet("A3"))
+        menu = QMenu(add)
+        for size in ("A4", "A3", "A2", "A1", "Letter", "Tabloid"):
+            menu.addAction(f"New sheet — {size}",
+                           lambda s=size: self._new_sheet(s))
+        menu.addSeparator()
+        menu.addAction("New sheet…  (choose size / portrait)",
+                       lambda: self.run_command("layout"))
+        add.setMenu(menu)
+        self.add_space_btn = add
+
+        hl.addWidget(add)
+        hl.addStretch(1)
+        return row
+
+    def _new_sheet(self, paper: str = "A3", landscape: bool = True):
+        """Create a new paper-space drafting sheet and switch to it — the '+'
+        button's action, i.e. 'layout' > New in one click."""
+        from .core.layout import PAPER_SIZES, Layout
+        w, h = PAPER_SIZES.get(paper, PAPER_SIZES["A3"])
+        if not landscape:
+            w, h = h, w
+        lay = Layout(name=f"Layout {len(self.scene.layouts) + 1}",
+                     paper_w=float(w), paper_h=float(h))
+        self.scene.layouts.append(lay)
+        self.scene.notify()
+        self.switch_space(lay.id)
+        self.command_line.echo(
+            f"Created sheet '{lay.name}' ({w:g}x{h:g}mm). "
+            "Use 'detail' to place model views.")
+        return lay
 
     def _refresh_space_tabs(self):
         self._tabs_updating = True
