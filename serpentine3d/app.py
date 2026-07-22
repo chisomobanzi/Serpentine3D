@@ -744,7 +744,7 @@ class MainWindow(QMainWindow):
 
     _FILTERS = ("Serpentine3D (*.serp);;STEP (*.step *.stp);;"
                 "Autodesk FBX (*.fbx);;Wavefront OBJ (*.obj);;"
-                "STL — 3D printing (*.stl)")
+                "STL — 3D printing (*.stl);;3MF — 3D printing (*.3mf)")
 
     def _file_new(self):
         if self.scene.all():

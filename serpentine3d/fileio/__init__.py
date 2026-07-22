@@ -88,6 +88,12 @@ def export_file(scene, path: str, only_ids: list | None = None,
         stl.export_stl([(o.name, o.shape) for o in objs], path,
                        quality=stl_quality)
         return
+    if ext == ".3mf":
+        from . import threemf
+        threemf.export_3mf(
+            [(o.name, o.shape, scene.color_of(o)) for o in objs], path,
+            unit=threemf.UNIT_3MF.get(scene.units, "millimeter"))
+        return
     if ext == ".3dm":
         from . import rhino
         rhino.export_3dm(scene, path, only_ids=only_ids)
