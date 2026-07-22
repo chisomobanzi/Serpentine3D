@@ -897,15 +897,9 @@ class MainWindow(QMainWindow):
             return
         stl_quality = "standard"
         if path.lower().endswith(".stl"):
-            labels = [lbl for lbl, _ in self._STL_QUALITY]
-            label, ok = QInputDialog.getItem(
-                self, "STL mesh quality",
-                "Finer meshes print smoother curves but make larger files:",
-                labels, 2, False)          # default to "Fine" for printing
-            if not ok:
+            stl_quality = self._pick_stl_quality()
+            if stl_quality is None:
                 return
-            stl_quality = dict(
-                (lbl, key) for lbl, key in self._STL_QUALITY)[label]
         try:
             ids = self.selection.ids or None
             fileio.export_file(self.scene, path, only_ids=ids,
@@ -914,6 +908,31 @@ class MainWindow(QMainWindow):
             self.command_line.echo(f"Exported {scope} to {path}")
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Export failed", str(exc))
+
+    def _pick_stl_quality(self) -> str | None:
+        """STL quality picker. Built as an instance (not QInputDialog.getItem)
+        so we can give it a NORMAL window type on Linux — under GNOME's
+        attach-modal-dialogs a DIALOG-type window gets tethered and drags the
+        main window around. Same trick as _pick_file. Returns a QUALITY key,
+        or None if cancelled."""
+        import sys
+        labels = [lbl for lbl, _ in self._STL_QUALITY]
+        dlg = QInputDialog(self)
+        dlg.setWindowTitle("STL mesh quality")
+        dlg.setLabelText(
+            "Finer meshes print smoother curves but make larger files:")
+        dlg.setComboBoxItems(labels)
+        dlg.setComboBoxEditable(False)
+        dlg.setTextValue(labels[2])            # default to "Fine" for printing
+        if sys.platform.startswith("linux"):
+            dlg.setWindowFlags(Qt.WindowType.Window)   # dodge attach-modal
+        dlg.adjustSize()
+        frame = dlg.frameGeometry()
+        frame.moveCenter(self.frameGeometry().center())
+        dlg.move(frame.topLeft())
+        if not dlg.exec():
+            return None
+        return dict(self._STL_QUALITY)[dlg.textValue()]
 
     # ------------------------------------------------------------- autosave
 
