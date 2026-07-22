@@ -64,6 +64,7 @@ class SceneObject:
     clip_plane: dict | None = None     # {"enabled": bool}: sections the view
     annotation: dict | None = None     # {"text": str}: model-space dot label
     linetype: str = "ByLayer"          # dash style; ByLayer -> use the layer's
+    draw_order: int = 0                # higher draws on top (breaks depth ties)
     _mesh: DisplayMesh | None = field(default=None, repr=False, compare=False)
 
     @property

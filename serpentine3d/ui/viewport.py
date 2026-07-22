@@ -1022,7 +1022,11 @@ class Viewport(QOpenGLWidget):
                       "zebra": 1.0, "curvature": 1.0, "draft": 1.0,
                       "rendered": 1.0}[mode]
         curv_range = self._curvature_range() if mode == "curvature" else 0.0
-        objects = self.scene.visible_objects()
+        # Higher draw_order on top: with GL_LESS the first-drawn wins coincident
+        # depth ties, so draw front-most first. Stable, so equal-order objects
+        # keep insertion order (unchanged default behaviour).
+        objects = sorted(self.scene.visible_objects(),
+                         key=lambda o: -getattr(o, "draw_order", 0))
         clips = self._clip_vectors() if self.space == "model" else []
         for i in range(len(clips)):
             GL.glEnable(GL.GL_CLIP_DISTANCE0 + i)

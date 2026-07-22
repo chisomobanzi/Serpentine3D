@@ -101,6 +101,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                                else None),
                 "locked": obj.locked,
                 "linetype": obj.linetype,
+                "draw_order": obj.draw_order,
                 "group": obj.group_id,
                 "block": obj.block_id,
                 "brep": (None if obj.kind == "mesh" else
@@ -189,6 +190,8 @@ def _load_doc(scene, doc: dict):
             updates["annotation"] = dict(od["annotation"])
         if od.get("linetype") and od["linetype"] != "ByLayer":
             updates["linetype"] = od["linetype"]
+        if od.get("draw_order"):
+            updates["draw_order"] = int(od["draw_order"])
         if od.get("locked"):
             updates["locked"] = True
         if od.get("group"):

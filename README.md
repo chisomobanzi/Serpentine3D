@@ -99,13 +99,14 @@ commits a value mid-command, or repeats the last command.
 | **Transform** | `move` `copy` `rotate` `scale` `scalenu` `mirror` `array` |
 | **Edit** | `join` `explode` `trim` `split` `offset` `fillet` `rebuild` `pointson`/`pointsoff` (control points, curves *and* surfaces) `delete` `hide` `show` `rename` `undo` `redo` |
 | **Select** | `selall` `selnone` `selcrv` `selsrf` `selsolid` `sellayer` `selname` `sellast` `invert` `isolate` `unisolate` |
-| **Organise** | `group`/`ungroup` `lock`/`unlockall` `block` `insert` `blocklist` `count` |
+| **Organise** | `group`/`ungroup` `lock`/`unlockall` `block` `insert` `blocklist` `count` `bringtofront`/`sendtoback` `bringforward`/`sendbackward` (draw order) |
 | **Camera** | `camera` (lens mm, cinema sensors, placement, 2.39/1.85 frame guides) `units` `cplane` |
 | **Array** | `array` (grid) `arraypolar` `arraypath` (along a curve) |
 | **Analysis** | `distance` `length` `area` `volume` `curvature` `zebra` `curvaturegraph` (combs) `draftanalysis` `printcheck` (3D-print readiness: watertight, thin walls, overhangs, size) |
 | **View** | `top` `front` `right` `perspective` `4view`/`1view` `zoomextents` `wireframe` `shaded` `ghosted` `rendered` `technical` `grid` `snap` |
 | **Render** | `material` (Matte/Plastic/Metal/Glass/custom PBR — flows into GLB/USD export) `rendered` |
-| **Layers** | `layer` (new/current/show/hide/rename/weight) — or use the Layers panel |
+| **Layers** | `layer` (new/current/show/hide/rename/weight/**linetype**) — or use the Layers panel |
+| **Linetypes** | `linetype` — dashed/dotted/hidden/center/… per object or ByLayer (layers carry a linetype too) |
 | **Meshes** | heavy OBJ/3DM/FBX props stay native meshes (instant display); `meshtobrep` / `breptomesh` convert |
 | **Files** | `new` `open` `save` `import` `export` (`.serp` is a zip container with thumbnail + metadata) |
 | **Live** | `recordhistory` — loft/extrude/revolve outputs rebuild when their input curves are edited |

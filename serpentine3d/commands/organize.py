@@ -252,6 +252,56 @@ def cmd_linetype(ctx):
     ctx.echo(f"Set linetype '{style}' on {len(objs)} object(s).")
 
 
+def _reorder(scene, objs, mode: str):
+    orders = [o.draw_order for o in scene.all()] or [0]
+    hi, lo = max(orders), min(orders)
+    for i, o in enumerate(objs):
+        if mode == "front":
+            scene.update(o.id, draw_order=hi + 1 + i)
+        elif mode == "back":
+            scene.update(o.id, draw_order=lo - 1 - i)
+        elif mode == "forward":
+            scene.update(o.id, draw_order=o.draw_order + 1)
+        elif mode == "backward":
+            scene.update(o.id, draw_order=o.draw_order - 1)
+
+
+@command("bringtofront", aliases=("bf",))
+def cmd_bringtofront(ctx):
+    """Draw the selected objects on top of overlapping ones."""
+    objs = yield SelectReq("Select objects to bring to front")
+    if objs:
+        _reorder(ctx.scene, objs, "front")
+        ctx.echo(f"Brought {len(objs)} object(s) to front.")
+
+
+@command("sendtoback", aliases=("sb",))
+def cmd_sendtoback(ctx):
+    """Draw the selected objects behind overlapping ones."""
+    objs = yield SelectReq("Select objects to send to back")
+    if objs:
+        _reorder(ctx.scene, objs, "back")
+        ctx.echo(f"Sent {len(objs)} object(s) to back.")
+
+
+@command("bringforward", aliases=("bringforwards",))
+def cmd_bringforward(ctx):
+    """Nudge the selected objects one step towards the front."""
+    objs = yield SelectReq("Select objects to bring forward")
+    if objs:
+        _reorder(ctx.scene, objs, "forward")
+        ctx.echo(f"Brought {len(objs)} object(s) forward.")
+
+
+@command("sendbackward", aliases=("sendbackwards",))
+def cmd_sendbackward(ctx):
+    """Nudge the selected objects one step towards the back."""
+    objs = yield SelectReq("Select objects to send backward")
+    if objs:
+        _reorder(ctx.scene, objs, "backward")
+        ctx.echo(f"Sent {len(objs)} object(s) backward.")
+
+
 @command("changelayer", aliases=("tolayer",))
 def cmd_changelayer(ctx):
     """Move objects to a layer by name (created if missing)."""
