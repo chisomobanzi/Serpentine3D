@@ -291,21 +291,9 @@
   }
   .detail p { margin: 0; color: var(--ink-soft); font-size: 0.9875rem; }
   .detail p strong { color: var(--ink); }
-  /* headless capstone — full-width editorial row below the 2x2 grid */
-  .detail.wide {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: 1fr 1.35fr;
-    gap: clamp(18px, 4vw, 52px);
-    align-items: start;
-    padding-top: clamp(24px, 3vw, 36px);
-    border-top: 1px solid var(--hairline);
-  }
-  @media (max-width: 860px) {
-    .detail.wide { grid-template-columns: 1fr; gap: 12px; }
-  }
-  .detail.wide .detail-label { border-bottom: none; padding-bottom: 0; margin-bottom: 10px; }
-  .detail.wide p { max-width: 62ch; }
+  /* headless capstone — full-width card, stacked like its siblings */
+  .detail.wide { grid-column: 1 / -1; }
+  .detail.wide p { max-width: 60ch; }
   .cmd {
     display: block; width: fit-content; max-width: 100%; overflow-x: auto;
     margin-top: 18px; padding: 9px 13px;
@@ -620,19 +608,15 @@
         operated this way.</p>
       </div>
       <div class="detail wide">
-        <div>
-          <div class="detail-label">DETAIL E — HEADLESS</div>
-          <h3>The whole modeller, no window required</h3>
-        </div>
-        <div>
-          <p>Every command runs without a GUI — the same engine that draws the
-          viewport also drives a Python script, the <strong>serp3d-batch</strong>
-          runner, or a CI job on a server with no display. Full create, read,
-          update and delete on the scene: batch a hundred variants, regenerate
-          drawing sheets, export STEP or STL — all from code. The window is just
-          one more front-end.</p>
-          <code class="cmd"><b>serp3d-batch</b> make_bracket.py bracket.step</code>
-        </div>
+        <div class="detail-label">DETAIL E — HEADLESS</div>
+        <h3>The whole modeller, no window required</h3>
+        <p>Every command runs without a GUI — the same engine that draws the
+        viewport also drives a Python script, the <strong>serp3d-batch</strong>
+        runner, or a CI job on a server with no display. Full create, read,
+        update and delete on the scene: batch a hundred variants, regenerate
+        drawing sheets, export STEP or STL — all from code. The window is just
+        one more front-end.</p>
+        <code class="cmd"><b>serp3d-batch</b> make_bracket.py bracket.step</code>
       </div>
     </div>
 
