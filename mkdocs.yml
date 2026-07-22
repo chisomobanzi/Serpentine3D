@@ -40,20 +40,35 @@ theme:
 
 nav:
   - Home: index.md
-  - Install: install.md
-  - "Tutorial: model a stage flat": tutorial.md
-  - Drafting & layouts: drafting.md
-  - Scripting & plugins: scripting.md
-  - AI / MCP integration: mcp.md
-  - Command reference: commands.md
+  - Get started:
+      - Install: getstarted/install.md
+      - Your first model: getstarted/first-model.md
+      - "Tutorial: a stage flat": getstarted/stage-flat.md
+  - How-to guides:
+      - Export for 3D printing: howto/3d-printing.md
+      - Make a drawing sheet: howto/drawings.md
+      - Script & automate: howto/scripting.md
+      - Drive it with AI (MCP): howto/ai-mcp.md
+  - Reference:
+      - Command reference: reference/commands.md
+      - File formats: reference/file-formats.md
+      - Keyboard & mouse: reference/keyboard.md
+  - Explanation:
+      - How it works: explanation/how-it-works.md
+  - Coming from Rhino: coming-from-rhino.md
 
 markdown_extensions:
   - admonition
   - attr_list
+  - md_in_html
   - pymdownx.details
+  - pymdownx.keys
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.superfences
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - toc:
       permalink: true
 

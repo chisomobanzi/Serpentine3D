@@ -17,30 +17,37 @@ or driven by an AI.
     the same object snaps, and it even imports your Rhino shortcuts. Not every
     command is here yet, but the ones that are work the way you'd expect.
 
-## Highlights
+## Find your way
 
-- **Command-line driven.** Type `loft`, click curves, done. Clickable option
-  chips (`Cap=Yes`), live ghost previews while you type values, Rhino alias
-  import, and a right-click that runs whatever you've typed.
-- **Exact geometry.** Solids, lofts, sweeps, fillets with chains and variable
-  radii, booleans, offsets, shelling, deformers (twist, taper, bend, flow),
-  draft-angle and curvature analysis.
-- **Drafting.** Paper-space layouts with detail views, hidden-line rendering,
-  associative dimensions, hatches, revision tables, linetypes and PDF/SVG
-  output.
-- **3D printing.** Watertight STL and modern 3MF export with mesh-quality
-  presets, plus a `printcheck` command that reports watertight/manifold,
-  thin walls, overhangs and print size.
-- **Fast on big scenes.** Background tessellation, picking culled by screen
-  bounds, native mesh objects for heavy OBJ/3DM/STL props.
-- **AI-native.** A bundled MCP server lets Claude (or any MCP client) see the
-  viewport, create geometry and run every command.
-- **Headless-first.** A stable scripting API (`Document`), `serp3d-batch` for
-  CI, and a Python console — the command layer is fully decoupled from the UI.
+These docs follow [Diátaxis](https://diataxis.fr) — four kinds of page for
+four kinds of need:
 
-## Where next
+<div class="grid cards" markdown>
 
-- [Install](install.md) — download a build or run from source
-- [Tutorial: model a stage flat](tutorial.md)
-- [Scripting & plugins](scripting.md) · [AI / MCP integration](mcp.md)
-- [Command reference](commands.md)
+- :material-school: **[Get started](getstarted/install.md)**
+
+    Learning by doing. [Install](getstarted/install.md), then build
+    [your first model](getstarted/first-model.md) in five minutes, or take
+    the longer [stage-flat tutorial](getstarted/stage-flat.md).
+
+- :material-wrench: **[How-to guides](howto/3d-printing.md)**
+
+    Get a specific job done: [export for 3D printing](howto/3d-printing.md),
+    [make a drawing sheet](howto/drawings.md),
+    [script & automate](howto/scripting.md), or
+    [drive it with an AI](howto/ai-mcp.md).
+
+- :material-book-open-variant: **[Reference](reference/commands.md)**
+
+    Look things up: the [command reference](reference/commands.md),
+    [file formats](reference/file-formats.md), and
+    [keyboard & mouse](reference/keyboard.md).
+
+- :material-lightbulb: **[Explanation](explanation/how-it-works.md)**
+
+    Understand the design: [how it works](explanation/how-it-works.md) —
+    exact BREP geometry, generator-based commands, and the headless core.
+
+</div>
+
+Coming from another tool? Start with **[Coming from Rhino](coming-from-rhino.md)**.

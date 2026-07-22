@@ -30,7 +30,7 @@ def main():
                 label += " (" + ", ".join(f"`{a}`" for a in aliases) + ")"
             lines.append(f"| {label} | {doc} |")
         lines.append("")
-    out = os.path.join(os.path.dirname(__file__), "commands.md")
+    out = os.path.join(os.path.dirname(__file__), "reference", "commands.md")
     with open(out, "w") as f:
         f.write("\n".join(lines) + "\n")
     print(f"wrote {out}")
