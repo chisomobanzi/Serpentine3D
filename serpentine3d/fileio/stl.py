@@ -18,19 +18,36 @@ import struct
 import numpy as np
 
 from ..core.mesh import MeshShape
-from ..core.tessellate import tessellate
+from ..core.tessellate import default_deflection, tessellate
 
 _HEADER = b"Serpentine3D binary STL"
 
+# Print-quality presets: multipliers on the adaptive display deflection.
+# Smaller deflection -> finer mesh -> smoother curved surfaces (bigger file).
+QUALITY = {
+    "draft": 2.5,       # coarse, small file, fast slicing
+    "standard": 1.0,    # matches the on-screen display mesh
+    "fine": 0.25,       # smooth curves — good default for printing
+    "ultra": 0.1,       # maximum detail
+}
 
-def export_stl(named_shapes: list, path: str, *, binary: bool = True):
+
+def export_stl(named_shapes: list, path: str, *, binary: bool = True,
+               quality: str = "standard", deflection: float | None = None):
     """named_shapes: [(name, shape)] or [(name, shape, color)] — colour is
     ignored (STL stores none). All shapes are tessellated and merged into one
-    triangle soup."""
+    triangle soup.
+
+    Mesh fineness is set by `quality` (one of QUALITY) or, for full control, an
+    explicit `deflection` (chord tolerance in model units) that overrides it.
+    """
+    factor = QUALITY.get(quality, 1.0)
     blocks = []
     for entry in named_shapes:
         shape = entry[1]
-        mesh = tessellate(shape)
+        defl = deflection if deflection is not None \
+            else default_deflection(shape) * factor
+        mesh = tessellate(shape, defl)
         if not mesh.has_faces:
             continue
         v = np.asarray(mesh.vertices, np.float64)

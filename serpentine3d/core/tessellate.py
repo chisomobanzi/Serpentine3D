@@ -66,6 +66,12 @@ def _deflection_for(shape) -> float:
     return max(diag * 0.002, 1e-4)
 
 
+def default_deflection(shape) -> float:
+    """The adaptive mesh deflection tessellate() uses when none is given —
+    exposed so callers (e.g. STL export) can scale off it for quality presets."""
+    return _deflection_for(shape)
+
+
 def _face_mesh(face) -> tuple | None:
     loc = TopLoc_Location()
     tri = occ.triangulation(face, loc)

@@ -10,8 +10,8 @@ import numpy as np
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QDockWidget, QFileDialog, QMainWindow, QMessageBox,
-    QToolBar, QVBoxLayout, QWidget,
+    QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
+    QMessageBox, QToolBar, QVBoxLayout, QWidget,
 )
 
 from . import commands as cmd_pkg
@@ -885,13 +885,31 @@ class MainWindow(QMainWindow):
             self.history.discard_checkpoint()
             QMessageBox.warning(self, "Import failed", str(exc))
 
+    # STL export mesh-quality presets, shown in the export prompt.
+    _STL_QUALITY = [("Draft — coarse, small file", "draft"),
+                    ("Standard", "standard"),
+                    ("Fine — smooth curves (recommended)", "fine"),
+                    ("Ultra fine — maximum detail", "ultra")]
+
     def _file_export(self):
         path = self._pick_file(save=True, title="Export")
         if not path:
             return
+        stl_quality = "standard"
+        if path.lower().endswith(".stl"):
+            labels = [lbl for lbl, _ in self._STL_QUALITY]
+            label, ok = QInputDialog.getItem(
+                self, "STL mesh quality",
+                "Finer meshes print smoother curves but make larger files:",
+                labels, 2, False)          # default to "Fine" for printing
+            if not ok:
+                return
+            stl_quality = dict(
+                (lbl, key) for lbl, key in self._STL_QUALITY)[label]
         try:
             ids = self.selection.ids or None
-            fileio.export_file(self.scene, path, only_ids=ids)
+            fileio.export_file(self.scene, path, only_ids=ids,
+                               stl_quality=stl_quality)
             scope = "selection" if ids else "scene"
             self.command_line.echo(f"Exported {scope} to {path}")
         except Exception as exc:                              # noqa: BLE001

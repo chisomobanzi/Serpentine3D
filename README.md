@@ -244,7 +244,7 @@ Settings live in `~/.config/serpentine3d/settings.json`.
 | `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps/surfaces import as untrimmed NURBS faces, export as meshes; layers preserved |
 | `.obj` | ✓ | ✓ | Tessellated mesh with `.mtl` colours |
 | `.fbx` | ✓ | ✓ | Autodesk FBX (binary) — tessellated meshes; imports/exports cleanly to Blender, Maya, Unreal, Unity |
-| `.stl` | ✓ | ✓ | 3D printing — exports watertight binary STL (or ASCII) for slicers; imports both |
+| `.stl` | ✓ | ✓ | 3D printing — watertight binary STL (or ASCII) for slicers, with draft→ultra mesh-quality presets on export; imports both |
 | `.dxf` | ✓ | ✓ | Curves/meshes with layers; layout sheets export at paper scale |
 | `.svg` | ✓ | ✓ | Paths import as curves (béziers exact); layouts export as vector SVG |
 | `.glb` | | ✓ | Binary glTF with materials (Unreal/Blender/web) |

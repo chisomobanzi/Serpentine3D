@@ -62,7 +62,7 @@ def import_file(scene, path: str) -> int:
 
 
 def export_file(scene, path: str, only_ids: list | None = None,
-                thumbnail: bytes | None = None):
+                thumbnail: bytes | None = None, stl_quality: str = "standard"):
     """Export scene (or subset) to a file, format by extension."""
     ext = os.path.splitext(path)[1].lower()
     objs = scene.all()
@@ -85,7 +85,8 @@ def export_file(scene, path: str, only_ids: list | None = None,
         return
     if ext == ".stl":
         from . import stl
-        stl.export_stl([(o.name, o.shape) for o in objs], path)
+        stl.export_stl([(o.name, o.shape) for o in objs], path,
+                       quality=stl_quality)
         return
     if ext == ".3dm":
         from . import rhino

@@ -6,6 +6,7 @@ come back welded into a MeshShape, mirroring the OBJ/FBX path.
 """
 
 import os
+import struct
 
 import numpy as np
 
@@ -17,6 +18,10 @@ from serpentine3d.fileio import stl
 def _bbox(v):
     v = np.asarray(v, float)
     return v.min(axis=0), v.max(axis=0)
+
+
+def _ntri(path):
+    return struct.unpack("<I", open(path, "rb").read()[80:84])[0]
 
 
 def test_export_is_binary_stl(tmp_path):
@@ -80,6 +85,38 @@ def test_scene_export_import_roundtrip(tmp_path):
     assert fileio.import_file(sc2, p) == 1
     lo, hi = _bbox(sc2.all()[0].shape.vertices)
     assert np.allclose(hi - lo, [12, 12, 12], atol=0.02)
+
+
+def test_quality_presets_control_density(tmp_path):
+    # print-quality control: finer presets tessellate curves into more facets.
+    sph = g.make_sphere((0, 0, 0), 20)
+    counts = {}
+    for q in ("draft", "standard", "fine", "ultra"):
+        p = str(tmp_path / f"{q}.stl")
+        stl.export_stl([("s", sph)], p, quality=q)
+        counts[q] = _ntri(p)
+    assert counts["draft"] < counts["standard"] < counts["fine"] < counts["ultra"]
+
+
+def test_explicit_deflection_overrides_quality(tmp_path):
+    sph = g.make_sphere((0, 0, 0), 20)
+    coarse = str(tmp_path / "c.stl")
+    fine = str(tmp_path / "f.stl")
+    stl.export_stl([("s", sph)], coarse, deflection=2.0)
+    stl.export_stl([("s", sph)], fine, deflection=0.05)
+    assert _ntri(fine) > _ntri(coarse)
+
+
+def test_export_file_forwards_quality(tmp_path):
+    # the app passes its quality picker through fileio.export_file(stl_quality=).
+    from serpentine3d import fileio
+    from serpentine3d.core.scene import Scene
+    sc = Scene()
+    sc.add(g.make_sphere((0, 0, 0), 15), name="ball")
+    draft, fine = str(tmp_path / "d.stl"), str(tmp_path / "f.stl")
+    fileio.export_file(sc, draft, stl_quality="draft")
+    fileio.export_file(sc, fine, stl_quality="fine")
+    assert _ntri(fine) > _ntri(draft)
 
 
 def test_import_welds_shared_vertices(tmp_path):
