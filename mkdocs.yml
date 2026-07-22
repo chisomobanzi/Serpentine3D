@@ -1,14 +1,43 @@
 site_name: Serpentine3D
-site_description: Open-source NURBS surface modeller for Linux
+site_description: >-
+  Documentation for Serpentine3D — an open-source NURBS surface modeller for
+  Linux, Windows and macOS, with a Rhino-style workflow and native AI (MCP)
+  integration.
+site_url: https://chisomobanzi.github.io/Serpentine3D/docs/
 repo_url: https://github.com/chisomobanzi/Serpentine3D
+repo_name: chisomobanzi/Serpentine3D
+edit_uri: edit/main/docs/
+
+exclude_docs: |
+  gen_commands.py
+
 theme:
   name: material
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
   palette:
-    scheme: slate
-    primary: teal
+    - scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+    - scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
   features:
     - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
     - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+
 nav:
   - Home: index.md
   - Install: install.md
@@ -17,3 +46,20 @@ nav:
   - Scripting & plugins: scripting.md
   - AI / MCP integration: mcp.md
   - Command reference: commands.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/chisomobanzi/Serpentine3D
+    - icon: material/web
+      link: https://chisomobanzi.github.io/Serpentine3D/

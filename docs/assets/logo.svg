@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2c30"/>
+      <stop offset="1" stop-color="#161719"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#e8ca62"/>
+      <stop offset="0.55" stop-color="#d8b44a"/>
+      <stop offset="1" stop-color="#c49b39"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#tile)" stroke="#3a3b40" stroke-width="1.5"/>
+  <path d="M 74,192 C 148,204 154,150 124,128 C 94,108 106,56 178,66"
+        fill="none" stroke="url(#gold)" stroke-width="27" stroke-linecap="round" stroke-linejoin="round"/>
+  <g stroke="#7fb4e6" stroke-width="2.5">
+    <line x1="178" y1="66" x2="208" y2="94"/>
+    <rect x="67" y="185" width="12" height="12" fill="#7fb4e6" stroke="#3f6f9f" stroke-width="1.4"/>
+    <rect x="172" y="60" width="12" height="12" fill="#7fb4e6" stroke="#3f6f9f" stroke-width="1.4"/>
+    <rect x="202" y="88" width="12" height="12" fill="#161719"/>
+  </g>
+</svg>

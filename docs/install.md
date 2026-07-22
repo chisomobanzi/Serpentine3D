@@ -1,19 +1,34 @@
 # Install
 
-Serpentine3D needs Python 3.10+ on Linux with OpenGL 3.3.
+## Download
+
+Each build bundles the OpenCASCADE kernel and Python runtime — nothing else
+to install.
+
+| Platform | Download |
+|---|---|
+| **Linux** | [`Serpentine3D-x86_64.AppImage`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) — `chmod +x` and run |
+| **Windows** | [`Serpentine3D-Setup-x86_64.exe`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) — installer |
+| **macOS** (Apple Silicon) | [`Serpentine3D-arm64.dmg`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.4.0-arm64.dmg) — drag to Applications |
+
+The GUI needs a GPU with OpenGL 3.3 drivers (any normal desktop). Headless
+use (`serp3d-batch`, the MCP server, file conversion) works anywhere.
 
 ## From source
+
+Requires Python 3.10+. Works on Linux, Windows and macOS.
 
 ```bash
 git clone https://github.com/chisomobanzi/Serpentine3D
 cd Serpentine3D
 python3 -m venv .venv
-.venv/bin/pip install -e .
+.venv/bin/pip install -e .        # or: uv pip install -e .
 .venv/bin/serp3d
 ```
 
-The heavy dependency is `cadquery-ocp` (the OpenCASCADE kernel);
-everything installs from PyPI wheels — no conda, no compiler.
+The heavy dependency is `cadquery-ocp` (the OpenCASCADE kernel); everything
+installs from PyPI wheels — no conda, no compiler. The full test suite passes
+on all three platforms.
 
 ## Entry points
 

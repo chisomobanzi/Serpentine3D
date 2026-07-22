@@ -80,6 +80,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `pictureframe` (`picture`) | Place a reference image in the model (trace over photos/plans). |
 | `pointsoff` (`pf`) | Pointsoff |
 | `pointson` (`po`) | Show control points for selected curves and surfaces (F10). |
+| `printcheck` (`printinfo`) | Check selected objects for 3D-print readiness: watertight, manifold, |
 | `radius` | Radius of curvature of a curve at a picked point. |
 | `rendered` (`render`) | Environment-lit display with materials and a ground shadow. |
 | `right` | Right |
@@ -183,14 +184,19 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `block` | Turn a selection into a reusable block definition + one instance. |
 | `blocklist` (`blockmanager`) | Blocklist |
 | `breptomesh` (`meshify`) | Convert BREP objects into lightweight native meshes. |
+| `bringforward` (`bringforwards`) | Nudge the selected objects one step towards the front. |
+| `bringtofront` (`bf`) | Draw the selected objects on top of overlapping ones. |
 | `changelayer` (`tolayer`) | Move objects to a layer by name (created if missing). |
 | `count` | Count objects: totals by block, kind and layer (for takeoffs). |
 | `group` | Group |
 | `insert` | Insert |
+| `linetype` (`lt`, `setlinetype`) | Set the dash style of selected objects (Continuous/Dashed/…/ByLayer). |
 | `lock` | Lock |
 | `matchprops` (`matchproperties`) | Copy layer, colour and material from one object to others. |
 | `meshtobrep` | Convert mesh objects into exact BREP shells (slow for big meshes). |
 | `purge` | Remove empty layers and unused block definitions. |
+| `sendbackward` (`sendbackwards`) | Nudge the selected objects one step towards the back. |
+| `sendtoback` (`sb`) | Draw the selected objects behind overlapping ones. |
 | `ungroup` | Ungroup |
 | `unlockall` (`unlock`) | Unlockall |
 | `what` | Report details of the selected objects. |
