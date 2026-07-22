@@ -83,3 +83,26 @@ def test_linetype_command_sets_objects():
     doc.add(doc.geo.make_circle((0, 0, 0), 5), name="c1")
     doc.run("linetype", ["c1", "", "Center"])        # select, finish, choose
     assert doc.get("c1").linetype == "Center"
+
+
+def test_hlr_per_shape_occlusion():
+    """Dashed-solid export relies on per-shape visible edges from ONE
+    occlusion-correct HLR pass: a bar behind a solid must lose the hidden
+    portion, yet still be reported as its own shape (so it keeps its linetype).
+    """
+    from serpentine3d.core import geometry as g
+    from serpentine3d.core import hlr
+    back = g.make_box((-25, 6, -20), 40, 12, 10)
+    front = g.make_box((5, -5, 10), 30, 30, 20)      # covers the bar's right end
+
+    def vlen(edges):
+        return sum(float(np.linalg.norm(np.diff(p, axis=0), axis=1).sum())
+                   for p in hlr.edges_to_polylines(edges))
+
+    both = hlr.hlr_project_safe([front, back], origin=(0, 0, 0),
+                                view_dir=(0, 0, 1), x_dir=(1, 0, 0))
+    assert len(both["visible_by_shape"]) == 2         # one edge list per shape
+    solo = hlr.hlr_project_safe([back], origin=(0, 0, 0),
+                                view_dir=(0, 0, 1), x_dir=(1, 0, 0))
+    # the bar hidden behind the front solid shows less than the bar alone
+    assert vlen(both["visible_by_shape"][1]) < vlen(solo["visible_by_shape"][0])

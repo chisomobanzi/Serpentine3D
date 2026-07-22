@@ -79,6 +79,7 @@ def polylines_2d(polylines: list) -> list:
 
 import json as _json
 import os as _os
+import shutil as _shutil
 import subprocess as _subprocess
 import sys as _sys
 import tempfile as _tempfile
@@ -100,19 +101,24 @@ class _HlrWorker:
 
     def project(self, shapes: list, origin, view_dir, x_dir,
                 include_hidden: bool = True, timeout: float = 120.0) -> dict:
-        """Like hlr_project, but crash-isolated. Empty result on failure."""
-        empty = {"visible": [], "outline": [], "hidden": []}
+        """Like hlr_project, but crash-isolated. Empty result on failure.
+
+        Returns `visible_by_shape`: one visible-edge list per input shape, in
+        order — computed from a single HLR pass so occlusion is correct across
+        all shapes. `visible` is their flattened union (backward compatible)."""
+        empty = {"visible": [], "outline": [], "hidden": [],
+                 "visible_by_shape": []}
         if not shapes:
             return empty
         from . import geometry
         tmp = _tempfile.mkdtemp(prefix="serp_hlr_")
         in_path = _os.path.join(tmp, "in.brep")
-        v_path = _os.path.join(tmp, "vis.brep")
+        vis_prefix = _os.path.join(tmp, "vis_")     # per-shape: vis_0.brep …
         h_path = _os.path.join(tmp, "hid.brep")
         try:
             occ.brep_write(geometry.make_compound(shapes), in_path)
             req = _json.dumps({
-                "in": in_path, "vis": v_path, "hid": h_path,
+                "in": in_path, "vis": vis_prefix, "hid": h_path,
                 "origin": list(map(float, origin)),
                 "view_dir": list(map(float, view_dir)),
                 "x_dir": list(map(float, x_dir)),
@@ -125,7 +131,8 @@ class _HlrWorker:
                 line = self.proc.stdout.readline()
             except (BrokenPipeError, OSError):
                 line = ""
-            if not line.strip() or not line.strip().startswith("ok"):
+            parts = line.strip().split()
+            if not parts or parts[0] != "ok":
                 # worker crashed (segfault) or errored: restart next time
                 try:
                     self.proc.kill()
@@ -133,22 +140,19 @@ class _HlrWorker:
                     pass
                 self.proc = None
                 return empty
-            out = dict(empty)
-            if _os.path.exists(v_path):
-                out["visible"] = geometry.edges_of(occ.brep_read(v_path))
-            if include_hidden and _os.path.exists(h_path):
-                out["hidden"] = geometry.edges_of(occ.brep_read(h_path))
-            return out
+            n = int(parts[1]) if len(parts) > 1 else 0
+            by_shape = []
+            for i in range(n):
+                p = f"{vis_prefix}{i}.brep"
+                by_shape.append(geometry.edges_of(occ.brep_read(p))
+                                if _os.path.exists(p) else [])
+            hidden = (geometry.edges_of(occ.brep_read(h_path))
+                      if include_hidden and _os.path.exists(h_path) else [])
+            return {"visible": [e for grp in by_shape for e in grp],
+                    "outline": [], "hidden": hidden,
+                    "visible_by_shape": by_shape}
         finally:
-            for p in (in_path, v_path, h_path):
-                try:
-                    _os.unlink(p)
-                except OSError:
-                    pass
-            try:
-                _os.rmdir(tmp)
-            except OSError:
-                pass
+            _shutil.rmtree(tmp, ignore_errors=True)
 
 
 _worker = _HlrWorker()
@@ -160,22 +164,56 @@ def hlr_project_safe(shapes: list, origin, view_dir, x_dir,
 
 
 def _worker_main():
-    """Entry point of the isolated HLR worker process."""
+    """Entry point of the isolated HLR worker process.
+
+    Adds every input shape to one HLR pass (so hidden-line removal is correct
+    across all of them), then extracts visible edges *per input shape* via the
+    HLRToShape per-shape overloads — this is what lets each object keep its own
+    linetype while still being hidden by objects in front of it."""
     from . import geometry
+    from OCP.HLRBRep import HLRBRep_Algo, HLRBRep_HLRToShape
+    from OCP.TopoDS import TopoDS_Iterator
+
+    def edges_for(method, arg):
+        try:
+            c = method(arg)
+        except Exception:                                     # noqa: BLE001
+            return []
+        return [] if (c is None or c.IsNull()) else geometry.edges_of(c)
+
     for raw in _sys.stdin:
         try:
             req = _json.loads(raw)
-            shape = occ.brep_read(req["in"])
-            res = hlr_project([shape], req["origin"], req["view_dir"],
-                              req["x_dir"],
-                              include_hidden=req["include_hidden"])
-            visible = res["visible"] + res["outline"]
-            if visible:
-                occ.brep_write(geometry.make_compound(visible), req["vis"])
-            if res["hidden"]:
-                occ.brep_write(geometry.make_compound(res["hidden"]),
-                               req["hid"])
-            _sys.stdout.write("ok\n")
+            comp = occ.brep_read(req["in"])
+            inputs = []
+            it = TopoDS_Iterator(comp)
+            while it.More():
+                inputs.append(it.Value())
+                it.Next()
+
+            algo = HLRBRep_Algo()
+            for s in inputs:
+                algo.Add(s)
+            algo.Projector(_projector(req["origin"], req["view_dir"],
+                                      req["x_dir"]))
+            algo.Update()
+            algo.Hide()
+            conv = HLRBRep_HLRToShape(algo)
+
+            for i, s in enumerate(inputs):
+                vis = (edges_for(conv.VCompound, s)
+                       + edges_for(conv.OutLineVCompound, s)
+                       + edges_for(conv.Rg1LineVCompound, s))
+                if vis:
+                    occ.brep_write(geometry.make_compound(vis),
+                                   f"{req['vis']}{i}.brep")
+            if req["include_hidden"]:
+                hidden = (edges_for(lambda _: conv.HCompound(), None)
+                          + edges_for(lambda _: conv.OutLineHCompound(), None)
+                          + edges_for(lambda _: conv.Rg1LineHCompound(), None))
+                if hidden:
+                    occ.brep_write(geometry.make_compound(hidden), req["hid"])
+            _sys.stdout.write(f"ok {len(inputs)}\n")
         except Exception as exc:                              # noqa: BLE001
             _sys.stdout.write(f"err {type(exc).__name__}\n")
         _sys.stdout.flush()
