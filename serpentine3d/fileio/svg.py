@@ -84,7 +84,7 @@ def import_svg(scene, path: str, scale: float = 1.0) -> int:
 
 def export_layout_svg(window, layout, path: str):
     """The composed sheet as an SVG (same renderer as the PDF export)."""
-    from PySide6.QtCore import QSize
+    from PySide6.QtCore import QRect, QSize
     from PySide6.QtGui import QPainter
     from PySide6.QtSvg import QSvgGenerator
     from .pdf import _paint_layout
@@ -93,7 +93,8 @@ def export_layout_svg(window, layout, path: str):
     gen.setFileName(path)
     k = 4.0                                  # device units per mm
     gen.setSize(QSize(int(layout.paper_w * k), int(layout.paper_h * k)))
-    gen.setViewBox(0, 0, int(layout.paper_w * k), int(layout.paper_h * k))
+    gen.setViewBox(QRect(0, 0, int(layout.paper_w * k),
+                         int(layout.paper_h * k)))
     gen.setTitle(layout.name)
     painter = QPainter(gen)
     try:

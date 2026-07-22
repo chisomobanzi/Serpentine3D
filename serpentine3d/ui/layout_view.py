@@ -181,25 +181,37 @@ class LayoutView:
             return cached[1]
         d, right, up = detail_direction(detail)
         from ..core.mesh import MeshShape
-        shapes = [o.shape for o in vp.scene.visible_objects()
-                  if not isinstance(o.shape, MeshShape)]
-        cut_polys = []
-        if shapes and detail.section_offset is not None \
-                and not detail.perspective:
-            shapes, cut_polys = _section_cut(
-                shapes, np.asarray(detail.target, float), d, right, up,
-                detail.section_offset)
-        if shapes:
+        objs = [o for o in vp.scene.visible_objects()
+                if not isinstance(o.shape, MeshShape)]
+        # Group by effective linetype so non-Continuous objects can export as
+        # dashed linework. An all-Continuous scene stays a single HLR pass.
+        groups: dict = {}
+        for o in objs:
+            groups.setdefault(vp._effective_linetype(o), []).append(o.shape)
+
+        def run(shapes):
+            cut = []
+            if shapes and detail.section_offset is not None \
+                    and not detail.perspective:
+                shapes, cut = _section_cut(
+                    shapes, np.asarray(detail.target, float), d, right, up,
+                    detail.section_offset)
+            if not shapes:
+                return [], [], cut
             res = hlr.hlr_project_safe(shapes, origin=detail.target,
-                                  view_dir=d, x_dir=right)
-            data = {
-                "visible": hlr.edges_to_polylines(res["visible"]
-                                                  + res["outline"]),
-                "hidden": hlr.edges_to_polylines(res["hidden"]),
-                "cut": cut_polys,
-            }
-        else:
-            data = {"visible": [], "hidden": [], "cut": cut_polys}
+                                       view_dir=d, x_dir=right)
+            return (hlr.edges_to_polylines(res["visible"] + res["outline"]),
+                    hlr.edges_to_polylines(res["hidden"]), cut)
+
+        vis, hidden, cut_polys = run(groups.pop("Continuous", []))
+        visible_lt = []
+        for name, shapes in groups.items():
+            gv, gh, _ = run(shapes)
+            if gv:
+                visible_lt.append((name, gv))
+            hidden = hidden + gh
+        data = {"visible": vis, "hidden": hidden, "cut": cut_polys,
+                "visible_lt": visible_lt}
         self._hlr_cache[detail.id] = (key, data)
         return data
 
@@ -246,6 +258,19 @@ class LayoutView:
         if segs_v:
             self._draw_segs(paper_mvp, np.concatenate(segs_v),
                             LINE_VISIBLE, 1.6)
+        # non-Continuous linetypes: same ink, dashed per their pattern
+        from ..core import linetype as _lt
+        for name, polys in data.get("visible_lt", []):
+            pattern = _lt.pattern_for(name)
+            dsegs = []
+            for poly in polys:
+                p = to_paper(poly[:, :2])
+                pairs = (_lt.dash_polyline(p, pattern) if pattern
+                         else list(zip(p[:-1], p[1:])))
+                dsegs.extend([a, b] for a, b in pairs)
+            if dsegs:
+                self._draw_segs(paper_mvp, np.asarray(dsegs, np.float32),
+                                LINE_VISIBLE, 1.6)
         # section-cut faces: heavy outline + 45-degree hatching
         cut = data.get("cut") or []
         if cut:
