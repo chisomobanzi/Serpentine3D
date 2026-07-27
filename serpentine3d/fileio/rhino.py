@@ -367,23 +367,41 @@ def _import_brep(brep) -> list:
         else:
             faces.append(face)
 
+    return _assemble_faces(faces)
+
+
+def _assemble_faces(faces) -> list:
+    """Turn one brep's converted faces into scene shapes.
+
+    A face that can't be rebuilt exactly falls back to its render mesh, and a
+    MeshShape is not a TopoDS_Shape — OCC won't sew one or even put it in a
+    compound. So keep the two apart rather than letting a single unconvertible
+    face crash the whole brep: sew the real faces, and return the mesh
+    fallbacks beside them as one mesh object (a brep is one Rhino object)."""
+    from ..core.mesh import MeshShape, merge
     faces = [f for f in faces if f is not None and not f.IsNull()]
-    if not faces:
-        return []
-    if len(faces) == 1:
-        return faces
-    from ..core.occ import BRepBuilderAPI_Sewing
-    import numpy as np
-    # sew tolerance scaled to model size: NURBS-approximated shared edges
-    # rarely match to 1e-6, which would leave watertight shells open
-    box = geometry.make_compound(faces)
-    (mn, mx) = geometry.bbox(box)
-    span = float(np.linalg.norm(np.subtract(mx, mn)))
-    sew = BRepBuilderAPI_Sewing(max(span * 1e-5, 1e-6))
-    for f in faces:
-        sew.Add(f)
-    sew.Perform()
-    return [_shell_to_solid(sew.SewedShape())]
+    meshes = [f for f in faces if isinstance(f, MeshShape)]
+    brep_faces = [f for f in faces if not isinstance(f, MeshShape)]
+
+    out = []
+    if len(brep_faces) == 1:
+        out.append(brep_faces[0])
+    elif brep_faces:
+        from ..core.occ import BRepBuilderAPI_Sewing
+        import numpy as np
+        # sew tolerance scaled to model size: NURBS-approximated shared edges
+        # rarely match to 1e-6, which would leave watertight shells open
+        box = geometry.make_compound(brep_faces)
+        (mn, mx) = geometry.bbox(box)
+        span = float(np.linalg.norm(np.subtract(mx, mn)))
+        sew = BRepBuilderAPI_Sewing(max(span * 1e-5, 1e-6))
+        for f in brep_faces:
+            sew.Add(f)
+        sew.Perform()
+        out.append(_shell_to_solid(sew.SewedShape()))
+    if meshes:
+        out.append(meshes[0] if len(meshes) == 1 else merge(meshes))
+    return out
 
 
 def _shell_to_solid(shape):

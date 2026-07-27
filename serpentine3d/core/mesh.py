@@ -116,6 +116,21 @@ class MeshShape:
         return np.asarray(out, np.float32)
 
 
+def merge(meshes) -> MeshShape:
+    """Concatenate meshes into one, re-basing each triangle's vertex indices.
+    Used where several mesh pieces describe a single object and shouldn't
+    arrive in the scene as separate things."""
+    meshes = [m for m in meshes if len(m.vertices)]
+    if not meshes:
+        return MeshShape(np.zeros((0, 3)), np.zeros((0, 3), np.uint32))
+    verts, tris, offset = [], [], 0
+    for m in meshes:
+        verts.append(m.vertices)
+        tris.append(m.triangles + offset)
+        offset += len(m.vertices)
+    return MeshShape(np.concatenate(verts), np.concatenate(tris))
+
+
 def mesh_to_display(mesh: MeshShape):
     """DisplayMesh for the viewport, with smooth normals + feature edges."""
     from .tessellate import DisplayMesh, _smooth_normals

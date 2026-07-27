@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Rhino import no longer crashes on breps with unconvertible faces**: when a
+  face can't be rebuilt as an exact surface, the importer falls back to its
+  render mesh — but then handed that mesh to OpenCASCADE's sewer along with
+  the real faces, so one bad face killed the whole file (`Add(): incompatible
+  function arguments ... MeshShape`). Exact faces and mesh fallbacks are now
+  kept apart, so the rest of the object still comes in as real geometry.
+
 - **File dialogs list every supported format** ([#2](https://github.com/chisomobanzi/Serpentine3D/issues/2)):
   Open/Import were missing **Rhino `.3dm`**, DXF and SVG — all of which import
   fine — while offering `.3mf`, which can only be exported; Export was missing
