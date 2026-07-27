@@ -3,6 +3,8 @@
 import os
 
 from . import native, obj, step
+from .progress import (Cancelled, Progress,  # noqa: F401  (re-exported)
+                       throttled)
 
 # The formats this module handles, as (label, extensions) — the single source
 # of truth behind the file dialogs. Anything dispatched below belongs here, or
@@ -91,9 +93,24 @@ def ensure_suffix(path: str, name_filter: str) -> str:
     return f"{path}.{suffix}"
 
 
-def import_file(scene, path: str) -> int:
-    """Import any supported file into the scene. Returns object count added."""
+def import_file(scene, path: str, progress=None) -> int:
+    """Import any supported file into the scene. Returns object count added.
+
+    `progress` is called as `progress(fraction, message)` while the work runs;
+    answering False cancels it, raising `Cancelled`. Only .3dm reports as it
+    goes so far — the rest bracket the read, so a caller's dialog behaves the
+    same whatever the format.
+    """
     ext = os.path.splitext(path)[1].lower()
+    report = Progress(progress,
+                      f"Opening {os.path.basename(path)}…")
+    report(0.0)
+    n = _import_file(scene, path, ext, report)
+    report.done()
+    return n
+
+
+def _import_file(scene, path: str, ext: str, report) -> int:
     if ext == ".serp":
         native.load_scene(scene, path)
         return len(scene.all())
@@ -129,7 +146,7 @@ def import_file(scene, path: str) -> int:
         return svg_mod.import_svg(scene, path)
     if ext == ".3dm":
         from . import rhino
-        items = rhino.import_3dm(path)
+        items = rhino.import_3dm(path, progress=report)
         layer_map = {}
         for name, shape, meta in items:
             layer_id = None

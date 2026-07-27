@@ -11,6 +11,39 @@ SELECTION_COLOR = (1.0, 0.78, 0.25)          # warm gold
 ACCENT = "#d9a441"
 ACCENT_DIM = "#8a6a2f"
 
+# Shaded-mode lighting. SHADED_AMBIENT mirrors a constant hardcoded in
+# viewport.MESH_FRAG (`uColor * (0.30 + 0.70 * diff)`); a test pins the two
+# together. FILL_FLOOR is what a pure black object is shaded as, and colours
+# at or above FILL_KNEE are left exactly as they are. The floor must stay
+# below the knee: the two ends define a ramp, and a floor above the knee tips
+# it backwards, rendering pure black lighter than dark grey.
+SHADED_AMBIENT = 0.30
+FILL_FLOOR = 0.42
+FILL_KNEE = 0.50
+
+
+def shaded_fill(color):
+    """The colour to shade a surface with, lifted clear of black.
+
+    Shading is multiplicative, so a black object has nothing left to shade: it
+    came out flat black against a background that is itself nearly black
+    (0.10-0.18) and read as a hole rather than a solid — you had to change the
+    layer colour to see the model at all. Rhino keeps black-layer objects
+    legible in shaded mode; this does the same, adding grey to colours below
+    the knee and more of it the darker they are.
+
+    Gated on the largest channel rather than luminance, so saturated hues that
+    are dark in luminance but perfectly visible — pure blue most of all — are
+    left alone. Only the fill is lifted: edges keep the object's true colour,
+    so a black object still draws black wireframe over a grey surface.
+    """
+    r, g, b = color[0], color[1], color[2]
+    v = max(r, g, b)
+    if v >= FILL_KNEE:
+        return (r, g, b)
+    lift = FILL_FLOOR * (1.0 - v / FILL_KNEE)
+    return (min(1.0, r + lift), min(1.0, g + lift), min(1.0, b + lift))
+
 QSS = """
 * { outline: none; }
 

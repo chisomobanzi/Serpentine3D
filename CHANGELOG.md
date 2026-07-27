@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+- **Large Rhino files finish importing**: a 921 MB set-design `.3dm` (17802
+  objects, 1900 of them polysurfaces totalling 42k faces and 78k edges) never
+  came back at all. Each face rediscovered which edges bound it by testing
+  every edge in the brep — about 1.1 billion surface projections — and the
+  fallback that splits an untrimmed face handed OpenCASCADE's boolean engine
+  the whole edge list too, one such face taking 62 seconds. Edges are now
+  pruned by bounding box first, and each stage gets only the edges it can
+  actually use. The worst polysurface in that file went from an estimated 103
+  minutes to 3.5, and the file as a whole now loads in about half an hour
+  (13492 objects, 2.1 GB peak). Still slow, but finite — and now visible and
+  interruptible while it runs.
+
+- **Import shows what it is doing, and can be cancelled**: opening a big file
+  no longer just stops repainting with no way out but killing the app. A
+  progress dialog appears once the work is slow enough to warrant one, names
+  the object (and, on a large polysurface, the face) being converted, and
+  Cancel stops it — leaving the scene exactly as it was. Large meshes report
+  as they convert too: the same file holds four over 1.5 million faces, each
+  21 seconds in what used to be one uninterruptible call. That conversion also
+  got about a fifth quicker on the way — it was re-resolving the mesh's face
+  list once per face — so the progress costs nothing.
+
+- **The progress dialog moves on its own**: dragging the "Opening" dialog
+  dragged the main window with it. Under GNOME's `attach-modal-dialogs` a
+  dialog-type window is glued to its parent; this one now asks for a normal
+  window type, as the file and STL-quality choosers already did, and places
+  itself over the middle of the main window rather than wherever the window
+  manager felt like putting it.
+
+- **Black objects are visible in shaded mode**: shading multiplies the object's
+  colour, so an object on a black layer had nothing left to shade — it came out
+  flat black against a viewport background that is itself nearly black, and the
+  only way to see the model was to change the layer colour. Dark fills are now
+  lifted clear of black, more the darker they are, the way Rhino keeps
+  black-layer objects legible. Hue is preserved and colours that are bright
+  enough already are untouched, so a dark blue stays blue and nothing else
+  changes. Only the fill is lifted: edges keep the object's true colour, so a
+  black object still draws black wireframe over its surface.
+
 - **Rhino import no longer crashes on breps with unconvertible faces**: when a
   face can't be rebuilt as an exact surface, the importer falls back to its
   render mesh — but then handed that mesh to OpenCASCADE's sewer along with

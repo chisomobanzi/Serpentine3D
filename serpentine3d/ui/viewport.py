@@ -1065,6 +1065,10 @@ class Viewport(QOpenGLWidget):
                 grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
                 color = (grey, grey, grey)
             line_color = color
+            # Surfaces are shaded by multiplying this colour, so a near-black
+            # one leaves nothing to shade. Lift the fill only — edges keep the
+            # object's real colour, so black stays black in wireframe.
+            fill_color = theme.shaded_fill(color)
             if light_background and not selected:
                 # dark linework on paper-white detail backgrounds
                 line_color = (min(color[0], 0.3), min(color[1], 0.3),
@@ -1083,7 +1087,8 @@ class Viewport(QOpenGLWidget):
                     GL.glGetUniformLocation(self._mesh_prog, "uView"), 1,
                     GL.GL_TRUE, view.astype(np.float32))
                 GL.glUniform3f(
-                    GL.glGetUniformLocation(self._mesh_prog, "uColor"), *color)
+                    GL.glGetUniformLocation(self._mesh_prog, "uColor"),
+                    *fill_color)
                 GL.glUniform1f(
                     GL.glGetUniformLocation(self._mesh_prog, "uAlpha"),
                     fill_alpha_obj)

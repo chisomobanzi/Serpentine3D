@@ -11,7 +11,7 @@ from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
-    QMessageBox, QToolBar, QVBoxLayout, QWidget,
+    QMessageBox, QProgressDialog, QToolBar, QVBoxLayout, QWidget,
 )
 
 from . import commands as cmd_pkg
@@ -807,12 +807,52 @@ class MainWindow(QMainWindow):
         if path:
             self._open_path(path)
 
+    def _import_showing_progress(self, path: str) -> int:
+        """Import `path`, showing what it is doing and offering a way out.
+
+        A set-design .3dm is minutes of work; with no dialog the window simply
+        stops repainting and the only exit is killing the app, which is what
+        happened with a 921 MB file. The dialog waits before appearing so
+        ordinary files don't flash one up, and updates are throttled because
+        repainting per face would cost more than the import itself.
+        """
+        dlg = QProgressDialog(f"Opening {os.path.basename(path)}…",
+                              "Cancel", 0, 100, self)
+        dlg.setWindowTitle("Opening")
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        if sys.platform.startswith("linux"):
+            # Same trick as _pick_file and _pick_stl_quality: under GNOME's
+            # attach-modal-dialogs a DIALOG-type window is glued to its parent,
+            # so dragging it drags the main window along with it.
+            dlg.setWindowFlags(Qt.WindowType.Window)
+        dlg.setMinimumDuration(500)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        # It appears on a delay, so place it now — an untethered window would
+        # otherwise be left wherever the window manager felt like putting it.
+        dlg.adjustSize()
+        frame = dlg.frameGeometry()
+        frame.moveCenter(self.frameGeometry().center())
+        dlg.move(frame.topLeft())
+
+        def report(fraction, message):
+            dlg.setLabelText(message)
+            dlg.setValue(int(fraction * 100))
+            QApplication.processEvents()
+            return not dlg.wasCanceled()
+
+        try:
+            return fileio.import_file(self.scene, path,
+                                      progress=fileio.throttled(report))
+        finally:
+            dlg.close()
+
     def _open_path(self, path: str):
         """Open a file by path (shared by the dialog, Recent menu and the
         welcome screen)."""
         try:
             self.history.checkpoint("open")
-            fileio.import_file(self.scene, path)
+            self._import_showing_progress(path)
             if path.endswith(".serp"):
                 self.ctx.current_path = path
             self.command_line.echo(
@@ -820,6 +860,11 @@ class MainWindow(QMainWindow):
             self.viewport.zoom_extents()
             self.mark_saved()
             self.add_recent(path)
+        except fileio.Cancelled:
+            # the user's own decision, not a failure — no alert. Cancel
+            # leaves the scene untouched, so there is nothing to undo.
+            self.history.discard_checkpoint()
+            self.command_line.echo("Open cancelled.")
         except Exception as exc:                              # noqa: BLE001
             self.history.discard_checkpoint()
             QMessageBox.warning(self, "Open failed", str(exc))
@@ -889,9 +934,12 @@ class MainWindow(QMainWindow):
             return
         try:
             self.history.checkpoint("import")
-            n = fileio.import_file(self.scene, path)
+            n = self._import_showing_progress(path)
             self.command_line.echo(f"Imported {n} object(s).")
             self.viewport.zoom_extents()
+        except fileio.Cancelled:
+            self.history.discard_checkpoint()
+            self.command_line.echo("Import cancelled.")
         except Exception as exc:                              # noqa: BLE001
             self.history.discard_checkpoint()
             QMessageBox.warning(self, "Import failed", str(exc))

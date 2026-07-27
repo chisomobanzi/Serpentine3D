@@ -10,8 +10,11 @@ meshes — Rhino re-imports them fine; exact BREP export goes via STEP).
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import rhino3dm as r3
+from OCP.GeomAPI import GeomAPI_ProjectPointOnSurf
 
 from ..core import geometry, occ
 from ..core.occ import (
@@ -21,6 +24,7 @@ from ..core.occ import (
 )
 from ..core.tessellate import tessellate
 from .obj import _shell_from_triangles
+from .progress import Progress
 
 
 # ------------------------------------------------------------------ knots
@@ -150,12 +154,47 @@ def _r3_surface_to_face(srf: r3.Surface):
     return BRepBuilderAPI_MakeFace(surf, 1e-6).Face()
 
 
-def _r3_mesh_to_shape(mesh: r3.Mesh, as_mesh: bool = True):
-    verts = np.array([[v.X, v.Y, v.Z] for v in mesh.Vertices], float)
+_MESH_CHUNK = 2048
+
+
+def _reporting(items, report, lo: float, hi: float):
+    """`items`, reporting progress across `lo`..`hi` as they go past.
+
+    Wraps the iterator instead of indexing it: rhino3dm's vertex list is nearly
+    twice as slow to index as to iterate, so the progress must not cost more
+    than it is worth. The chunk grows with the mesh, keeping the number of
+    updates bounded — reporting per face would outweigh the conversion.
+    """
+    total = len(items) or 1
+    step = max(_MESH_CHUNK, total // 64)
+    for i, item in enumerate(items):
+        if i % step == 0:
+            report(lo + (hi - lo) * i / total)
+        yield item
+
+
+def _r3_mesh_to_shape(mesh: r3.Mesh, as_mesh: bool = True, report=None):
+    """A Rhino mesh as a MeshShape (or a sewn shell).
+
+    rhino3dm exposes no bulk accessor, so vertices and faces are both read one
+    at a time in Python. The fence file's biggest mesh is 1.6 million faces —
+    21 seconds in what was a single opaque call, with a frozen bar and a dead
+    Cancel button. Vertices take roughly three times as long as faces, hence
+    the lopsided split of the progress range.
+
+    Iterate both lists; don't index them. `mesh.Faces[i]` re-resolves the
+    `.Faces` property every time round, building a fresh list wrapper per face,
+    and the vertex list is nearly twice as slow to index as to iterate. Doing
+    it this way is about a fifth quicker than the version with no progress in
+    it at all, so the bar costs nothing.
+    """
+    report = report or Progress()
+    verts = np.array([[v.X, v.Y, v.Z]
+                      for v in _reporting(mesh.Vertices, report, 0.0, 0.7)],
+                     float)
     tris = []
-    for i in range(len(mesh.Faces)):
-        f = mesh.Faces[i]
-        a, b, c, d = f[0], f[1], f[2], f[3]
+    for f in _reporting(mesh.Faces, report, 0.7, 0.95):
+        a, b, c, d = f
         tris.append((a, b, c))
         if d != c:
             tris.append((a, c, d))
@@ -237,10 +276,106 @@ def _group_closed_wires(edges: list) -> list:
     return wires
 
 
+def _shape_box(shape, tol: float = 0.0):
+    """(min, max) corners of a shape's bounding box, grown by `tol`. None if
+    the box comes back void."""
+    from OCP.Bnd import Bnd_Box
+    box = Bnd_Box()
+    try:
+        geometry.occ.bbox_add(shape, box)
+        if box.IsVoid():
+            return None
+        xn, yn, zn, xx, yx, zx = box.Get()
+    except Exception:
+        return None
+    return (np.array([xn - tol, yn - tol, zn - tol]),
+            np.array([xx + tol, yx + tol, zx + tol]))
+
+
+def _edge_boxes(edges: list):
+    """Bounding boxes of `edges` as one (min, max) pair of (N, 3) arrays.
+
+    Arrays rather than N small boxes because the prune below runs once per
+    face: at fence scale — 7921 faces, 12688 edges — a per-edge comparison in
+    Python is a hundred million calls, which is its own hang. An edge whose
+    box can't be measured gets an infinite one, so it overlaps everything and
+    is never pruned; a prefilter may only discard what it is sure about.
+    """
+    los, his = [], []
+    for e in edges:
+        box = _shape_box(e)
+        if box is None:
+            los.append([-np.inf] * 3)
+            his.append([np.inf] * 3)
+        else:
+            los.append(box[0])
+            his.append(box[1])
+    return (np.array(los, float).reshape(-1, 3),
+            np.array(his, float).reshape(-1, 3))
+
+
+def _edges_near(face, edges: list, boxes, tol: float) -> list:
+    """The edges whose bounding box comes within `tol` of `face`'s.
+
+    Both ways of trimming a face — projecting edges onto its surface, and
+    splitting it with them — cost time per edge, and each runs once per face,
+    so handing them the whole brep's edge list makes import quadratic. That is
+    fatal on set-design polysurfaces: one 7921-face fence in a 921 MB file
+    meant about 1.1 billion surface projections.
+
+    Discarding by box is sound for both. An edge every sample of which
+    projects onto the surface within `tol` lies inside the surface's box grown
+    by `tol`; and an edge whose box misses the face's cannot cut it. `boxes`
+    comes from `_edge_boxes`, computed once per brep.
+    """
+    target = _shape_box(face, tol)
+    if target is None or not edges:
+        return edges                      # can't prune; test everything
+    lo, hi = target
+    los, his = boxes
+    keep = np.all((los <= hi) & (his >= lo), axis=1)
+    return [e for e, k in zip(edges, keep) if k]
+
+
+def _edges_bounding(face, edges: list, boxes, tol: float) -> list:
+    """The edges that could be trims of `face` — box contained in its own.
+
+    Stronger than `_edges_near`, and sound for this use: a trim loop lies
+    within the surface it bounds, so an edge running past the surface's extent
+    bounds something else. On the fence that is most of them — a rail spanning
+    the run overlaps every panel's box but belongs to none.
+    """
+    target = _shape_box(face, tol)
+    if target is None or not edges:
+        return edges
+    lo, hi = target
+    los, his = boxes
+    keep = np.all((los >= lo) & (his <= hi), axis=1)
+    return [e for e, k in zip(edges, keep) if k]
+
+
+def _edges_cutting(face, surf, edges: list, boxes, tol: float) -> list:
+    """The edges that could split `face` — reaching it, and lying on it.
+
+    `_split_face_by_edges` wants on-surface edges, but was handed the brep's
+    whole list: a single boolean against ~2900 unrelated edges took 62 seconds,
+    which across the fence is most of a working day. Looser than
+    `_edges_bounding` on purpose — an edge that overruns the surface's extent
+    is no trim of it but does still cut it.
+    """
+    return _edges_on_surface(surf, _edges_near(face, edges, boxes, tol), tol)
+
+
 def _edges_on_surface(surf, edges: list, tol: float) -> list:
-    """The subset of edges lying on `surf` (sampled projection test)."""
-    from OCP.GeomAPI import GeomAPI_ProjectPointOnSurf
+    """The subset of edges lying on `surf` (sampled projection test).
+
+    Costs a handful of projections per edge, so callers pass only the edges
+    that could bound the face — see `_edges_bounding`. The projector is built
+    once and re-aimed per sample: constructing the extrema solver is the
+    expensive part, and it depends only on the surface.
+    """
     on = []
+    projector = None
     for e in edges:
         try:
             ad = geometry.occ.edge_adaptor(geometry.occ.to_edge(e))
@@ -250,8 +385,11 @@ def _edges_on_surface(surf, edges: list, tol: float) -> list:
         hit = True
         for i in range(6):
             p = ad.Value(t0 + (t1 - t0) * i / 5)
-            proj = GeomAPI_ProjectPointOnSurf(p, surf)
-            if proj.NbPoints() == 0 or proj.LowerDistance() > tol:
+            if projector is None:
+                projector = GeomAPI_ProjectPointOnSurf(p, surf)
+            else:
+                projector.Perform(p)
+            if projector.NbPoints() == 0 or projector.LowerDistance() > tol:
                 hit = False
                 break
         if hit:
@@ -320,12 +458,22 @@ def _trimmed_face(surf, edges: list):
         return None
 
 
-def _import_brep(brep) -> list:
+def _import_brep(brep, report=None) -> list:
     """Faces of a Rhino brep as OCC faces, recovering trims when possible."""
     from OCP.BRep import BRep_Tool
+    report = report or Progress()
     occ_edges = _brep_edges_to_occ(brep)
+    edge_boxes = _edge_boxes(occ_edges)
     faces = []
-    for fi in range(len(brep.Faces)):
+    total = len(brep.Faces)
+    # A handful of faces goes by too fast to read; naming them just makes the
+    # label flicker. On a polysurface that *is* the import, it's the only sign
+    # anything is happening.
+    detail = total >= 25
+    for fi in range(total):
+        # per face, not per object: one polysurface can be the whole import
+        report(fi / total,
+               f"{report.label} — face {fi + 1} of {total}" if detail else "")
         rface = brep.Faces[fi]
         try:
             face = _r3_surface_to_face(rface.ToNurbsSurface())
@@ -342,17 +490,23 @@ def _import_brep(brep) -> list:
         span = float(np.linalg.norm(np.subtract(mx, mn)))
         tol = max(span * 0.02, 1e-4)
 
+        # Only edges that can reach this face can bound or cut it, and both
+        # ways of trimming below cost time per edge. Prune once, use twice.
+        etol = max(span * 1e-4, 1e-6)
+
         # Preferred path: rebuild the exact trim from the brep's 3D edges
         # that lie on this face's surface. Works with no render mesh and
         # for any face count, unlike the split-and-classify fallback.
         surf = BRep_Tool.Surface_s(geometry.occ.to_face(face))
-        boundary = _edges_on_surface(surf, occ_edges, max(span * 1e-4, 1e-6))
+        boundary = _edges_on_surface(
+            surf, _edges_bounding(face, occ_edges, edge_boxes, etol), etol)
         exact = _trimmed_face(surf, boundary) if boundary else None
         if exact is not None:
             faces.append(exact)
             continue
 
-        pieces = _split_face_by_edges(face, occ_edges)
+        pieces = _split_face_by_edges(
+            face, _edges_cutting(face, surf, occ_edges, edge_boxes, etol))
         if pieces:
             # trimmed face: resolve which pieces are real
             resolved = None
@@ -438,8 +592,10 @@ def _face_mesh_shape(rface):
 
 # ------------------------------------------------------------------- import
 
-def import_3dm(path: str) -> list[tuple[str, object, dict]]:
+def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
     """Returns [(name, shape, {layer, color})]."""
+    report = progress or Progress()
+    report(0.0, f"Reading {os.path.basename(path)}…")
     model = r3.File3dm.Read(path)
     if model is None:
         raise IOError(f"Could not read 3dm file: {path}")
@@ -455,7 +611,13 @@ def import_3dm(path: str) -> list[tuple[str, object, dict]]:
 
     out = []
     counter = 0
-    for obj in model.Objects:
+    total = len(model.Objects) or 1
+    for index, obj in enumerate(model.Objects):
+        # Reading the file is a fraction of the work; converting is the rest,
+        # so the bar covers the object loop and each object owns a slice of it.
+        step = report.part(index / total, (index + 1) / total,
+                           f"Converting object {index + 1} of {total}")
+        step(0.0)
         geo = obj.Geometry
         shapes = []
         if isinstance(geo, r3.Curve):
@@ -468,7 +630,7 @@ def import_3dm(path: str) -> list[tuple[str, object, dict]]:
             if brep:
                 geo = brep
         if isinstance(geo, r3.Brep):
-            shapes = _import_brep(geo)
+            shapes = _import_brep(geo, step)
         elif isinstance(geo, (r3.NurbsSurface, r3.Surface)) \
                 and not isinstance(geo, r3.Brep):
             try:
@@ -477,7 +639,7 @@ def import_3dm(path: str) -> list[tuple[str, object, dict]]:
             except Exception:
                 shapes = []
         elif isinstance(geo, r3.Mesh):
-            shape = _r3_mesh_to_shape(geo)
+            shape = _r3_mesh_to_shape(geo, report=step)
             shapes = [shape] if shape is not None else []
 
         for shape in shapes:
