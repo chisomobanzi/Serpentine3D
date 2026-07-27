@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import sys
 
@@ -489,6 +490,16 @@ class Viewport(QOpenGLWidget):
         self._marker_points: list = []
         self._last_mouse = None
         self._mesh_prog = self._line_prog = self._bg_prog = 0
+        self._thick_prog = 0
+        self._max_line_width = 1.0          # real cap read back in initializeGL
+        self._uloc_cache: dict = {}
+        # what the GL context is already set to, so the draw loop can stop
+        # re-sending it. _reset_gl_state() drops all of it.
+        self._mvp_state: dict = {}
+        self._bound_color: dict = {}
+        self._bound_uniform: dict = {}
+        self._bound_prog = -1
+        self._bound_width = -1.0
         self._bg_vao = 0
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -498,6 +509,8 @@ class Viewport(QOpenGLWidget):
     # ---------------------------------------------------------------- GL setup
 
     def initializeGL(self):
+        self._uloc_cache.clear()      # programs below are about to be relinked
+        self._reset_gl_state()
         if not GL.glCreateProgram:
             # a legacy context (e.g. Windows GDI GL 1.1 in a VM or over
             # remote desktop) has no shader entry points. Raising here
@@ -615,6 +628,7 @@ class Viewport(QOpenGLWidget):
     def paintGL(self):
         # QPainter overlays (dots, layout text) reset GL state behind our
         # back — re-assert what every frame relies on.
+        self._reset_gl_state()
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
         GL.glEnable(GL.GL_DEPTH_TEST)
@@ -623,10 +637,10 @@ class Viewport(QOpenGLWidget):
 
         # gradient background
         GL.glDisable(GL.GL_DEPTH_TEST)
-        GL.glUseProgram(self._bg_prog)
-        GL.glUniform3f(GL.glGetUniformLocation(self._bg_prog, "uTop"),
+        self._use(self._bg_prog)
+        GL.glUniform3f(self._uloc(self._bg_prog, "uTop"),
                        *theme.VIEWPORT_BG_TOP)
-        GL.glUniform3f(GL.glGetUniformLocation(self._bg_prog, "uBottom"),
+        GL.glUniform3f(self._uloc(self._bg_prog, "uBottom"),
                        *theme.VIEWPORT_BG_BOTTOM)
         GL.glBindVertexArray(self._bg_vao)
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
@@ -645,12 +659,13 @@ class Viewport(QOpenGLWidget):
             self.layout_view.paint()
             self._draw_preview(self.layout_view._paper_mvp())
             GL.glBindVertexArray(0)
-            GL.glUseProgram(0)
+            self._use(0)
             GL.glDisable(GL.GL_SCISSOR_TEST)
             GL.glDisable(GL.GL_DEPTH_TEST)
             painter.endNativePainting()
             self.layout_view.paint_overlay(painter)
             painter.end()
+            self._reset_gl_state()      # QPainter bound its own program
             return
 
         view = self.camera.view_matrix()
@@ -687,7 +702,7 @@ class Viewport(QOpenGLWidget):
         from PySide6.QtCore import QRectF
         from PySide6.QtGui import QColor, QFont, QPainter, QPen
         GL.glBindVertexArray(0)
-        GL.glUseProgram(0)
+        self._use(0)
         GL.glDisable(GL.GL_DEPTH_TEST)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -722,6 +737,7 @@ class Viewport(QOpenGLWidget):
             painter.drawText(rect, 0x84, text)  # AlignHCenter | AlignVCenter
         painter.end()
         GL.glEnable(GL.GL_DEPTH_TEST)
+        self._reset_gl_state()      # QPainter bound its own program
 
     def _update_gumball_readout(self):
         """Position the value-readout label by the gumball (a real child
@@ -825,16 +841,135 @@ class Viewport(QOpenGLWidget):
             GL.glDrawArrays(GL.GL_LINES, 0, len(allv))
         GL.glEnable(GL.GL_DEPTH_TEST)
 
+    def _cull(self, mvp, objects: list) -> list:
+        """`objects`, minus the ones wholly outside the view.
+
+        Every object used to cost a draw call whether or not it was on screen,
+        and a survey drawing is mostly off screen: the cave file spans 60000
+        units and you work inside it a room at a time.
+
+        The test is the standard one — read the six clip planes off the MVP,
+        and for each plane check the box corner furthest along its normal. If
+        even that corner is behind the plane the whole box is. It is done for
+        every object in one array operation rather than per object, because
+        per-object numpy would cost more than the draw calls it saves.
+
+        Boxes are padded by a little of the camera distance: point markers and
+        the like are drawn at a screen-relative size around a box that may be
+        a single point, and clipping those at the frame edge is worse than
+        drawing a few objects that turn out to contribute nothing.
+        """
+        if not objects:
+            return objects
+        bounds = [obj.mesh.bounds() if obj.mesh_ready else None
+                  for obj in objects]
+        boxes = [(i, b) for i, b in enumerate(bounds) if b is not None]
+        if not boxes:
+            return objects              # nothing to judge them on: draw them
+        m = np.asarray(mvp, dtype=np.float64)
+        planes = np.array([m[3] + m[0], m[3] - m[0],
+                           m[3] + m[1], m[3] - m[1],
+                           m[3] + m[2], m[3] - m[2]])
+        pad = abs(getattr(self.camera, "distance", 0.0)) * 0.02 + 1e-6
+        mins = np.array([b[0] for _, b in boxes], float) - pad
+        maxs = np.array([b[1] for _, b in boxes], float) + pad
+        normals, offsets = planes[:, :3], planes[:, 3]
+        # the corner furthest along each plane normal, per object per plane
+        corner = np.where(normals[None, :, :] > 0,
+                          maxs[:, None, :], mins[:, None, :])
+        inside = ((corner * normals[None, :, :]).sum(-1)
+                  + offsets >= 0).all(axis=1)
+        # keep the incoming order: it is the draw order, and coincident
+        # surfaces and translucency both depend on it
+        dropped = {i for (i, _), ok in zip(boxes, inside) if not ok}
+        return [obj for i, obj in enumerate(objects) if i not in dropped]
+
+    def _uloc(self, prog: int, name: str) -> int:
+        """A uniform's location, looked up once per program.
+
+        `glGetUniformLocation` is a string lookup inside the driver, and
+        through PyOpenGL it costs a ctypes round trip on top. Called from the
+        per-object draw loop it was the largest single line item in the
+        profile: a 5900-object scene spent about a third of every frame asking
+        the driver where `uColor` lives. Locations are fixed for the life of a
+        linked program, so ask once. -1 (no such uniform, usually optimised
+        out) caches like any other answer.
+        """
+        key = (prog, name)
+        loc = self._uloc_cache.get(key)
+        if loc is None:
+            loc = GL.glGetUniformLocation(prog, name)
+            self._uloc_cache[key] = loc
+        return loc
+
+    def _set_mvp(self, prog: int, mvp):
+        """Upload uMVP, unless this very matrix is already the one in place.
+
+        Every object's edges were re-sending the same camera matrix — 5900
+        uploads of 16 identical floats per frame, each one a trip through
+        PyOpenGL's array marshalling. Matrices are built fresh per frame and
+        never written into afterwards, so object identity is enough to tell
+        "the same matrix" from "a new one"; keeping a reference to the one we
+        uploaded stops its id being recycled underneath us.
+        """
+        if self._mvp_state.get(prog) is mvp:
+            return
+        GL.glUniformMatrix4fv(self._uloc(prog, "uMVP"), 1, GL.GL_TRUE, mvp)
+        self._mvp_state[prog] = mvp
+
     def _set_line_uniforms(self, mvp, color):
-        GL.glUseProgram(self._line_prog)
-        GL.glUniformMatrix4fv(
-            GL.glGetUniformLocation(self._line_prog, "uMVP"), 1, GL.GL_TRUE,
-            mvp)
-        GL.glUniform4f(GL.glGetUniformLocation(self._line_prog, "uColor"),
-                       *color)
+        self._use(self._line_prog)
+        self._set_mvp(self._line_prog, mvp)
+        self._set_color4(self._line_prog, color)
+
+    def _reset_gl_state(self):
+        """Forget what the context is believed to hold.
+
+        The skips above are only sound while nothing else touches the state
+        they shadow, and something else does: the QPainter overlays reset GL
+        behind our back between frames. So the shadow lasts exactly one frame
+        and every frame starts by assuming nothing. Uniform *locations* are
+        not state and survive — those belong to the program.
+        """
+        self._mvp_state.clear()
+        self._bound_color.clear()
+        self._bound_uniform.clear()
+        self._bound_prog = -1
+        self._bound_width = -1.0
+
+    def _use(self, prog: int):
+        """Bind a shader program, unless it is already the bound one."""
+        if self._bound_prog != prog:
+            GL.glUseProgram(prog)
+            self._bound_prog = prog
 
     def _line_width(self, width: float):
-        GL.glLineWidth(min(width, getattr(self, "_max_line_width", 1.0)))
+        w = min(width, self._max_line_width)
+        if w != self._bound_width:
+            GL.glLineWidth(w)
+            self._bound_width = w
+
+    def _set_uniform(self, prog: int, name: str, setter, *values):
+        """Set a scalar uniform, unless it already holds those values."""
+        key = (prog, name)
+        if self._bound_uniform.get(key) == values:
+            return
+        setter(self._uloc(prog, name), *values)
+        self._bound_uniform[key] = values
+
+    def _set_color4(self, prog: int, color):
+        """Set a program's uColor, unless it already holds that colour.
+
+        Objects are drawn in scene order and a drawing is mostly runs of
+        objects on the same layer, so consecutive objects usually share a
+        colour — this skips most of the uploads for the cost of a tuple
+        compare.
+        """
+        c = tuple(color)
+        if self._bound_color.get(prog) == c:
+            return
+        GL.glUniform4f(self._uloc(prog, "uColor"), *c)
+        self._bound_color[prog] = c
 
     def _draw_lines(self, batch: _LineBatch, mvp, color, width=1.0):
         if not batch or batch.count == 0:
@@ -884,17 +1019,17 @@ class Viewport(QOpenGLWidget):
                 [*o, 0, 0], [*(o + u), 1, 0], [*(o + u + v), 1, 1],
                 [*o, 0, 0], [*(o + u + v), 1, 1], [*(o + v), 0, 1],
             ], np.float32)
-            GL.glUseProgram(self._tex_prog)
+            self._use(self._tex_prog)
             GL.glUniformMatrix4fv(
-                GL.glGetUniformLocation(self._tex_prog, "uMVP"), 1,
+                self._uloc(self._tex_prog, "uMVP"), 1,
                 GL.GL_TRUE, mvp)
             GL.glUniform1f(
-                GL.glGetUniformLocation(self._tex_prog, "uAlpha"),
+                self._uloc(self._tex_prog, "uAlpha"),
                 float(plane.get("alpha", 1.0)))
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
             GL.glUniform1i(
-                GL.glGetUniformLocation(self._tex_prog, "uTex"), 0)
+                self._uloc(self._tex_prog, "uTex"), 0)
             GL.glBindVertexArray(self._tex_vao)
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._tex_vbo)
             GL.glBufferData(GL.GL_ARRAY_BUFFER, quad.nbytes, quad,
@@ -1046,7 +1181,27 @@ class Viewport(QOpenGLWidget):
                 return -float(np.linalg.norm(centre - eye))
             objects = sorted(objects, key=_depth)
         if mode == "rendered":
+            # before culling: an object above the frustum can still stamp a
+            # shadow that is inside it
             self._draw_ground_shadow(mvp, objects)
+        objects = self._cull(mvp, objects)
+        # Uniform state belongs to the program, not the draw call, and these
+        # are the same for every object in the frame — the camera and the
+        # display mode. Only the colour and the material change per object.
+        self._use(self._mesh_prog)
+        GL.glUniformMatrix4fv(self._uloc(self._mesh_prog, "uMVP"), 1,
+                              GL.GL_TRUE, mvp)
+        GL.glUniformMatrix4fv(self._uloc(self._mesh_prog, "uView"), 1,
+                              GL.GL_TRUE, view.astype(np.float32))
+        GL.glUniform1i(self._uloc(self._mesh_prog, "uZebra"),
+                       1 if mode == "zebra" else 0)
+        GL.glUniform1i(self._uloc(self._mesh_prog, "uDraft"),
+                       1 if mode == "draft" else 0)
+        GL.glUniform1f(self._uloc(self._mesh_prog, "uDraftCos"),
+                       math.sin(math.radians(self.draft_angle)))
+        GL.glUniform1f(self._uloc(self._mesh_prog, "uCurvRange"), curv_range)
+        GL.glUniform1i(self._uloc(self._mesh_prog, "uRendered"),
+                       1 if mode == "rendered" else 0)
         for obj in objects:
             gpu = self._gpu.get(obj.id)
             if gpu is None:
@@ -1079,46 +1234,24 @@ class Viewport(QOpenGLWidget):
             else:
                 fill_alpha_obj = fill_alpha
             if fill_alpha_obj > 0 and gpu.tri_count:
-                GL.glUseProgram(self._mesh_prog)
-                GL.glUniformMatrix4fv(
-                    GL.glGetUniformLocation(self._mesh_prog, "uMVP"), 1,
-                    GL.GL_TRUE, mvp)
-                GL.glUniformMatrix4fv(
-                    GL.glGetUniformLocation(self._mesh_prog, "uView"), 1,
-                    GL.GL_TRUE, view.astype(np.float32))
+                self._use(self._mesh_prog)
                 GL.glUniform3f(
-                    GL.glGetUniformLocation(self._mesh_prog, "uColor"),
+                    self._uloc(self._mesh_prog, "uColor"),
                     *fill_color)
                 GL.glUniform1f(
-                    GL.glGetUniformLocation(self._mesh_prog, "uAlpha"),
+                    self._uloc(self._mesh_prog, "uAlpha"),
                     fill_alpha_obj)
-                GL.glUniform1i(
-                    GL.glGetUniformLocation(self._mesh_prog, "uZebra"),
-                    1 if mode == "zebra" else 0)
-                import math as _math
-                GL.glUniform1i(
-                    GL.glGetUniformLocation(self._mesh_prog, "uDraft"),
-                    1 if mode == "draft" else 0)
-                GL.glUniform1f(
-                    GL.glGetUniformLocation(self._mesh_prog, "uDraftCos"),
-                    _math.sin(_math.radians(self.draft_angle)))
-                GL.glUniform1f(
-                    GL.glGetUniformLocation(self._mesh_prog, "uCurvRange"),
-                    curv_range)
                 m = obj.material or {}
                 opacity = float(m.get("opacity", 1.0))
-                GL.glUniform1i(
-                    GL.glGetUniformLocation(self._mesh_prog, "uRendered"),
-                    1 if mode == "rendered" else 0)
                 GL.glUniform1f(
-                    GL.glGetUniformLocation(self._mesh_prog, "uMetallic"),
+                    self._uloc(self._mesh_prog, "uMetallic"),
                     float(m.get("metallic", 0.0)))
                 GL.glUniform1f(
-                    GL.glGetUniformLocation(self._mesh_prog, "uRoughness"),
+                    self._uloc(self._mesh_prog, "uRoughness"),
                     float(m.get("roughness", 0.55)))
                 if opacity < 1.0:
                     GL.glUniform1f(
-                        GL.glGetUniformLocation(self._mesh_prog, "uAlpha"),
+                        self._uloc(self._mesh_prog, "uAlpha"),
                         fill_alpha * opacity)
                 if mode == "ghosted" or opacity < 1.0 \
                         or obj.clip_plane is not None:
@@ -1220,12 +1353,12 @@ class Viewport(QOpenGLWidget):
         squash[2, 2] = 0.0
         squash[2, 3] = 0.01                 # hair above the plane
         smvp = (mvp @ squash).astype(np.float32)
-        GL.glUseProgram(self._line_prog)
-        GL.glUniformMatrix4fv(
-            GL.glGetUniformLocation(self._line_prog, "uMVP"), 1, GL.GL_TRUE,
-            smvp)
-        GL.glUniform4f(GL.glGetUniformLocation(self._line_prog, "uColor"),
-                       0.02, 0.02, 0.03, 0.30)
+        self._use(self._line_prog)
+        # through _set_mvp, so the squashed matrix is recorded as what the
+        # program holds — the edge pass after this one has to know to put the
+        # real one back
+        self._set_mvp(self._line_prog, smvp)
+        self._set_color4(self._line_prog, (0.02, 0.02, 0.03, 0.30))
         GL.glDepthMask(False)
         for obj in objects:
             gpu = self._gpu.get(obj.id)
@@ -1249,14 +1382,15 @@ class Viewport(QOpenGLWidget):
             GL.glDrawArrays(GL.GL_LINES, 0, gpu.line_count)
             return
         prog = self._thick_prog
-        GL.glUseProgram(prog)
-        GL.glUniformMatrix4fv(GL.glGetUniformLocation(prog, "uMVP"), 1,
-                              GL.GL_TRUE, mvp.astype(np.float32))
-        GL.glUniform2f(GL.glGetUniformLocation(prog, "uViewport"),
-                       float(self.width()), float(self.height()))
-        GL.glUniform1f(GL.glGetUniformLocation(prog, "uWidthPx"),
-                       float(width))
-        GL.glUniform4f(GL.glGetUniformLocation(prog, "uColor"), *color)
+        self._use(prog)
+        # asarray, not astype: astype copies even when the dtype already
+        # matches, and a fresh array every object defeated _set_mvp entirely —
+        # this is the path llvmpipe takes for every wide line it draws.
+        self._set_mvp(prog, np.asarray(mvp, np.float32))
+        self._set_uniform(prog, "uViewport", GL.glUniform2f,
+                          float(self.width()), float(self.height()))
+        self._set_uniform(prog, "uWidthPx", GL.glUniform1f, float(width))
+        self._set_color4(prog, color)
         GL.glBindVertexArray(gpu.thick_vao)
         GL.glDrawElements(GL.GL_TRIANGLES, gpu.thick_count,
                           GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
@@ -1523,11 +1657,11 @@ class Viewport(QOpenGLWidget):
         return vecs
 
     def _set_clip_uniforms(self, prog, clips):
-        GL.glUseProgram(prog)
-        GL.glUniform1i(GL.glGetUniformLocation(prog, "uClipCount"),
+        self._use(prog)
+        GL.glUniform1i(self._uloc(prog, "uClipCount"),
                        len(clips))
         if clips:
-            GL.glUniform4fv(GL.glGetUniformLocation(prog, "uClips"),
+            GL.glUniform4fv(self._uloc(prog, "uClips"),
                             len(clips), np.asarray(clips, np.float32))
 
     def _draw_ghost(self, mvp):
@@ -1639,6 +1773,7 @@ class Viewport(QOpenGLWidget):
             GL.glClearColor(0.98, 0.98, 0.97, 1.0)
             GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
             GL.glEnable(GL.GL_DEPTH_TEST)
+            self._reset_gl_state()        # a different target, a fresh start
             self._sync_gpu()
             proj, view = self.layout_view.detail_matrices(detail, px_w, px_h)
             mvp = (proj @ view).astype(np.float32)

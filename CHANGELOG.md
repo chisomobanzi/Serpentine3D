@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Big scenes are workable again**: a 5900-object cave survey drew at 5.8 fps —
+  slow enough that orbiting it was guesswork. Almost none of that was the
+  graphics card. The draw loop asked the driver where each shader variable
+  lived, by name, once per object per frame — 26000 lookups before a single
+  pixel was filled, about a third of the frame — and re-sent the camera matrix,
+  the display mode and the object colour for every object even when they hadn't
+  changed since the object before. It also drew everything, including the
+  five-sixths of the model behind you. Uniform locations are now looked up once
+  per shader, values are only sent when they actually differ, and objects whose
+  bounding box falls outside the view are skipped. An object now costs two GL
+  calls to draw — bind its geometry, draw it — down from about seven. The cave
+  went to **13.9 fps zoomed out and 30 fps working inside the model**, where
+  culling does the most good. Draw order is unchanged, so coincident surfaces
+  and transparency still resolve the same way.
+
 ## 0.5.1 — 2026-07-27
 
 A fix release, all of it from one real file: a 921 MB Rhino set design that
