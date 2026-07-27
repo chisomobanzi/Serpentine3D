@@ -34,9 +34,11 @@
   camera matrix from scratch, for a camera that cannot move part-way through a
   click. The matrix is now worked out once and reused until the camera actually
   moves, and the bounding boxes are tested in a single pass over the drawing
-  rather than one object at a time. In the same 5900-object cave a click went
-  from **304 ms to 19 ms**. Box selection and sub-object (Ctrl+Shift) picking
-  take the same route and got the same speed-up.
+  rather than one object at a time. Objects wholly behind the camera are now
+  ruled out rather than tested, which working inside a model is most of it.
+  In the same 5900-object cave a click went from **304 ms to 19 ms zoomed out
+  and 380 ms to 17 ms working inside the model**. Box selection and sub-object
+  (Ctrl+Shift) picking take the same route and got the same speed-up.
 
 ## 0.5.1 — 2026-07-27
 

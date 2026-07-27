@@ -1903,8 +1903,12 @@ class Viewport(QOpenGLWidget):
         xs, ys = scr[:, :, 0], scr[:, :, 1]
         outside = ((xs.max(axis=1) < x0) | (xs.min(axis=1) > x1)
                    | (ys.max(axis=1) < y0) | (ys.min(axis=1) > y1))
-        # a box crossing the camera plane projects nonsense: keep it
-        return outside & ~(scr[:, :, 2] <= 0).any(axis=1)
+        behind = scr[:, :, 2] <= 0
+        # A box crossing the camera plane projects nonsense, so the screen
+        # test above cannot be trusted for it and it has to be kept. One
+        # wholly behind the camera is not that case: it cannot be under the
+        # cursor at all. Working inside a model, that is most of the model.
+        return (outside & ~behind.any(axis=1)) | behind.all(axis=1)
 
     def _pick_reject(self, mesh, x0, y0, x1, y1, w, h) -> bool:
         """True if the mesh's bbox projects fully outside a screen rect."""

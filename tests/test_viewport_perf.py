@@ -452,3 +452,53 @@ def test_the_prefilter_actually_rejects_something(gl):
     assert objs[0].id in {o.id for o in kept}, "missed the object aimed at"
     assert len(kept) < len(objs), (
         f"all {len(objs)} survived a {2 * r:.0f}px window — nothing rejected")
+
+
+def _look_away(camera):
+    """Aim the camera along -X from far out on +X, leaving the model at the
+    origin squarely behind it — no object straddling the camera plane."""
+    camera.azimuth = 0.0
+    camera.elevation = 0.0
+    camera.distance = 10.0
+    camera.target = np.array([-1000.0, 0.0, 0.0])
+
+
+def test_objects_behind_the_camera_are_not_pick_candidates(gl):
+    """Working inside a model means most of it is behind you. A box whose every
+    corner is behind the camera plane cannot be under the cursor, but the
+    projection of such a box is meaningless, so it was kept unconditionally —
+    and zoomed in that was most of what the ray then had to be tested against."""
+    view = _viewport(200, spread=8.0)
+    w, h = view.width(), view.height()
+    r = vp_mod.PICK_RADIUS_PX
+    objs = view.scene.visible_objects()
+    _look_away(view.camera)
+
+    kept = view._pick_candidates(objs, 400 - r, 300 - r, 400 + r, 300 + r, w, h)
+    assert not kept, f"{len(kept)} of {len(objs)} objects behind the camera kept"
+
+
+def test_an_object_straddling_the_camera_plane_is_still_a_candidate(gl):
+    """The dangerous half. A box with corners on both sides of the camera
+    plane projects nonsense — part of it is genuinely in front of you, so it
+    must survive the prefilter and be settled by the ray test."""
+    scene = Scene()
+    selection = SelectionManager(scene)
+    # one long curve running from well behind the camera to well in front
+    scene.add(geometry.make_polyline([(0, -500, 0), (0, 500, 0)]), name="thru")
+    view = vp_mod.Viewport(scene, selection)
+    view.resize(800, 600)
+    view._mesh_prog, view._line_prog, view._thick_prog = 11, 12, 13
+    view._max_line_width = 1.0
+    for obj in scene.all():
+        obj.mesh
+        view._gpu[obj.id] = _FakeGpu()
+
+    view.camera.target = np.zeros(3)
+    view.camera.distance = 10.0            # inside the curve's span
+    w, h = view.width(), view.height()
+    r = vp_mod.PICK_RADIUS_PX
+
+    kept = view._pick_candidates(scene.all(), 400 - r, 300 - r,
+                                 400 + r, 300 + r, w, h)
+    assert len(kept) == 1, "curve running through the camera was prefiltered out"
