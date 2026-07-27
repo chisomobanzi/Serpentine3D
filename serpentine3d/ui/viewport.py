@@ -15,6 +15,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from ..core import linetype as _lt
+from ..core import spatial
 from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
 from . import theme
 from .camera import Camera
@@ -1110,11 +1111,43 @@ class Viewport(QOpenGLWidget):
                         if lt_name != "Continuous" else None)
                 self._gpu[obj.id] = _GpuObject(obj.mesh, dash=dash,
                                                dash_key=lt_name)
+                self._warm_pick_index(obj.mesh)
         for dead in set(self._gpu) - live:
             self._gpu[dead].release()
             del self._gpu[dead]
         for dead in set(self._tess_pending) - live:
             del self._tess_pending[dead]
+
+    def _worker_pool(self):
+        if self._tess_pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+            self._tess_pool = ThreadPoolExecutor(
+                max_workers=3, thread_name_prefix="serp-tess")
+        return self._tess_pool
+
+    def _warm_pick_index(self, mesh):
+        """Build a big mesh's pick indexes now, off the thread that clicks.
+
+        Indexing costs about a second per million primitives. Spent on the
+        click that needs it, that is exactly the freeze the index exists to
+        remove — and the first thing anyone does with a model they have just
+        opened is click on it. So it happens when the mesh first reaches the
+        screen, while they are still looking at it.
+
+        Racing the click is harmless: both sides would build the same index
+        and one would simply be discarded.
+        """
+        if (len(mesh.triangles) < spatial.MIN_PRIMITIVES
+                and len(mesh.edge_segments) < spatial.MIN_PRIMITIVES):
+            return                         # most of a drawing, and never worth
+
+        def work():
+            try:
+                mesh.triangle_index()
+                mesh.segment_index()
+            except Exception:              # noqa: BLE001
+                pass                       # picking still works, just slower
+        self._worker_pool().submit(work)
 
     def _schedule_tess(self, obj) -> bool:
         """Queue heavy tessellation on a worker; True while pending."""
@@ -1135,10 +1168,6 @@ class Viewport(QOpenGLWidget):
             mn, mx = g.bbox(obj.shape)
         except Exception:                                  # noqa: BLE001
             return False
-        if self._tess_pool is None:
-            from concurrent.futures import ThreadPoolExecutor
-            self._tess_pool = ThreadPoolExecutor(
-                max_workers=3, thread_name_prefix="serp-tess")
         self._tess_pending[obj.id] = _bbox_segments(mn, mx)
 
         def work(target=obj):
@@ -1148,7 +1177,7 @@ class Viewport(QOpenGLWidget):
                 pass
             self._tessDone.emit()
 
-        self._tess_pool.submit(work)
+        self._worker_pool().submit(work)
         return True
 
     def _on_tess_done(self):
@@ -1892,11 +1921,17 @@ class Viewport(QOpenGLWidget):
         per object the overhead *is* the cost of the click — the same reason
         `_cull` tests the whole draw list in a single array operation.
         """
-        n = len(boxes)
+        if not len(boxes):
+            return np.zeros(0, bool)
+        return self._reject_extents(np.array([b[0] for b in boxes], float),
+                                    np.array([b[1] for b in boxes], float),
+                                    x0, y0, x1, y1, w, h)
+
+    def _reject_extents(self, mins, maxs, x0, y0, x1, y1, w, h) -> np.ndarray:
+        """The same test over boxes already in (N, 3) min/max arrays."""
+        n = len(mins)
         if not n:
             return np.zeros(0, bool)
-        mins = np.array([b[0] for b in boxes], float)
-        maxs = np.array([b[1] for b in boxes], float)
         corners = np.where(_BOX_CORNERS[None, :, :],
                            maxs[:, None, :], mins[:, None, :])
         scr = self.camera.project(corners.reshape(-1, 3), w, h).reshape(n, 8, 3)
@@ -1931,6 +1966,43 @@ class Viewport(QOpenGLWidget):
         drop = self._reject_boxes([b for _, b in boxed], x0, y0, x1, y1, w, h)
         return [obj for (obj, _), d in zip(boxed, drop) if not d]
 
+    def _near_primitives(self, index, x0, y0, x1, y1, w, h):
+        """Which of an indexed mesh's primitives can reach a screen rect.
+
+        Narrowing the drawing to the objects near the cursor does nothing
+        when one object *is* the drawing — a scanned mesh of millions of
+        triangles. Its chunks are rejected by exactly the test that rejects
+        whole objects, so a chunk straddling the camera plane is kept for
+        the same reason an object is.
+
+        None means "all of them": either the mesh is small enough to have no
+        index, or nothing was rejected and subsetting would be pure cost.
+        """
+        if index is None:
+            return None
+        drop = self._reject_extents(index.mins, index.maxs,
+                                    x0, y0, x1, y1, w, h)
+        if not drop.any():
+            return None
+        return index.gather(~drop)
+
+    def _near_triangles(self, mesh, x0, y0, x1, y1, w, h) -> tuple:
+        """(triangles worth testing, where each sits in the mesh or None).
+
+        The second half matters wherever the answer is an index — a winner
+        found at position 3 of a narrowed set is not triangle 3 of the mesh.
+        """
+        sub = self._near_primitives(mesh.triangle_index(),
+                                    x0, y0, x1, y1, w, h)
+        return (mesh.triangles if sub is None else mesh.triangles[sub]), sub
+
+    def _near_segments(self, mesh, x0, y0, x1, y1, w, h) -> tuple:
+        """(edge segments worth testing, where each sits in the mesh)."""
+        sub = self._near_primitives(mesh.segment_index(),
+                                    x0, y0, x1, y1, w, h)
+        return ((mesh.edge_segments if sub is None
+                 else mesh.edge_segments[sub]), sub)
+
     def pick_object(self, px: float, py: float) -> str | None:
         w, h = self.width(), self.height()
         origin, direction = self.camera.ray_through(px, py, w, h)
@@ -1946,7 +2018,8 @@ class Viewport(QOpenGLWidget):
             depth = np.inf
             hit = False
             if mesh.has_faces and self.display_mode != "wireframe":
-                tris = mesh.triangles
+                tris, _ = self._near_triangles(mesh, px - r, py - r,
+                                               px + r, py + r, w, h)
                 t = ray_triangle_hits(origin, direction,
                                       mesh.vertices[tris[:, 0]].astype(float),
                                       mesh.vertices[tris[:, 1]].astype(float),
@@ -1956,7 +2029,9 @@ class Viewport(QOpenGLWidget):
                     depth = tmin
                     hit = True
             if len(mesh.edge_segments):
-                pts = mesh.edge_segments.reshape(-1, 3)
+                segs, _ = self._near_segments(mesh, px - r, py - r,
+                                              px + r, py + r, w, h)
+                pts = segs.reshape(-1, 3)
                 scr = self.camera.project(pts, w, h)
                 a, b = scr[0::2], scr[1::2]
                 d2 = _point_segment_dist2(np.array([px, py]), a[:, :2],
@@ -2003,16 +2078,22 @@ class Viewport(QOpenGLWidget):
             mesh = obj.mesh
             if not len(mesh.edge_segments):
                 continue
-            pts = mesh.edge_segments.reshape(-1, 3)
-            scr = self.camera.project(pts, w, h)
+            segs, sub = self._near_segments(mesh, px - r, py - r,
+                                            px + r, py + r, w, h)
+            if not len(segs):
+                continue
+            scr = self.camera.project(segs.reshape(-1, 3), w, h)
             a, b = scr[0::2], scr[1::2]
             d2 = _point_segment_dist2(np.array([px, py]), a[:, :2],
                                       b[:, :2])
             valid = (a[:, 2] > 0) & (b[:, 2] > 0)
             d2[~valid] = np.inf
             i = int(np.argmin(d2))
-            if d2[i] < best_d2 and len(mesh.edge_of_segment) > i:
-                best_d2 = d2[i]
+            nearest = d2[i]
+            if sub is not None:
+                i = int(sub[i])              # back to the mesh's own numbering
+            if nearest < best_d2 and len(mesh.edge_of_segment) > i:
+                best_d2 = nearest
                 best_edge = (obj.id, "edge", int(mesh.edge_of_segment[i]))
         if best_edge is not None:
             return best_edge
@@ -2023,7 +2104,10 @@ class Viewport(QOpenGLWidget):
             mesh = obj.mesh
             if not mesh.has_faces or not len(mesh.face_of_triangle):
                 continue
-            tris = mesh.triangles
+            tris, sub = self._near_triangles(mesh, px - r, py - r,
+                                             px + r, py + r, w, h)
+            if not len(tris):
+                continue
             t = ray_triangle_hits(origin, direction,
                                   mesh.vertices[tris[:, 0]].astype(float),
                                   mesh.vertices[tris[:, 1]].astype(float),
@@ -2031,6 +2115,8 @@ class Viewport(QOpenGLWidget):
             i = int(np.argmin(t))
             if np.isfinite(t[i]) and t[i] < best_t:
                 best_t = t[i]
+                if sub is not None:
+                    i = int(sub[i])          # back to the mesh's own numbering
                 best_face = (obj.id, "face",
                              int(mesh.face_of_triangle[i]))
         return best_face
@@ -2252,7 +2338,16 @@ class Viewport(QOpenGLWidget):
         for obj in self._pick_candidates(selectable, *rect, w, h):
             mesh = obj.mesh
             if len(mesh.edge_segments):
-                pts = mesh.edge_segments.reshape(-1, 3)
+                segs = mesh.edge_segments
+                if crossing:
+                    # a crossing box asks whether *any* point falls inside,
+                    # so the ones nowhere near it change no answer. A window
+                    # box asks whether *every* point does, and a narrowed set
+                    # would answer yes for a mesh hanging out of the box.
+                    segs, _ = self._near_segments(mesh, *rect, w, h)
+                    if not len(segs):
+                        continue
+                pts = segs.reshape(-1, 3)
             elif len(mesh.vertices):
                 pts = mesh.vertices
             else:

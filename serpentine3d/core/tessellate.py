@@ -11,6 +11,9 @@ from .occ import (
     BRepMesh_IncrementalMesh, TopExp_Explorer, TopLoc_Location,
     GCPnts_TangentialDeflection, TopAbs_Orientation,
 )
+from .spatial import build_index
+
+_UNINDEXED = object()
 
 
 @dataclass
@@ -42,10 +45,31 @@ class DisplayMesh:
 
     has_curvature: bool = False
     _bounds: tuple | None = field(default=None, repr=False, compare=False)
+    # spatial indexes for picking, built on first click and kept: None means
+    # "not looked at yet", _UNINDEXED means "looked at, not worth indexing"
+    _tri_index: object = field(default=None, repr=False, compare=False)
+    _seg_index: object = field(default=None, repr=False, compare=False)
 
     @property
     def has_faces(self) -> bool:
         return len(self.triangles) > 0
+
+    def triangle_index(self):
+        """Spatial index over the triangles, or None to test them all.
+
+        Built lazily: a mesh only pays for this if it is ever picked in,
+        and most objects in a drawing never are.
+        """
+        if self._tri_index is None:
+            self._tri_index = (build_index(self.vertices[self.triangles])
+                               or _UNINDEXED)
+        return None if self._tri_index is _UNINDEXED else self._tri_index
+
+    def segment_index(self):
+        """Spatial index over the edge segments, or None to test them all."""
+        if self._seg_index is None:
+            self._seg_index = build_index(self.edge_segments) or _UNINDEXED
+        return None if self._seg_index is _UNINDEXED else self._seg_index
 
     def bounds(self) -> tuple | None:
         """Cached (min_xyz, max_xyz) over vertices, edge and point data."""

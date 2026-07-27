@@ -27,18 +27,30 @@
   Together: the cave went from **5.8 fps to 16.6 fps zoomed out, and 48 fps
   working inside the model**, where culling does the most good.
 
-- **Clicking to select is immediate again**: in a big scene, picking an object
-  meant a wait of several seconds before it highlighted. Deciding what you
-  clicked on means testing every object in the drawing, and each test began by
-  projecting that object's bounding box to the screen — which rebuilt the whole
-  camera matrix from scratch, for a camera that cannot move part-way through a
-  click. The matrix is now worked out once and reused until the camera actually
-  moves, and the bounding boxes are tested in a single pass over the drawing
-  rather than one object at a time. Objects wholly behind the camera are now
-  ruled out rather than tested, which working inside a model is most of it.
-  In the same 5900-object cave a click went from **304 ms to 19 ms zoomed out
-  and 380 ms to 17 ms working inside the model**. Box selection and sub-object
-  (Ctrl+Shift) picking take the same route and got the same speed-up.
+- **Clicking to select is immediate again**: in the 5900-object cave survey,
+  picking an object meant a wait of about five seconds before it highlighted.
+  Deciding what you clicked on means testing the cursor against geometry, and
+  that test is linear in how much geometry there is, so the fix was to stop
+  looking at nearly all of it.
+
+  Three of the four passes over the drawing were pure overhead. Each object's
+  bounding box was projected to the screen one object at a time, and each
+  projection rebuilt the whole camera matrix from scratch — for a camera that
+  cannot move part-way through a click. The matrix is now worked out once and
+  reused until the camera actually moves, the boxes are tested in a single pass
+  over the drawing, and objects wholly behind the camera are ruled out rather
+  than tested, which working inside a model is most of the model.
+
+  That still left the shape a survey file actually takes: two of those 5900
+  objects are scanned meshes of 3.3 million triangles each, so narrowing the
+  drawing to "the objects near the cursor" narrows it to the cave. Each big
+  mesh now sorts its triangles and wireframe segments into a coarse grid once,
+  with a bounding box per cell, and a click rejects cells by exactly the test
+  that rejects whole objects. Working inside the cave, a click went from
+  **4712 ms to 134 ms**. The sort takes a second or two per million triangles,
+  so it happens on a background thread when the mesh first reaches the screen —
+  never on the click that needs it. Box selection and sub-object (Ctrl+Shift)
+  picking take the same route and got the same speed-up.
 
 ## 0.5.1 — 2026-07-27
 

@@ -17,6 +17,7 @@ import pytest
 from serpentine3d.core.scene import Scene
 from serpentine3d.core.selection import SelectionManager
 from serpentine3d.core import geometry
+from serpentine3d.core import tessellate as tessellate_mod
 from serpentine3d.ui import viewport as vp_mod
 
 
@@ -47,7 +48,9 @@ class _GLRecorder:
 class _FakeGpu:
     """The buffer handles `_draw_objects` reads, without a GL context."""
 
-    def __init__(self, lines=6, tris=0, isos=0):
+    def __init__(self, lines=6, tris=0, isos=0, mesh_id=None,
+                 dash_key="Continuous"):
+        self.mesh_id, self.dash_key = mesh_id, dash_key
         self.tri_vao, self.tri_count = 1, tris
         self.line_vao, self.line_count = 2, lines
         self.iso_vao, self.iso_count = 3, isos
@@ -76,8 +79,7 @@ def _viewport(count: int, spread: float = 10.0):
     view._mesh_prog, view._line_prog, view._thick_prog = 11, 12, 13
     view._max_line_width = 1.0
     for obj in scene.all():
-        obj.mesh                              # tessellate now, not mid-draw
-        view._gpu[obj.id] = _FakeGpu()
+        view._gpu[obj.id] = _FakeGpu(mesh_id=id(obj.mesh))
     return view
 
 
@@ -502,3 +504,236 @@ def test_an_object_straddling_the_camera_plane_is_still_a_candidate(gl):
     kept = view._pick_candidates(scene.all(), 400 - r, 300 - r,
                                  400 + r, 300 + r, w, h)
     assert len(kept) == 1, "curve running through the camera was prefiltered out"
+
+
+# --- a single mesh big enough to be the whole drawing -----------------------
+#
+# The prefilter above narrows a drawing of many objects to the few near the
+# cursor. A scanned survey mesh is the other shape a drawing takes: one
+# object of millions of triangles, where "near the cursor" is all of it. The
+# tests below are about not testing all of it.
+
+def _sheet_mesh(rows: int = 174, extent: float = 50.0):
+    """A triangulated sheet in z=0, wireframed — a survey mesh in miniature."""
+    g = np.linspace(-extent, extent, rows + 1)
+    xx, yy = np.meshgrid(g, g, indexing="ij")
+    verts = np.stack([xx.ravel(), yy.ravel(),
+                      np.zeros(xx.size)], axis=1).astype(np.float32)
+    n = rows + 1
+    i = np.arange(rows)[:, None] * n + np.arange(rows)[None, :]
+    i = i.ravel()
+    tris = np.concatenate([
+        np.stack([i, i + 1, i + n], axis=1),
+        np.stack([i + 1, i + n + 1, i + n], axis=1)]).astype(np.uint32)
+    # the wireframe: every row line of the grid, as its own segments
+    a = verts[i]
+    segs = np.stack([a, verts[i + 1]], axis=1).astype(np.float32)
+    return tessellate_mod.DisplayMesh(
+        vertices=verts,
+        normals=np.tile(np.array([[0, 0, 1]], np.float32), (len(verts), 1)),
+        triangles=tris,
+        edge_segments=segs,
+        # sub-object maps: one topological edge per grid row, one face per
+        # band of rows, so a wrong index shows up as a wrong answer
+        edge_of_segment=(i // rows).astype(np.int32),
+        face_of_triangle=np.tile(i // (rows * 8), 2).astype(np.int32))
+
+
+def _sheet_viewport():
+    scene = Scene()
+    selection = SelectionManager(scene)
+    obj = scene.add(geometry.make_box((-50, -50, 0), 100, 100, 1), name="scan")
+    obj._mesh = _sheet_mesh()
+    view = vp_mod.Viewport(scene, selection)
+    view.resize(800, 600)
+    view._mesh_prog, view._line_prog, view._thick_prog = 11, 12, 13
+    view._max_line_width = 1.0
+    view._gpu[obj.id] = _FakeGpu(mesh_id=id(obj.mesh))
+    view.display_mode = "shaded"
+    view.camera.set_standard_view("top")
+    view.zoom_extents()
+    return view, obj
+
+
+class _CountingRayTest:
+    """Counts the triangles actually handed to the ray test."""
+    def __init__(self, monkeypatch):
+        self.triangles = 0
+        real = vp_mod.ray_triangle_hits
+
+        def counted(origin, direction, v0, v1, v2):
+            self.triangles += len(v0)
+            return real(origin, direction, v0, v1, v2)
+
+        monkeypatch.setattr(vp_mod, "ray_triangle_hits", counted)
+
+
+def test_picking_a_dense_mesh_does_not_ray_test_every_triangle(gl,
+                                                               monkeypatch):
+    view, obj = _sheet_viewport()
+    total = len(obj.mesh.triangles)
+    counter = _CountingRayTest(monkeypatch)
+
+    view.pick_object(400.0, 300.0)
+
+    assert counter.triangles < total / 10, (
+        f"{counter.triangles} of {total} triangles ray-tested for one click")
+
+
+def test_picking_a_dense_mesh_still_hits_it(gl):
+    """The dangerous half: skipping chunks must not skip the one clicked."""
+    view, obj = _sheet_viewport()
+    for px, py in ((400.0, 300.0), (300.0, 200.0), (520.0, 410.0)):
+        assert view.pick_object(px, py) == obj.id, f"missed at ({px}, {py})"
+
+
+def test_picking_past_a_dense_mesh_still_finds_nothing(gl):
+    """The other dangerous half: chunk boxes must not widen the hit."""
+    view, _ = _sheet_viewport()
+    view.camera.distance /= 4              # sheet now larger than the window
+    view.camera.pan(-4000.0, 0.0, view.height())
+    assert view.pick_object(400.0, 300.0) is None, "hit a mesh that is off-screen"
+
+
+def test_picking_a_dense_mesh_does_not_project_every_edge_segment(gl):
+    view, obj = _sheet_viewport()
+    view.display_mode = "wireframe"        # faces off, edges are the only test
+    total = len(obj.mesh.edge_segments) * 2
+    projected = []
+    real = view.camera.project
+
+    def counted(points, width, height):
+        projected.append(len(points))
+        return real(points, width, height)
+
+    view.camera.project = counted
+    view.pick_object(400.0, 300.0)
+
+    assert sum(projected) < total / 10, (
+        f"{sum(projected)} of {total} edge points projected for one click")
+
+
+def test_the_dense_mesh_wireframe_still_picks(gl):
+    view, obj = _sheet_viewport()
+    view.display_mode = "wireframe"
+    assert view.pick_object(400.0, 300.0) == obj.id
+
+
+_SPOTS = ((400.0, 300.0), (310.0, 220.0), (505.0, 385.0))
+
+
+def _sub_answers(view):
+    return [None if r is None else (r[1], r[2])
+            for r in (view.pick_subobject(px, py) for px, py in _SPOTS)]
+
+
+def test_sub_object_picking_a_dense_mesh_reports_the_same_edge_and_face(
+        gl, monkeypatch):
+    """The dangerous half of narrowing: what survives a chunk test is a
+    *subset*, so the position of the winner within it is not its position
+    in the mesh. Report the subset position and Ctrl+Shift selects the
+    wrong edge — which looks like picking working, only wrong."""
+    monkeypatch.setattr(tessellate_mod, "build_index", lambda corners: None)
+    plain, _ = _sheet_viewport()
+    want = _sub_answers(plain)
+    monkeypatch.undo()
+
+    indexed, obj = _sheet_viewport()
+    assert obj.mesh.segment_index() is not None, "fixture built no index"
+    assert _sub_answers(indexed) == want
+
+
+def test_sub_object_picking_a_dense_mesh_does_not_test_every_segment(gl):
+    view, obj = _sheet_viewport()
+    total = len(obj.mesh.edge_segments) * 2
+    projected = []
+    real = view.camera.project
+
+    def counted(points, width, height):
+        projected.append(len(points))
+        return real(points, width, height)
+
+    view.camera.project = counted
+    view.pick_subobject(400.0, 300.0)
+
+    assert sum(projected) < total / 10, (
+        f"{sum(projected)} of {total} edge points projected for one pick")
+
+
+def test_box_selecting_a_dense_mesh_does_not_test_every_segment(gl):
+    view, obj = _sheet_viewport()
+    total = len(obj.mesh.edge_segments) * 2
+    projected = []
+    real = view.camera.project
+
+    def counted(points, width, height):
+        projected.append(len(points))
+        return real(points, width, height)
+
+    view.camera.project = counted
+    # a small box well inside the mesh, so it really does cross it
+    assert obj.id in view._box_pick(380.0, 280.0, 420.0, 320.0, crossing=True)
+
+    assert sum(projected) < total / 4, (
+        f"{sum(projected)} of {total} edge points projected for a box drag")
+
+
+def test_box_selecting_a_dense_mesh_still_catches_it(gl):
+    view, obj = _sheet_viewport()
+    assert obj.id in view._box_pick(100.0, 100.0, 700.0, 500.0, crossing=True)
+
+
+def test_a_window_box_over_a_dense_mesh_still_means_all_of_it(gl):
+    """Window selection asks whether the *whole* object is inside, so it is
+    the one path the chunk narrowing must not touch — a narrowed set is all
+    inside by construction, which would select a mesh hanging out of the
+    box."""
+    view, obj = _sheet_viewport()
+    assert obj.id not in view._box_pick(380.0, 280.0, 420.0, 320.0,
+                                        crossing=False), (
+        "window box inside the mesh selected the whole mesh")
+    assert obj.id in view._box_pick(0.0, 0.0, 800.0, 600.0, crossing=False), (
+        "window box around the whole mesh did not select it")
+
+
+class _InlinePool:
+    """Stands in for the tessellation worker pool, running the job here."""
+    def __init__(self):
+        self.jobs = 0
+
+    def submit(self, fn, *a):
+        self.jobs += 1
+        fn(*a)
+
+
+def test_a_big_mesh_is_queued_for_indexing_when_it_reaches_the_screen(gl):
+    """Indexing a scanned mesh costs about a second per million triangles.
+    Spent on the click that needs it, that is the freeze the index exists to
+    remove — so it has to be spent before the click."""
+    view, obj = _sheet_viewport()
+    view._tess_pool = _InlinePool()
+    view._gpu.clear()                          # as if first drawn just now
+    view._sync_gpu()
+    assert view._tess_pool.jobs >= 1, "big mesh reached the screen unindexed"
+
+
+def test_a_warmed_mesh_does_not_build_its_index_on_the_click(gl, monkeypatch):
+    view, obj = _sheet_viewport()
+    view._tess_pool = _InlinePool()
+    view._warm_pick_index(obj.mesh)
+
+    def boom(corners):
+        raise AssertionError("index built during the click, not before it")
+
+    monkeypatch.setattr(tessellate_mod, "build_index", boom)
+    assert view.pick_object(400.0, 300.0) == obj.id
+
+
+def test_a_small_mesh_is_not_queued_for_indexing(gl):
+    """Most of a drawing is small objects that would never be indexed; a
+    worker job each is churn for nothing."""
+    view = _viewport(30)
+    view._tess_pool = _InlinePool()
+    view._gpu.clear()
+    view._sync_gpu()
+    assert view._tess_pool.jobs == 0, "queued index jobs for short polylines"
