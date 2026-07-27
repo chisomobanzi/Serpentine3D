@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.1 — 2026-07-27
+
+A fix release, all of it from one real file: a 921 MB Rhino set design that
+wouldn't open. Large imports now finish, say what they are doing while they
+work, and can be cancelled — plus the dialog and shading problems that turned
+up alongside, and the file-format filters from
+[#2](https://github.com/chisomobanzi/Serpentine3D/issues/2).
+
 - **Large Rhino files finish importing**: a 921 MB set-design `.3dm` (17802
   objects, 1900 of them polysurfaces totalling 42k faces and 78k edges) never
   came back at all. Each face rediscovered which edges bound it by testing
