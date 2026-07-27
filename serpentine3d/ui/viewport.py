@@ -21,6 +21,11 @@ from .camera import Camera
 
 PICK_RADIUS_PX = 7.0
 
+# which end of a bounding box each of its eight corners takes per axis
+_BOX_CORNERS = np.array([(x, y, z) for x in (False, True)
+                         for y in (False, True)
+                         for z in (False, True)])
+
 MESH_VERT = """
 #version 330 core
 layout(location=0) in vec3 pos;
@@ -1878,20 +1883,49 @@ class Viewport(QOpenGLWidget):
                 hit = np.asarray(self.cplane.to_world(bu, v, w))
         return tuple(round(float(c), 9) for c in hit)
 
+    def _reject_boxes(self, boxes: list, x0, y0, x1, y1, w, h) -> np.ndarray:
+        """Mask over `boxes`: True where one projects clear of the rect.
+
+        Every box at once, in one projection, because clicking asks this of
+        every object in the scene. Projecting eight corners is a few dozen
+        flops wrapped in enough numpy call overhead to dwarf them, so done
+        per object the overhead *is* the cost of the click — the same reason
+        `_cull` tests the whole draw list in a single array operation.
+        """
+        n = len(boxes)
+        if not n:
+            return np.zeros(0, bool)
+        mins = np.array([b[0] for b in boxes], float)
+        maxs = np.array([b[1] for b in boxes], float)
+        corners = np.where(_BOX_CORNERS[None, :, :],
+                           maxs[:, None, :], mins[:, None, :])
+        scr = self.camera.project(corners.reshape(-1, 3), w, h).reshape(n, 8, 3)
+        xs, ys = scr[:, :, 0], scr[:, :, 1]
+        outside = ((xs.max(axis=1) < x0) | (xs.min(axis=1) > x1)
+                   | (ys.max(axis=1) < y0) | (ys.min(axis=1) > y1))
+        # a box crossing the camera plane projects nonsense: keep it
+        return outside & ~(scr[:, :, 2] <= 0).any(axis=1)
+
     def _pick_reject(self, mesh, x0, y0, x1, y1, w, h) -> bool:
         """True if the mesh's bbox projects fully outside a screen rect."""
         b = mesh.bounds()
         if b is None:
             return True
-        mn, mx = b
-        corners = np.array([(x, y, z) for x in (mn[0], mx[0])
-                            for y in (mn[1], mx[1])
-                            for z in (mn[2], mx[2])])
-        scr = self.camera.project(corners, w, h)
-        if (scr[:, 2] <= 0).any():
-            return False                # crosses the camera plane: keep
-        return bool(scr[:, 0].max() < x0 or scr[:, 0].min() > x1
-                    or scr[:, 1].max() < y0 or scr[:, 1].min() > y1)
+        return bool(self._reject_boxes([b], x0, y0, x1, y1, w, h)[0])
+
+    def _pick_candidates(self, objects: list, x0, y0, x1, y1, w, h) -> list:
+        """`objects`, minus the ones whose bounds project clear of the rect.
+
+        Callers filter for selectability first: asking an object for its mesh
+        tessellates it, and one that can never be picked should not be made
+        to pay for that.
+        """
+        boxed = [(obj, obj.mesh.bounds()) for obj in objects]
+        boxed = [(obj, b) for obj, b in boxed if b is not None]
+        if not boxed:
+            return []
+        drop = self._reject_boxes([b for _, b in boxed], x0, y0, x1, y1, w, h)
+        return [obj for (obj, _), d in zip(boxed, drop) if not d]
 
     def pick_object(self, px: float, py: float) -> str | None:
         w, h = self.width(), self.height()
@@ -1899,14 +1933,12 @@ class Viewport(QOpenGLWidget):
         best_id, best_depth = None, np.inf
 
         r = PICK_RADIUS_PX
-        for obj in self.scene.visible_objects():
-            if not self.scene.is_selectable(obj.id):
-                continue
-            if not self.selection.filter_allows(obj.kind):
-                continue
+        selectable = [obj for obj in self.scene.visible_objects()
+                      if self.scene.is_selectable(obj.id)
+                      and self.selection.filter_allows(obj.kind)]
+        for obj in self._pick_candidates(selectable, px - r, py - r,
+                                         px + r, py + r, w, h):
             mesh = obj.mesh
-            if self._pick_reject(mesh, px - r, py - r, px + r, py + r, w, h):
-                continue
             depth = np.inf
             hit = False
             if mesh.has_faces and self.display_mode != "wireframe":
@@ -1959,13 +1991,13 @@ class Viewport(QOpenGLWidget):
         best_edge = None
         best_d2 = PICK_RADIUS_PX ** 2
         r = PICK_RADIUS_PX
-        for obj in self.scene.visible_objects():
-            if not self.scene.is_selectable(obj.id):
-                continue
+        selectable = [obj for obj in self.scene.visible_objects()
+                      if self.scene.is_selectable(obj.id)]
+        near_cursor = self._pick_candidates(selectable, px - r, py - r,
+                                            px + r, py + r, w, h)
+        for obj in near_cursor:
             mesh = obj.mesh
             if not len(mesh.edge_segments):
-                continue
-            if self._pick_reject(mesh, px - r, py - r, px + r, py + r, w, h):
                 continue
             pts = mesh.edge_segments.reshape(-1, 3)
             scr = self.camera.project(pts, w, h)
@@ -1983,9 +2015,7 @@ class Viewport(QOpenGLWidget):
         # faces by nearest ray-triangle hit
         best_face = None
         best_t = np.inf
-        for obj in self.scene.visible_objects():
-            if not self.scene.is_selectable(obj.id):
-                continue
+        for obj in near_cursor:             # same rect, already narrowed
             mesh = obj.mesh
             if not mesh.has_faces or not len(mesh.face_of_triangle):
                 continue
@@ -2212,14 +2242,11 @@ class Viewport(QOpenGLWidget):
         rect = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
         w, h = self.width(), self.height()
         picked = []
-        for obj in self.scene.visible_objects():
-            if not self.scene.is_selectable(obj.id):
-                continue
-            if not self.selection.filter_allows(obj.kind):
-                continue
+        selectable = [obj for obj in self.scene.visible_objects()
+                      if self.scene.is_selectable(obj.id)
+                      and self.selection.filter_allows(obj.kind)]
+        for obj in self._pick_candidates(selectable, *rect, w, h):
             mesh = obj.mesh
-            if self._pick_reject(mesh, *rect, w, h):
-                continue
             if len(mesh.edge_segments):
                 pts = mesh.edge_segments.reshape(-1, 3)
             elif len(mesh.vertices):

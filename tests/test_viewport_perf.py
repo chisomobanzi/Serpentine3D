@@ -307,3 +307,148 @@ def test_an_objects_own_linetype_still_overrides_its_layer(gl):
     assert view._gpu[obj.id].dash_key == "Dotted"
     others = [o for o in view.scene.all() if o.id != obj.id]
     assert all(view._gpu[o.id].dash_key == "Dashed" for o in others)
+
+
+# -- picking: the same per-object question, asked on click -------------------
+#
+# Clicking runs a ray against every object, prefiltered by projecting each
+# object's bounding box to the screen. That projection needs the camera's
+# view-projection matrix — which was rebuilt from scratch inside the loop, once
+# per object, when the camera does not move during a pick.
+
+
+class _CountingCamera:
+    """Counts how often the camera builds a matrix from its pose."""
+
+    def __init__(self, cam):
+        self.cam = cam
+        self.views = 0
+        real = cam.view_matrix
+
+        def counted():
+            self.views += 1
+            return real()
+
+        cam.view_matrix = counted
+
+
+def test_the_camera_matrix_is_not_rebuilt_once_per_object_when_picking(gl):
+    """The camera cannot move part-way through a click, so every object was
+    paying to rebuild the same matrix — and `look_at` runs two `np.cross`
+    calls, which is where the pick time actually went."""
+    view = _viewport(120)
+    counter = _CountingCamera(view.camera)
+    view.pick_object(400.0, 300.0)
+
+    assert counter.views <= 4, (
+        f"{counter.views} view matrices built for one pick over 120 objects")
+
+
+def test_picking_does_not_rebuild_the_matrix_more_as_the_scene_grows(gl):
+    """The real check: whatever the fixed cost is, it must not scale."""
+    small = _viewport(20)
+    few = _CountingCamera(small.camera)
+    small.pick_object(400.0, 300.0)
+
+    big = _viewport(200)
+    many = _CountingCamera(big.camera)
+    big.pick_object(400.0, 300.0)
+
+    assert many.views <= few.views, (
+        f"{few.views} for 20 objects, {many.views} for 200")
+
+
+def test_a_moved_camera_picks_from_its_new_pose(gl):
+    """The dangerous half: a matrix cached across camera moves means clicking
+    selects whatever *used* to be under the cursor."""
+    view = _viewport(40, spread=4.0)
+    view.camera.set_standard_view("top")
+    view.zoom_extents()
+    first = view.pick_object(400.0, 300.0)
+    assert first is not None, "nothing under the cursor to begin with"
+
+    view.camera.pan(4000.0, 4000.0, view.height())   # far away from everything
+    assert view.pick_object(400.0, 300.0) is None, (
+        "camera panned off the model but the pick still hit an object")
+
+    view.camera.pan(-4000.0, -4000.0, view.height())
+    assert view.pick_object(400.0, 300.0) == first, (
+        "camera panned back but the pick no longer finds the object")
+
+
+def test_a_resized_viewport_projects_at_the_new_size(gl):
+    """Viewport size feeds the projection as much as the camera pose does."""
+    view = _viewport(40, spread=4.0)
+    view.camera.set_standard_view("top")
+    view.zoom_extents()
+    corner = view.pick_object(780.0, 580.0)
+
+    view.resize(1600, 1200)
+    # the same *pixel* is now a different point in the model
+    assert view.pick_object(780.0, 580.0) != corner or corner is None
+
+
+class _CountingProject:
+    """Counts how often the camera is asked to project a batch of points."""
+
+    def __init__(self, cam):
+        self.calls = 0
+        real = cam.project
+
+        def counted(points, width, height):
+            self.calls += 1
+            return real(points, width, height)
+
+        cam.project = counted
+
+
+def test_the_pick_prefilter_projects_in_one_batch(gl):
+    """Projecting eight corners is a few dozen flops wrapped in a lot of numpy
+    call overhead, so per object the overhead is the whole cost. The same test
+    over every object at once is one call instead of thousands — the shape
+    `_cull` already uses for drawing."""
+    view = _viewport(300)
+    counter = _CountingProject(view.camera)
+    view.pick_object(400.0, 300.0)
+
+    assert counter.calls < 30, (
+        f"{counter.calls} project calls for one pick over 300 objects")
+
+
+def test_the_batched_prefilter_agrees_with_the_one_it_replaced(gl):
+    """Batching must narrow the loop, not widen the test. The single-object
+    version is the specification, so the two must return the same set."""
+    view = _viewport(120, spread=8.0)
+    view.camera.set_standard_view("top")
+    view.zoom_extents()
+    w, h = view.width(), view.height()
+    r = vp_mod.PICK_RADIUS_PX
+
+    objs = view.scene.visible_objects()
+    for px, py in ((400.0, 300.0), (5.0, 5.0), (799.0, 599.0), (250.0, 480.0)):
+        rect = (px - r, py - r, px + r, py + r)
+        batched = {o.id for o in view._pick_candidates(objs, *rect, w, h)}
+        one_at_a_time = {o.id for o in objs
+                         if not view._pick_reject(o.mesh, *rect, w, h)}
+        assert batched == one_at_a_time, f"disagree at ({px}, {py})"
+
+
+def test_the_prefilter_actually_rejects_something(gl):
+    """A prefilter that keeps everything would satisfy the test above while
+    doing nothing, so pin that it really is narrowing the loop."""
+    view = _viewport(120, spread=8.0)
+    view.camera.set_standard_view("top")
+    view.zoom_extents()
+    w, h = view.width(), view.height()
+    r = vp_mod.PICK_RADIUS_PX
+
+    objs = view.scene.visible_objects()
+    # aim at something that is definitely there: one object's own centre
+    mn, mx = objs[0].mesh.bounds()
+    scr = view.camera.project(np.array([(mn + mx) / 2.0]), w, h)
+    px, py = float(scr[0, 0]), float(scr[0, 1])
+
+    kept = view._pick_candidates(objs, px - r, py - r, px + r, py + r, w, h)
+    assert objs[0].id in {o.id for o in kept}, "missed the object aimed at"
+    assert len(kept) < len(objs), (
+        f"all {len(objs)} survived a {2 * r:.0f}px window — nothing rejected")

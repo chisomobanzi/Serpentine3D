@@ -39,6 +39,7 @@ class Camera:
         self.fov = 45.0
         self.sensor_name = "Super35"
         self.projection = "perspective"        # or "parallel" (orthographic)
+        self._vp_cache = None                  # see _view_proj
 
     @property
     def sensor(self) -> tuple[float, float]:
@@ -169,12 +170,36 @@ class Camera:
             fwd + right * (x_ndc * tan_f * aspect) + up * (y_ndc * tan_f))
         return self.position.copy(), direction
 
+    def _view_proj(self, width: int, height: int) -> tuple:
+        """Cached (view-projection, position, forward) for the current pose.
+
+        Picking projects every object's bounds to the screen to decide what
+        the ray need not be tested against, so this is asked for once per
+        object — thousands of times between two camera moves, for the same
+        answer. Rebuilding it each time meant two `np.cross` calls per
+        object inside `look_at`, which is where the click time went.
+
+        The key is read straight off the pose rather than bumped by a
+        setter, so it cannot outlive a move it did not hear about: every
+        field here is public and callers do assign to them directly.
+        """
+        key = (width, height, self.projection, self.fov, self.distance,
+               self.azimuth, self.elevation, tuple(self.target))
+        cached = self._vp_cache
+        if cached is None or cached[0] != key:
+            pos = self.position
+            cached = (key,
+                      self.proj_matrix(width, height) @ self.view_matrix(),
+                      pos, normalize(self.target - pos))
+            self._vp_cache = cached
+        return cached[1], cached[2], cached[3]
+
     def project(self, points: np.ndarray, width: int,
                 height: int) -> np.ndarray:
         """World points (N,3) -> pixel coords + depth (N,3): x_px, y_px, w."""
         n = len(points)
         hom = np.hstack([points, np.ones((n, 1))])
-        mvp = self.proj_matrix(width, height) @ self.view_matrix()
+        mvp, pos, fwd = self._view_proj(width, height)
         clip = hom @ mvp.T
         w = clip[:, 3:4]
         w_safe = np.where(np.abs(w) < 1e-9, 1e-9, w)
@@ -185,8 +210,7 @@ class Camera:
         if self.projection == "parallel":
             # w is a constant 1 in parallel projection, so the "in front of
             # camera" sign must come from the forward distance instead
-            fwd = normalize(self.target - self.position)
-            out[:, 2] = (np.asarray(points, float) - self.position) @ fwd
+            out[:, 2] = (np.asarray(points, float) - pos) @ fwd
         else:
             out[:, 2] = w[:, 0]
         return out
