@@ -4,6 +4,92 @@ import os
 
 from . import native, obj, step
 
+# The formats this module handles, as (label, extensions) — the single source
+# of truth behind the file dialogs. Anything dispatched below belongs here, or
+# the chooser silently stops offering it (GitHub #2: .3dm imported fine but was
+# never listed, so Rhino files looked unsupported).
+IMPORT_FORMATS = [
+    ("Serpentine3D", (".serp",)),
+    ("STEP", (".step", ".stp")),
+    ("Rhino", (".3dm",)),
+    ("Wavefront OBJ", (".obj",)),
+    ("Autodesk FBX", (".fbx",)),
+    ("STL", (".stl",)),
+    ("DXF", (".dxf",)),
+    ("SVG", (".svg",)),
+]
+
+EXPORT_FORMATS = [
+    ("Serpentine3D", (".serp",)),
+    ("STEP", (".step", ".stp")),
+    ("Rhino", (".3dm",)),
+    ("Wavefront OBJ", (".obj",)),
+    ("Autodesk FBX", (".fbx",)),
+    ("STL — 3D printing", (".stl",)),
+    ("3MF — 3D printing", (".3mf",)),
+    ("DXF", (".dxf",)),
+    ("glTF binary", (".glb",)),
+    ("USD", (".usda", ".usd")),
+]
+
+IMPORT_EXTS = {e for _, exts in IMPORT_FORMATS for e in exts}
+EXPORT_EXTS = {e for _, exts in EXPORT_FORMATS for e in exts}
+
+
+def _filter(formats, catch_alls: bool) -> str:
+    """Build a Qt name-filter string.
+
+    Catch-alls ("All supported", "All files") belong to reading only: they let
+    you reach a file whatever it's called, and a bad guess just fails loudly on
+    import. Saving is the opposite — the filter *is* the format choice, and a
+    catch-all names none, leaving a typed "part" with no extension to dispatch
+    on. So export lists real formats only, led (Qt selects the first) by the
+    native one."""
+    parts = []
+    if catch_alls:
+        every = " ".join(f"*{e}" for _, exts in formats for e in exts)
+        parts.append(f"All supported ({every})")
+    parts += [f"{label} ({' '.join('*' + e for e in exts)})"
+              for label, exts in formats]
+    if catch_alls:
+        parts.append("All files (*)")
+    return ";;".join(parts)
+
+
+def import_filter() -> str:
+    """Name filter for Open/Import dialogs."""
+    return _filter(IMPORT_FORMATS, catch_alls=True)
+
+
+def export_filter() -> str:
+    """Name filter for Export dialogs."""
+    return _filter(EXPORT_FORMATS, catch_alls=False)
+
+
+def suffix_for_filter(name_filter: str) -> str:
+    """The extension a chosen filter writes, without the dot — so a typed
+    filename with no extension still saves in the selected format. The first
+    extension wins when a filter lists several ("STEP (*.step *.stp)"); a
+    filter naming no extension at all ("All files (*)") yields "", leaving
+    whatever the user typed alone."""
+    head, _, tail = name_filter.partition("(*.")
+    if not head or not tail:
+        return ""
+    return tail.split()[0].rstrip(")").lower()
+
+
+def ensure_suffix(path: str, name_filter: str) -> str:
+    """Give a saved path an extension when the user typed none, so a bare
+    "part" saves as the format they picked instead of failing to dispatch. A
+    typed extension we can actually write wins over the dropdown; anything
+    else ("my.part") keeps its text and gains the chosen suffix."""
+    suffix = suffix_for_filter(name_filter)
+    if not suffix:
+        return path
+    if os.path.splitext(path)[1].lower() in EXPORT_EXTS:
+        return path
+    return f"{path}.{suffix}"
+
 
 def import_file(scene, path: str) -> int:
     """Import any supported file into the scene. Returns object count added."""

@@ -742,9 +742,9 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ file dialogs
 
-    _FILTERS = ("Serpentine3D (*.serp);;STEP (*.step *.stp);;"
-                "Autodesk FBX (*.fbx);;Wavefront OBJ (*.obj);;"
-                "STL — 3D printing (*.stl);;3MF — 3D printing (*.3mf)")
+    # Filters come from fileio so the chooser can never drift from what we can
+    # actually read/write (GitHub #2), and so Open stops offering export-only
+    # formats.
 
     def _file_new(self):
         if self.scene.all():
@@ -776,9 +776,18 @@ class MainWindow(QMainWindow):
         sensibly sized window (NORMAL window type dodges the attach). Native
         elsewhere."""
         import sys
-        dlg = QFileDialog(self, title, "", filters or self._FILTERS)
+        if not filters:
+            filters = (fileio.export_filter() if save
+                       else fileio.import_filter())
+        dlg = QFileDialog(self, title, "", filters)
         if save:
             dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+            # Export dispatches on the extension, so a typed "part" must come
+            # back as "part.stl" — follow whichever format is selected.
+            def _suffix(f):
+                dlg.setDefaultSuffix(fileio.suffix_for_filter(f))
+            _suffix(dlg.selectedNameFilter())
+            dlg.filterSelected.connect(_suffix)
             if name:
                 dlg.selectFile(name)
         else:
@@ -788,7 +797,9 @@ class MainWindow(QMainWindow):
             dlg.setWindowFlags(Qt.WindowType.Window)   # not DIALOG-type: no attach
             dlg.resize(900, 580)
         if dlg.exec() and dlg.selectedFiles():
-            return dlg.selectedFiles()[0]
+            path = dlg.selectedFiles()[0]
+            return (fileio.ensure_suffix(path, dlg.selectedNameFilter())
+                    if save else path)
         return ""
 
     def _file_open(self):

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **File dialogs list every supported format** ([#2](https://github.com/chisomobanzi/Serpentine3D/issues/2)):
+  Open/Import were missing **Rhino `.3dm`**, DXF and SVG — all of which import
+  fine — while offering `.3mf`, which can only be exported; Export was missing
+  `.3dm`, DXF, glTF and USD. One shared filter string was used for both
+  directions. Filters now derive from `fileio`, so the chooser can't drift from
+  what the app can actually read and write.
+- **Open/Import default to "All supported"**: one entry listing every readable
+  format, selected by default, so you no longer have to know which format
+  dropdown a file hides behind. Export is the opposite case — the filter *is*
+  the format choice — so it lists real formats only (no "All files"), and a
+  filename typed without an extension now takes the selected format's
+  (`part` → `part.stl`) rather than failing to export.
+
 ## 0.5.0 — 2026-07-22
 
 The "interchange" release: real interoperability with the rest of the 3D
