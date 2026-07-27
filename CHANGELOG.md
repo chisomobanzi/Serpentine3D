@@ -12,10 +12,20 @@
   five-sixths of the model behind you. Uniform locations are now looked up once
   per shader, values are only sent when they actually differ, and objects whose
   bounding box falls outside the view are skipped. An object now costs two GL
-  calls to draw — bind its geometry, draw it — down from about seven. The cave
-  went to **13.9 fps zoomed out and 30 fps working inside the model**, where
-  culling does the most good. Draw order is unchanged, so coincident surfaces
-  and transparency still resolve the same way.
+  calls to draw — bind its geometry, draw it — down from about seven. Draw
+  order is unchanged, so coincident surfaces and transparency still resolve
+  the same way.
+
+  The other per-frame pass had the same shape. Before drawing, the viewport
+  asks every object which dash style it uses, so it can notice when the answer
+  changes — and that meant fetching the object's layer once per object, plus
+  an `import` statement inside the loop that Qt's import hook turned into real
+  work 5900 times a frame. A drawing has thousands of objects and a few dozen
+  layers, so the layers are now read once per frame and the import moved to
+  the top of the file. That pass went from 11.9 ms to 2.7 ms.
+
+  Together: the cave went from **5.8 fps to 16.6 fps zoomed out, and 48 fps
+  working inside the model**, where culling does the most good.
 
 ## 0.5.1 — 2026-07-27
 

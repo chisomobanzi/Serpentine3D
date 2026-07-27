@@ -184,7 +184,9 @@ class LayoutView:
         objs = [o for o in vp.scene.visible_objects()
                 if not isinstance(o.shape, MeshShape)]
         shapes = [o.shape for o in objs]
-        lts = [vp._effective_linetype(o) for o in objs]     # aligned to shapes
+        layer_types = vp._layer_linetypes()                 # once, not per object
+        lts = [vp._effective_linetype(o, layer_types)
+               for o in objs]                               # aligned to shapes
 
         cut_polys = []
         if shapes and detail.section_offset is not None \

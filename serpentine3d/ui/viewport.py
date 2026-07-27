@@ -14,6 +14,7 @@ from PySide6.QtGui import QCursor, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from ..core import linetype as _lt
 from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
 from . import theme
 from .camera import Camera
@@ -1056,15 +1057,34 @@ class Viewport(QOpenGLWidget):
     # shapes with at least this many faces mesh in the background
     ASYNC_FACE_COUNT = 48
 
-    def _effective_linetype(self, obj) -> str:
-        """The object's dash style, resolving 'ByLayer' against its layer."""
-        from ..core import linetype as _lt
-        layer = self.scene.layers.get(obj.layer_id)
-        layer_lt = layer.linetype if layer is not None else "Continuous"
-        return _lt.resolve(getattr(obj, "linetype", "ByLayer"), layer_lt)
+    def _layer_linetypes(self) -> dict:
+        """Every layer's dash style, by id.
+
+        A drawing is thousands of objects over a few dozen layers, so
+        resolving "ByLayer" per object asked for the same handful of answers
+        once per object per frame. Built fresh each pass rather than kept
+        between them: there are two orders of magnitude fewer layers than
+        objects, so rebuilding costs nothing, and a map that cannot go stale
+        needs no invalidating. There is nothing to hang invalidation off in
+        any case — `LayerManager.set_linetype` mutates the layer without
+        notifying the scene, so `scene.revision` does not move.
+        """
+        return {lay.id: lay.linetype for lay in self.scene.layers.all()}
+
+    def _effective_linetype(self, obj, layer_types: dict | None = None) -> str:
+        """The object's dash style, resolving 'ByLayer' against its layer.
+
+        `layer_types` is `_layer_linetypes()`, passed in by callers looping
+        over the scene; without it the layer is fetched per call.
+        """
+        if layer_types is None:
+            layer_types = self._layer_linetypes()
+        return _lt.resolve(getattr(obj, "linetype", "ByLayer"),
+                           layer_types.get(obj.layer_id) or "Continuous")
 
     def _sync_gpu(self):
         live = set()
+        layer_types = self._layer_linetypes()
         for obj in self.scene.all():
             live.add(obj.id)
             gpu = self._gpu.get(obj.id)
@@ -1074,14 +1094,13 @@ class Viewport(QOpenGLWidget):
                     del self._gpu[obj.id]
                 continue
             self._tess_pending.pop(obj.id, None)
-            lt_name = self._effective_linetype(obj)
+            lt_name = self._effective_linetype(obj, layer_types)
             if gpu is not None and (gpu.mesh_id != id(obj.mesh)
                                     or gpu.dash_key != lt_name):
                 gpu.release()
                 gpu = None
                 del self._gpu[obj.id]
             if gpu is None:
-                from ..core import linetype as _lt
                 dash = ((_lt.pattern_for(lt_name), 1.0)
                         if lt_name != "Continuous" else None)
                 self._gpu[obj.id] = _GpuObject(obj.mesh, dash=dash,

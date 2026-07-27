@@ -228,3 +228,82 @@ def test_objects_inside_the_view_are_still_drawn(gl):
     mvp, v = _mvp(view)
     view._draw_objects(mvp, v)
     assert gl.draws >= 30, f"only {gl.draws} draw calls for 30 objects in view"
+
+
+# -- _sync_gpu: the other per-object, per-frame pass --------------------------
+#
+# _sync_gpu runs every frame too, and asks every object for its effective
+# linetype so it can notice when the answer changed. A drawing has a handful of
+# layers and thousands of objects, so that question has very few distinct
+# answers — and resolving it per object meant a layer lookup each time.
+
+
+def _layered(count: int, layers: int):
+    """A viewport over `count` curves spread across `layers` layers."""
+    view = _viewport(count)
+    ids = [view.scene.layers.create(f"L{i}").id for i in range(layers)]
+    for i, obj in enumerate(view.scene.all()):
+        obj.layer_id = ids[i % len(ids)]
+    view._gpu.clear()                 # let _sync_gpu build them for real
+    return view, ids
+
+
+class _CountingLayers:
+    """The scene's LayerManager, counting how often a layer is looked up."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.gets = 0
+
+    def get(self, layer_id):
+        self.gets += 1
+        return self._inner.get(layer_id)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_layers_are_not_looked_up_once_per_object(gl):
+    """A drawing is thousands of objects over a few dozen layers. Asking the
+    layer manager for each object's layer, every frame, is the same answer
+    fetched over and over."""
+    view, ids = _layered(150, 5)
+    view._sync_gpu()                                  # first pass: builds them
+    counter = _CountingLayers(view.scene.layers)
+    view.scene.layers = counter
+    view._sync_gpu()                                  # steady state
+
+    assert counter.gets <= 2 * len(ids), (
+        f"{counter.gets} layer lookups for 150 objects on {len(ids)} layers")
+
+
+def test_a_changed_layer_linetype_reaches_its_objects(gl):
+    """The dangerous half: a cached answer that outlives the thing it was
+    cached from means changing a layer to Dashed does nothing on screen."""
+    view, ids = _layered(12, 2)
+    view._sync_gpu()
+    before = {oid: g.dash_key for oid, g in view._gpu.items()}
+    assert set(before.values()) == {"Continuous"}
+
+    view.scene.layers.set_linetype(ids[0], "Dashed")
+    view._sync_gpu()
+
+    on_layer0 = [o.id for o in view.scene.all() if o.layer_id == ids[0]]
+    assert on_layer0
+    for oid in on_layer0:
+        assert view._gpu[oid].dash_key == "Dashed", (
+            "layer set to Dashed but its objects still draw Continuous")
+
+
+def test_an_objects_own_linetype_still_overrides_its_layer(gl):
+    """Resolution is ByLayer *by default*; an object that names its own
+    linetype must keep it whatever the layer says."""
+    view, ids = _layered(6, 1)
+    obj = view.scene.all()[0]
+    obj.linetype = "Dotted"
+    view.scene.layers.set_linetype(ids[0], "Dashed")
+    view._sync_gpu()
+
+    assert view._gpu[obj.id].dash_key == "Dotted"
+    others = [o for o in view.scene.all() if o.id != obj.id]
+    assert all(view._gpu[o.id].dash_key == "Dashed" for o in others)
