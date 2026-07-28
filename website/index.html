@@ -495,7 +495,7 @@
 
   /* ---- sample scenes ---- */
   .samples { margin: 58px 0 8px; }
-  #costs { margin-top: 58px; }
+  #roadmap { margin-top: 58px; }
   .samples .sub { color: var(--ink-soft); max-width: 64ch; margin: 8px 0 0; }
   .samples .sub code {
     font-family: var(--mono); font-size: 0.86em; background: var(--panel);
@@ -701,50 +701,50 @@
       </div>
     </div>
 
-    <div id="costs">
-      <div class="h2-eyebrow">SCHEDULE OF COSTS</div>
-      <h2>What it costs to keep this free</h2>
+    <div id="roadmap">
+      <div class="h2-eyebrow">SCHEDULE OF WORKS</div>
+      <h2>What comes next</h2>
       <p class="h2-sub">Serpentine3D is MIT-licensed and free, and stays that way —
-      no paid tier, no donor-only build, nothing behind a login. But shipping a
-      desktop application to three operating systems has a bill attached, and at
-      the moment it is mine.</p>
+      no paid tier, no donor-only build, nothing behind a login. Rhino costs $995,
+      and this already does a good deal of what Rhino does, on three operating
+      systems, for nothing. What stands between it and the tool you work in is
+      the list below, and one person's supply of hours to spend on it.</p>
 
       <div class="issue-wrap">
         <table class="issue">
           <thead>
-            <tr><th>REF</th><th>ITEM</th><th>RATE</th><th>WHAT IT CHANGES</th></tr>
+            <tr><th>REF</th><th>ITEM</th><th>STATE</th><th>WHAT IT WOULD ADD</th></tr>
           </thead>
           <tbody>
             <tr>
               <td class="rev">01</td>
-              <td class="plat">Apple Developer ID</td>
-              <td class="state"><span class="badge due">$99/YR</span></td>
-              <td class="desc">Signs the macOS build. Until it is paid, every Mac
-              user has to right-click&nbsp;→&nbsp;Open and agree to run software
-              from an unidentified developer.</td>
+              <td class="plat">SubD modelling</td>
+              <td class="state"><span class="badge due">QUEUED</span></td>
+              <td class="desc">Push-and-pull organic surfacing sitting alongside
+              the NURBS side, the way Rhino pairs the two.</td>
             </tr>
             <tr>
               <td class="rev">02</td>
-              <td class="plat">Windows signing</td>
-              <td class="state"><span class="badge due">$120/YR</span></td>
-              <td class="desc">Signs the installer. Until then Windows throws a
-              blue SmartScreen warning on first run — the most common reason
-              people give up before the modeller ever opens.</td>
+              <td class="plat">History &amp; visual programming</td>
+              <td class="state"><span class="badge due">QUEUED</span></td>
+              <td class="desc">History today covers loft, extrude and revolve.
+              Parametrics across every command, with a node graph over the top,
+              is where it is going.</td>
             </tr>
             <tr>
               <td class="rev">03</td>
-              <td class="plat">Test hardware</td>
-              <td class="state"><span class="badge shop">ONE-OFF</span></td>
-              <td class="desc">Today it is verified on the three machines I own.
-              A wider spread of graphics cards is how driver bugs get found
-              before you find them.</td>
+              <td class="plat">Production render</td>
+              <td class="state"><span class="badge due">QUEUED</span></td>
+              <td class="desc">The rendered view is a lit preview, not a
+              raytracer. Materials and lighting with output you would put in
+              front of a client.</td>
             </tr>
             <tr>
               <td class="rev">04</td>
-              <td class="plat">Time</td>
-              <td class="state"><span class="badge shop">—</span></td>
-              <td class="desc">The only thing that makes the next release land
-              sooner.</td>
+              <td class="plat">The command long tail</td>
+              <td class="state"><span class="badge shop">ONGOING</span></td>
+              <td class="desc">Every release adds commands. The quickest way onto
+              this list is to say which one you reached for and could not find.</td>
             </tr>
           </tbody>
         </table>
@@ -754,20 +754,22 @@
         <div class="waitlist-inner">
           <div>
             <h3>If it is in your toolchain</h3>
-            <p>A few pounds a month covers more of that schedule than you would
-            think — and if you are using Serpentine3D at work, it is the sort of
-            line a studio can expense without a second thought.</p>
+            <p>Sponsoring buys hours, not a place in the queue — whatever gets
+            built ships to everyone. Against the price of a Rhino seat it is a
+            rounding error a studio can expense without a second thought.</p>
           </div>
           <a class="btn" href="https://github.com/sponsors/chisomobanzi" data-goatcounter-click="cta-sponsor">SPONSOR →</a>
         </div>
       </div>
 
+      <p class="mock-note">RUNNING COSTS · APPLE DEVELOPER ID $99/YR · WINDOWS
+      SIGNING ~$120/YR · WHY BOTH INSTALLERS STILL WARN YOU · ALL THE REST IS TIME</p>
       <p class="mock-note">NO FEATURE IS BEHIND THIS · NO BUILD IS DONOR-ONLY ·
       FUNDED OR NOT, EVERYTHING SHIPS MIT AND FREE</p>
     </div>
 
-    <p class="gh-line">Technically inclined? The source code, issue tracker and
-    roadmap live on <a href="https://github.com/chisomobanzi/Serpentine3D" data-goatcounter-click="nav-github">GitHub</a> —
+    <p class="gh-line">Technically inclined? The source code and issue tracker
+    live on <a href="https://github.com/chisomobanzi/Serpentine3D" data-goatcounter-click="nav-github">GitHub</a> —
     contributions welcome.</p>
 
     <div class="titleblock" role="contentinfo">
