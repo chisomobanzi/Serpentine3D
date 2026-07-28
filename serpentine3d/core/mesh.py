@@ -78,16 +78,51 @@ class MeshShape:
         tris = self.triangles
         if not len(tris):
             return np.zeros((0, 2, 3), np.float32)
-        edges = np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]],
-                                tris[:, [2, 0]]])
+        # Two faces are neighbours when they meet in space, which is not the
+        # same as sharing a vertex index. Rhino stores a mesh unwelded — four
+        # unshared corners per quad — so matching by index finds nothing
+        # shared and calls every triangle edge a boundary. One survey object
+        # produced 9.9 million of them: a wireframe drawn over a solid surface,
+        # and 238 MB of it uploaded to the card and redrawn every frame.
+        #
+        # So the corners are matched by position first. np.unique(axis=0) would
+        # say that in one line, but it compares whole rows and took 32 seconds
+        # on 6.6 million of them; sorting the three columns takes half of one.
+        # Coincident points land next to each other, and a point is new only
+        # when it differs from the one before it.
+        verts = self.vertices
+        order = np.lexsort((verts[:, 2], verts[:, 1], verts[:, 0]))
+        ranked = verts[order]
+        starts_run = np.empty(len(ranked), bool)
+        starts_run[0] = True
+        np.any(ranked[1:] != ranked[:-1], axis=1, out=starts_run[1:])
+        canonical = np.empty(len(verts), np.int64)
+        canonical[order] = np.cumsum(starts_run) - 1
+        points = ranked[starts_run]
+        welded = canonical[tris]
+
+        # An edge is its two endpoints, lower first so that a triangle and its
+        # neighbour describe their shared edge the same way round. The pair
+        # then folds into one number, because sorting on one key is a single
+        # pass where sorting on two is two.
+        ends = welded[:, [1, 2, 0]]
+        low = np.minimum(welded, ends).T.ravel()
+        high = np.maximum(welded, ends).T.ravel()
         tri_ids = np.tile(np.arange(len(tris)), 3)
-        key = np.sort(edges, axis=1)
-        order = np.lexsort((key[:, 1], key[:, 0]))
-        key_sorted = key[order]
+        packed = low * len(points) + high
+        # Welding can fold a sliver triangle onto itself. A segment running
+        # from a point to that same point is nothing to draw.
+        real = low != high
+        if not real.all():
+            packed, tri_ids = packed[real], tri_ids[real]
+        if not len(packed):
+            return np.zeros((0, 2, 3), np.float32)
+        order = np.argsort(packed)
+        key_sorted = packed[order]
         tri_sorted = tri_ids[order]
-        v0 = self.vertices[tris[:, 0]]
-        v1 = self.vertices[tris[:, 1]]
-        v2 = self.vertices[tris[:, 2]]
+        v0 = verts[tris[:, 0]]
+        v1 = verts[tris[:, 1]]
+        v2 = verts[tris[:, 2]]
         n = np.cross(v1 - v0, v2 - v0)
         lens = np.linalg.norm(n, axis=1, keepdims=True)
         lens[lens < 1e-12] = 1
@@ -100,7 +135,7 @@ class MeshShape:
         # of equal edges are found by comparing neighbours instead, and every
         # run is then judged at once.
         total = len(key_sorted)
-        changed = np.any(key_sorted[1:] != key_sorted[:-1], axis=1)
+        changed = key_sorted[1:] != key_sorted[:-1]
         starts = np.concatenate(([0], np.flatnonzero(changed) + 1))
         counts = np.diff(np.concatenate((starts, [total])))
 
@@ -116,7 +151,9 @@ class MeshShape:
         if not len(keep):
             return np.zeros((0, 2, 3), np.float32)
         keep.sort()                              # the order the loop produced
-        return self.vertices[key_sorted[keep]].astype(np.float32)
+        kept = key_sorted[keep]                  # unpacked only for the few
+        return points[np.column_stack(divmod(kept, len(points)))] \
+            .astype(np.float32)
 
 
 def merge(meshes) -> MeshShape:
