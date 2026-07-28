@@ -153,17 +153,17 @@ _DOWNCAST = None
 def _encode(shape):
     """A shape as something pickle can carry."""
     if isinstance(shape, MeshShape):
-        return ("mesh", shape.vertices, shape.triangles)
+        return ("mesh", shape.vertices, shape.triangles, shape.normals)
     from OCP.BinTools import BinTools
     buf = io.BytesIO()
     BinTools.Write_s(shape, buf)
-    return ("occ", buf.getvalue(), None)
+    return ("occ", buf.getvalue(), None, None)
 
 
 def _decode(payload):
-    kind, first, second = payload
+    kind, first, second, third = payload
     if kind == "mesh":
-        return MeshShape(first, second)
+        return MeshShape(first, second, third)
     from OCP.BinTools import BinTools
     from OCP.TopoDS import TopoDS_Shape
     shape = TopoDS_Shape()

@@ -205,6 +205,14 @@ def _r3_mesh_to_shape(mesh: r3.Mesh, as_mesh: bool = True, report=None):
             tris.append((a, c, d))
     if as_mesh:
         from ..core.mesh import MeshShape
+        # The file carries Rhino's own vertex normals, smoothed to whatever
+        # weld angle the modeller chose, and they are not read. rhino3dm hands
+        # them over one attribute at a time like everything else: 36us each,
+        # 239 seconds for the 6.6 million of one survey object, on top of the
+        # 313 the same object's vertices already cost. That is most of an
+        # import spent on shading. They are worked out from the geometry
+        # instead — see mesh_to_display, which welds by position and keeps the
+        # edges the modeller made hard.
         return MeshShape(verts, np.asarray(tris, np.uint32))
     return _shell_from_triangles(verts, tris)
 
