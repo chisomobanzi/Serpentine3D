@@ -339,18 +339,26 @@ Serpentine3D is free and MIT-licensed, and every release stays that way — no
 paid tier, no donor-only build, nothing behind a login. This section is not a
 step towards any of those.
 
-It is one person's work, and a few parts of shipping a desktop app to three
-operating systems cost money — right now that is me:
+Rhino costs $995. This does a good deal of what Rhino does, on three operating
+systems, for nothing. The distance between a young focused modeller and the
+one you actually work in is measured in a single currency, which is hours —
+and there is one person's supply of them.
 
-| Item | Rate | What it changes |
-|---|---|---|
-| Apple Developer ID | $99/yr | macOS opens the app normally, instead of right-click → Open on an unidentified developer |
-| Windows code signing | ~$120/yr | The SmartScreen warning on the installer's first run goes away |
-| Test hardware | one-off | Verified on more than the three machines I own |
+What is still missing is written down rather than glossed over:
+[Not here yet](docs/coming-from-rhino.md#not-here-yet) names SubD, Grasshopper, a real
+render engine and the long tail of commands. That list is the roadmap, and it
+gets shorter roughly in proportion to the time there is to spend on it.
+Sponsoring buys time, not a place in a queue — everything that ships, ships
+for everyone.
 
-The first two are what most people hit before they have drawn a single curve.
-If Serpentine3D is useful to you — or in your toolchain at work —
-[sponsoring it](https://github.com/sponsors/chisomobanzi) pays for that list.
+Money goes first to the things that cost money whether or not anyone is
+paying: the code-signing certificates, $99 a year for Apple and about the same
+for Windows, which are why both installers still warn you on first run.
+Releases are built and tested on real Linux, Windows and macOS hardware before
+they go out. Past that it is time.
+
+If Serpentine3D is useful to you — or it is in your toolchain at work —
+[sponsor it](https://github.com/sponsors/chisomobanzi).
 
 Bug reports, sample files and documentation fixes are worth as much and cost
 nothing: see [CONTRIBUTING.md](CONTRIBUTING.md).
