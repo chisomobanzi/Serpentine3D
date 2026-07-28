@@ -199,9 +199,12 @@ def test_a_helper_never_re_runs_the_appimage(tmp_path, monkeypatch):
 
 
 def test_the_ordinary_case_spawns_the_interpreter_already_running(monkeypatch):
+    """The one running, not the one it was built from. In a virtualenv
+    sys._base_executable is the system python, which has none of our
+    dependencies and never runs the venv's editable-install hook — pointing
+    helpers at it turned every parallel import into a silent serial one."""
     monkeypatch.delenv("APPIMAGE", raising=False)
-    assert rp._spawn_executable() == (getattr(sys, "_base_executable", None)
-                                      or sys.executable)
+    assert rp._spawn_executable() == sys.executable
 
 
 def test_no_interpreter_to_spawn_means_the_serial_path(tmp_path, monkeypatch):

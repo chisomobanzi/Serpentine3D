@@ -90,8 +90,14 @@ def _spawn_executable() -> str | None:
 
     Naming the real interpreter fixes it. If it cannot be found we say so
     rather than guess, and the caller stays on the single-process path.
+
+    Everywhere else the answer is the interpreter already running — not
+    sys._base_executable, which in a virtualenv is the system python: it has
+    none of our dependencies and never runs the venv's editable-install hook,
+    so helpers died on import and every parallel import quietly became a
+    serial one.
     """
-    exe = getattr(sys, "_base_executable", None) or sys.executable
+    exe = sys.executable
     bundle = os.environ.get("APPIMAGE")
     if not bundle or os.path.realpath(exe) != os.path.realpath(bundle):
         return exe
