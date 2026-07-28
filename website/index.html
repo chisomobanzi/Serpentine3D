@@ -124,6 +124,8 @@
     right: clamp(20px, 4.5vw, 64px);
     width: min(42%, 430px); height: auto;
     opacity: 0.9; filter: none; pointer-events: none;
+    /* mirrored so the head faces into the headline, not off the page */
+    transform: scaleX(-1);
   }
   @media (prefers-color-scheme: dark) {
     .hero-serpent { filter: invert(1); opacity: 0.82; }
