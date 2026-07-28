@@ -291,9 +291,6 @@
   }
   .detail p { margin: 0; color: var(--ink-soft); font-size: 0.9875rem; }
   .detail p strong { color: var(--ink); }
-  /* headless capstone — full-width card, stacked like its siblings */
-  .detail.wide { grid-column: 1 / -1; }
-  .detail.wide p { max-width: 60ch; }
   .cmd {
     display: block; width: fit-content; max-width: 100%; overflow-x: auto;
     margin-top: 18px; padding: 9px 13px;
@@ -600,21 +597,12 @@
         <div class="detail-label">DETAIL D — ASSISTANT</div>
         <h3>Model with an AI that can see the screen</h3>
         <p>Serpentine speaks <strong>MCP</strong>, so an assistant like Claude can
-        look at your viewport and run any tool you can — draw a curve, loft a
-        surface, run a boolean, measure a span, export a STEP.
-        <strong>Describe the change and watch it happen</strong>, or hand off the
-        repetitive parts and keep designing. No other CAD tool is built to be
-        operated this way.</p>
-      </div>
-      <div class="detail wide">
-        <div class="detail-label">DETAIL E — HEADLESS</div>
-        <h3>The whole modeller, no window required</h3>
-        <p>Every command runs without a GUI — the same engine that draws the
-        viewport also drives a Python script, the <strong>serp3d-batch</strong>
-        runner, or a CI job on a server with no display. Full create, read,
-        update and delete on the scene: batch a hundred variants, regenerate
-        drawing sheets, export STEP or STL — all from code. The window is just
-        one more front-end.</p>
+        look at your viewport and run any tool you can — draw a curve, run a
+        boolean, export a STEP. <strong>Describe the change and watch it
+        happen</strong>, or hand off the repetitive parts and keep designing.
+        The same engine runs with <strong>no window at all</strong> — a script,
+        a batch of a hundred variants, a CI job on a server with no display.
+        No other CAD tool is built to be operated this way.</p>
       </div>
     </div>
 
