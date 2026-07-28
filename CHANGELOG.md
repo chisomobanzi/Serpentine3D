@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.2 — 2026-07-28
+
+A performance release, measured on one 522 MB cave survey: 5933 objects,
+8.3 million triangles. It drew at 5.8 fps and took nearly five seconds to
+answer a click. Both of those turned out to be work the app was repeating
+rather than work the machine couldn't do.
+
 - **Big scenes are workable again**: a 5900-object cave survey drew at 5.8 fps —
   slow enough that orbiting it was guesswork. Almost none of that was the
   graphics card. The draw loop asked the driver where each shader variable
