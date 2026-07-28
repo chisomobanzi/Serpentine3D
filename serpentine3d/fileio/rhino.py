@@ -11,6 +11,7 @@ meshes — Rhino re-imports them fine; exact BREP export goes via STEP).
 from __future__ import annotations
 
 import os
+import sys
 
 import numpy as np
 import rhino3dm as r3
@@ -24,7 +25,11 @@ from ..core.occ import (
 )
 from ..core.tessellate import tessellate
 from .obj import _shell_from_triangles
-from .progress import Progress
+from .progress import Cancelled, Progress
+# Safe to import at module level: the parallel importer only reaches back
+# into this module from inside its functions.
+from .rhino_parallel import (MIN_PARALLEL_BYTES, import_3dm_parallel,
+                             worker_count)
 
 
 # ------------------------------------------------------------------ knots
@@ -592,14 +597,18 @@ def _face_mesh_shape(rface):
 
 # ------------------------------------------------------------------- import
 
-def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
-    """Returns [(name, shape, {layer, color})]."""
-    report = progress or Progress()
-    report(0.0, f"Reading {os.path.basename(path)}…")
-    model = r3.File3dm.Read(path)
-    if model is None:
-        raise IOError(f"Could not read 3dm file: {path}")
+def _worth_parallelising(path: str) -> bool:
+    """Spawning a reader costs a couple of seconds; a small file does not."""
+    if worker_count() < 2:
+        return False
+    try:
+        return os.path.getsize(path) >= MIN_PARALLEL_BYTES
+    except OSError:
+        return False
 
+
+def read_layers(model) -> dict:
+    """{layer index: {name, color}} — plain data, so it can cross a pipe."""
     layers = {}
     for i in range(len(model.Layers)):
         layer = model.Layers[i]
@@ -608,6 +617,62 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
             "name": layer.Name,
             "color": (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0),
         }
+    return layers
+
+
+def object_to_shapes(geo, report=None) -> list:
+    """The shapes one .3dm object converts to, by geometry type.
+
+    Split out of the import loop so the parallel importer converts objects by
+    exactly the same rules — the two paths disagreeing would be worse than
+    either being wrong.
+    """
+    step = report or Progress()
+    shapes = []
+    if isinstance(geo, r3.Curve):
+        try:
+            shapes = [_r3_curve_to_shape(geo)]
+        except Exception:
+            shapes = []
+    elif isinstance(geo, r3.Extrusion):
+        brep = geo.ToBrep(True)
+        if brep:
+            geo = brep
+    if isinstance(geo, r3.Brep):
+        shapes = _import_brep(geo, step)
+    elif isinstance(geo, (r3.NurbsSurface, r3.Surface)) \
+            and not isinstance(geo, r3.Brep):
+        try:
+            face = _r3_surface_to_face(geo)
+            shapes = [face] if face is not None else []
+        except Exception:
+            shapes = []
+    elif isinstance(geo, r3.Mesh):
+        shape = _r3_mesh_to_shape(geo, report=step)
+        shapes = [shape] if shape is not None else []
+    return shapes
+
+
+def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
+    """Returns [(name, shape, {layer, color})]."""
+    report = progress or Progress()
+    if _worth_parallelising(path):
+        try:
+            return import_3dm_parallel(path, report)
+        except Cancelled:
+            raise
+        except Exception as exc:                                # noqa: BLE001
+            # Starting processes can fail in ways opening a file should not
+            # (a frozen build, a locked-down sandbox). Slow beats refusing.
+            print(f"parallel import unavailable ({exc}); "
+                  f"converting in one process", file=sys.stderr)
+
+    report(0.0, f"Reading {os.path.basename(path)}…")
+    model = r3.File3dm.Read(path)
+    if model is None:
+        raise IOError(f"Could not read 3dm file: {path}")
+
+    layers = read_layers(model)
 
     out = []
     counter = 0
@@ -618,31 +683,7 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
         step = report.part(index / total, (index + 1) / total,
                            f"Converting object {index + 1} of {total}")
         step(0.0)
-        geo = obj.Geometry
-        shapes = []
-        if isinstance(geo, r3.Curve):
-            try:
-                shapes = [_r3_curve_to_shape(geo)]
-            except Exception:
-                shapes = []
-        elif isinstance(geo, r3.Extrusion):
-            brep = geo.ToBrep(True)
-            if brep:
-                geo = brep
-        if isinstance(geo, r3.Brep):
-            shapes = _import_brep(geo, step)
-        elif isinstance(geo, (r3.NurbsSurface, r3.Surface)) \
-                and not isinstance(geo, r3.Brep):
-            try:
-                face = _r3_surface_to_face(geo)
-                shapes = [face] if face is not None else []
-            except Exception:
-                shapes = []
-        elif isinstance(geo, r3.Mesh):
-            shape = _r3_mesh_to_shape(geo, report=step)
-            shapes = [shape] if shape is not None else []
-
-        for shape in shapes:
+        for shape in object_to_shapes(obj.Geometry, step):
             if shape is None or shape.IsNull():
                 continue
             counter += 1

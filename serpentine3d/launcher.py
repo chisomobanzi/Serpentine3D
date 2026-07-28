@@ -17,6 +17,13 @@ import sys
 
 
 def main() -> int:
+    # First, and before anything can print or open a window: the .3dm importer
+    # spawns a helper process, and in a PyInstaller bundle a spawned child
+    # re-enters this executable. Without this it would relaunch the whole app
+    # instead of running the helper — one new window per worker.
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     if "--selftest" in sys.argv:
         # headless bundle check — no window, no splash
         from .app import _selftest

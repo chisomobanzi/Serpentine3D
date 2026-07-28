@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- **Rhino files open across every core**: a 65259-object `.3dm` took about
+  fifteen minutes to open on a 22-core machine, and the machine was idle for
+  almost all of it
+  ([#3](https://github.com/chisomobanzi/Serpentine3D/issues/3)). The cost is
+  not the geometry kernel: it is rhino3dm's Python binding, where reading one
+  float off a point costs 11 µs and reaching one mesh vertex costs 25 µs,
+  against 0.25 µs for a plain Python attribute. A survey mesh has millions of
+  vertices, so mesh reading alone was 90% of an import — and it is Python-side
+  work, which holds the GIL, so no amount of threads would have moved it.
+
+  Objects convert independently, so they now convert in parallel processes.
+  Three details are what make that a fix rather than a disappointment. Workers
+  are forked from the process that read the file, so they inherit the model
+  copy-on-write instead of each paying ten seconds and a private copy to open
+  it again. Objects are dealt out interleaved rather than in blocks, because a
+  drawing keeps its meshes together and a block split hands one worker every
+  expensive object. And the reader itself is a separate, thread-free process,
+  because the app cannot fork: its tessellation threads hold locks a forked
+  child would inherit already locked.
+
+  Progress and Cancel work exactly as before. Files under 8 MB stay on the
+  single-process path, where starting a helper would cost more than it saves,
+  and `SERP3D_IMPORT_WORKERS=1` forces it everywhere.
+
+- **A broken macOS build now fails the build**: 0.5.2's `.dmg` was assembled
+  from an empty app bundle and reported success, because the bundle died
+  before writing its selftest report and the check read the file the previous
+  release had left behind.
+
 ## 0.5.2 — 2026-07-28
 
 A performance release, measured on one 522 MB cave survey: 5933 objects,
