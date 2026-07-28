@@ -10,7 +10,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PY="${1:-python3}"
+# Default to the repo's own venv. The system python3 has none of the runtime
+# deps, and PyInstaller happily builds a 4 MB bundle out of it that only fails
+# when someone opens it.
+DEFAULT_PY="../../.venv/bin/python"
+[ -x "$DEFAULT_PY" ] || DEFAULT_PY="python3"
+PY="${1:-$DEFAULT_PY}"
 VERSION="0.5.2"
 APPNAME="Serpentine3D"
 ARCH="$(uname -m)"
@@ -48,11 +53,17 @@ APP="dist/${APPNAME}.app"
 [ -d "$APP" ] || { echo "ERROR: $APP was not produced"; exit 1; }
 
 echo "=== bundle selftest (headless: Qt + OCCT + file I/O) ==="
+# Delete last run's report first: a bundle that dies before writing one used
+# to leave the previous release's file behind, and the grep below passed on it.
+REPORT="${TMPDIR:-/tmp}/serp3d-selftest.txt"
+rm -f "$REPORT"
 set +e
 "$APP/Contents/MacOS/serp3d" --selftest
+STATUS=$?
 set -e
-cat "${TMPDIR:-/tmp}/serp3d-selftest.txt"
-grep -q "SELFTEST OK" "${TMPDIR:-/tmp}/serp3d-selftest.txt" \
+[ -f "$REPORT" ] && cat "$REPORT"
+[ "$STATUS" -eq 0 ] || { echo "ERROR: bundle exited $STATUS"; exit 1; }
+grep -q "SELFTEST OK" "$REPORT" \
     || { echo "ERROR: bundle selftest failed"; exit 1; }
 
 echo "=== assemble .dmg (drag onto Applications) ==="
