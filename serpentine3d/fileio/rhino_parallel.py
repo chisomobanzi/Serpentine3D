@@ -38,6 +38,7 @@ import io
 import math
 import multiprocessing as mp
 import os
+import sys
 import traceback
 
 import rhino3dm as r3
@@ -75,6 +76,32 @@ def _available_cores() -> int:
         return len(os.sched_getaffinity(0))
     except AttributeError:                          # not Linux
         return os.cpu_count() or 1
+
+
+def _spawn_executable() -> str | None:
+    """The interpreter a spawned helper should run, or None if there isn't one.
+
+    Inside an AppImage `sys.executable` is the AppImage, not python:
+    python-appimage sets it that way so re-running it reproduces the whole
+    environment. multiprocessing takes it at face value and starts the child
+    as `TheApp.AppImage -c "...spawn_main()..."`, which the AppImage's launcher
+    hands to the app as arguments — so every worker opened another window,
+    none of them ran the helper, and the import waited on a pipe forever.
+
+    Naming the real interpreter fixes it. If it cannot be found we say so
+    rather than guess, and the caller stays on the single-process path.
+    """
+    exe = getattr(sys, "_base_executable", None) or sys.executable
+    bundle = os.environ.get("APPIMAGE")
+    if not bundle or os.path.realpath(exe) != os.path.realpath(bundle):
+        return exe
+
+    version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    for prefix in (sys.prefix, sys.base_prefix):
+        candidate = os.path.join(prefix, "bin", version)
+        if os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def worker_count(requested: int | None = None) -> int:
@@ -299,6 +326,10 @@ def import_3dm_parallel(path: str, progress=None,
     """
     report = progress or Progress()
     ctx = mp.get_context("spawn")
+    interpreter = _spawn_executable()
+    if interpreter is None:
+        raise RuntimeError("no interpreter to run the import helper")
+    ctx.set_executable(interpreter)
     cancel = ctx.Event()
     receiver, sender = ctx.Pipe(duplex=False)
     # Not daemonic: a daemon may not have children, and the reader's whole

@@ -28,8 +28,8 @@ from .obj import _shell_from_triangles
 from .progress import Cancelled, Progress
 # Safe to import at module level: the parallel importer only reaches back
 # into this module from inside its functions.
-from .rhino_parallel import (MIN_PARALLEL_BYTES, import_3dm_parallel,
-                             worker_count)
+from .rhino_parallel import (MIN_PARALLEL_BYTES, _spawn_executable,
+                             import_3dm_parallel, worker_count)
 
 
 # ------------------------------------------------------------------ knots
@@ -599,7 +599,7 @@ def _face_mesh_shape(rface):
 
 def _worth_parallelising(path: str) -> bool:
     """Spawning a reader costs a couple of seconds; a small file does not."""
-    if worker_count() < 2:
+    if worker_count() < 2 or _spawn_executable() is None:
         return False
     try:
         return os.path.getsize(path) >= MIN_PARALLEL_BYTES

@@ -12,6 +12,8 @@ is spawned to read the file, and it forks the converters, which inherit the
 model copy-on-write instead of re-reading it.
 """
 
+import sys
+
 import numpy as np
 import pytest
 import rhino3dm as r3
@@ -164,6 +166,52 @@ def test_a_broken_file_raises_rather_than_returning_nothing(tmp_path):
     bad.write_bytes(b"3D Geometry File Format nope")
     with pytest.raises(IOError):
         rp.import_3dm_parallel(str(bad), workers=2)
+
+
+# --------------------------------------------- which interpreter to spawn
+
+def _fake_appimage(tmp_path, monkeypatch, with_interpreter=True):
+    """An AppImage's idea of itself: sys.executable is the bundle, not python."""
+    appimage = tmp_path / "Serpentine3D.AppImage"
+    appimage.write_text("")
+    monkeypatch.setenv("APPIMAGE", str(appimage))
+    monkeypatch.setattr(sys, "executable", str(appimage))
+    monkeypatch.setattr(sys, "_base_executable", str(appimage))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "mount"))
+    monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "mount"))
+    if not with_interpreter:
+        return None
+    real = (tmp_path / "mount" / "bin"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}")
+    real.parent.mkdir(parents=True)
+    real.write_text("")
+    real.chmod(0o755)
+    return real
+
+
+def test_a_helper_never_re_runs_the_appimage(tmp_path, monkeypatch):
+    """python-appimage points sys.executable at the bundle, so that re-running
+    it reproduces the environment. multiprocessing takes that literally: it
+    launched the whole app again, one window per worker, and the import waited
+    forever on a pipe none of them knew to write to."""
+    real = _fake_appimage(tmp_path, monkeypatch)
+    assert rp._spawn_executable() == str(real)
+
+
+def test_the_ordinary_case_spawns_the_interpreter_already_running(monkeypatch):
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    assert rp._spawn_executable() == (getattr(sys, "_base_executable", None)
+                                      or sys.executable)
+
+
+def test_no_interpreter_to_spawn_means_the_serial_path(tmp_path, monkeypatch):
+    """Better slow than a screenful of windows and an import that never ends."""
+    _fake_appimage(tmp_path, monkeypatch, with_interpreter=False)
+    assert rp._spawn_executable() is None
+
+    path = _boxes_3dm(str(tmp_path / "boxes.3dm"), 2)
+    monkeypatch.setattr(rhino, "MIN_PARALLEL_BYTES", 0)
+    assert not rhino._worth_parallelising(path)
 
 
 # ------------------------------------------------------- choosing the path
