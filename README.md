@@ -333,6 +333,28 @@ menu items. See `docs/scripting.md`.
 .venv/bin/pytest            # unit tests (geometry, scene, commands, file I/O)
 ```
 
+## Supporting the project
+
+Serpentine3D is free and MIT-licensed, and every release stays that way — no
+paid tier, no donor-only build, nothing behind a login. This section is not a
+step towards any of those.
+
+It is one person's work, and a few parts of shipping a desktop app to three
+operating systems cost money — right now that is me:
+
+| Item | Rate | What it changes |
+|---|---|---|
+| Apple Developer ID | $99/yr | macOS opens the app normally, instead of right-click → Open on an unidentified developer |
+| Windows code signing | ~$120/yr | The SmartScreen warning on the installer's first run goes away |
+| Test hardware | one-off | Verified on more than the three machines I own |
+
+The first two are what most people hit before they have drawn a single curve.
+If Serpentine3D is useful to you — or in your toolchain at work —
+[sponsoring it](https://github.com/sponsors/chisomobanzi) pays for that list.
+
+Bug reports, sample files and documentation fixes are worth as much and cost
+nothing: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 MIT
