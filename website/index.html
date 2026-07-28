@@ -381,17 +381,19 @@
   .waitlist-inner {
     display: flex;
     flex-wrap: wrap;
-    gap: 20px;
-    align-items: flex-end;
+    gap: 20px 32px;
+    align-items: center;
     justify-content: space-between;
   }
+  /* let the copy claim the space instead of leaving a hole beside the button */
+  .waitlist-inner > div { flex: 1 1 22rem; }
   .waitlist h3 {
     font-family: var(--display);
     font-weight: 400;
     font-size: 1.45rem;
     margin: 0 0 6px;
   }
-  .waitlist p { margin: 0; color: var(--ink-soft); font-size: 0.95rem; max-width: 44ch; }
+  .waitlist p { margin: 0; color: var(--ink-soft); font-size: 0.95rem; max-width: 58ch; }
   .waitlist form { display: flex; gap: 10px; flex-wrap: wrap; }
   .waitlist input[type="email"] {
     font-family: var(--mono);
