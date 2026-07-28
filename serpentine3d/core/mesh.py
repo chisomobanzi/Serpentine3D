@@ -93,27 +93,30 @@ class MeshShape:
         lens[lens < 1e-12] = 1
         n = n / lens
         cos_tol = np.cos(np.radians(angle_deg))
-        out = []
-        i = 0
+
+        # Walking the sorted edges in Python cost three iterations per
+        # triangle, each calling into numpy — six and a half minutes on one
+        # survey mesh, which is what left an import sitting at 98%. The runs
+        # of equal edges are found by comparing neighbours instead, and every
+        # run is then judged at once.
         total = len(key_sorted)
-        while i < total:
-            j = i + 1
-            while j < total and np.array_equal(key_sorted[i], key_sorted[j]):
-                j += 1
-            count = j - i
-            keep = False
-            if count == 1:                       # boundary
-                keep = True
-            elif count == 2:
-                dot = float(np.dot(n[tri_sorted[i]], n[tri_sorted[i + 1]]))
-                keep = dot < cos_tol             # crease
-            if keep:
-                a, b = key_sorted[i]
-                out.append((self.vertices[a], self.vertices[b]))
-            i = j
-        if not out:
+        changed = np.any(key_sorted[1:] != key_sorted[:-1], axis=1)
+        starts = np.concatenate(([0], np.flatnonzero(changed) + 1))
+        counts = np.diff(np.concatenate((starts, [total])))
+
+        boundary = starts[counts == 1]           # an edge with one triangle
+        shared = starts[counts == 2]
+        # Anything shared by three or more is non-manifold: no single fold
+        # angle to measure, so it is left alone rather than guessed at.
+        dots = np.einsum("ij,ij->i", n[tri_sorted[shared]],
+                         n[tri_sorted[shared + 1]])
+        creases = shared[dots < cos_tol]
+
+        keep = np.concatenate((boundary, creases))
+        if not len(keep):
             return np.zeros((0, 2, 3), np.float32)
-        return np.asarray(out, np.float32)
+        keep.sort()                              # the order the loop produced
+        return self.vertices[key_sorted[keep]].astype(np.float32)
 
 
 def merge(meshes) -> MeshShape:
