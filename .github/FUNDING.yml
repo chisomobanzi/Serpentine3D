@@ -1,0 +1,11 @@
+# Adds the "Sponsor" button to the repo header, a card in the sidebar, and a
+# link on every issue. Donations fund running costs, chiefly the Apple and
+# Windows code-signing certificates — see the cost schedule on the website.
+#
+# Nothing here gates a feature: every build stays MIT-licensed and free.
+
+github: [chisomobanzi]
+
+# A no-GitHub-account option goes here once the handle exists, e.g.
+# ko_fi: <handle>
+# liberapay: <handle>

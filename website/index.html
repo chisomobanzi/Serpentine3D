@@ -359,6 +359,7 @@
   }
   .badge.issued { color: var(--blue); border-color: var(--blue); }
   .badge.shop { color: var(--ink-soft); border-color: var(--hairline); }
+  .badge.due { color: var(--redline); border-color: var(--redline); }
   .dl-link {
     font-family: var(--mono);
     font-size: 0.8125rem;
@@ -495,6 +496,7 @@
 
   /* ---- sample scenes ---- */
   .samples { margin: 58px 0 8px; }
+  #costs { margin-top: 58px; }
   .samples .sub { color: var(--ink-soft); max-width: 64ch; margin: 8px 0 0; }
   .samples .sub code {
     font-family: var(--mono); font-size: 0.86em; background: var(--panel);
@@ -708,6 +710,71 @@
             <span class="sample-dl">bands.serp ↓</span></div>
         </a>
       </div>
+    </div>
+
+    <div id="costs">
+      <div class="h2-eyebrow">SCHEDULE OF COSTS</div>
+      <h2>What it costs to keep this free</h2>
+      <p class="h2-sub">Serpentine3D is MIT-licensed and free, and stays that way —
+      no paid tier, no donor-only build, nothing behind a login. But shipping a
+      desktop application to three operating systems has a bill attached, and at
+      the moment it is mine.</p>
+
+      <div class="issue-wrap">
+        <table class="issue">
+          <thead>
+            <tr><th>REF</th><th>ITEM</th><th>RATE</th><th>WHAT IT CHANGES</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="rev">01</td>
+              <td class="plat">Apple Developer ID</td>
+              <td class="state"><span class="badge due">$99/YR</span></td>
+              <td class="desc">Signs the macOS build. Until it is paid, every Mac
+              user has to right-click&nbsp;→&nbsp;Open and agree to run software
+              from an unidentified developer.</td>
+            </tr>
+            <tr>
+              <td class="rev">02</td>
+              <td class="plat">Windows signing</td>
+              <td class="state"><span class="badge due">$120/YR</span></td>
+              <td class="desc">Signs the installer. Until then Windows throws a
+              blue SmartScreen warning on first run — the most common reason
+              people give up before the modeller ever opens.</td>
+            </tr>
+            <tr>
+              <td class="rev">03</td>
+              <td class="plat">Test hardware</td>
+              <td class="state"><span class="badge shop">ONE-OFF</span></td>
+              <td class="desc">Today it is verified on the three machines I own.
+              A wider spread of graphics cards is how driver bugs get found
+              before you find them.</td>
+            </tr>
+            <tr>
+              <td class="rev">04</td>
+              <td class="plat">Time</td>
+              <td class="state"><span class="badge shop">—</span></td>
+              <td class="desc">The only thing that makes the next release land
+              sooner.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="waitlist">
+        <div class="waitlist-inner">
+          <div>
+            <h3>If it is in your toolchain</h3>
+            <p>A few pounds a month covers more of that schedule than you would
+            think — and if you are using Serpentine3D at work, it is the sort of
+            line a studio can expense without a second thought.</p>
+          </div>
+          <a class="btn" href="https://github.com/sponsors/chisomobanzi" data-goatcounter-click="cta-sponsor">SPONSOR →</a>
+        </div>
+      </div>
+
+      <p class="mock-note">NO FEATURE IS BEHIND THIS · NO BUILD IS DONOR-ONLY ·
+      FUNDED OR NOT, EVERYTHING SHIPS MIT AND FREE</p>
     </div>
 
     <p class="gh-line">Technically inclined? The source code, issue tracker and
