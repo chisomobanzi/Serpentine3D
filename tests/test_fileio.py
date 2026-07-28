@@ -276,3 +276,38 @@ def test_obj_mtl_colors(scene, tmp_path):
     assert "usemtl" in open(path).read()
     mtl = open(str(tmp_path / "colored.mtl")).read()
     assert "Kd 1 0 0" in mtl
+
+
+def test_adding_objects_to_the_scene_reports_progress(tmp_path):
+    """The bar used to stop at whatever the converter last said and sit there
+    while every object was added to the scene — on a 522 MB file that is the
+    part people watch, and it looked like a hang at 98%."""
+    import rhino3dm as r3
+    path = str(tmp_path / "many.3dm")
+    model = r3.File3dm()
+    for i in range(12):
+        box = r3.Box(r3.BoundingBox(r3.Point3d(i * 10, 0, 0),
+                                    r3.Point3d(i * 10 + 5, 5, 5)))
+        model.Objects.AddBrep(r3.Brep.CreateFromBox(box), None)
+    assert model.Write(path, 8)
+
+    seen = []
+    fileio.import_file(Scene(), path, progress=lambda f, m: seen.append(m))
+    assert any("Adding" in m for m in seen), seen
+
+
+def test_a_scene_is_never_left_half_built(tmp_path):
+    """Cancel during the conversion leaves the scene untouched, so a caller
+    can discard its checkpoint. Once objects are going in it is too late to
+    offer — a fragment of the file is not what anyone asked for."""
+    import rhino3dm as r3
+    path = str(tmp_path / "one.3dm")
+    model = r3.File3dm()
+    box = r3.Box(r3.BoundingBox(r3.Point3d(0, 0, 0), r3.Point3d(5, 5, 5)))
+    model.Objects.AddBrep(r3.Brep.CreateFromBox(box), None)
+    assert model.Write(path, 8)
+
+    scene = Scene()
+    fileio.import_file(scene, path,
+                       progress=lambda f, m: "Adding" not in m)
+    assert len(scene.all()) == 1

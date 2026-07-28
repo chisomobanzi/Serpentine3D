@@ -168,6 +168,91 @@ def test_a_broken_file_raises_rather_than_returning_nothing(tmp_path):
         rp.import_3dm_parallel(str(bad), workers=2)
 
 
+# ---------------------------------------- keeping the window alive meanwhile
+
+class _Idle:
+    """A pipe with nothing to say, then nothing at all."""
+
+    def __init__(self, quiet=3):
+        self.quiet = quiet
+
+    def poll(self, timeout=None):
+        self.quiet -= 1
+        return self.quiet < 0
+
+    def recv(self):
+        raise EOFError
+
+
+def test_waiting_on_the_helper_still_lets_the_window_repaint():
+    """The caller drives this on its UI thread. A blocking recv() meant the
+    window stopped painting and Cancel stopped answering for as long as a
+    batch took — which on a 522 MB file is most of the import."""
+    assert list(rp._messages(_Idle(3), interval=0.0)) == [("waiting",)] * 3
+
+
+def test_a_heartbeat_repaints_without_moving_the_bar():
+    seen = []
+    rp._assemble([("total", 4), ("batch", 2, 4, []), ("waiting",),
+                  ("waiting",)], Progress(lambda f, m: seen.append((f, m))))
+    assert seen[-1] == seen[-2] == seen[-3], seen
+
+
+def test_cancel_is_answered_while_the_helper_is_busy():
+    """Cancel used to do nothing at all until a batch happened to land."""
+    with pytest.raises(Cancelled):
+        rp._assemble([("total", 4), ("waiting",)],
+                     Progress(lambda f, m: False))
+
+
+# ------------------------------------------------- letting the reader go
+
+class _Reader:
+    """A reader process that never gets around to exiting."""
+
+    def __init__(self):
+        self.waited = []
+        self.terminated = False
+
+    def join(self, timeout=None):
+        self.waited.append(timeout)
+
+    def is_alive(self):
+        return not self.terminated
+
+    def terminate(self):
+        self.terminated = True
+
+
+class _Cancel:
+    def __init__(self):
+        self.set_ = False
+
+    def set(self):
+        self.set_ = True
+
+
+def test_a_finished_reader_is_not_waited_on():
+    """Closing the pipe is the reader's last act after stopping its pool, so
+    what is left is a spawned interpreter unloading OCP and rhino3dm — two
+    seconds we used to spend inside a join, which reports nothing, so the
+    dialog sat frozen at 95% with the work already done."""
+    proc, cancel = _Reader(), _Cancel()
+    rp._stop(proc, cancel, finished=True)
+    assert sum(t for t in proc.waited[:1]) < 0.5, proc.waited
+    assert proc.terminated
+
+
+def test_bailing_out_gives_the_reader_time_to_take_its_workers_with_it():
+    """Cancel arrives mid-file, with a pool of forked converters below the
+    reader. Killing it outright reparents them onto init, still chewing
+    through the file with nobody left to read the answers."""
+    proc, cancel = _Reader(), _Cancel()
+    rp._stop(proc, cancel, finished=False)
+    assert cancel.set_, "the reader was never asked to stop"
+    assert proc.waited[0] >= 1, proc.waited
+
+
 # --------------------------------------------- which interpreter to spawn
 
 def _fake_appimage(tmp_path, monkeypatch, with_interpreter=True):

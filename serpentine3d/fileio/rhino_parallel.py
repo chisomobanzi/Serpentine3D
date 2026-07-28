@@ -266,15 +266,26 @@ def _read_file(path: str, workers: int, conn, cancel):
 
 # ---------------------------------------------------------------- assembly
 
-def _messages(conn):
+def _messages(conn, interval: float = 0.05):
+    """The reader's messages, with a heartbeat while it has nothing to say.
+
+    The caller drives this from its UI thread, so a plain blocking recv()
+    froze the window and deafened Cancel for as long as a batch took. On the
+    file that started all this that was the whole import: a dialog that never
+    painted, then a bar that stopped at 98% with no way out.
+    """
     while True:
+        if not conn.poll(interval):
+            yield ("waiting",)
+            continue
         try:
             yield conn.recv()
         except EOFError:
             return
 
 
-def _assemble(messages, report) -> list[tuple[str, object, dict]]:
+def _assemble(messages, report, opening: str = "") -> list[tuple[str, object,
+                                                                dict]]:
     """Turn the reader's message stream into what import_3dm returns.
 
     Shapes are decoded as they land rather than at the end, so the bytes are
@@ -282,6 +293,12 @@ def _assemble(messages, report) -> list[tuple[str, object, dict]]:
     the whole file twice over.
     """
     layers, total, rows = {}, None, []
+    # What to repaint between messages. The bar must not creep while the
+    # helper is thinking, so a heartbeat repeats the last real update rather
+    # than inventing one.
+    # The helper takes a moment to start, and a dialog with no words in it
+    # reads as a hang. We know the filename without asking it.
+    latest = (0.0, opening)
     for message in messages:
         kind = message[0]
         if kind == "batch":
@@ -289,10 +306,14 @@ def _assemble(messages, report) -> list[tuple[str, object, dict]]:
             rows.extend((index, name, layer,
                          [_decode(payload) for payload in encoded])
                         for index, name, layer, encoded in results)
-            report(done / (total or 1),
-                   f"Converting object {done} of {total}")
+            latest = (done / (total or 1),
+                      f"Converting object {done} of {total}")
+            report(*latest)
+        elif kind == "waiting":
+            report(*latest)
         elif kind == "status":
-            report(message[1], message[2])
+            latest = (message[1], message[2])
+            report(*latest)
         elif kind == "layers":
             layers = message[1]
         elif kind == "total":
@@ -345,14 +366,36 @@ def import_3dm_parallel(path: str, progress=None,
                        args=(path, worker_count(workers), sender, cancel))
     proc.start()
     sender.close()          # or the parent never sees the pipe close
+    finished = False
     try:
-        return _assemble(_messages(receiver), report)
+        # _assemble returns only once the message stream ends, which is the
+        # reader closing the pipe — so a normal return means it got to the end.
+        items = _assemble(_messages(receiver), report,
+                          f"Reading {os.path.basename(path)}…")
+        finished = True
+        return items
     finally:
-        # Ask first: a reader killed outright leaves its forked converters
-        # orphaned and still chewing through the file.
-        cancel.set()
-        proc.join(timeout=2)
-        if proc.is_alive():
-            proc.terminate()
-            proc.join(timeout=5)
+        _stop(proc, cancel, finished)
         receiver.close()
+
+
+def _stop(proc, cancel, finished: bool) -> None:
+    """Let the reader go.
+
+    Closing the pipe is its last act after stopping its pool, so a reader that
+    got that far has nothing of ours left running in it — only a spawned
+    interpreter unloading OCP and rhino3dm, which takes about two seconds. We
+    used to spend them inside a join, and a join reports nothing, so the bar
+    sat frozen at 95% with every object already converted. Nobody is waiting
+    on that exit, so we stop watching it.
+
+    Bailing out is the opposite. The reader is mid-file with a pool of forked
+    converters below it, and killing it there reparents them onto init, still
+    chewing through the file with nobody left to read their answers. So it is
+    asked to stop and given time to take its children with it.
+    """
+    cancel.set()
+    proc.join(timeout=0.2 if finished else 2)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(timeout=5)

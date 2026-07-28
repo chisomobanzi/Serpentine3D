@@ -146,9 +146,14 @@ def _import_file(scene, path: str, ext: str, report) -> int:
         return svg_mod.import_svg(scene, path)
     if ext == ".3dm":
         from . import rhino
-        items = rhino.import_3dm(path, progress=report)
+        items = rhino.import_3dm(path, progress=report.part(0.0, 0.95))
+        # Adding is the last stretch and it is not free. The bar used to stop
+        # wherever the converter left it and sit there while thousands of
+        # objects went into the scene, which read as a hang at 98%.
+        adding = report.part(0.95, 1.0)
+        count = len(items) or 1
         layer_map = {}
-        for name, shape, meta in items:
+        for done, (name, shape, meta) in enumerate(items, 1):
             layer_id = None
             lname = meta.get("name")
             if lname:
@@ -160,6 +165,7 @@ def _import_file(scene, path: str, ext: str, report) -> int:
                     layer_map[lname] = existing.id
                 layer_id = layer_map[lname]
             scene.add(shape, name=name, layer_id=layer_id)
+            adding.tick(done / count, f"Adding object {done} of {count}")
         return len(items)
     raise ValueError(f"Unsupported import format: {ext}")
 

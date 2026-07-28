@@ -70,6 +70,20 @@ class Progress:
         if self._callback is not None:
             self._callback(self._hi, message or self.label)
 
+    def tick(self, fraction: float, message: str = "") -> None:
+        """Report without offering a way out.
+
+        Some stretches have already paid for their work, and stopping part
+        way through would leave the caller holding a fragment — half a file
+        added to a scene, say. They still have to be seen to move: a bar that
+        sits at 98% for a minute is indistinguishable from a hung app.
+        """
+        if self._callback is None:
+            return
+        f = min(max(fraction, 0.0), 1.0)
+        self._callback(self._lo + (self._hi - self._lo) * f,
+                       message or self.label)
+
     def part(self, lo: float, hi: float, label: str = "") -> "Progress":
         """A reporter whose own 0..1 covers [lo, hi] of this one."""
         span = self._hi - self._lo
