@@ -143,6 +143,22 @@ def test_cancelling_a_parallel_import_raises_and_stops(tmp_path):
         rp.import_3dm_parallel(path, progress=Progress(stop), workers=3)
 
 
+def test_a_reader_that_dies_silently_raises_rather_than_importing_nothing():
+    """A child can die before it can report why — a bundle where the spawned
+    interpreter cannot find the kernel, say. All the parent sees then is the
+    pipe closing, and an empty import looks exactly like a file of nothing.
+    It has to raise, so the serial path gets its turn."""
+    with pytest.raises(Exception) as caught:
+        rp._assemble([], Progress())
+    assert not isinstance(caught.value, Cancelled)
+
+
+def test_an_empty_file_is_not_mistaken_for_a_dead_reader():
+    """A reader that got as far as counting the objects did its job, even
+    when the answer was none."""
+    assert rp._assemble([("total", 0)], Progress()) == []
+
+
 def test_a_broken_file_raises_rather_than_returning_nothing(tmp_path):
     bad = tmp_path / "not-really.3dm"
     bad.write_bytes(b"3D Geometry File Format nope")

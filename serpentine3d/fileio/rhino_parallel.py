@@ -248,7 +248,7 @@ def _assemble(messages, report) -> list[tuple[str, object, dict]]:
     freed while the workers are still busy and the parent is not left holding
     the whole file twice over.
     """
-    layers, total, rows = {}, 1, []
+    layers, total, rows = {}, None, []
     for message in messages:
         kind = message[0]
         if kind == "batch":
@@ -263,10 +263,18 @@ def _assemble(messages, report) -> list[tuple[str, object, dict]]:
         elif kind == "layers":
             layers = message[1]
         elif kind == "total":
-            total = message[1] or 1
+            total = message[1]
         elif kind == "error":
             exc, text = message[1], message[2]
             raise exc if isinstance(exc, BaseException) else RuntimeError(text)
+
+    # A reader can die before it can say why — a bundle whose spawned
+    # interpreter cannot find the kernel, an OOM kill. The pipe simply closes,
+    # and an import of nothing is indistinguishable from a file of nothing.
+    # Counting the objects is the reader's first act after opening the file,
+    # so having no count at all means it never got that far.
+    if total is None:
+        raise RuntimeError("the import helper stopped before reading the file")
 
     # Batches finish out of order; the scene should not depend on which
     # worker was quickest, and the fallback names count in file order.
