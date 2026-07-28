@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **The distance you are drawing reads out at the cursor**: pulling out a
+  line, a circle's radius or a move now shows the length of the open leg in a
+  small label beside the cursor, in the document's units. It follows the
+  snapped point rather than the raw mouse, so the number agrees with the point
+  the click will actually place — and it disappears the moment the command
+  ends. Asked for on the Rhino forum.
+
 - **Rhino files open across every core**: a 65259-object `.3dm` took about
   fifteen minutes to open on a 22-core machine, and the machine was idle for
   almost all of it
