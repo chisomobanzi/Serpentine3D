@@ -72,15 +72,22 @@ class DisplayMesh:
         return None if self._seg_index is _UNINDEXED else self._seg_index
 
     def bounds(self) -> tuple | None:
-        """Cached (min_xyz, max_xyz) over vertices, edge and point data."""
+        """Cached (min_xyz, max_xyz) over vertices, edge and point data.
+
+        Reduced source by source rather than over one concatenation of them
+        all: concatenating copies every vertex in the mesh to read six
+        numbers off it, and on a scanned survey the vertices are the file.
+        """
         if self._bounds is None:
-            pts = [p for p in (self.vertices,
-                               self.edge_segments.reshape(-1, 3),
-                               self.points) if len(p)]
-            if not pts:
+            los, his = [], []
+            for p in (self.vertices, self.edge_segments.reshape(-1, 3),
+                      self.points):
+                if len(p):
+                    los.append(p.min(axis=0))
+                    his.append(p.max(axis=0))
+            if not los:
                 return None
-            allp = np.concatenate(pts)
-            self._bounds = (allp.min(axis=0), allp.max(axis=0))
+            self._bounds = (np.min(los, axis=0), np.max(his, axis=0))
         return self._bounds
 
 

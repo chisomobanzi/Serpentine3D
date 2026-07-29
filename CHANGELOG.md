@@ -12,6 +12,12 @@
 
 ### Changed
 
+- Big meshes are made ready to click on about a third faster. Both the pick
+  index and an object's bounding box were read with a reduction that walks
+  memory in strides rather than straight through; on the 522 MB survey this
+  is measured against, indexing everything that wants an index went from
+  3.17 s to 2.08 s, and a click that has to build its own index first went
+  from 2.87 s to 1.86 s. Nothing about which object you get has changed.
 - The MCP server runs on `mcp` 2.x. 0.5.3 capped the dependency below 2.0 to
   stop fresh installs picking up a release the server could not import; the
   server is now written against 2.x's `mcp.server.mcpserver` and the cap is

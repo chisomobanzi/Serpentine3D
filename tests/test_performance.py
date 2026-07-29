@@ -61,6 +61,28 @@ def test_display_mesh_bounds_cached():
     assert dm.bounds() is b1                # cached
 
 
+def test_display_mesh_bounds_span_every_kind_of_geometry():
+    """Vertices, edge segments and loose points all count.
+
+    A mesh is asked for its bounds to decide whether a click could possibly
+    have landed on it, so a source left out of the span is an object that
+    silently stops being pickable along that axis.
+    """
+    from serpentine3d.core.tessellate import DisplayMesh
+    dm = DisplayMesh(
+        vertices=np.array([[0, 0, 0], [1, 1, 1]], np.float32),
+        edge_segments=np.array([[[-5, 0, 0], [0, 0, 0]]], np.float32),
+        points=np.array([[0, 9, 0]], np.float32))
+    lo, hi = dm.bounds()
+    assert np.allclose(lo, (-5, 0, 0))       # x from the edge segment
+    assert np.allclose(hi, (1, 9, 1))        # y from the loose point
+
+
+def test_display_mesh_bounds_of_nothing_is_nothing():
+    from serpentine3d.core.tessellate import DisplayMesh
+    assert DisplayMesh().bounds() is None
+
+
 def test_layer_lineweight_roundtrip(tmp_path):
     from serpentine3d import fileio
     scene = Scene()
