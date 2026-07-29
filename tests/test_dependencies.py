@@ -15,6 +15,7 @@ import importlib.metadata as md
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PKG = os.path.join(ROOT, "serpentine3d")
+CI = os.path.join(ROOT, ".github", "workflows", "ci.yml")
 
 
 def _normalise(name: str) -> str:
@@ -72,6 +73,32 @@ def test_every_third_party_import_is_a_declared_dependency():
         + "\n".join(missing)
         + "\n\nAdd them to [project] dependencies. Right now they only arrive "
           "as somebody else's transitive dependency, which is not a promise.")
+
+
+def test_ci_installs_the_versions_the_lock_file_pins():
+    """A green build should mean the code works, not that today's resolution
+    happened to be kind.
+
+    Twice now a release landed mid-morning and broke a build that had passed
+    an hour earlier on the same commit — nothing here changed, the answer to
+    "what does `mcp` mean" did. Resolving afresh on every run makes the whole
+    of PyPI an untracked input. uv.lock is the record of what we actually
+    tested against; `--locked` is what makes CI read it instead of guessing,
+    and makes a stale lock a failure rather than a silent re-resolve.
+    """
+    text = open(CI).read()
+
+    assert "pip install -e" not in text, (
+        "a CI job installs with pip, which cannot read uv.lock and so "
+        "resolves dependencies fresh on every run. Use "
+        "`uv sync --locked` (add `--extra dev` where tests need it).")
+
+    installs = [ln.strip() for ln in text.splitlines() if "uv sync" in ln]
+    assert installs, "no job installs anything with uv sync"
+    unpinned = [ln for ln in installs if "--locked" not in ln]
+    assert not unpinned, (
+        "these install without --locked, so uv is free to resolve something "
+        "other than what the lock pins:\n  " + "\n  ".join(unpinned))
 
 
 def test_mcp_is_pinned_to_the_api_the_server_is_written_against():
