@@ -44,6 +44,18 @@ def _set(table, row, chord, command):
     table.setItem(row, 1, QTableWidgetItem(command))
 
 
+def test_keys_and_chords_share_one_page(dlg):
+    """Both answer the same question — what do I press to run this — so
+    finding one must not depend on knowing which device it lives on."""
+    d, _ = dlg
+    names = [d.sidebar.item(r).text() for r in range(d.sidebar.count())]
+    assert "Shortcuts" in names
+    assert "Keyboard" not in names and "Mouse Chords" not in names
+    page = d.pages.widget(names.index("Shortcuts"))
+    assert page.isAncestorOf(d.key_table), "the keyboard table is elsewhere"
+    assert page.isAncestorOf(d.chord_table), "the chord table is elsewhere"
+
+
 def test_the_table_shows_what_is_already_bound(tmp_path):
     cfg = Config(path=str(tmp_path / "settings.json"))
     cfg.set("mouse", "chords", {"ctrl+shift+mmb": "zoomselected"})

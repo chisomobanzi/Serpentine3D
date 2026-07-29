@@ -34,21 +34,37 @@ def _page(title: str, subtitle: str) -> tuple[QWidget, QVBoxLayout]:
     return w, layout
 
 
+def _section(title: str, subtitle: str) -> QWidget:
+    """A heading part-way down a page, for pages holding more than one
+    thing."""
+    w = QWidget()
+    layout = QVBoxLayout(w)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(2)
+    t = QLabel(title)
+    t.setStyleSheet("font-weight: bold; color: #e8e9ea;")
+    s = QLabel(subtitle)
+    s.setWordWrap(True)
+    s.setStyleSheet("color: #85868a; font-size: 11px;")
+    layout.addWidget(t)
+    layout.addWidget(s)
+    return w
+
+
 class SettingsDialog(QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.cfg = window.cfg
         self.setWindowTitle("Serpentine3D Settings")
-        self.resize(760, 500)
+        self.resize(760, 620)
 
         self.sidebar = QListWidget()
         self.sidebar.setFixedWidth(160)
         self.pages = QStackedWidget()
         for name, builder in [
             ("Mouse", self._mouse_page),
-            ("Mouse Chords", self._chords_page),
-            ("Keyboard", self._keyboard_page),
+            ("Shortcuts", self._shortcuts_page),
             ("Aliases", self._aliases_page),
             ("Object Snaps", self._osnap_page),
             ("Display", self._display_page),
@@ -176,29 +192,54 @@ class SettingsDialog(QDialog):
         self.cfg.set("spacemouse", "invert_orbit",
                      self.cb_sm_orbit.isChecked())
 
-    # ------------------------------------------------------------- chords
+    # --------------------------------------------------------- shortcuts
+    #
+    # Keys and mouse chords answer the same question — what do I press to
+    # run this — so they share a page. Two tables rather than one, because
+    # 'alt+right' means Alt and the arrow key to a keyboard and Alt and the
+    # right button to a mouse; which table a row sits in says which.
 
-    def _chords_page(self) -> QWidget:
-        w, layout = _page("Mouse Chords",
-                          "A mouse button held with modifiers, bound to a "
-                          "command: 'ctrl+shift+mmb' runs it on a click. "
-                          "Order and spelling don't matter — 'mmb+ctrl+shift' "
-                          "and 'shift+ctrl+middle' are the same chord. The "
-                          "middle and right buttons can be bound; a drag "
-                          "still orbits and pans as it did.")
-        self.chord_table = QTableWidget(0, 2)
-        self.chord_table.setHorizontalHeaderLabels(["Chord", "Command"])
-        for col in (0, 1):
-            self.chord_table.horizontalHeader().setSectionResizeMode(
-                col, QHeaderView.ResizeMode.Stretch)
+    def _shortcuts_page(self) -> QWidget:
+        w, layout = _page("Shortcuts",
+                          "What you press to run a command, by key or by "
+                          "mouse button.")
+        layout.addWidget(_section("Keyboard",
+                                  "Any key, any command. Import accepts "
+                                  "simple text files ('F5 zoomextents' or "
+                                  "'ctrl+b=box' per line) or JSON."))
+        self.key_table = self._binding_table("Shortcut", self._shortcuts_changed)
+        for key, cmd in sorted(
+                (self.cfg.get("shortcuts", default={}) or {}).items()):
+            self._add_row(self.key_table, key, cmd)
+        layout.addWidget(self.key_table, 2)   # more keys get bound than chords
+        layout.addLayout(self._table_buttons(
+            self.key_table, self._import_shortcuts,
+            on_change=self._shortcuts_changed))
+
+        layout.addSpacing(10)
+        layout.addWidget(_section(
+            "Mouse chords",
+            "A button held with modifiers: 'ctrl+shift+mmb' runs its command "
+            "on a click, so a drag still orbits and pans. Middle and right "
+            "buttons only. Order and spelling don't matter — "
+            "'mmb+ctrl+shift' and 'shift+ctrl+middle' are the same chord."))
+        self.chord_table = self._binding_table("Chord", self._chords_changed)
         for chord, cmd in sorted(
                 (self.cfg.get("mouse", "chords", default={}) or {}).items()):
             self._add_row(self.chord_table, chord, cmd)
-        self.chord_table.itemChanged.connect(self._chords_changed)
         layout.addWidget(self.chord_table, 1)
         layout.addLayout(self._table_buttons(
             self.chord_table, None, on_change=self._chords_changed))
         return w
+
+    def _binding_table(self, heading: str, on_change) -> QTableWidget:
+        table = QTableWidget(0, 2)
+        table.setHorizontalHeaderLabels([heading, "Command"])
+        for col in (0, 1):
+            table.horizontalHeader().setSectionResizeMode(
+                col, QHeaderView.ResizeMode.Stretch)
+        table.itemChanged.connect(on_change)
+        return table
 
     def _chords_changed(self, *_):
         """Save the chord table. Rows that aren't a chord are dropped rather
@@ -216,29 +257,6 @@ class SettingsDialog(QDialog):
                 continue
             chords[chord] = cmd
         self.cfg.set("mouse", "chords", chords)
-
-    # ---------------------------------------------------------- keyboard
-
-    def _keyboard_page(self) -> QWidget:
-        w, layout = _page("Keyboard Shortcuts",
-                          "Bind any key to any command. Import accepts "
-                          "simple text files ('F5 zoomextents' or "
-                          "'ctrl+b=box' per line) or JSON.")
-        self.key_table = QTableWidget(0, 2)
-        self.key_table.setHorizontalHeaderLabels(["Shortcut", "Command"])
-        self.key_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch)
-        self.key_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch)
-        for key, cmd in sorted(
-                (self.cfg.get("shortcuts", default={}) or {}).items()):
-            self._add_row(self.key_table, key, cmd)
-        self.key_table.itemChanged.connect(self._shortcuts_changed)
-        layout.addWidget(self.key_table, 1)
-        layout.addLayout(self._table_buttons(
-            self.key_table, self._import_shortcuts,
-            on_change=self._shortcuts_changed))
-        return w
 
     def _shortcuts_changed(self, *_):
         shortcuts = {}

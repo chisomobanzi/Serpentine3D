@@ -2,7 +2,7 @@
 
 Serpentine3D is command-line first, but the mouse and shortcuts cover
 navigation, selection and the common operations. Everything here is
-remappable in *Settings → Keyboard* and *Settings → Mouse*.
+remappable in *Settings → Shortcuts* and *Settings → Mouse*.
 
 ## Navigation
 
@@ -21,7 +21,7 @@ common Rhino preference).
 ## Mouse chords
 
 A mouse button held with modifiers can run any command. Add one in
-*Settings → Mouse Chords*, or write it into your settings file:
+*Settings → Shortcuts*, or write it into your settings file:
 
 ```json
 "mouse": { "chords": { "ctrl+shift+mmb": "zoomselected" } }
