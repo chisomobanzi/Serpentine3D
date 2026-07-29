@@ -4,6 +4,21 @@
 
 ### Fixed
 
+- Orbiting and panning with a lot selected is no longer slower than orbiting
+  with nothing selected. On a 522 MB cave file a frame took 121 ms with
+  nothing selected and 1092 ms with all 7064 objects selected — nine times
+  slower for a view change that has nothing to do with what is selected. Two
+  things were walking the whole selection every frame. The draw loop asks
+  "is this one selected?" once per object, and the answer was found by
+  reading the selection rather than indexing it, so a frame cost objects
+  times selection: 190 ms of it. The gumball worked out where to sit by
+  taking the bounding box of every selected object again, which is about
+  100µs an object and was 747 ms — and it did it a second time on every
+  mouse move, for the hover test. Objects now remember their own bounds
+  until their geometry is replaced, and the selection is indexed as well as
+  ordered. Selecting the whole drawing now costs 0.1 ms a frame rather than
+  971.
+
 - Opening a drawing with a survey scan in it no longer freezes the window
   after the file has finished loading. The viewport already kept heavy
   tessellation off the thread that draws, but meshes skipped that check

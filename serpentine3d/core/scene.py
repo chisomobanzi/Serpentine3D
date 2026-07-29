@@ -68,6 +68,28 @@ class SceneObject:
     linetype: str = "ByLayer"          # dash style; ByLayer -> use the layer's
     draw_order: int = 0                # higher draws on top (breaks depth ties)
     _mesh: DisplayMesh | None = field(default=None, repr=False, compare=False)
+    _bounds: tuple | None = field(default=None, repr=False, compare=False)
+
+    def bbox(self) -> tuple[tuple, tuple]:
+        """This object's world bounding box, worked out at most once.
+
+        Measuring a B-rep walks the whole shape and a mesh reads every
+        vertex — about 100us an object, which is nothing until something
+        asks for all of them every frame. The gumball does exactly that,
+        and on the cave file it cost 747 ms of every frame you orbited
+        with the drawing selected.
+
+        Keyed on the shape it measured rather than cleared by hand:
+        geometry is changed here by swapping the shape for a new one, so
+        the answer expires by itself and there is no invalidation to
+        forget at a call site.
+        """
+        cached = self._bounds
+        if cached is not None and cached[0] is self.shape:
+            return cached[1]
+        box = geometry.bbox(self.shape)
+        self._bounds = (self.shape, box)
+        return box
 
     @property
     def mesh(self) -> DisplayMesh:
@@ -285,13 +307,9 @@ class Scene:
         objs = self.visible_objects()
         if not objs:
             return None
-        mins = np.full(3, np.inf)
-        maxs = np.full(3, -np.inf)
-        for o in objs:
-            mn, mx = geometry.bbox(o.shape)
-            mins = np.minimum(mins, mn)
-            maxs = np.maximum(maxs, mx)
-        return (tuple(mins), tuple(maxs))
+        boxes = np.array([o.bbox() for o in objs], float)
+        return (tuple(boxes[:, 0].min(axis=0)),
+                tuple(boxes[:, 1].max(axis=0)))
 
     # -- snapshot (undo/redo) --
     def snapshot(self) -> dict:

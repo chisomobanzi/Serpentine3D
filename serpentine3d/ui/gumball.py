@@ -243,13 +243,13 @@ class Gumball:
         objs = self.vp.selection.objects()
         if not objs:
             return None
-        mins = np.full(3, np.inf)
-        maxs = np.full(3, -np.inf)
-        for o in objs:
-            mn, mx = g.bbox(o.shape)
-            mins = np.minimum(mins, mn)
-            maxs = np.maximum(maxs, mx)
-        anchor = (mins + maxs) / 2
+        # Once per frame while you orbit, and again on every mouse move for
+        # the hover test — so it asks each object for bounds it has already
+        # been asked for. SceneObject.bbox remembers them; the union is one
+        # array operation because a per-object numpy loop over a whole
+        # drawing costs more than the measuring used to.
+        boxes = np.array([o.bbox() for o in objs], float)
+        anchor = (boxes[:, 0].min(axis=0) + boxes[:, 1].max(axis=0)) / 2
         cp = self.vp.cplane
         return anchor, (np.asarray(cp.xdir), np.asarray(cp.ydir),
                         np.asarray(cp.normal))
