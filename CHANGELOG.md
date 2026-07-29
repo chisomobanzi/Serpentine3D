@@ -16,6 +16,13 @@
   are pulling from is deliberately left out: it sits under the cursor the
   moment you place it, and offering it would glue every new leg to nothing.
 
+- **...and on every other command that takes more than one point**: the end of
+  an arc could not find the arc's start, and neither could the third pick of a
+  box, a dimension or an angle. The points a command has taken are now tracked
+  as it takes them instead of each command having to volunteer them, so End
+  works across all of them. Midpoints stay with the curves that draw a
+  connected run — halfway along a box's diagonal is not a feature of anything.
+
 - **The AppImage runs the code it ships**: it started with `python -m`, which
   puts the launch directory first on the import path, so opening it from a
   folder that happened to contain a `serpentine3d/` directory ran that code

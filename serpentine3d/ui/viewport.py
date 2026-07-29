@@ -480,7 +480,8 @@ class Viewport(QOpenGLWidget):
         self._active_snap = None            # (point, kind) under cursor
         self.snap_base = None               # reference point for perp snap
         self.point_axis = None              # (base, axis) while axis-locked
-        self.pending_points = []            # points picked so far this command
+        self.pending_points = []            # the run being drawn, if any
+        self.picked_points = []             # every point picked this command
         self.frame_aspect = None            # cinema frame guide (e.g. 2.39)
         self.grid_snap = bool(config.get("grid_snap")) if config else False
         self.grid_snap_step = (float(config.get("grid_snap_step",
@@ -1931,7 +1932,8 @@ class Viewport(QOpenGLWidget):
             return tuple(float(c) for c in base + t * normalize(axis))
         snap = self.snaps.find(self.camera, px, py, self.width(),
                                self.height(), base_point=self.snap_base,
-                               pending_points=self.pending_points)
+                               pending_points=self.pending_points,
+                               picked_points=self.picked_points)
         if snap is not None:
             self._active_snap = snap
             return snap[0]

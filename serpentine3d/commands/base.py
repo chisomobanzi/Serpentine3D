@@ -337,6 +337,9 @@ class CommandProcessor:
         self._start_revision = 0
         self._select_buffer: list[str] = []
         self._listeners: list = []       # notified on state change
+        # every point the running command has taken, so the UI can offer
+        # them as snaps: what you are drawing is not in the scene yet
+        self.picked_points: list = []
 
     # -- observers --
     def add_listener(self, fn):
@@ -370,6 +373,7 @@ class CommandProcessor:
             self._notify()
             return False
         self.active = cd
+        self.picked_points = []
         self.last_command = cd.name
         self.ctx.echo(f"> {cd.name}")
         if cd.mutates:
@@ -424,6 +428,7 @@ class CommandProcessor:
                         return
 
     def _finish(self, success: bool):
+        self.picked_points = []
         was = self.active
         self.gen = None
         self.request = None
@@ -458,6 +463,14 @@ class CommandProcessor:
             return
         if isinstance(self.request, PointReq):
             self.ctx.last_point = value
+            # Enter answers with None and an option answers with its name;
+            # neither is somewhere you can snap to
+            if value is not None and not isinstance(value, str):
+                try:
+                    self.picked_points.append(
+                        tuple(float(c) for c in value)[:3])
+                except (TypeError, ValueError):
+                    pass
         self._advance(value)
 
     def set_option(self, name: str, value: str | None = None):

@@ -3,6 +3,10 @@
 Until a polyline is finished it is not in the scene, so it offered no snap
 candidates at all: you could not close it back onto its own start, or land a
 later leg on an earlier vertex. Reported twice on the Rhino forum.
+
+The same hole is there in every other multi-pick command — the end of an arc
+could not find its start — so the points a command has taken are tracked by
+the processor, not left to each command to volunteer.
 """
 
 import json
@@ -138,3 +142,99 @@ def test_finishing_the_command_clears_them(window):
     assert window.viewport.pending_points
     window.processor.cancel()
     assert window.viewport.pending_points == []
+
+
+# -- every command's picked points, not just the ones that draw a chain --
+
+def test_loose_picks_offer_their_ends():
+    scene = Scene()
+    idx = SnapIndex(scene)
+    vp, _ = _vp(scene)
+    px, py = _px(vp, (0, 0, 0))
+    hit = idx.find(vp.camera, px, py, vp.width(), vp.height(),
+                   picked_points=[(0, 0, 0), (10, 0, 0), (10, 10, 0)])
+    assert hit is not None and hit[1] == "end"
+    assert np.allclose(hit[0], (0, 0, 0))
+
+
+def test_loose_picks_offer_no_midpoints():
+    """Two corners of a box are picked in sequence, but the line between
+    them is a diagonal — halfway along it is not a feature of anything."""
+    scene = Scene()
+    idx = SnapIndex(scene)
+    vp, _ = _vp(scene)
+    px, py = _px(vp, (5, 0, 0))
+    assert idx.find(vp.camera, px, py, vp.width(), vp.height(),
+                    picked_points=[(0, 0, 0), (10, 0, 0),
+                                   (10, 10, 0)]) is None
+
+
+def test_the_newest_loose_pick_is_left_out_too():
+    scene = Scene()
+    idx = SnapIndex(scene)
+    vp, _ = _vp(scene)
+    px, py = _px(vp, (10, 0, 0))
+    assert idx.find(vp.camera, px, py, vp.width(), vp.height(),
+                    picked_points=[(0, 0, 0), (10, 0, 0)]) is None
+
+
+def test_the_viewport_starts_with_no_picked_points():
+    vp, _ = _vp()
+    assert vp.picked_points == []
+
+
+def test_world_point_at_honours_the_picked_points():
+    vp, _ = _vp()
+    vp.picked_points = [(0, 0, 0), (10, 0, 0)]
+    px, py = _px(vp, (0, 0, 0))
+    p = vp.world_point_at(px, py)
+    assert vp._active_snap is not None and vp._active_snap[1] == "end"
+    assert np.allclose(p, (0, 0, 0))
+
+
+# -- the processor keeps the tally --
+
+def test_the_processor_remembers_the_points_a_command_has_taken(window):
+    window.processor.run("arc")
+    window.processor.provide_text("0,0")
+    window.processor.provide_text("10,0")
+    pts = [tuple(round(float(c), 6) for c in p)
+           for p in window.processor.picked_points]
+    assert pts == [(0, 0, 0), (10, 0, 0)]
+
+
+def test_answers_that_are_not_points_are_not_counted(window):
+    """An ellipse takes a centre and then two radii; a radius is a length,
+    and a length is not somewhere you can snap to."""
+    window.processor.run("ellipse")
+    window.processor.provide_text("0,0")
+    window.processor.provide_text("10")
+    pts = [tuple(round(float(c), 6) for c in p)
+           for p in window.processor.picked_points]
+    assert pts == [(0, 0, 0)]
+
+
+def test_a_fresh_command_starts_its_own_tally(window):
+    window.processor.run("arc")
+    window.processor.provide_text("0,0")
+    assert window.processor.picked_points
+    window.processor.run("line")
+    assert window.processor.picked_points == []
+
+
+def test_the_tally_is_dropped_when_the_command_ends(window):
+    window.processor.run("arc")
+    window.processor.provide_text("0,0")
+    window.processor.cancel()
+    assert window.processor.picked_points == []
+
+
+def test_the_arc_end_can_find_the_arc_start(window):
+    """The forum report, in one test: three picks in, the earlier two are
+    on offer even though an arc never volunteers a rubber chain."""
+    window.processor.run("arc")
+    window.processor.provide_text("0,0")
+    window.processor.provide_text("10,0")
+    pts = [tuple(round(float(c), 6) for c in p)
+           for p in window.viewport.picked_points]
+    assert pts == [(0, 0, 0), (10, 0, 0)]

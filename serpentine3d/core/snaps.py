@@ -143,30 +143,50 @@ class SnapIndex:
     # -- query --
 
     @staticmethod
-    def _pending_candidates(pending) -> list[tuple[tuple, str]]:
-        """Snap candidates on the curve still being picked.
+    def _pending_candidates(chain, picked=None) -> list[tuple[tuple, str]]:
+        """Snap candidates on the geometry still being picked.
 
-        The newest point is left out: it sits under the cursor the moment it
-        is placed, so offering it would glue every new leg to zero length."""
-        pts = [tuple(float(c) for c in p) for p in (pending or [])]
-        if len(pts) < 2:
-            return []
-        out = [(p, "end") for p in pts[:-1]]
-        for a, b in zip(pts, pts[1:]):
-            out.append((tuple((x + y) / 2 for x, y in zip(a, b)), "mid"))
+        `chain` is the run of points the command draws as a connected curve;
+        `picked` is simply every point it has taken. Only the chain has
+        midpoints worth offering — a box takes two corners in sequence, but
+        the line between them is a diagonal and halfway along it is not a
+        feature of anything.
+
+        Either way the newest point is left out: it sits under the cursor the
+        moment it is placed, so offering it would glue every new leg to zero
+        length."""
+        def clean(seq):
+            return [tuple(float(c) for c in p) for p in (seq or [])]
+
+        run, taken = clean(chain), clean(picked)
+        out, seen = [], set()
+
+        def add(p, kind):
+            key = (round(p[0], 9), round(p[1], 9), round(p[2], 9), kind)
+            if key not in seen:
+                seen.add(key)
+                out.append((p, kind))
+
+        for p in run[:-1]:
+            add(p, "end")
+        for p in taken[:-1]:
+            add(p, "end")
+        for a, b in zip(run, run[1:]):
+            add(tuple((x + y) / 2 for x, y in zip(a, b)), "mid")
         return out
 
     def find(self, camera, px: float, py: float, width: int, height: int,
-             radius_px: float = 12.0, base_point=None, pending_points=None):
+             radius_px: float = 12.0, base_point=None, pending_points=None,
+             picked_points=None):
         """Best snap near the pixel. Returns (point, kind) or None."""
         if not self.enabled:
             return None
         objects = self.scene.visible_objects()
         pts, kinds = [], []
 
-        # the curve you are drawing is not in the scene yet, but you still
-        # want to close it back on its start or land on an earlier vertex
-        for p, kind in self._pending_candidates(pending_points):
+        # what you are drawing is not in the scene yet, but you still want to
+        # close it back on its start or land a later pick on an earlier one
+        for p, kind in self._pending_candidates(pending_points, picked_points):
             if self.types.get(kind):
                 pts.append(p)
                 kinds.append(kind)
