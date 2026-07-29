@@ -7,7 +7,7 @@ def _dist(a, b) -> float:
     return math.dist(a, b)
 
 from ..core import geometry as g
-from .base import LengthReq, NumberReq, PointReq, command
+from .base import PointReq, command
 
 
 @command("box")
@@ -127,7 +127,40 @@ def cmd_cone(ctx):
 @command("torus")
 def cmd_torus(ctx):
     center = yield PointReq("Center of torus")
-    r1 = yield LengthReq("Major radius", minimum=1e-9)
-    r2 = yield LengthReq("Minor (tube) radius", minimum=1e-9)
-    obj = ctx.scene.add(g.make_torus(center, r1, r2))
-    ctx.echo(f"Created {obj.name}.")
+
+    def _ring_to(p):
+        r = _dist(center, p)
+        return g.make_circle(center, r) if r > 1e-9 else None
+
+    rp = yield PointReq("Major radius (click, or type a number)",
+                        number_from=(center, (1.0, 0.0, 0.0)),
+                        rubber_from=center, preview_fn=_ring_to)
+    r1 = _dist(center, rp)
+    if r1 < 1e-9:
+        ctx.echo("Zero major radius — no torus created.")
+        return
+
+    # the tube is dragged out from the ring itself, not from the centre:
+    # its thickness is a distance you can see against the circle above
+    ring = (center[0] + r1, center[1], center[2])
+
+    def _torus_to(p):
+        r2 = _dist(ring, p)
+        # r2 >= r1 folds the tube through the middle and OCC will not build it
+        if r2 < 1e-9 or r2 >= r1:
+            return None
+        try:
+            return g.make_torus(center, r1, r2)
+        except g.GeometryError:
+            return None
+
+    tp = yield PointReq("Minor (tube) radius (click, or type a number)",
+                        number_from=(ring, (1.0, 0.0, 0.0)),
+                        rubber_from=ring, preview_fn=_torus_to)
+    shape = _torus_to(tp)
+    if shape is None:
+        ctx.echo("Tube radius must be greater than zero and smaller than the "
+                 "major radius — no torus created.")
+        return
+    obj = ctx.scene.add(shape)
+    ctx.echo(f"Created {obj.name} (R={r1:g}, r={_dist(ring, tp):g}).")

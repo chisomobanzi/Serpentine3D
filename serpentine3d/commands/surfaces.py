@@ -1,7 +1,7 @@
 """Surface creation commands."""
 
 from ..core import geometry as g
-from .base import LengthReq, NumberReq, OptionReq, PointReq, SelectReq, command
+from .base import NumberReq, PointReq, SelectReq, command
 
 
 @command("extrude", aliases=("ext", "extrudecrv"))
@@ -112,11 +112,30 @@ def cmd_offsetsrf(ctx):
     objs = yield SelectReq("Select surfaces to offset",
                            kinds=("surface", "solid"))
 
-    def _preview(d):
-        return g.make_compound([g.offset_surface(o.shape, d) for o in objs])
+    from . import dragging
+    from .base import PointReq
+    # a surface offset runs along its own normal, so that is the way to drag
+    origin, normal = g.face_point_normal(g.faces_of(objs[0].shape)[0])
+    read = dragging.signed_along(origin, normal)
 
-    dist = yield LengthReq("Offset distance (negative flips side)",
-                           preview_fn=_preview)
+    def _preview(p):
+        d = read(p)
+        if abs(d) < 1e-9:
+            return None
+        try:
+            return g.make_compound(
+                [g.offset_surface(o.shape, d) for o in objs])
+        except g.GeometryError:
+            return None
+
+    dp = yield PointReq("Offset distance (click a side, or type a number)",
+                        axis_lock=(origin, normal),
+                        number_from=(origin, normal),
+                        rubber_from=origin, preview_fn=_preview)
+    dist = read(dp)
+    if abs(dist) < 1e-9:
+        ctx.echo("Zero offset — nothing created.")
+        return
     made = []
     for o in objs:
         made.append(ctx.scene.add(g.offset_surface(o.shape, dist),
@@ -127,7 +146,29 @@ def cmd_offsetsrf(ctx):
 @command("shell")
 def cmd_shell(ctx):
     objs = yield SelectReq("Select solids to shell", kinds=("solid",))
-    thickness = yield LengthReq("Wall thickness", minimum=1e-9)
+    from . import dragging
+    from .base import PointReq
+    # measured off the wall being thickened, so a 1 mm wall is a 1 mm drag
+    side = tuple(ctx.cplane.xdir)
+    base = dragging.edge_point(objs, side)
+    read = dragging.distance_from(base)
+
+    def _shell_to(p):
+        t = read(p)
+        if t < 1e-9:
+            return None
+        try:
+            return g.make_compound([g.shell_solid(o.shape, t) for o in objs])
+        except g.GeometryError:
+            return None
+
+    tp = yield PointReq("Wall thickness (click, or type a number)",
+                        number_from=(base, side), rubber_from=base,
+                        preview_fn=_shell_to)
+    thickness = read(tp)
+    if thickness < 1e-9:
+        ctx.echo("Zero thickness — nothing shelled.")
+        return
     for o in objs:
         ctx.scene.replace_shape(o.id, g.shell_solid(o.shape, thickness))
     ctx.echo(f"Shelled {len(objs)} solid(s) with wall {thickness:g}.")

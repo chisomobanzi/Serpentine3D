@@ -1,7 +1,9 @@
 """Transform commands: move, copy, rotate, scale, mirror, array."""
 
 from ..core import geometry as g
-from .base import IntReq, LengthReq, NumberReq, OptionReq, PointReq, SelectReq, command
+from .base import (
+    IntReq, NumberReq, OptionReq, PointReq, SelectReq, command,
+)
 
 
 def _ghost(objs, fn):
@@ -229,12 +231,27 @@ def cmd_array(ctx):
                   if (i, j) != (0, 0) for o in objs]
         return g.make_compound(shapes) if shapes else None
 
-    dx = yield LengthReq("Spacing X", default=10.0,
-                         preview_fn=lambda v: _grid(v, 0.0))
+    from . import dragging
+    from .base import PointReq
+    # spacing is centre to centre, so the drag starts at the centre of what
+    # is selected: wherever the cursor lands is where the next copy lands
+    centre = dragging.middle(objs)
+    xdir, ydir = tuple(ctx.cplane.xdir), tuple(ctx.cplane.ydir)
+    read_x = dragging.signed_along(centre, xdir)
+    read_y = dragging.signed_along(centre, ydir)
+
+    dx = read_x((yield PointReq("Spacing X (click, or type a number)",
+                                axis_lock=(centre, xdir),
+                                number_from=(centre, xdir),
+                                rubber_from=centre,
+                                preview_fn=lambda p: _grid(read_x(p), 0.0))))
     dy = 0.0
     if ny > 1:
-        dy = yield LengthReq("Spacing Y", default=10.0,
-                             preview_fn=lambda v: _grid(dx, v))
+        dy = read_y((yield PointReq(
+            "Spacing Y (click, or type a number)",
+            axis_lock=(centre, ydir), number_from=(centre, ydir),
+            rubber_from=centre,
+            preview_fn=lambda p: _grid(dx, read_y(p)))))
     n = 0
     for i in range(nx):
         for j in range(ny):
@@ -359,8 +376,16 @@ def cmd_orient3pt(ctx):
     r1 = yield PointReq("First reference point")
     r2 = yield PointReq("Second reference point", rubber_from=r1)
     r3 = yield PointReq("Third reference point", rubber_from=r2)
+    def _slide(p):
+        # the first target only settles where the objects go, not how they
+        # turn — so show them sliding across, and let the next two pick up
+        # the rotation
+        shift = tuple(a - b for a, b in zip(p, r1))
+        return g.make_compound([g.translate(o.shape, shift) for o in objs])
+
     t1 = yield PointReq("First target point",
-                        choices={"Copy": ["No", "Yes"]})
+                        choices={"Copy": ["No", "Yes"]},
+                        preview_fn=_slide)
     t2 = yield PointReq("Second target point", rubber_from=t1)
 
     def _matrix(t3):

@@ -3,7 +3,7 @@ unroll."""
 
 from ..core import geometry as g
 from .base import (
-    IntReq, LengthReq, NumberReq, OptionReq, PointReq, SelectReq, TextReq,
+    NumberReq, OptionReq, PointReq, SelectReq, TextReq,
     command,
 )
 
@@ -68,20 +68,82 @@ def cmd_pull(ctx):
 
 @command("helix")
 def cmd_helix(ctx):
+    import math
+    DEFAULT_TURNS = 5.0
     center = yield PointReq("Center of helix base")
-    radius = yield LengthReq("Radius", minimum=1e-9)
-    pitch = yield LengthReq("Pitch (rise per turn)", minimum=1e-9)
-    turns = yield NumberReq("Number of turns", default=5.0, minimum=0.01)
-    obj = ctx.scene.add(g.make_helix(center, radius, pitch, turns))
+
+    def _base_to(p):
+        # a helix needs a pitch as well, so the first drag shows the circle
+        # it will wind around
+        r = math.dist(center, p)
+        return g.make_circle(center, r) if r > 1e-9 else None
+
+    rp = yield PointReq("Radius (click, or type a number)",
+                        number_from=(center, (1.0, 0.0, 0.0)),
+                        rubber_from=center, preview_fn=_base_to)
+    radius = math.dist(center, rp)
+    if radius < 1e-9:
+        ctx.echo("Zero radius — no helix created.")
+        return
+
+    def _helix(pitch, turns):
+        if pitch < 1e-9 or turns < 0.01:
+            return None
+        try:
+            return g.make_helix(center, radius, pitch, turns)
+        except g.GeometryError:
+            return None
+
+    up = (0.0, 0.0, 1.0)
+    pp = yield PointReq("Pitch, the rise per turn (click, or type a number)",
+                        number_from=(center, up), axis_lock=(center, up),
+                        rubber_from=center,
+                        preview_fn=lambda p: _helix(abs(p[2] - center[2]),
+                                                    DEFAULT_TURNS))
+    pitch = abs(pp[2] - center[2])
+    if pitch < 1e-9:
+        ctx.echo("Zero pitch — no helix created.")
+        return
+
+    turns = yield NumberReq("Number of turns", default=DEFAULT_TURNS,
+                            minimum=0.01,
+                            preview_fn=lambda n: _helix(pitch, float(n)))
+    shape = _helix(pitch, turns)
+    if shape is None:
+        ctx.echo("No helix created.")
+        return
+    obj = ctx.scene.add(shape)
     ctx.echo(f"Created {obj.name} ({turns:g} turns).")
 
 
 @command("textobject", aliases=("textcurves",))
 def cmd_textobject(ctx):
     from ..core.text import text_curves
+    from . import dragging
     content = yield TextReq("Text")
-    height = yield LengthReq("Text height", default=10.0, minimum=1e-6)
+    # where before how big: the height is a size in the model, and there is
+    # nothing to measure it against until the text has somewhere to sit
     position = yield PointReq("Position (baseline start)")
+    up = tuple(ctx.cplane.ydir)
+    read = dragging.distance_from(position)
+
+    def _text_to(p):
+        h = read(p)
+        if h < 1e-6:
+            return None
+        try:
+            return g.make_compound(
+                [g.translate(c, position) for c in text_curves(content, h)])
+        except (g.GeometryError, ValueError):
+            return None
+
+    hp = yield PointReq("Text height (click, or type a number)",
+                        number_from=(position, up), rubber_from=position,
+                        preview_fn=_text_to)
+    height = read(hp)
+    if height < 1e-6:
+        ctx.echo("Zero height — no text created.")
+        return
     curves = text_curves(content, height)
     made = []
     for c in curves:
@@ -124,20 +186,35 @@ def cmd_unrollsrf(ctx):
         ctx.echo(f"Unrolled {total} boundary curve(s) onto layer "
                  "'Unrolled' (laid out along +X from the origin).")
 
+
 @command("pipe")
 def cmd_pipe(ctx):
     rails = yield SelectReq("Select rail curves", kinds=("curve",))
 
-    def _preview(r):
+    from . import dragging
+    # a pipe radius is measured out from the rail it wraps, not from anywhere
+    # else in the scene
+    base = dragging.curve_middle(rails[0].shape)
+    side = tuple(ctx.cplane.xdir)
+    read = dragging.distance_from(base)
+
+    def _preview(p):
+        r = read(p)
+        if r < 1e-9:
+            return None
         try:
             return g.make_compound(
                 [g.pipe(o.shape, r, cap=False) for o in rails])
         except g.GeometryError:
             return None
 
-    radius = yield LengthReq("Pipe radius", minimum=1e-9, default=1.0,
-                             choices={"Cap": ["Yes", "No"]},
-                             preview_fn=_preview)
+    rp = yield PointReq("Pipe radius (click, or type a number)",
+                        number_from=(base, side), rubber_from=base,
+                        choices={"Cap": ["Yes", "No"]}, preview_fn=_preview)
+    radius = read(rp)
+    if radius < 1e-9:
+        ctx.echo("Zero radius — no pipe created.")
+        return
     cap = ctx.opt("Cap", "Yes") == "Yes"
     made = []
     for o in rails:
@@ -295,14 +372,35 @@ def cmd_extendsrf(ctx):
         return
     obj, _, _, idx = picked[0]
 
-    def _preview(d):
+    from . import dragging
+
+    def _extend(d):
+        return g.extend_surface(obj.shape, idx, d)
+
+    # only the picked edge knows which way the surface grows, and it cannot
+    # say — so extend it a hair and watch which way it went
+    side = tuple(ctx.cplane.xdir)
+    direction = dragging.grow_direction(obj.shape, _extend, fallback=side)
+    base = dragging.edge_point([obj], direction)
+    read = dragging.distance_from(base)
+
+    def _preview(p):
+        d = read(p)
+        if d < 1e-9:
+            return None
         try:
-            return g.extend_surface(obj.shape, idx, d)
+            return _extend(d)
         except g.GeometryError:
             return None
 
-    length = yield LengthReq("Extension length", minimum=1e-9, default=1.0,
-                             preview_fn=_preview)
+    lp = yield PointReq("Extension length (click, or type a number)",
+                        axis_lock=(base, direction),
+                        number_from=(base, direction),
+                        rubber_from=base, preview_fn=_preview)
+    length = read(lp)
+    if length < 1e-9:
+        ctx.echo("Zero length — nothing extended.")
+        return
     ctx.scene.replace_shape(obj.id, g.extend_surface(obj.shape, idx, length))
     ctx.echo(f"Extended {obj.name} by {length:g}.")
 

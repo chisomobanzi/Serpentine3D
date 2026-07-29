@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..core import deform, geometry as g
-from .base import LengthReq, NumberReq, OptionReq, PointReq, SelectReq, command
+from .base import NumberReq, OptionReq, PointReq, SelectReq, command
 
 
 def _apply(ctx, objs, fn, label):
@@ -84,7 +84,41 @@ def cmd_extend(ctx):
     objs = yield SelectReq("Select curves to extend", kinds=("curve",))
     side = yield OptionReq("Which end", options=["End", "Start", "Both"],
                            default="End")
-    length = yield LengthReq("Extension length", minimum=1e-9)
+    from . import dragging
+    from .base import PointReq
+    # the drag starts at the end being extended and runs the way the curve
+    # was already heading, so the cursor sits on the curve's new end
+    lead = "start" if side == "Start" else "end"
+    ends = g.curve_endpoints(objs[0].shape)
+    base = ends[0] if lead == "start" else ends[1]
+    direction = dragging.end_direction(objs[0].shape, lead)
+    read = dragging.distance_from(base)
+
+    def _extend_to(p):
+        v = read(p)
+        if v < 1e-9:
+            return None
+        out = []
+        for o in objs:
+            shape = o.shape
+            try:
+                if side in ("End", "Both"):
+                    shape = g.extend_curve(shape, v, "end")
+                if side in ("Start", "Both"):
+                    shape = g.extend_curve(shape, v, "start")
+            except g.GeometryError:
+                return None
+            out.append(shape)
+        return g.make_compound(out) if out else None
+
+    lp = yield PointReq("Extension length (click, or type a number)",
+                        axis_lock=(base, direction),
+                        number_from=(base, direction),
+                        rubber_from=base, preview_fn=_extend_to)
+    length = read(lp)
+    if length < 1e-9:
+        ctx.echo("Zero length — nothing extended.")
+        return
     done = 0
     for o in objs:
         try:

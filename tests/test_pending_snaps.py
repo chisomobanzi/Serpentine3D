@@ -204,11 +204,14 @@ def test_the_processor_remembers_the_points_a_command_has_taken(window):
 
 
 def test_answers_that_are_not_points_are_not_counted(window):
-    """An ellipse takes a centre and then two radii; a radius is a length,
-    and a length is not somewhere you can snap to."""
-    window.processor.run("ellipse")
+    """scalenu takes a base point and then three scale factors; a factor is
+    a ratio, and a ratio is not somewhere you can snap to."""
+    from serpentine3d.core import geometry as g
+    obj = window.scene.add(g.make_circle((0, 0, 0), 3))
+    window.selection.set([obj.id])
+    window.processor.run("scalenu")
     window.processor.provide_text("0,0")
-    window.processor.provide_text("10")
+    window.processor.provide_text("2")
     pts = [tuple(round(float(c), 6) for c in p)
            for p in window.processor.picked_points]
     assert pts == [(0, 0, 0)]

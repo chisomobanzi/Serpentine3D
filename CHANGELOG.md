@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **Every distance in the model can now be drawn with the mouse**: a torus'
+  tube radius, a wall thickness, a fillet radius, a push/pull depth, a contour
+  spacing, an array step, a curve extension, a text height — all of them used
+  to be a number you had to know before you could see anything. Each is now a
+  drag with a live ghost of the result, and typing the number still works
+  exactly as before. Where the distance has a side to it (offsets, push/pull,
+  contours) the cursor is pinned to the line being measured, so the number
+  beside the cursor is the number the click will use.
+
+  Distances on things already in the scene are measured off the geometry
+  itself rather than from thin air: a 1 mm wall on a 100 mm box is a 1 mm
+  drag, not a drag from the origin. Two commands were reordered so the pick
+  that makes a preview possible comes first — `fillet` asks for the corner
+  before the radius, and `textobject` asks for the text and its position
+  before the height.
+
+- **New commands are held to that standard by the test suite**: the tests read
+  every command's source and fail if a prompt asks for a distance in the model
+  that only the keyboard can answer, if a drag has nothing to show while you
+  make it, or if a signed drag lets the cursor wander off the line it is
+  measuring. Prompts that genuinely cannot do better carry a written reason
+  next to the exemption.
+
 - **The distance you are drawing reads out at the cursor**: pulling out a
   line, a circle's radius or a move now shows the length of the open leg in a
   small label beside the cursor, in the document's units. It follows the

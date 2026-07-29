@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..core import geometry as g
-from .base import LengthReq, NumberReq, OptionReq, PointReq, SelectReq, command
+from .base import PointReq, SelectReq, command
 
 
 def _rubber(pts):
@@ -92,11 +92,42 @@ def cmd_arc(ctx):
 
 @command("ellipse", aliases=("el",))
 def cmd_ellipse(ctx):
+    import math
     center = yield PointReq("Center of ellipse")
-    r1 = yield LengthReq("Major radius", minimum=1e-9)
-    r2 = yield LengthReq("Minor radius", minimum=1e-9)
-    obj = ctx.scene.add(g.make_ellipse(center, r1, r2))
-    ctx.echo(f"Created {obj.name}.")
+    normal = tuple(ctx.cplane.normal)
+
+    def _round_to(p):
+        # nothing describes an ellipse until both radii are in, so the first
+        # drag shows the circle it would be if you stopped here
+        r = math.dist(center, p)
+        return g.make_circle(center, r, normal=normal) if r > 1e-9 else None
+
+    rp = yield PointReq("Major radius (click, or type a number)",
+                        number_from=(center, tuple(ctx.cplane.xdir)),
+                        rubber_from=center, preview_fn=_round_to)
+    r1 = math.dist(center, rp)
+    if r1 < 1e-9:
+        ctx.echo("Zero major radius — no ellipse created.")
+        return
+
+    def _ellipse_to(p):
+        r2 = math.dist(center, p)
+        if r2 < 1e-9:
+            return None
+        try:
+            return g.make_ellipse(center, r1, r2, normal=normal)
+        except g.GeometryError:
+            return None
+
+    tp = yield PointReq("Minor radius (click, or type a number)",
+                        number_from=(center, tuple(ctx.cplane.ydir)),
+                        rubber_from=center, preview_fn=_ellipse_to)
+    shape = _ellipse_to(tp)
+    if shape is None:
+        ctx.echo("Zero minor radius — no ellipse created.")
+        return
+    obj = ctx.scene.add(shape)
+    ctx.echo(f"Created {obj.name} ({r1:g} x {math.dist(center, tp):g}).")
 
 
 @command("rectangle", aliases=("rect", "rec"))

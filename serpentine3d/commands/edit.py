@@ -27,11 +27,31 @@ def cmd_join(ctx):
 def cmd_offset(ctx):
     objs = yield SelectReq("Select curve to offset", kinds=("curve",),
                            max_count=1)
-    from .base import LengthReq, NumberReq
-    dist = yield LengthReq(
-        "Offset distance (negative for other side)",
-        preview_fn=lambda v: g.offset_curve(objs[0].shape, v))
-    new_shape = g.offset_curve(objs[0].shape, dist)
+    from . import dragging
+    from .base import PointReq
+    shape = objs[0].shape
+    mid = dragging.curve_middle(shape)
+    out = dragging.offset_direction(shape, tuple(ctx.cplane.normal))
+    read = dragging.signed_along(mid, out)
+
+    def _offset_to(p):
+        v = read(p)
+        if abs(v) < 1e-9:
+            return None
+        try:
+            return g.offset_curve(shape, v)
+        except g.GeometryError:
+            return None
+
+    dp = yield PointReq("Offset distance (click a side, or type a number)",
+                        axis_lock=(mid, out),
+                        number_from=(mid, out), rubber_from=mid,
+                        preview_fn=_offset_to)
+    dist = read(dp)
+    if abs(dist) < 1e-9:
+        ctx.echo("Zero offset — nothing created.")
+        return
+    new_shape = g.offset_curve(shape, dist)
     obj = ctx.scene.add(new_shape, layer_id=objs[0].layer_id)
     ctx.echo(f"Offset -> {obj.name}.")
 
@@ -42,9 +62,30 @@ def cmd_fillet(ctx):
                         max_count=1)
     b = yield SelectReq("Select second curve", kinds=("curve",),
                         max_count=1, allow_preselected=False)
-    from .base import LengthReq, NumberReq, PointReq
-    radius = yield LengthReq("Fillet radius", minimum=1e-9)
+    from . import dragging
+    from .base import PointReq
+    # the corner comes first: until we know which one, there is no fillet to
+    # show, and once we do the radius can be dragged straight out of it
     corner = yield PointReq("Point near the corner to fillet")
+    read = dragging.distance_from(corner)
+
+    def _fillet_to(p):
+        r = read(p)
+        if r < 1e-9:
+            return None
+        try:
+            return g.join_curves(list(
+                g.fillet_curves(a[0].shape, b[0].shape, r, corner)))
+        except g.GeometryError:
+            return None
+
+    rp = yield PointReq("Fillet radius (click, or type a number)",
+                        number_from=(corner, tuple(ctx.cplane.xdir)),
+                        rubber_from=corner, preview_fn=_fillet_to)
+    radius = read(rp)
+    if radius < 1e-9:
+        ctx.echo("Zero radius — nothing filleted.")
+        return
     ea, arc, eb = g.fillet_curves(a[0].shape, b[0].shape, radius, corner)
     joined = g.join_curves([ea, arc, eb])
     ctx.scene.remove(b[0].id)
