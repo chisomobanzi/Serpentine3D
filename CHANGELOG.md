@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Clicking an edge picks the one in front. Edges were ranked by how near they
+  fell to the cursor on screen and by nothing else, so an edge on the far side
+  of a model could take a click away from the one drawn over it, and the only
+  way to reach the near one was to hunt for a spot where the far one happened
+  to be further off in 2D. Edges within a few pixels of each other now count
+  as equally aimed at, and the front-most of those wins.
+
 ## 0.5.3 — 2026-07-29
 
 An import release, and both halves of it came from one person opening their

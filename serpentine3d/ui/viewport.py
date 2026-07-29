@@ -22,6 +22,13 @@ from .camera import Camera
 
 PICK_RADIUS_PX = 7.0
 
+# Two edges this close to each other on screen are both taken to be under the
+# cursor, and the one in front wins. Without a band, depth alone would let an
+# edge seven pixels away steal a click aimed squarely at one you can see; with
+# it, only edges you could plausibly have meant compete, and among those the
+# front-most is the one you meant.
+PICK_DEPTH_BAND_PX = 4.0
+
 # which end of a bounding box each of its eight corners takes per axis
 _BOX_CORNERS = np.array([(x, y, z) for x in (False, True)
                          for y in (False, True)
@@ -2121,13 +2128,15 @@ class Viewport(QOpenGLWidget):
         w, h = self.width(), self.height()
         origin, direction = self.camera.ray_through(px, py, w, h)
         # edges first (they are the smaller target)
-        best_edge = None
-        best_d2 = PICK_RADIUS_PX ** 2
         r = PICK_RADIUS_PX
         selectable = [obj for obj in self.scene.visible_objects()
                       if self.scene.is_selectable(obj.id)]
         near_cursor = self._pick_candidates(selectable, px - r, py - r,
                                             px + r, py + r, w, h)
+        # Every segment under the cursor, gathered before anything is chosen:
+        # which edge wins depends on how close the closest one came, and that
+        # is not known until all the objects have been looked at.
+        found = []
         for obj in near_cursor:
             mesh = obj.mesh
             if not len(mesh.edge_segments):
@@ -2140,17 +2149,34 @@ class Viewport(QOpenGLWidget):
             a, b = scr[0::2], scr[1::2]
             d2 = _point_segment_dist2(np.array([px, py]), a[:, :2],
                                       b[:, :2])
-            valid = (a[:, 2] > 0) & (b[:, 2] > 0)
-            d2[~valid] = np.inf
-            i = int(np.argmin(d2))
-            nearest = d2[i]
-            if sub is not None:
-                i = int(sub[i])              # back to the mesh's own numbering
-            if nearest < best_d2 and len(mesh.edge_of_segment) > i:
-                best_d2 = nearest
-                best_edge = (obj.id, "edge", int(mesh.edge_of_segment[i]))
-        if best_edge is not None:
-            return best_edge
+            near = (a[:, 2] > 0) & (b[:, 2] > 0) & (d2 <= PICK_RADIUS_PX ** 2)
+            if not near.any():
+                continue
+            # Sorted by how close to the cursor, so the band below is a slice.
+            order = np.flatnonzero(near)
+            order = order[np.argsort(d2[order], kind="stable")]
+            found.append((obj, mesh, sub, order, d2[order],
+                          np.minimum(a[:, 2], b[:, 2])))
+
+        if found:
+            closest = math.sqrt(min(float(f[4][0]) for f in found))
+            band = (closest + PICK_DEPTH_BAND_PX) ** 2
+            best_edge, best_depth = None, np.inf
+            for obj, mesh, sub, order, sorted_d2, depth in found:
+                k = int(np.searchsorted(sorted_d2, band, side="right"))
+                if not k:
+                    continue
+                within = order[:k]
+                seg = int(within[np.argmin(depth[within])])
+                if float(depth[seg]) >= best_depth:
+                    continue
+                i = int(sub[seg]) if sub is not None else seg
+                if len(mesh.edge_of_segment) > i:
+                    best_depth = float(depth[seg])
+                    best_edge = (obj.id, "edge",
+                                 int(mesh.edge_of_segment[i]))
+            if best_edge is not None:
+                return best_edge
         # faces by nearest ray-triangle hit
         best_face = None
         best_t = np.inf
