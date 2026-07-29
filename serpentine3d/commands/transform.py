@@ -192,11 +192,12 @@ def cmd_array_polar(ctx):
                             preview_fn=lambda v: _ring(count, v))
     step = total / (count if abs(total - 360.0) < 1e-9 else count - 1)
     n = 0
-    for i in range(1, count):
-        for o in objs:
-            ctx.scene.add_from(
-                g.rotate(o.shape, center, (0, 0, 1), step * i), o)
-            n += 1
+    with ctx.scene.batched():           # one notification, not one a copy
+        for i in range(1, count):
+            for o in objs:
+                ctx.scene.add_from(
+                    g.rotate(o.shape, center, (0, 0, 1), step * i), o)
+                n += 1
     ctx.echo(f"Created {n} arrayed object(s) around {center}.")
 
 
@@ -209,13 +210,14 @@ def cmd_array_path(ctx):
     base = yield PointReq("Base point on the object(s)")
     samples = g.sample_curve(paths[0].shape, count)
     n = 0
-    for target in samples:
-        offset = tuple(t - b for t, b in zip(target, base))
-        if all(abs(c) < 1e-12 for c in offset):
-            continue
-        for o in objs:
-            ctx.scene.add_from(g.translate(o.shape, offset), o)
-            n += 1
+    with ctx.scene.batched():           # one notification, not one a copy
+        for target in samples:
+            offset = tuple(t - b for t, b in zip(target, base))
+            if all(abs(c) < 1e-12 for c in offset):
+                continue
+            for o in objs:
+                ctx.scene.add_from(g.translate(o.shape, offset), o)
+                n += 1
     ctx.echo(f"Placed {n} object(s) along {paths[0].name}.")
 
 
@@ -253,14 +255,17 @@ def cmd_array(ctx):
             rubber_from=centre,
             preview_fn=lambda p: _grid(dx, read_y(p)))))
     n = 0
-    for i in range(nx):
-        for j in range(ny):
-            if i == 0 and j == 0:
-                continue
-            for o in objs:
-                ctx.scene.add_from(
-                    g.translate(o.shape, (i * dx, j * dy, 0)), o)
-                n += 1
+    # One notification for the array, not one per copy: the counts are typed
+    # by the user and 40x40 is an ordinary thing to type. See Scene.batched.
+    with ctx.scene.batched():
+        for i in range(nx):
+            for j in range(ny):
+                if i == 0 and j == 0:
+                    continue
+                for o in objs:
+                    ctx.scene.add_from(
+                        g.translate(o.shape, (i * dx, j * dy, 0)), o)
+                    n += 1
     ctx.echo(f"Created {n} arrayed object(s).")
 
 

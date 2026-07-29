@@ -757,10 +757,15 @@ class MainWindow(QMainWindow):
         from .core import geometry as g
         self.history.checkpoint("paste")
         pasted = []
-        for name, shape, layer_id in clip:
-            lid = layer_id if layer_id in {
-                l.id for l in self.scene.layers.all()} else None
-            pasted.append(self.scene.add(g.copy_shape(shape), layer_id=lid))
+        live = {la.id for la in self.scene.layers.all()}
+        # One notification for the paste, not one per object — see
+        # Scene.batched. The clipboard holds whatever was selected, which on
+        # a survey drawing is thousands of things.
+        with self.scene.batched():
+            for name, shape, layer_id in clip:
+                lid = layer_id if layer_id in live else None
+                pasted.append(self.scene.add(g.copy_shape(shape),
+                                             layer_id=lid))
         self.selection.set([o.id for o in pasted])
         self.command_line.echo(f"Pasted {len(pasted)} object(s).")
 

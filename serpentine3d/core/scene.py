@@ -8,6 +8,7 @@ from __future__ import annotations
 import itertools
 import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -114,6 +115,8 @@ class Scene:
         self.layers = LayerManager()
         self._counters = {}
         self._listeners: list = []
+        self._batch_depth = 0           # see batched()
+        self._batched_kinds: set[str] = set()
         self.revision = 0               # bumped on every change notification
         self.named_views: dict = {}     # name -> camera params
         self.layouts: list = []         # drafting sheets (core/layout.py)
@@ -131,8 +134,47 @@ class Scene:
         ("objects", "layers", "layouts") — "all" changes always fire."""
         self._listeners.append((fn, frozenset(kinds) if kinds else None))
 
+    @contextmanager
+    def batched(self):
+        """Hold the notifications until the whole change is made.
+
+        Listeners answer a change by reading the scene, and two of them read
+        all of it — the layers panel rebuilds its tree and counts objects per
+        layer, the status bar counts objects. One notification per object
+        added therefore makes bulk work cost objects squared: 0.08 ms an
+        object into an empty scene, 0.71 ms into one already holding 4000,
+        about 4.7 seconds of opening the 522 MB cave file.
+
+        Nobody wants the states in between. What comes out is the finished
+        scene, once, and still sorted by kind so a listener that only asked
+        about layouts is not woken by objects arriving.
+
+        Notifications go out even if the body raises: a half-read file still
+        changed the scene, and a panel showing what was there before is worse
+        than one showing the half. `revision` still moves inside the batch,
+        so a cache rebuilt part-way through can tell the scene shifted.
+        """
+        self._batch_depth += 1
+        try:
+            yield self
+        finally:
+            self._batch_depth -= 1
+            if not self._batch_depth and self._batched_kinds:
+                kinds, self._batched_kinds = self._batched_kinds, set()
+                if "all" in kinds:
+                    self._fire("all")       # already reaches everyone
+                else:
+                    for kind in sorted(kinds):
+                        self._fire(kind)
+
     def notify(self, kind: str = "all"):
         self.revision += 1
+        if self._batch_depth:
+            self._batched_kinds.add(kind)
+            return
+        self._fire(kind)
+
+    def _fire(self, kind: str):
         for fn, kinds in self._listeners:
             if kinds is None or kind == "all" or kind in kinds:
                 fn()

@@ -4,6 +4,19 @@
 
 ### Fixed
 
+- Opening a big file no longer spends seconds redrawing panels nobody has
+  looked at yet. Every object added announced itself, and two of the things
+  listening answer by reading the whole scene — the layers panel rebuilds
+  its tree and counts what is on each layer, the status bar counts the
+  objects. So importing n objects meant n walks of a scene on its way to
+  holding n of them, and the cost of adding one grew with how full the
+  scene already was: 0.08 ms into an empty scene, 0.71 ms into one already
+  holding 4000. On the 522 MB cave file that was 7064 announcements and
+  3.1 seconds of the open. Nothing wanted the states in between. Imports,
+  arrays and paste now make the whole change and announce it once — 3.1
+  seconds to none — and the announcement is still sorted by kind, so a
+  panel that only asked about layouts is not woken by objects arriving.
+
 - Orbiting and panning with a lot selected is no longer slower than orbiting
   with nothing selected. On a 522 MB cave file a frame took 121 ms with
   nothing selected and 1092 ms with all 7064 objects selected — nine times

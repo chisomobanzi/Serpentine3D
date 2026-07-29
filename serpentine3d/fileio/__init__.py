@@ -105,7 +105,11 @@ def import_file(scene, path: str, progress=None) -> int:
     report = Progress(progress,
                       f"Opening {os.path.basename(path)}…")
     report(0.0)
-    n = _import_file(scene, path, ext, report)
+    # One notification for the file, not one per object in it. Panels that
+    # answer a change by reading the whole scene made a big import cost
+    # objects squared — see Scene.batched.
+    with scene.batched():
+        n = _import_file(scene, path, ext, report)
     report.done()
     return n
 
