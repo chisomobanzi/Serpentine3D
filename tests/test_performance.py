@@ -134,7 +134,7 @@ def test_background_tessellation_of_heavy_shapes():
     assert not obj.mesh_ready
     assert vp._schedule_tess(obj)           # queued with a bbox placeholder
     assert obj.id in vp._tess_pending
-    assert len(vp._tess_pending[obj.id]) == 24      # 12 AABB edges
+    assert len(vp._tess_pending[obj.id][1]) == 24   # 12 AABB edges
     deadline = time.time() + 10
     while not obj.mesh_ready and time.time() < deadline:
         time.sleep(0.01)

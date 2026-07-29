@@ -48,9 +48,9 @@ class _GLRecorder:
 class _FakeGpu:
     """The buffer handles `_draw_objects` reads, without a GL context."""
 
-    def __init__(self, lines=6, tris=0, isos=0, mesh_id=None,
+    def __init__(self, lines=6, tris=0, isos=0, mesh_key=None,
                  dash_key="Continuous"):
-        self.mesh_id, self.dash_key = mesh_id, dash_key
+        self.mesh_key, self.dash_key = mesh_key, dash_key
         self.tri_vao, self.tri_count = 1, tris
         self.line_vao, self.line_count = 2, lines
         self.iso_vao, self.iso_count = 3, isos
@@ -79,7 +79,7 @@ def _viewport(count: int, spread: float = 10.0):
     view._mesh_prog, view._line_prog, view._thick_prog = 11, 12, 13
     view._max_line_width = 1.0
     for obj in scene.all():
-        view._gpu[obj.id] = _FakeGpu(mesh_id=id(obj.mesh))
+        view._gpu[obj.id] = _FakeGpu(mesh_key=obj.mesh.uid)
     return view
 
 
@@ -558,7 +558,7 @@ def _sheet_viewport():
     view.resize(800, 600)
     view._mesh_prog, view._line_prog, view._thick_prog = 11, 12, 13
     view._max_line_width = 1.0
-    view._gpu[obj.id] = _FakeGpu(mesh_id=id(obj.mesh))
+    view._gpu[obj.id] = _FakeGpu(mesh_key=obj.mesh.uid)
     view.display_mode = "shaded"
     view.camera.set_standard_view("top")
     view.zoom_extents()

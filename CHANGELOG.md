@@ -4,6 +4,31 @@
 
 ### Fixed
 
+- Dragging with the gumball no longer occasionally leaves the drawing
+  behind. The object really did move — the gumball sat where it now was,
+  and nudging it again made the picture catch up — but the shaded faces
+  went on being drawn at the old position. What is uploaded to the graphics
+  card was remembered against the *address* of the display mesh it came
+  from, and an address is not an identity: moving something builds it a new
+  mesh and drops the old one, and CPython hands the freed address straight
+  back out. Measured, a new mesh lands on a dead one's address 49 times out
+  of 50 in a tight loop, and about 1 time in 20 across a real move, where
+  meshing allocates other things in between — which is exactly why it
+  happened sometimes and would not reproduce on demand. So the question
+  "are these still the right buffers?" was answered yes about a mesh that
+  no longer existed. It also explained the odd way it looked: sub-object
+  highlights are rebuilt from the geometry every frame, so the yellow was
+  at the new position while the grey box behind it was still at the old
+  one. Display meshes now carry a serial number that is never reused.
+
+- Editing something while it is still being meshed no longer strands it as
+  a wireframe box. Anything heavy enough is meshed on a worker and drawn as
+  its bounding box in the meantime; that work was tracked per object, so an
+  edit landing mid-build looked like work already in hand. Nothing then
+  meshed the new shape, and the box standing in for it stayed where the old
+  shape had been. It is now tracked per shape, so replacing the geometry
+  queues the new one and moves the placeholder with it.
+
 - Zoom Selected now fills the viewport with what you selected, instead of
   leaving it small in the middle. It framed the *sphere* around the
   selection in the *vertical* field of view and then backed off another

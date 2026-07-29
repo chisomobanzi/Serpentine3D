@@ -85,7 +85,7 @@ def test_the_placeholder_is_the_meshs_own_bounding_box():
     vp = _viewport(scene)
     obj = scene.add(_grid(400), name="Survey")
     vp._schedule_tess(obj)
-    segs = np.asarray(vp._tess_pending[obj.id], float).reshape(-1, 3)
+    segs = np.asarray(vp._tess_pending[obj.id][1], float).reshape(-1, 3)
     mn, mx = obj.shape.bbox()
     assert np.allclose(segs.min(axis=0), mn)
     assert np.allclose(segs.max(axis=0), mx)

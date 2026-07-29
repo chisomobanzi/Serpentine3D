@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -14,6 +15,10 @@ from .occ import (
 from .spatial import build_index
 
 _UNINDEXED = object()
+
+# Serial numbers for display meshes; see DisplayMesh.uid. next() on a count
+# is a single bytecode, so the tessellation workers can share one.
+_uids = itertools.count(1)
 
 
 @dataclass
@@ -44,6 +49,15 @@ class DisplayMesh:
         default_factory=lambda: np.zeros((0, 3), np.float32))
 
     has_curvature: bool = False
+    # A serial number for this mesh, for caches that have to answer "is this
+    # still the mesh I was given?" after the mesh in question may be gone.
+    # id() cannot answer that: it is an address, and a freed one is handed
+    # straight back out — a new mesh lands on a dead one's address 49 times
+    # out of 50 — so a cache keyed on it goes on serving what it built from
+    # geometry that no longer exists. Never reused, and out of the equality
+    # comparison, since two meshes of the same geometry are still equal.
+    uid: int = field(default_factory=lambda: next(_uids),
+                     repr=False, compare=False)
     _bounds: tuple | None = field(default=None, repr=False, compare=False)
     # spatial indexes for picking, built on first click and kept: None means
     # "not looked at yet", _UNINDEXED means "looked at, not worth indexing"

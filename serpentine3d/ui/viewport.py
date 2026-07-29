@@ -282,7 +282,10 @@ class _GpuObject:
     """GPU buffers for one scene object."""
 
     def __init__(self, mesh, dash=None, dash_key=None):
-        self.mesh_id = id(mesh)
+        # The mesh's own serial, not id(mesh): the question "are these
+        # buffers still current?" is asked after the mesh they came from may
+        # have been freed, and an address gets recycled. See DisplayMesh.uid.
+        self.mesh_key = mesh.uid
         self.dash_key = dash_key                  # linetype identity for cache
         self.tri_vao = self.tri_count = 0
         self.line_vao = self.line_count = 0
@@ -509,7 +512,8 @@ class Viewport(QOpenGLWidget):
         self._grid = None
         # heavy shapes tessellate off the UI thread; bbox shown meanwhile
         self._tess_pool = None                     # created on first use
-        self._tess_pending: dict[str, np.ndarray] = {}   # id -> bbox segs
+        # id -> (the shape being meshed, its bbox segments)
+        self._tess_pending: dict[str, tuple] = {}
         self._tessDone.connect(self._on_tess_done,
                                Qt.ConnectionType.QueuedConnection)
         self._preview: _LineBatch | None = None
@@ -1154,7 +1158,7 @@ class Viewport(QOpenGLWidget):
                 continue
             self._tess_pending.pop(obj.id, None)
             lt_name = self._effective_linetype(obj, layer_types)
-            if gpu is not None and (gpu.mesh_id != id(obj.mesh)
+            if gpu is not None and (gpu.mesh_key != obj.mesh.uid
                                     or gpu.dash_key != lt_name):
                 gpu.release()
                 gpu = None
@@ -1203,8 +1207,17 @@ class Viewport(QOpenGLWidget):
         self._worker_pool().submit(work)
 
     def _schedule_tess(self, obj) -> bool:
-        """Queue heavy tessellation on a worker; True while pending."""
-        if obj.id in self._tess_pending:
+        """Queue heavy tessellation on a worker; True while pending.
+
+        Pending is per shape, not per object: edit something while its mesh
+        is still being built and the work in flight is for geometry that no
+        longer exists. Taken as "already in hand" it would strand the object
+        — nobody meshes what replaced it, and the box drawn in the meantime
+        stays where the old shape was. Holding the shape itself keeps the
+        `is` honest; an address on its own would get recycled.
+        """
+        pending = self._tess_pending.get(obj.id)
+        if pending is not None and pending[0] is obj.shape:
             return True
         from ..core.mesh import MeshShape
         try:
@@ -1230,7 +1243,7 @@ class Viewport(QOpenGLWidget):
             mn, mx = g.bbox(obj.shape)
         except Exception:                                  # noqa: BLE001
             return False
-        self._tess_pending[obj.id] = _bbox_segments(mn, mx)
+        self._tess_pending[obj.id] = (obj.shape, _bbox_segments(mn, mx))
 
         def work(target=obj):
             try:
@@ -1320,7 +1333,8 @@ class Viewport(QOpenGLWidget):
         for obj in objects:
             gpu = self._gpu.get(obj.id)
             if gpu is None:
-                pend = self._tess_pending.get(obj.id)
+                entry = self._tess_pending.get(obj.id)
+                pend = entry[1] if entry is not None else None
                 if pend is not None and len(pend):
                     self._preview.update(pend)
                     self._set_line_uniforms(
@@ -2529,7 +2543,7 @@ class Viewport(QOpenGLWidget):
         """(points, grid) — grid is (nu, nv) for surfaces, None for curves."""
         from ..core import geometry as _g
         entry = self._cv_cache.get(obj.id)
-        key = id(obj.mesh)
+        key = obj.mesh.uid            # not id(obj.mesh) — see DisplayMesh.uid
         if entry is None or entry[0] != key:
             try:
                 if obj.kind == "surface":
