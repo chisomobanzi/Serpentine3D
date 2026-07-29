@@ -67,6 +67,21 @@ def test_label_sits_by_the_cursor_end_not_the_base():
             < np.linalg.norm(pos - scr[0][:2]))
 
 
+def test_set_preview_positions_the_label_without_waiting_for_a_paint():
+    """Regression: doing this only in paintGL lost a race. Qt composites a
+    QOpenGLWidget's children around the GL paint, so a label first shown
+    *during* paintGL can miss the frame — and when the cursor then stops,
+    no later frame comes to fix it. The label was invisible in AppImage
+    builds and visible in venv ones purely on timing."""
+    vp, scene = _vp()
+    vp.set_preview(_seg((0, 0, 0), (3, 4, 0)), [(0, 0, 0)])
+    # no _update_draw_readout() call here — set_preview must have done it
+    assert not vp._draw_readout.isHidden()
+    assert vp._draw_readout.text() == scene.format_length(5.0)
+    vp.set_preview(None)
+    assert vp._draw_readout.isHidden()
+
+
 def test_clearing_the_preview_hides_it():
     vp, _ = _vp()
     vp.set_preview(_seg((0, 0, 0), (3, 4, 0)), [(0, 0, 0)])

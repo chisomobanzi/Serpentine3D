@@ -1787,6 +1787,11 @@ class Viewport(QOpenGLWidget):
                                arr[-1][1].astype(float))
             self._preview_data = arr.reshape(-1, 3)
         self._marker_points = list(markers or [])
+        # place the readout now, not from paintGL: Qt composites a
+        # QOpenGLWidget's children around the GL paint, so a label first
+        # shown *during* paintGL can miss the frame — and once the cursor
+        # stops there is no later frame to correct it
+        self._update_draw_readout()
         self.update()
 
     def set_point_mode(self, on: bool):
