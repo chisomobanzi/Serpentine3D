@@ -10,6 +10,17 @@
   equally, so a cube reads as a cube and you can measure along all three
   directions off the same picture. Detail views on a layout can use it too.
 
+### Changed
+
+- The MCP server runs on `mcp` 2.x. 0.5.3 capped the dependency below 2.0 to
+  stop fresh installs picking up a release the server could not import; the
+  server is now written against 2.x's `mcp.server.mcpserver` and the cap is
+  gone, so `serp3d-mcp` installs alongside the current SDK rather than
+  holding an MCP client back to last year's. The tools, their names and their
+  arguments are unchanged — nothing a client already talks to has moved.
+  `httpx`, which the AI assistant uses directly, stays declared in its own
+  right now that `mcp` no longer brings it along.
+
 ### Fixed
 
 - Clicking an edge picks the one in front. Edges were ranked by how near they

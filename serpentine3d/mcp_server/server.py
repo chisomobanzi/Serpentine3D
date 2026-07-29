@@ -9,17 +9,16 @@ register this server with your MCP client:
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import socket
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.mcpserver import Image, MCPServer
 
 PORT_FILE = os.path.expanduser("~/.serpentine3d/rpc.port")
 
-mcp = FastMCP(
+mcp = MCPServer(
     "serpentine3d",
     instructions=(
         "Control the Serpentine3D NURBS 3D modeller. Objects are referenced "

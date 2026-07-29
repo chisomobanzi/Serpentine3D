@@ -75,13 +75,22 @@ def test_every_third_party_import_is_a_declared_dependency():
 
 
 def test_mcp_is_pinned_to_the_api_the_server_is_written_against():
-    """`mcp.server.fastmcp` is gone in mcp 2.x — it is `mcp.server.mcpserver`
-    now. Until the server is ported, an unbounded `mcp>=1.0` lets a fresh
-    install pick up 2.x and fail at import."""
+    """mcp 1.x and 2.x do not offer the same module: `mcp.server.fastmcp`
+    became `mcp.server.mcpserver`. Whichever one the server imports, the
+    version range has to be the one that has it — an unbounded range lets a
+    fresh install pick the other and fail at import."""
     with open(os.path.join(ROOT, "pyproject.toml"), "rb") as fh:
         deps = tomllib.load(fh)["project"]["dependencies"]
     spec = next(d for d in deps if d.split(">")[0].split("<")[0] == "mcp")
-    assert "<2" in spec, (
-        f"mcp is declared as {spec!r} with no upper bound, but "
-        "serpentine3d/mcp_server/server.py imports mcp.server.fastmcp, "
-        "which 2.x removed")
+    source = open(os.path.join(PKG, "mcp_server", "server.py")).read()
+
+    if "mcp.server.fastmcp" in source:
+        wanted, era = "<2", "mcp.server.fastmcp, which 2.x removed"
+    elif "mcp.server.mcpserver" in source:
+        wanted, era = ">=2", "mcp.server.mcpserver, which 1.x does not have"
+    else:
+        raise AssertionError("the MCP server imports neither known module")
+
+    assert wanted in spec.replace(" ", ""), (
+        f"mcp is declared as {spec!r}, but "
+        f"serpentine3d/mcp_server/server.py imports {era}")
