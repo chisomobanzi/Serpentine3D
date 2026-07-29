@@ -335,6 +335,23 @@ menu items. See `docs/scripting.md`.
 .venv/bin/pytest            # unit tests (geometry, scene, commands, file I/O)
 ```
 
+## Keep the lights on
+
+Serpentine3D is free and always will be. No subscription, no licence server,
+no "upgrade to Pro." One person builds and maintains this in the hours
+between other work.
+
+If it's useful to you, [a small contribution][kofi] helps keep development
+moving: bug fixes shipped, features added, servers paid for. Not required.
+Never expected. But genuinely appreciated.
+
+Bug reports, sample files and documentation fixes are worth as much and cost
+nothing: see [CONTRIBUTING.md](CONTRIBUTING.md).
+[Not here yet](docs/coming-from-rhino.md#not-here-yet) is the running list of
+what is missing, if you are looking for somewhere to start.
+
+[kofi]: https://ko-fi.com/chisomobanzi/?hidefeed=true&widget=true&embed=true&preview=true
+
 ## License
 
 MIT

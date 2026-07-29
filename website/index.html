@@ -124,6 +124,8 @@
     right: clamp(20px, 4.5vw, 64px);
     width: min(42%, 430px); height: auto;
     opacity: 0.9; filter: none; pointer-events: none;
+    /* mirrored so the head faces into the headline, not off the page */
+    transform: scaleX(-1);
   }
   @media (prefers-color-scheme: dark) {
     .hero-serpent { filter: invert(1); opacity: 0.82; }
@@ -291,9 +293,6 @@
   }
   .detail p { margin: 0; color: var(--ink-soft); font-size: 0.9875rem; }
   .detail p strong { color: var(--ink); }
-  /* headless capstone — full-width card, stacked like its siblings */
-  .detail.wide { grid-column: 1 / -1; }
-  .detail.wide p { max-width: 60ch; }
   .cmd {
     display: block; width: fit-content; max-width: 100%; overflow-x: auto;
     margin-top: 18px; padding: 9px 13px;
@@ -359,6 +358,7 @@
   }
   .badge.issued { color: var(--blue); border-color: var(--blue); }
   .badge.shop { color: var(--ink-soft); border-color: var(--hairline); }
+  .badge.due { color: var(--redline); border-color: var(--redline); }
   .dl-link {
     font-family: var(--mono);
     font-size: 0.8125rem;
@@ -381,17 +381,19 @@
   .waitlist-inner {
     display: flex;
     flex-wrap: wrap;
-    gap: 20px;
-    align-items: flex-end;
+    gap: 20px 32px;
+    align-items: center;
     justify-content: space-between;
   }
+  /* let the copy claim the space instead of leaving a hole beside the button */
+  .waitlist-inner > div { flex: 1 1 22rem; }
   .waitlist h3 {
     font-family: var(--display);
     font-weight: 400;
     font-size: 1.45rem;
     margin: 0 0 6px;
   }
-  .waitlist p { margin: 0; color: var(--ink-soft); font-size: 0.95rem; max-width: 44ch; }
+  .waitlist p { margin: 0; color: var(--ink-soft); font-size: 0.95rem; max-width: 58ch; }
   .waitlist form { display: flex; gap: 10px; flex-wrap: wrap; }
   .waitlist input[type="email"] {
     font-family: var(--mono);
@@ -495,6 +497,7 @@
 
   /* ---- sample scenes ---- */
   .samples { margin: 58px 0 8px; }
+  #support { margin-top: 58px; }
   .samples .sub { color: var(--ink-soft); max-width: 64ch; margin: 8px 0 0; }
   .samples .sub code {
     font-family: var(--mono); font-size: 0.86em; background: var(--panel);
@@ -598,22 +601,12 @@
         <div class="detail-label">DETAIL D — ASSISTANT</div>
         <h3>Model with an AI that can see the screen</h3>
         <p>Serpentine speaks <strong>MCP</strong>, so an assistant like Claude can
-        look at your viewport and run any tool you can — draw a curve, loft a
-        surface, run a boolean, measure a span, export a STEP.
-        <strong>Describe the change and watch it happen</strong>, or hand off the
-        repetitive parts and keep designing. No other CAD tool is built to be
-        operated this way.</p>
-      </div>
-      <div class="detail wide">
-        <div class="detail-label">DETAIL E — HEADLESS</div>
-        <h3>The whole modeller, no window required</h3>
-        <p>Every command runs without a GUI — the same engine that draws the
-        viewport also drives a Python script, the <strong>serp3d-batch</strong>
-        runner, or a CI job on a server with no display. Full create, read,
-        update and delete on the scene: batch a hundred variants, regenerate
-        drawing sheets, export STEP or STL — all from code. The window is just
-        one more front-end.</p>
-        <code class="cmd"><b>serp3d-batch</b> make_bracket.py bracket.step</code>
+        look at your viewport and run any tool you can — draw a curve, run a
+        boolean, export a STEP. <strong>Describe the change and watch it
+        happen</strong>, or hand off the repetitive parts and keep designing.
+        The same engine runs with <strong>no window at all</strong> — a script,
+        a batch of a hundred variants, a CI job on a server with no display.
+        No other CAD tool is built to be operated this way.</p>
       </div>
     </div>
 
@@ -710,8 +703,27 @@
       </div>
     </div>
 
-    <p class="gh-line">Technically inclined? The source code, issue tracker and
-    roadmap live on <a href="https://github.com/chisomobanzi/Serpentine3D" data-goatcounter-click="nav-github">GitHub</a> —
+    <div id="support">
+      <div class="h2-eyebrow">COST SCHEDULE — SUPPORT</div>
+      <h2>Keep the lights on</h2>
+      <p class="h2-sub">Serpentine3D is free and always will be. No subscription,
+      no licence server, no &ldquo;upgrade to Pro.&rdquo; One person builds and
+      maintains this in the hours between other work.</p>
+
+      <div class="waitlist">
+        <div class="waitlist-inner">
+          <div>
+            <p>If it&rsquo;s useful to you, a small contribution helps keep
+            development moving: bug fixes shipped, features added, servers paid
+            for. Not required. Never expected. But genuinely appreciated.</p>
+          </div>
+          <a class="btn" href="https://ko-fi.com/chisomobanzi/?hidefeed=true&amp;widget=true&amp;embed=true&amp;preview=true" data-goatcounter-click="cta-sponsor">SPONSOR →</a>
+        </div>
+      </div>
+    </div>
+
+    <p class="gh-line">Technically inclined? The source code and issue tracker
+    live on <a href="https://github.com/chisomobanzi/Serpentine3D" data-goatcounter-click="nav-github">GitHub</a> —
     contributions welcome.</p>
 
     <div class="titleblock" role="contentinfo">

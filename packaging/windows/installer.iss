@@ -31,6 +31,8 @@ ChangesAssociations=yes
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop icon"; \
   GroupDescription: "Additional icons:"; Flags: unchecked
+Name: "updatecheck"; Description: "Check GitHub for &updates on startup"; \
+  GroupDescription: "Options:"
 
 [Files]
 Source: "dist\serp3d\*"; DestDir: "{app}"; \
@@ -57,3 +59,26 @@ Root: HKA; Subkey: "Software\Classes\Serpentine3D.Document\shell\open\command"; 
 [Run]
 Filename: "{app}\serp3d.exe"; Description: "Launch {#AppName}"; \
   Flags: nowait postinstall skipifsilent
+
+[Code]
+{ Clearing the "check for updates" task writes a minimal settings.json so the
+  launch-time check is off from first run - SignPath's terms require an opt-out
+  at install time, not only a runtime setting. An existing settings file is
+  never touched: whatever the user already chose in the app wins. }
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  CfgDir, CfgPath: String;
+begin
+  if (CurStep = ssPostInstall) and (not WizardIsTaskSelected('updatecheck')) then
+  begin
+    CfgDir := ExpandConstant('{%USERPROFILE}') + '\.config\serpentine3d';
+    CfgPath := CfgDir + '\settings.json';
+    if not FileExists(CfgPath) then
+    begin
+      ForceDirectories(CfgDir);
+      SaveStringToFile(CfgPath,
+        '{' + #13#10 + '  "check_updates": false' + #13#10 + '}' + #13#10,
+        False);
+    end;
+  end;
+end;

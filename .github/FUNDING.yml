@@ -1,0 +1,13 @@
+# Adds the "Sponsor" button to the repo header, a card in the sidebar, and a
+# link on every issue. Donations fund running costs — the Apple and Windows
+# code-signing certificates first, then the time to keep building.
+#
+# Nothing here gates a feature: every build stays MIT-licensed and free.
+#
+# GitHub only takes the handle here, so this lands on the Ko-fi profile page
+# rather than the donate panel the website's button opens.
+
+ko_fi: chisomobanzi
+
+# github: [chisomobanzi]   # restore once GitHub Sponsors is live
+# liberapay: <handle>

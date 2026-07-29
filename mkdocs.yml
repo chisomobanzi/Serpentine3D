@@ -57,6 +57,7 @@ nav:
   - Explanation:
       - How it works: explanation/how-it-works.md
   - Coming from Rhino: coming-from-rhino.md
+  - Code signing policy: code-signing-policy.md
 
 markdown_extensions:
   - admonition
