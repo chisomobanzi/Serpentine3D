@@ -56,8 +56,11 @@ from ..core.mesh import MeshShape
 from .progress import Progress
 
 # Set once in the reader process; forked converters inherit it, and on
-# platforms without fork each fills it in for itself.
+# platforms without fork each fills it in for itself. The layer and material
+# tables come with it: a worker resolves an object's colour itself.
 _MODEL = None
+_LAYERS: dict = {}
+_MATERIALS: dict = {}
 
 # Spawning a process and importing the kernel into it costs a couple of
 # seconds, which most .3dm files do not take to convert in the first place.
@@ -245,13 +248,23 @@ def _decode(payload):
 
 def _init_worker(path: str):
     """Fill in the model only where fork did not hand one over."""
-    global _MODEL
+    global _MODEL, _LAYERS, _MATERIALS
+    from . import rhino
+
     if _MODEL is None:
         _MODEL = r3.File3dm.Read(path)
+    # Once per worker rather than once per batch: a drawing has thousands of
+    # objects and a few dozen layers.
+    _LAYERS = rhino.read_layers(_MODEL)
+    _MATERIALS = rhino.read_materials(_MODEL)
 
 
 def _convert(indices: list[int]):
-    """[(index, name, layer index, [encoded shape], size)] for one batch.
+    """[(index, name, appearance, [encoded shape], size)] for one batch.
+
+    Appearance is resolved here rather than by the reader, because working out
+    where an object's colour comes from means reading its attributes, and that
+    is exactly the per-object binding cost the pool exists to share out.
 
     A mesh too big for one worker is not converted here. Its vertex and face
     counts come back instead, as `size`, and the reader shares the reading of
@@ -265,8 +278,9 @@ def _convert(indices: list[int]):
         obj = _MODEL.Objects[i]
         geo = obj.Geometry
         attrs = obj.Attributes
+        meta = rhino.object_appearance(attrs, _LAYERS, _MATERIALS)
         if isinstance(geo, r3.Mesh) and len(geo.Vertices) > limit:
-            out.append((i, attrs.Name or "", attrs.LayerIndex, [],
+            out.append((i, attrs.Name or "", meta, [],
                         (len(geo.Vertices), len(geo.Faces))))
             continue
         try:
@@ -275,7 +289,7 @@ def _convert(indices: list[int]):
             shapes = []
         encoded = [_encode(s) for s in shapes
                    if s is not None and not s.IsNull()]
-        out.append((i, attrs.Name or "", attrs.LayerIndex, encoded, None))
+        out.append((i, attrs.Name or "", meta, encoded, None))
     return out
 
 
@@ -310,9 +324,9 @@ def _read_piece(job):
 def _convert_in_pool(path: str, workers: int, cancel=None):
     """Read the file, convert it across `workers` processes, yield as it goes.
 
-    Messages are ("status", fraction, text), ("layers", dict), ("total", n)
-    and ("batch", done, total, results). Runs in the spawned reader process,
-    but is a plain generator so it can also be driven in-process.
+    Messages are ("status", fraction, text), ("total", n) and
+    ("batch", done, total, results). Runs in the spawned reader process, but is
+    a plain generator so it can also be driven in-process.
     """
     global _MODEL
 
@@ -320,9 +334,6 @@ def _convert_in_pool(path: str, workers: int, cancel=None):
     _MODEL = r3.File3dm.Read(path)
     if _MODEL is None:
         raise IOError(f"Could not read 3dm file: {path}")
-
-    from . import rhino
-    yield ("layers", rhino.read_layers(_MODEL))
 
     total = len(_MODEL.Objects)
     yield ("total", total)
@@ -340,11 +351,11 @@ def _convert_in_pool(path: str, workers: int, cancel=None):
                 pool.terminate()
                 return
             rows = []
-            for index, name, layer, encoded, size in results:
+            for index, name, meta, encoded, size in results:
                 if size is None:
-                    rows.append((index, name, layer, encoded))
+                    rows.append((index, name, meta, encoded))
                 else:
-                    deferred[index] = (name, layer, size)
+                    deferred[index] = (name, meta, size)
             done += len(rows)
             yield ("batch", done, total, rows)
         if deferred:
@@ -363,7 +374,7 @@ def _share_out(pool, deferred, done, total, workers, cancel):
     """
     limit = split_vertices()
     jobs, held = [], {}
-    for index, (_, _, (vertices, faces)) in deferred.items():
+    for index, (_, _meta, (vertices, faces)) in deferred.items():
         parts = _piece_count(vertices, workers, limit)
         spans = zip(_pieces(vertices, parts), _pieces(faces, parts))
         held[index] = [None] * parts
@@ -387,10 +398,10 @@ def _share_out(pool, deferred, done, total, workers, cancel):
                 np.concatenate([piece[0] for piece in pieces]),
                 np.concatenate([piece[1] for piece in pieces]))
             del held[index]
-            name, layer, _ = deferred[index]
+            name, meta, _ = deferred[index]
             done += 1
             yield ("batch", done, total,
-                   [(index, name, layer, [_encode(shape)])])
+                   [(index, name, meta, [_encode(shape)])])
 
 
 def _read_file(path: str, workers: int, conn, cancel):
@@ -442,7 +453,7 @@ def _assemble(messages, report, opening: str = "") -> list[tuple[str, object,
     freed while the workers are still busy and the parent is not left holding
     the whole file twice over.
     """
-    layers, total, rows = {}, None, []
+    total, rows = None, []
     # What to repaint between messages. The bar must not creep while the
     # helper is thinking, so a heartbeat repeats the last real update rather
     # than inventing one.
@@ -453,9 +464,9 @@ def _assemble(messages, report, opening: str = "") -> list[tuple[str, object,
         kind = message[0]
         if kind == "batch":
             _, done, total, results = message
-            rows.extend((index, name, layer,
+            rows.extend((index, name, meta,
                          [_decode(payload) for payload in encoded])
-                        for index, name, layer, encoded in results)
+                        for index, name, meta, encoded in results)
             latest = (done / (total or 1),
                       f"Converting object {done} of {total}")
             report(*latest)
@@ -464,8 +475,6 @@ def _assemble(messages, report, opening: str = "") -> list[tuple[str, object,
         elif kind == "status":
             latest = (message[1], message[2])
             report(*latest)
-        elif kind == "layers":
-            layers = message[1]
         elif kind == "total":
             total = message[1]
         elif kind == "error":
@@ -484,11 +493,10 @@ def _assemble(messages, report, opening: str = "") -> list[tuple[str, object,
     # worker was quickest, and the fallback names count in file order.
     rows.sort(key=lambda row: row[0])
     out, counter = [], 0
-    for _, name, layer, shapes in rows:
+    for _, name, meta, shapes in rows:
         for shape in shapes:
             counter += 1
-            out.append((name or f"3dm object {counter:02d}",
-                        shape, layers.get(layer, {})))
+            out.append((name or f"3dm object {counter:02d}", shape, meta))
     return out
 
 

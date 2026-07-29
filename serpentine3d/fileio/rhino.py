@@ -31,6 +31,14 @@ from .progress import Cancelled, Progress
 from .rhino_parallel import (MIN_PARALLEL_BYTES, _spawn_executable,
                              import_3dm_parallel, worker_count)
 
+# Rhino's own numbering, read once here rather than looked up per object:
+# 11759 objects is 11759 enum constructions otherwise.
+_COLOR_FROM_OBJECT = int(r3.ObjectColorSource.ColorFromObject)
+_COLOR_FROM_MATERIAL = int(r3.ObjectColorSource.ColorFromMaterial)
+_MATERIAL_FROM_OBJECT = int(r3.ObjectMaterialSource.MaterialFromObject)
+# Rhino's shine is 0..255, where 255 is a mirror.
+MAX_SHINE = 255.0
+
 
 # ------------------------------------------------------------------ knots
 
@@ -616,7 +624,8 @@ def _worth_parallelising(path: str) -> bool:
 
 
 def read_layers(model) -> dict:
-    """{layer index: {name, color}} — plain data, so it can cross a pipe."""
+    """{layer index: {name, color, material}} — plain data, so it can cross
+    a pipe."""
     layers = {}
     for i in range(len(model.Layers)):
         layer = model.Layers[i]
@@ -624,8 +633,75 @@ def read_layers(model) -> dict:
         layers[layer.Index] = {
             "name": layer.Name,
             "color": (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0),
+            "material": layer.RenderMaterialIndex,
         }
     return layers
+
+
+def read_materials(model) -> dict:
+    """{material index: {color, opacity, roughness, metallic}}.
+
+    Rendered mode has always read opacity, gloss and metal off an object's
+    material; no import ever gave it one, so a file that carries its colour on
+    its materials — which is how you would colour anything meant to be
+    rendered — arrived with every object the colour of its layer (#4).
+
+    Plain data, like the layers, so it can cross the pipe once instead of
+    riding along with every object that uses it.
+    """
+    materials = {}
+    for i in range(len(model.Materials)):
+        mat = model.Materials[i]
+        c = mat.DiffuseColor
+        materials[i] = {
+            "color": (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0),
+            "opacity": 1.0 - _clamp(mat.Transparency),
+            # Rhino's shine runs to 255 and means the opposite of roughness.
+            "roughness": 1.0 - _clamp(mat.Shine / MAX_SHINE),
+            "metallic": _clamp(mat.Reflectivity),
+        }
+    return materials
+
+
+def _clamp(value: float) -> float:
+    try:
+        return min(1.0, max(0.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def object_appearance(attrs, layers: dict, materials: dict) -> dict:
+    """How one object should look: {layer, layer_color, color, material}.
+
+    `color` is an override and is None when the layer decides, which is the
+    common case and keeps a drawing's objects following their layer the way
+    they do in Rhino. Shared with the parallel importer, which resolves this
+    in the worker: the two paths disagreeing would be worse than either being
+    wrong.
+    """
+    layer = layers.get(attrs.LayerIndex, {})
+    index = attrs.MaterialIndex \
+        if int(attrs.MaterialSource) == _MATERIAL_FROM_OBJECT \
+        else layer.get("material", -1)
+    material = materials.get(index)
+
+    source = int(attrs.ColorSource)
+    color = None
+    if source == _COLOR_FROM_OBJECT:
+        c = attrs.ObjectColor
+        color = (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0)
+    elif source == _COLOR_FROM_MATERIAL and material is not None:
+        color = material["color"]
+
+    return {"layer": layer.get("name"), "layer_color": layer.get("color"),
+            "color": color, "material": _shading(material)}
+
+
+def _shading(material: dict | None) -> dict | None:
+    """The part of a material the viewport can actually draw."""
+    if material is None:
+        return None
+    return {k: material[k] for k in ("opacity", "roughness", "metallic")}
 
 
 def object_to_shapes(geo, report=None) -> list:
@@ -681,6 +757,7 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
         raise IOError(f"Could not read 3dm file: {path}")
 
     layers = read_layers(model)
+    materials = read_materials(model)
 
     out = []
     counter = 0
@@ -691,12 +768,12 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
         step = report.part(index / total, (index + 1) / total,
                            f"Converting object {index + 1} of {total}")
         step(0.0)
+        meta = object_appearance(obj.Attributes, layers, materials)
         for shape in object_to_shapes(obj.Geometry, step):
             if shape is None or shape.IsNull():
                 continue
             counter += 1
             name = obj.Attributes.Name or f"3dm object {counter:02d}"
-            meta = layers.get(obj.Attributes.LayerIndex, {})
             out.append((name, shape, meta))
     return out
 
@@ -721,6 +798,13 @@ def export_3dm(scene, path: str, only_ids: list | None = None):
         attrs = r3.ObjectAttributes()
         attrs.Name = obj.name
         attrs.LayerIndex = layer_index.get(obj.layer_id, 0)
+        # An object that overrides its layer has to say so, or opening a file
+        # and saving it flattens every object onto its layer's colour.
+        if obj.color is not None:
+            attrs.ObjectColor = (int(obj.color[0] * 255),
+                                 int(obj.color[1] * 255),
+                                 int(obj.color[2] * 255), 255)
+            attrs.ColorSource = r3.ObjectColorSource.ColorFromObject
         if obj.kind == "curve":
             exported = False
             for edge in geometry.edges_of(obj.shape):

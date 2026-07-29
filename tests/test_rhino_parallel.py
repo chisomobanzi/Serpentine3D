@@ -153,6 +153,46 @@ def test_parallel_import_gives_the_same_objects_as_serial(tmp_path):
         == pytest.approx([geometry.volume(s) for _, s, _ in serial], rel=1e-6)
 
 
+def test_parallel_import_agrees_about_colour(tmp_path):
+    """Colour is resolved in the worker, which is a different process holding
+
+    its own copy of the model. The two paths disagreeing would be worse than
+    either being wrong.
+    """
+    path = str(tmp_path / "coloured.3dm")
+    model = r3.File3dm()
+    layer = r3.Layer()
+    layer.Name = "everything"
+    layer.Color = (220, 30, 30, 255)
+    model.Layers.Add(layer)
+    mat = r3.Material()
+    mat.DiffuseColor = (40, 90, 240, 255)
+    mat.Transparency = 0.25
+    model.Materials.Add(mat)
+    for i in range(6):
+        box = r3.Box(r3.BoundingBox(r3.Point3d(i * 10, 0, 0),
+                                    r3.Point3d(i * 10 + 5, 5, 5)))
+        attrs = r3.ObjectAttributes()
+        attrs.Name = f"box {i}"
+        if i % 3 == 1:
+            attrs.ObjectColor = (30, 200, 60, 255)
+            attrs.ColorSource = r3.ObjectColorSource.ColorFromObject
+        elif i % 3 == 2:
+            attrs.MaterialIndex = 0
+            attrs.MaterialSource = r3.ObjectMaterialSource.MaterialFromObject
+            attrs.ColorSource = r3.ObjectColorSource.ColorFromMaterial
+        model.Objects.AddBrep(r3.Brep.CreateFromBox(box), attrs)
+    assert model.Write(path, 8)
+
+    serial = {n: m for n, _, m in rhino.import_3dm(path)}
+    parallel = {n: m for n, _, m in rp.import_3dm_parallel(path, workers=3)}
+    assert parallel == serial
+    assert serial["box 1"]["color"] == pytest.approx((30 / 255, 200 / 255,
+                                                      60 / 255), abs=1e-3)
+    assert serial["box 2"]["material"]["opacity"] == pytest.approx(0.75,
+                                                                   abs=1e-3)
+
+
 def test_parallel_import_reports_progress(tmp_path):
     path = _boxes_3dm(str(tmp_path / "boxes.3dm"), 12)
     seen = []

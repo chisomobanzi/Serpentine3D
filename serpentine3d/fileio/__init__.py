@@ -155,16 +155,23 @@ def _import_file(scene, path: str, ext: str, report) -> int:
         layer_map = {}
         for done, (name, shape, meta) in enumerate(items, 1):
             layer_id = None
-            lname = meta.get("name")
+            lname = meta.get("layer")
             if lname:
                 if lname not in layer_map:
                     existing = scene.layers.find_by_name(lname)
                     if existing is None:
                         existing = scene.layers.create(
-                            lname, meta.get("color"))
+                            lname, meta.get("layer_color"))
                     layer_map[lname] = existing.id
                 layer_id = layer_map[lname]
-            scene.add(shape, name=name, layer_id=layer_id)
+            # Not `obj`: that name is the .obj importer, one branch above.
+            added = scene.add(shape, name=name, layer_id=layer_id)
+            # An override only: leaving it None keeps the object following its
+            # layer, the way it does in Rhino.
+            if meta.get("color"):
+                added.color = meta["color"]
+            if meta.get("material"):
+                added.material = dict(meta["material"])
             adding.tick(done / count, f"Adding object {done} of {count}")
         return len(items)
     raise ValueError(f"Unsupported import format: {ext}")

@@ -73,6 +73,18 @@
   single-process path, where starting a helper would cost more than it saves,
   and `SERP3D_IMPORT_WORKERS=1` forces it everywhere.
 
+- **An imported object keeps the colour it was given**: Rhino takes an
+  object's colour from one of four places — its layer, the object itself, its
+  material, or the block it sits in — and the importer read the layer and
+  nothing else. A drawing that colours objects individually, or by material as
+  you would for anything meant to be rendered, arrived in one flat layer
+  colour, which in Rendered mode looked like no colours at all
+  ([#4](https://github.com/chisomobanzi/Serpentine3D/issues/4)). Object and
+  material colours now come across, and materials arrive with them, so a
+  transparent or glossy surface in the file is transparent or glossy here.
+  Saving writes an object's own colour back out, so opening a file and saving
+  it no longer flattens it onto its layers.
+
 - **Imported meshes are shaded by their surface, not by their triangles**:
   Rhino stores a mesh unwelded — every face owning its own corners — so
   averaging face normals per vertex index averaged exactly one face and shaded
