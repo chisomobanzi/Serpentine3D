@@ -4,6 +4,20 @@
 
 ### Fixed
 
+- Zoom Selected now fills the viewport with what you selected, instead of
+  leaving it small in the middle. It framed the *sphere* around the
+  selection in the *vertical* field of view and then backed off another
+  15%, and all three parts of that gave away room: the sphere around a box
+  is half its diagonal where the box on screen is only about half its
+  height, the window is wider than it is tall so the sides went unused, and
+  the 15% came on top of both. A wide flat model — a set, a floor plan,
+  most of what anyone zooms to — came back reaching under half the frame in
+  each direction, so filling about a quarter of the picture. It now puts
+  the eight corners of the selection on the camera's own axes and stops at
+  the distance where the outermost one reaches the edge, reading the shape
+  of the window as it goes. Zoom Extents and the zoom window use the same
+  fit, so they frame the same way.
+
 - Opening a big file no longer spends seconds redrawing panels nobody has
   looked at yet. Every object added announced itself, and two of the things
   listening answer by reading the whole scene — the layers panel rebuilds

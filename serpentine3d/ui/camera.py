@@ -141,17 +141,64 @@ class Camera:
         self.distance *= math.pow(0.88, steps)
         self.distance = max(0.01, min(self.distance, 1e6))
 
-    def zoom_extents(self, bbox: tuple | None):
+    def zoom_extents(self, bbox: tuple | None, aspect: float = 1.0):
+        """Pull back until the box just fills the frame.
+
+        It used to frame the sphere around the box in the vertical field of
+        view, then back off another 15%. All three parts of that gave away
+        room: the sphere around a box is half its diagonal where the box on
+        screen is only about half its height, the window is wider than it is
+        tall so the sides went unused, and the 15% came on top of both. A
+        wide flat model — a set, a floor plan, most of what anyone zooms to —
+        came back filling under half the frame in each direction, so a
+        quarter of the picture.
+
+        So measure the box instead of a sphere around it: put the eight
+        corners on the camera's own axes and take the distance at which the
+        outermost one lands on the edge, sideways and up-down separately.
+        `aspect` is the window's width over its height; the default of 1
+        assumes a square window, which only ever leaves room spare.
+        """
         if bbox is None:
             self.target = np.zeros(3)
             self.distance = 60.0
             return
         mn, mx = np.asarray(bbox[0], float), np.asarray(bbox[1], float)
-        center = (mn + mx) / 2
-        radius = float(np.linalg.norm(mx - mn)) / 2
-        radius = max(radius, 1.0)
-        self.target = center
-        self.distance = radius / math.sin(math.radians(self.fov) / 2) * 1.15
+        self.target = (mn + mx) / 2
+        half = (mx - mn) / 2
+
+        # A hair inside the edge, so the outermost face is not sitting on the
+        # boundary pixel and clipped by rounding.
+        t = math.tan(math.radians(self.fov) / 2) / 1.03
+        t_side = t * max(float(aspect), 1e-3)
+
+        # A point, or something else with no size: nothing to fill the frame
+        # with, so stand off as if it were a unit sphere. Measured against
+        # where it is rather than against zero — a single vertex comes back
+        # as a box a ten-millionth wide, and out at survey coordinates the
+        # slack in a bounding box is bigger still.
+        if not np.any(half > 1e-6 * max(1.0, float(np.abs(self.target).max()))):
+            self.distance = 1.0 / math.sin(math.radians(self.fov) / 2)
+            return
+
+        signs = np.array([(x, y, z) for x in (-1, 1)
+                          for y in (-1, 1) for z in (-1, 1)], float)
+        pts = signs * half
+        right, up = self.right_up()
+        fwd = normalize(self.target - self.position)   # away from the eye
+        across, high, deep = pts @ right, pts @ up, pts @ fwd
+
+        if self.projection == "parallel":
+            # No foreshortening, so depth does not enter it — the frame is
+            # distance x tan(fov/2) either side, by proj_matrix.
+            dist = max(np.abs(high).max() / t, np.abs(across).max() / t_side)
+        else:
+            # A corner sits on the edge when its offset equals its depth
+            # times the tangent; a near corner therefore needs more room
+            # than a far one, hence subtracting its depth.
+            dist = max((np.abs(high) / t - deep).max(),
+                       (np.abs(across) / t_side - deep).max())
+        self.distance = max(float(dist), 1e-3)
 
     def set_standard_view(self, name: str):
         if name not in STANDARD_VIEWS:

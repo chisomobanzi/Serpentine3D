@@ -1900,8 +1900,13 @@ class Viewport(QOpenGLWidget):
         self.displayModeChanged.emit()
         self.update()
 
+    def _aspect(self) -> float:
+        """The window's width over its height, which the fit needs: a wide
+        window has room at the sides that a square one does not."""
+        return self.width() / max(self.height(), 1)
+
     def zoom_extents(self):
-        self.camera.zoom_extents(self.scene.bbox())
+        self.camera.zoom_extents(self.scene.bbox(), self._aspect())
         self.update()
 
     def zoom_selected(self) -> bool:
@@ -1910,14 +1915,13 @@ class Viewport(QOpenGLWidget):
                 if (o := self.scene.get(i)) is not None]
         if not objs:
             return False
-        from ..core import geometry as g
-        mins = np.full(3, np.inf)
-        maxs = np.full(3, -np.inf)
-        for o in objs:
-            mn, mx = g.bbox(o.shape)
-            mins = np.minimum(mins, mn)
-            maxs = np.maximum(maxs, mx)
-        self.camera.zoom_extents((tuple(mins), tuple(maxs)))
+        # o.bbox(), not geometry.bbox(o.shape): objects remember their own
+        # bounds, and zooming to a whole drawing would otherwise measure
+        # every one of them again.
+        boxes = np.array([o.bbox() for o in objs], float)
+        self.camera.zoom_extents((tuple(boxes[:, 0].min(axis=0)),
+                                  tuple(boxes[:, 1].max(axis=0))),
+                                 self._aspect())
         self.update()
         return True
 
@@ -1926,7 +1930,8 @@ class Viewport(QOpenGLWidget):
         mn = np.minimum(np.asarray(p1, float), np.asarray(p2, float))
         mx = np.maximum(np.asarray(p1, float), np.asarray(p2, float))
         pad = max(float(np.linalg.norm(mx - mn)) * 0.05, 0.5)
-        self.camera.zoom_extents((tuple(mn - pad), tuple(mx + pad)))
+        self.camera.zoom_extents((tuple(mn - pad), tuple(mx + pad)),
+                                 self._aspect())
         self.update()
 
     def set_view(self, name: str):

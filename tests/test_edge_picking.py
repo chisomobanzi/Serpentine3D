@@ -20,7 +20,12 @@ def _viewport(scene):
     view = vp_mod.Viewport(scene, SelectionManager(scene))
     view.resize(800, 600)
     view.camera.set_standard_view("front")     # parallel, looking along +Y
-    view.camera.zoom_extents(scene.bbox())
+    # Framed by hand rather than by zoom-to-fit. What is under test is which
+    # of two edges wins a click, and that needs them landing a few pixels
+    # apart — a property of the framing, which is not this test's subject and
+    # should not be able to break it. At this distance the view is 60 units
+    # tall over 600 pixels, so the 0.4 between them is 4 pixels.
+    view.camera.distance = 72.46
     return view
 
 

@@ -83,6 +83,13 @@ def _viewport(count: int, spread: float = 10.0):
     return view
 
 
+def _on_screen(view, obj) -> tuple[float, float]:
+    """The pixel the middle of an object's first edge falls on."""
+    pts = obj.mesh.edge_segments.reshape(-1, 3)[:2]
+    scr = view.camera.project(pts, view.width(), view.height())
+    return float(scr[:, 0].mean()), float(scr[:, 1].mean())
+
+
 def _mvp(view):
     w, h = view.width(), view.height()
     v = view.camera.view_matrix()
@@ -366,15 +373,18 @@ def test_a_moved_camera_picks_from_its_new_pose(gl):
     view = _viewport(40, spread=4.0)
     view.camera.set_standard_view("top")
     view.zoom_extents()
-    first = view.pick_object(400.0, 300.0)
+    # Aim at something rather than at the middle and hope: how much model a
+    # pixel covers depends on the framing, which is not what is under test.
+    px, py = _on_screen(view, view.scene.all()[0])
+    first = view.pick_object(px, py)
     assert first is not None, "nothing under the cursor to begin with"
 
     view.camera.pan(4000.0, 4000.0, view.height())   # far away from everything
-    assert view.pick_object(400.0, 300.0) is None, (
+    assert view.pick_object(px, py) is None, (
         "camera panned off the model but the pick still hit an object")
 
     view.camera.pan(-4000.0, -4000.0, view.height())
-    assert view.pick_object(400.0, 300.0) == first, (
+    assert view.pick_object(px, py) == first, (
         "camera panned back but the pick no longer finds the object")
 
 
