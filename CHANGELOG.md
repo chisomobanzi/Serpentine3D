@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `--version` (and `-V`) on every command: `serp3d`, `serp`, `serp3d-batch`
+  and `serp3d-mcp`. An installed build is one opaque file — an AppImage, a
+  .dmg, an .exe — and until now the only place the version appeared was the
+  splash screen, so answering "which build is this?" meant launching the
+  whole app. `serp3d` and `serp3d-batch` answer before Qt or the geometry
+  kernel is loaded, which matters because you reach for `--version` when a
+  build is misbehaving, and a build broken enough to ask about may not
+  survive importing 150 MB of OpenCASCADE to tell you.
+
 ## 0.5.4 — 2026-07-29
 
 ### Added

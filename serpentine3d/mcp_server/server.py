@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 from typing import Any
 
 from mcp.server.mcpserver import Image, MCPServer
@@ -240,6 +241,14 @@ def serp_viewport(view: str = "", display_mode: str = "",
 
 
 def main():
+    # Unlike the other entry points this one cannot answer cheaply — the
+    # tools are registered at import time, so the work is already done by
+    # the time we get here. It answers anyway: someone reading an assistant's
+    # config wants to know which build it is about to talk to.
+    if "--version" in sys.argv or "-V" in sys.argv:
+        from .. import version_line
+        print(version_line())
+        return 0
     mcp.run()
 
 

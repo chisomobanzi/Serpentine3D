@@ -19,6 +19,10 @@ import sys
 
 def main(argv: list | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if "--version" in argv or "-V" in argv:
+        from . import version_line
+        print(version_line())
+        return 0
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     open_path = None
     if "--open" in argv:

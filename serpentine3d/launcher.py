@@ -15,6 +15,8 @@ from __future__ import annotations
 import signal
 import sys
 
+from . import version_line
+
 
 def main() -> int:
     # First, and before anything can print or open a window: the .3dm importer
@@ -23,6 +25,14 @@ def main() -> int:
     # instead of running the helper — one new window per worker.
     import multiprocessing
     multiprocessing.freeze_support()
+
+    # Answered before Qt or the kernel is touched. An installed build is one
+    # opaque file, and the moment you want to ask it what it is, is the
+    # moment it is misbehaving — possibly too badly to survive importing
+    # 150 MB of OpenCASCADE to tell you.
+    if "--version" in sys.argv or "-V" in sys.argv:
+        print(version_line())
+        return 0
 
     if "--selftest" in sys.argv:
         # headless bundle check — no window, no splash
