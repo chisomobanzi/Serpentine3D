@@ -24,6 +24,7 @@ from .core.scene import Scene
 from .core.selection import SelectionManager
 from .ui import theme
 from .ui.command_line import CommandLine
+from .ui.dialogs import untether
 from .ui.layers_panel import LayersPanel
 from .ui.properties import PropertiesPanel
 from .ui.viewport import Viewport, set_default_gl_format
@@ -824,8 +825,8 @@ class MainWindow(QMainWindow):
             dlg.setFileMode(QFileDialog.FileMode.ExistingFile)
         if sys.platform.startswith("linux"):
             dlg.setOption(QFileDialog.Option.DontUseNativeDialog, True)
-            dlg.setWindowFlags(Qt.WindowType.Window)   # not DIALOG-type: no attach
             dlg.resize(900, 580)
+        untether(dlg)
         if dlg.exec() and dlg.selectedFiles():
             path = dlg.selectedFiles()[0]
             return (fileio.ensure_suffix(path, dlg.selectedNameFilter())
@@ -850,20 +851,11 @@ class MainWindow(QMainWindow):
                               "Cancel", 0, 100, self)
         dlg.setWindowTitle("Opening")
         dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        if sys.platform.startswith("linux"):
-            # Same trick as _pick_file and _pick_stl_quality: under GNOME's
-            # attach-modal-dialogs a DIALOG-type window is glued to its parent,
-            # so dragging it drags the main window along with it.
-            dlg.setWindowFlags(Qt.WindowType.Window)
         dlg.setMinimumDuration(500)
         dlg.setAutoClose(False)
         dlg.setAutoReset(False)
-        # It appears on a delay, so place it now — an untethered window would
-        # otherwise be left wherever the window manager felt like putting it.
-        dlg.adjustSize()
-        frame = dlg.frameGeometry()
-        frame.moveCenter(self.frameGeometry().center())
-        dlg.move(frame.topLeft())
+        # It appears on a delay, so place it now rather than on the way up.
+        untether(dlg, over=self)
 
         def report(fraction, message):
             dlg.setLabelText(message)
@@ -1000,11 +992,8 @@ class MainWindow(QMainWindow):
 
     def _pick_stl_quality(self) -> str | None:
         """STL quality picker. Built as an instance (not QInputDialog.getItem)
-        so we can give it a NORMAL window type on Linux — under GNOME's
-        attach-modal-dialogs a DIALOG-type window gets tethered and drags the
-        main window around. Same trick as _pick_file. Returns a QUALITY key,
+        so it can be untethered from the main window. Returns a QUALITY key,
         or None if cancelled."""
-        import sys
         labels = [lbl for lbl, _ in self._STL_QUALITY]
         dlg = QInputDialog(self)
         dlg.setWindowTitle("STL mesh quality")
@@ -1013,12 +1002,7 @@ class MainWindow(QMainWindow):
         dlg.setComboBoxItems(labels)
         dlg.setComboBoxEditable(False)
         dlg.setTextValue(labels[2])            # default to "Fine" for printing
-        if sys.platform.startswith("linux"):
-            dlg.setWindowFlags(Qt.WindowType.Window)   # dodge attach-modal
-        dlg.adjustSize()
-        frame = dlg.frameGeometry()
-        frame.moveCenter(self.frameGeometry().center())
-        dlg.move(frame.topLeft())
+        untether(dlg, over=self)
         if not dlg.exec():
             return None
         return dict(self._STL_QUALITY)[dlg.textValue()]

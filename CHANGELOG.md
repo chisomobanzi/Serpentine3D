@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed
+
+- The Settings window can be moved on its own again. GNOME attaches modal
+  dialogs to their parent, so Settings was pinned to the middle of the
+  drawing it was about and dragging it dragged the whole application along
+  behind it — no way to put the panel beside the model and watch a setting
+  take effect. Four places had already met this and each dodged it privately;
+  Settings, opened the same way, never did. The dodge now has a name and one
+  home, and the rule that no dialog is glued to the window that opened it is
+  checked for every dialog the app puts on screen rather than remembered a
+  fifth time.
+
 ### Internal
 
 - The rule that what is drawn must be the geometry the scene holds is now

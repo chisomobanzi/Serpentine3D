@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from ..commands import base as cmd_base
 from ..core.snaps import SNAP_TYPES
 from ..utils.config import parse_chord, parse_rhino_aliases, parse_shortcuts
+from .dialogs import untether
 
 
 def _page(title: str, subtitle: str) -> tuple[QWidget, QVBoxLayout]:
@@ -58,6 +59,7 @@ class SettingsDialog(QDialog):
         self.cfg = window.cfg
         self.setWindowTitle("Serpentine3D Settings")
         self.resize(760, 620)
+        untether(self, over=window)   # a panel you read beside the drawing
 
         self.sidebar = QListWidget()
         self.sidebar.setFixedWidth(160)
