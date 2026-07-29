@@ -20,9 +20,11 @@
   `serpentine` to `serpentine3d` left the old tree behind in setuptools'
   staging directory, which is never cleaned out but is zipped into the wheel
   wholesale — so every build since the rename also installed 73 files of dead
-  code under the old top-level name. Staging is now rebuilt from scratch, and
-  the build fails outright if the finished bundle carries a top-level package
-  we did not intend to own.
+  code under the old top-level name. All three installer builds now rebuild
+  staging from scratch, and the AppImage build fails outright if the finished
+  bundle carries a top-level package we did not intend to own. Nothing was ever
+  published to PyPI, and the .exe and .dmg were unaffected because PyInstaller
+  takes only what the entry script imports — but that was luck, not design.
 
 - **...and on every other command that takes more than one point**: the end of
   an arc could not find the arc's start, and neither could the third pick of a

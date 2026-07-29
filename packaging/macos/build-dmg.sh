@@ -30,6 +30,11 @@ fi
 
 echo "=== ensure build tools + real (non-editable) install ==="
 "$PY" -m pip install --quiet pyinstaller
+# setuptools stages the package into the repo's build/ and never takes
+# anything out again, so a rename leaves the old tree there to be installed
+# alongside the new one. `rm -rf build` further down clears PyInstaller's
+# workspace in this directory, which is a different build/ entirely.
+rm -rf ../../build
 # PyInstaller cannot trace PEP 660 editable installs — install real files.
 "$PY" -m pip install --quiet --force-reinstall --no-deps ../..
 

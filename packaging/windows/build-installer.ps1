@@ -7,6 +7,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 & $Python -m pip install --quiet pyinstaller
+# setuptools stages the package into the repo's build/ and never takes
+# anything out again, so a rename leaves the old tree there to be installed
+# alongside the new one. The Remove-Item below clears PyInstaller's workspace
+# in this directory, which is a different build\ entirely.
+Remove-Item ..\..\build -Recurse -Force -ErrorAction SilentlyContinue
 # PyInstaller cannot trace PEP 660 editable installs - make sure the
 # package is present as real files in site-packages
 & $Python -m pip install --quiet --force-reinstall --no-deps ..\..
