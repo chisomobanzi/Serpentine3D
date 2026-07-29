@@ -1,3 +1,3 @@
 """Serpentine3D — an open-source NURBS modeller for Linux."""
 
-__version__ = "0.5.3"
+__version__ = "0.5.4"
