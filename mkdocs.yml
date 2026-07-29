@@ -57,7 +57,12 @@ nav:
   - Explanation:
       - How it works: explanation/how-it-works.md
   - Coming from Rhino: coming-from-rhino.md
-  - Code signing policy: code-signing-policy.md
+  # Code signing policy: code-signing-policy.md
+  # Held out of the nav until the signing pipeline is live. The page states in
+  # the present tense that the Windows builds are signed, and build-windows.yml
+  # has no signing step yet, so publishing it to the docs site would be a claim
+  # we cannot back. The file stays in the repo, which is a URL SignPath's
+  # application can point at; restore this line once releases are signed.
 
 markdown_extensions:
   - admonition
