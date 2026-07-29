@@ -32,6 +32,11 @@ DECLARED = {
         rf'\s*[=:]\s*"{V}"',
     "packaging/macos/build-dmg.sh": rf'^VERSION="{V}"',
     "packaging/windows/installer.iss": rf'#define AppVersion "{V}"',
+    # the lock pins the project's own version alongside its dependencies,
+    # and CI installs with --locked, so a bump that skips it fails the
+    # build rather than shipping something wrong — but it fails it on the
+    # release commit, which is the worst moment to find out
+    "uv.lock": rf'name = "serpentine3d"\nversion = "{V}"',
     # the download links have the version baked into the file name, so they
     # rot into 404s rather than into a stale-but-working page
     "README.md": rf'Serpentine3D-{V}-arm64\.dmg',
