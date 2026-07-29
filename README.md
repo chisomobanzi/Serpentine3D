@@ -333,35 +333,22 @@ menu items. See `docs/scripting.md`.
 .venv/bin/pytest            # unit tests (geometry, scene, commands, file I/O)
 ```
 
-## Supporting the project
+## Keep the lights on
 
-Serpentine3D is free and MIT-licensed, and every release stays that way — no
-paid tier, no donor-only build, nothing behind a login. This section is not a
-step towards any of those.
+Serpentine3D is free and always will be. No subscription, no licence server,
+no "upgrade to Pro." One person builds and maintains this in the hours
+between other work.
 
-Rhino costs $995. This does a good deal of what Rhino does, on three operating
-systems, for nothing. The distance between a young focused modeller and the
-one you actually work in is measured in a single currency, which is hours —
-and there is one person's supply of them.
-
-What is still missing is written down rather than glossed over:
-[Not here yet](docs/coming-from-rhino.md#not-here-yet) names SubD, Grasshopper, a real
-render engine and the long tail of commands. That list is the roadmap, and it
-gets shorter roughly in proportion to the time there is to spend on it.
-Sponsoring buys time, not a place in a queue — everything that ships, ships
-for everyone.
-
-Money goes first to the things that cost money whether or not anyone is
-paying: the code-signing certificates, $99 a year for Apple and about the same
-for Windows, which are why both installers still warn you on first run.
-Releases are built and tested on real Linux, Windows and macOS hardware before
-they go out. Past that it is time.
-
-If Serpentine3D is useful to you — or it is in your toolchain at work —
-[sponsor it](https://github.com/sponsors/chisomobanzi).
+If it's useful to you, [a small contribution][kofi] helps keep development
+moving: bug fixes shipped, features added, servers paid for. Not required.
+Never expected. But genuinely appreciated.
 
 Bug reports, sample files and documentation fixes are worth as much and cost
 nothing: see [CONTRIBUTING.md](CONTRIBUTING.md).
+[Not here yet](docs/coming-from-rhino.md#not-here-yet) is the running list of
+what is missing, if you are looking for somewhere to start.
+
+[kofi]: https://ko-fi.com/chisomobanzi/?hidefeed=true&widget=true&embed=true&preview=true
 
 ## License
 
