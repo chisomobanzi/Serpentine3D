@@ -45,3 +45,29 @@ def test_clears_the_cache_before_the_build_runs_not_after():
     build = text.find("build app --python-version")
     assert purge != -1 and build != -1
     assert purge < build, "clearing the wheel cache after the build is useless"
+
+
+def test_clears_setuptools_staging_before_building():
+    """setuptools copies the packages it is told to build into build/lib and
+    never takes anything out again, but the wheel is zipped from whatever is
+    in there. The package was renamed serpentine -> serpentine3d and the old
+    tree stayed behind, so every wheel since shipped 73 files of dead code
+    under the old top-level name."""
+    text = _text()
+    purge = text.find('rm -rf "$ROOT/build"')
+    build = text.find("build app --python-version")
+    assert purge != -1, (
+        "build-appimage.sh must clear setuptools' build/ staging directory, "
+        "or a renamed or deleted package keeps riding along in the wheel")
+    assert purge < build, "clearing the staging directory after the build "\
+        "is useless"
+
+
+def test_refuses_to_ship_a_package_it_did_not_mean_to():
+    """The staging purge stops the known cause; this catches the next one.
+
+    A wheel that installs a second top-level package puts a name on the
+    user's sys.path that we never intended to own."""
+    text = _text()
+    assert "top-level" in text and "serpentine3d" in text, (
+        "the script must verify the built wheel installs only serpentine3d")

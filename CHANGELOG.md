@@ -16,6 +16,14 @@
   are pulling from is deliberately left out: it sits under the cursor the
   moment you place it, and offering it would glue every new leg to nothing.
 
+- **The build stops shipping a package that no longer exists**: renaming
+  `serpentine` to `serpentine3d` left the old tree behind in setuptools'
+  staging directory, which is never cleaned out but is zipped into the wheel
+  wholesale — so every build since the rename also installed 73 files of dead
+  code under the old top-level name. Staging is now rebuilt from scratch, and
+  the build fails outright if the finished bundle carries a top-level package
+  we did not intend to own.
+
 - **...and on every other command that takes more than one point**: the end of
   an arc could not find the arc's start, and neither could the third pick of a
   box, a dimension or an angle. The points a command has taken are now tracked

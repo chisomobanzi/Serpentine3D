@@ -66,11 +66,40 @@ if [ -d "$CACHE" ]; then
     find "$CACHE" -name 'serpentine3d-*.whl' -delete
 fi
 
+# setuptools copies the packages it is told to build into build/lib and never
+# takes anything out again, but the wheel is zipped from whatever it finds
+# there. We renamed serpentine -> serpentine3d and the old tree stayed put, so
+# every wheel after the rename also shipped 73 files of dead code under the old
+# top-level name. Staging is pure copying for a pure-Python package; rebuilding
+# it from scratch costs a second and removes the whole class of problem.
+rm -rf "$ROOT/build"
+
 cd "$DIST"
 "${BUILDER[@]}" build app --python-version "$PYVER" "$RECIPE"
 
 BUILT="$(ls "$DIST"/Serpentine3D-*.AppImage 2>/dev/null | head -1)"
 ls -lh "$BUILT"
+
+# The staging purge above stops the cause we know about; this catches the next
+# one. Any top-level serpentine* package besides serpentine3d is a name we did
+# not mean to put on the user's import path. Extracting one file per candidate
+# package is enough to list them, and costs milliseconds.
+if [ -n "$BUILT" ]; then
+    PROBE="$(mktemp -d)"
+    trap 'rm -rf "$PROBE"' EXIT
+    ( cd "$PROBE" && "$BUILT" --appimage-extract \
+        'opt/python*/lib/python*/site-packages/serpentine*/__init__.py' \
+        > /dev/null 2>&1 ) || true
+    STOWAWAYS="$(find "$PROBE/squashfs-root" -mindepth 1 -type d \
+        -name 'serpentine*' -printf '%f\n' 2>/dev/null \
+        | sort -u | grep -vx 'serpentine3d' || true)"
+    if [ -n "$STOWAWAYS" ]; then
+        echo "ERROR: the bundle ships top-level packages we did not intend:" >&2
+        echo "$STOWAWAYS" | sed 's/^/  /' >&2
+        echo "Stale setuptools staging, or a rename that left a tree behind." >&2
+        exit 1
+    fi
+fi
 
 # Keep the desktop-installed copy (what the dock/launcher runs) in sync
 # with this build, so a rebuild is immediately live and never drifts from
