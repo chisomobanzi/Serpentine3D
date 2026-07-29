@@ -9,6 +9,13 @@
   the click will actually place — and it disappears the moment the command
   ends. Asked for on the Rhino forum.
 
+- **Snaps work on the curve you are still drawing**: a polyline is not in the
+  scene until you finish it, so it offered no snap points at all — you could
+  not close it back onto its own start, or bring a later leg down onto an
+  earlier vertex. End and Mid now see the legs already picked. The point you
+  are pulling from is deliberately left out: it sits under the cursor the
+  moment you place it, and offering it would glue every new leg to nothing.
+
 - **The AppImage runs the code it ships**: it started with `python -m`, which
   puts the launch directory first on the import path, so opening it from a
   folder that happened to contain a `serpentine3d/` directory ran that code
