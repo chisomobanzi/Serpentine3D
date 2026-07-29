@@ -621,16 +621,21 @@ class MainWindow(QMainWindow):
             base = req.rubber_from
             if base is None and req.rubber_pts:
                 base = req.rubber_pts[-1]
+            pending = list(req.rubber_pts or [])
+            if not pending and req.rubber_from is not None:
+                pending = [req.rubber_from]
             for vp in self.all_viewports():
                 vp.set_point_mode(True)
                 vp.snap_base = base
                 vp.point_axis = req.axis_lock
+                vp.pending_points = pending
             self._refresh_rubber(None)
         else:
             for vp in self.all_viewports():
                 vp.set_point_mode(False)
                 vp.snap_base = None
                 vp.point_axis = None
+                vp.pending_points = []
                 vp.set_preview(None)
         self.osnap_bar.refresh()
         self._update_status()

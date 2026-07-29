@@ -1,0 +1,140 @@
+"""Snapping to the curve you are still drawing.
+
+Until a polyline is finished it is not in the scene, so it offered no snap
+candidates at all: you could not close it back onto its own start, or land a
+later leg on an earlier vertex. Reported twice on the Rhino forum.
+"""
+
+import json
+
+import numpy as np
+import pytest
+
+from serpentine3d.core.scene import Scene
+from serpentine3d.core.selection import SelectionManager
+from serpentine3d.core.snaps import SnapIndex
+
+
+def _vp(scene=None):
+    from serpentine3d.ui.viewport import Viewport
+    scene = scene or Scene()
+    vp = Viewport(scene, SelectionManager(scene))
+    vp.resize(900, 700)
+    vp.camera.target = np.zeros(3)
+    vp.camera.distance = 40.0
+    vp.point_axis = None
+    return vp, scene
+
+
+def _px(vp, world):
+    scr = vp.camera.project(np.asarray([world], float),
+                            vp.width(), vp.height())[0]
+    return float(scr[0]), float(scr[1])
+
+
+# -- the index --
+
+def test_the_start_of_the_open_polyline_is_a_snap_candidate():
+    scene = Scene()
+    idx = SnapIndex(scene)
+    vp, _ = _vp(scene)
+    pending = [(0, 0, 0), (10, 0, 0), (10, 10, 0)]
+    px, py = _px(vp, (0, 0, 0))
+    hit = idx.find(vp.camera, px, py, vp.width(), vp.height(),
+                   pending_points=pending)
+    assert hit is not None
+    assert hit[1] == "end"
+    assert np.allclose(hit[0], (0, 0, 0))
+
+
+def test_the_leg_you_are_pulling_from_does_not_snap_to_itself():
+    """The newest point sits under the cursor the instant you place it —
+    offering it would glue every new leg to zero length."""
+    scene = Scene()
+    idx = SnapIndex(scene)
+    vp, _ = _vp(scene)
+    pending = [(0, 0, 0), (10, 0, 0)]
+    px, py = _px(vp, (10, 0, 0))
+    assert idx.find(vp.camera, px, py, vp.width(), vp.height(),
+                    pending_points=pending) is None
+
+
+def test_midpoints_of_the_legs_already_drawn_are_offered():
+    scene = Scene()
+    idx = SnapIndex(scene)
+    vp, _ = _vp(scene)
+    pending = [(0, 0, 0), (10, 0, 0), (10, 10, 0)]
+    px, py = _px(vp, (5, 0, 0))
+    hit = idx.find(vp.camera, px, py, vp.width(), vp.height(),
+                   pending_points=pending)
+    assert hit is not None and hit[1] == "mid"
+    assert np.allclose(hit[0], (5, 0, 0))
+
+
+def test_a_disabled_snap_type_stays_disabled_for_the_open_curve():
+    scene = Scene()
+    idx = SnapIndex(scene)
+    idx.types["end"] = False
+    vp, _ = _vp(scene)
+    px, py = _px(vp, (0, 0, 0))
+    assert idx.find(vp.camera, px, py, vp.width(), vp.height(),
+                   pending_points=[(0, 0, 0), (10, 0, 0), (10, 10, 0)]) is None
+
+
+def test_a_single_picked_point_offers_nothing():
+    """One point in hand is the point you are drawing from."""
+    scene = Scene()
+    idx = SnapIndex(scene)
+    vp, _ = _vp(scene)
+    px, py = _px(vp, (0, 0, 0))
+    assert idx.find(vp.camera, px, py, vp.width(), vp.height(),
+                    pending_points=[(0, 0, 0)]) is None
+
+
+# -- the viewport --
+
+def test_the_viewport_starts_with_no_pending_points():
+    vp, _ = _vp()
+    assert vp.pending_points == []
+
+
+def test_world_point_at_honours_the_pending_points():
+    vp, _ = _vp()
+    vp.pending_points = [(0, 0, 0), (10, 0, 0), (10, 10, 0)]
+    px, py = _px(vp, (0, 0, 0))
+    p = vp.world_point_at(px, py)
+    assert vp._active_snap is not None and vp._active_snap[1] == "end"
+    assert np.allclose(p, (0, 0, 0))
+
+
+# -- the app wires them up --
+
+@pytest.fixture
+def window(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({}))
+    monkeypatch.setenv("SERP3D_CONFIG", str(cfg))
+    monkeypatch.setenv("SERP3D_AUTOSAVE_DIR", str(tmp_path / "autosave"))
+    from serpentine3d.app import MainWindow
+    w = MainWindow()
+    yield w
+    w._saved_revision = w.scene.revision
+    w.close()
+
+
+def test_drawing_a_polyline_hands_the_picked_points_to_the_viewport(window):
+    window.processor.run("polyline")
+    for t in ("0,0", "10,0", "10,10"):
+        window.processor.provide_text(t)
+    pts = [tuple(round(float(c), 6) for c in p)
+           for p in window.viewport.pending_points]
+    assert pts == [(0, 0, 0), (10, 0, 0), (10, 10, 0)]
+
+
+def test_finishing_the_command_clears_them(window):
+    window.processor.run("polyline")
+    window.processor.provide_text("0,0")
+    window.processor.provide_text("10,0")
+    assert window.viewport.pending_points
+    window.processor.cancel()
+    assert window.viewport.pending_points == []

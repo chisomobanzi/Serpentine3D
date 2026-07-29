@@ -39,9 +39,12 @@ open(sys.argv[1], "wb").write(png)
 PY
 fi
 
-# {{ python-executable }} is substituted by python-appimage at build time
+# {{ python-executable }} is substituted by python-appimage at build time.
+# -P: without it `-m` puts the launch directory first on sys.path, so starting
+# the AppImage from anywhere containing a serpentine3d/ folder — a checkout,
+# say — runs that code instead of the bundled package, silently.
 cat > "$RECIPE/entrypoint.sh" << 'EOF'
-{{ python-executable }} -m serpentine3d "$@"
+{{ python-executable }} -P -m serpentine3d "$@"
 EOF
 
 # no spaces: python-appimage word-splits requirement lines when invoking pip
@@ -52,6 +55,15 @@ if command -v uvx > /dev/null 2>&1; then
 else
     python3 -m pip install --user --upgrade python-appimage
     BUILDER=(python3 -m python_appimage)
+fi
+
+# pip keys its wheel cache on name+version, and our version only moves at
+# release time — so without this a rebuild between releases quietly reuses the
+# wheel from the last one and bundles yesterday's code while the source tree
+# looks correct. Only ours: the third-party wheels are worth caching.
+CACHE="${PIP_CACHE_DIR:-$HOME/.cache/pip}/wheels"
+if [ -d "$CACHE" ]; then
+    find "$CACHE" -name 'serpentine3d-*.whl' -delete
 fi
 
 cd "$DIST"

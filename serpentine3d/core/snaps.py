@@ -142,13 +142,34 @@ class SnapIndex:
 
     # -- query --
 
+    @staticmethod
+    def _pending_candidates(pending) -> list[tuple[tuple, str]]:
+        """Snap candidates on the curve still being picked.
+
+        The newest point is left out: it sits under the cursor the moment it
+        is placed, so offering it would glue every new leg to zero length."""
+        pts = [tuple(float(c) for c in p) for p in (pending or [])]
+        if len(pts) < 2:
+            return []
+        out = [(p, "end") for p in pts[:-1]]
+        for a, b in zip(pts, pts[1:]):
+            out.append((tuple((x + y) / 2 for x, y in zip(a, b)), "mid"))
+        return out
+
     def find(self, camera, px: float, py: float, width: int, height: int,
-             radius_px: float = 12.0, base_point=None):
+             radius_px: float = 12.0, base_point=None, pending_points=None):
         """Best snap near the pixel. Returns (point, kind) or None."""
         if not self.enabled:
             return None
         objects = self.scene.visible_objects()
         pts, kinds = [], []
+
+        # the curve you are drawing is not in the scene yet, but you still
+        # want to close it back on its start or land on an earlier vertex
+        for p, kind in self._pending_candidates(pending_points):
+            if self.types.get(kind):
+                pts.append(p)
+                kinds.append(kind)
 
         for obj in objects:
             for p, kind in self._points(obj):

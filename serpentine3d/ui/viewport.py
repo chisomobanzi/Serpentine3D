@@ -463,6 +463,15 @@ class Viewport(QOpenGLWidget):
         self._gumball_readout.setVisible(False)
         self._gumball_readout.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._draw_readout = QLabel(self)   # length of the rubber-band leg
+        self._draw_readout.setStyleSheet(
+            "QLabel { background: rgba(20,21,24,225); color: #e6d896;"
+            " border: 1px solid #4a4b52; border-radius: 4px;"
+            " padding: 2px 7px; font-family: monospace; }")
+        self._draw_readout.setVisible(False)
+        self._draw_readout.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._draw_span = None              # (from, to) of the open leg
         from .viewport_hud import ViewportHud
         self._hud = ViewportHud(self)       # top-left view/display chips
         self.history = None                 # set by the main window
@@ -470,6 +479,8 @@ class Viewport(QOpenGLWidget):
         self.snaps = SnapIndex(scene, config)
         self._active_snap = None            # (point, kind) under cursor
         self.snap_base = None               # reference point for perp snap
+        self.point_axis = None              # (base, axis) while axis-locked
+        self.pending_points = []            # points picked so far this command
         self.frame_aspect = None            # cinema frame guide (e.g. 2.39)
         self.grid_snap = bool(config.get("grid_snap")) if config else False
         self.grid_snap_step = (float(config.get("grid_snap_step",
@@ -698,6 +709,7 @@ class Viewport(QOpenGLWidget):
         self._draw_frame_guides(w, h)
         self._draw_selection_box(w, h)
         self._update_gumball_readout()
+        self._update_draw_readout()
         self._paint_dots(w, h)
 
     def _paint_dots(self, w, h):
@@ -764,6 +776,30 @@ class Viewport(QOpenGLWidget):
         self._gumball_readout.move(x, y)
         self._gumball_readout.setVisible(True)
         self._gumball_readout.raise_()
+
+    def _update_draw_readout(self):
+        """Show how long the leg under the cursor is while a command is
+        picking points — the number you are actually aiming for, without
+        looking away from what you are drawing."""
+        span = self._draw_span
+        length = float(np.linalg.norm(span[1] - span[0])) if span else 0.0
+        if not length:
+            if not self._draw_readout.isHidden():
+                self._draw_readout.setVisible(False)
+            return
+        scr = self.camera.project(np.asarray([span[1]], float),
+                                  self.width(), self.height())[0]
+        if scr[2] <= 0:                     # cursor point behind the camera
+            self._draw_readout.setVisible(False)
+            return
+        self._draw_readout.setText(self.scene.format_length(length))
+        self._draw_readout.adjustSize()
+        w, h = self._draw_readout.width(), self._draw_readout.height()
+        x = max(2, min(int(scr[0]) + 18, self.width() - w - 2))
+        y = max(2, min(int(scr[1]) - 14 - h, self.height() - h - 2))
+        self._draw_readout.move(x, y)
+        self._draw_readout.setVisible(True)
+        self._draw_readout.raise_()
 
     def _paint_technical(self, w, h):
         """Model-space technical view: parallel-projection HLR linework."""
@@ -1744,10 +1780,19 @@ class Viewport(QOpenGLWidget):
         """Segments: (K,2,3) rubber-band lines; markers: picked points."""
         if segments is None or len(segments) == 0:
             self._preview_data = np.zeros((0, 3), np.float32)
+            self._draw_span = None
         else:
-            self._preview_data = np.asarray(
-                segments, np.float32).reshape(-1, 3)
+            arr = np.asarray(segments, np.float32)
+            # the last leg runs from the newest picked point to the cursor:
+            # that is the length worth showing while you draw
+            self._draw_span = (arr[-1][0].astype(float),
+                               arr[-1][1].astype(float))
+            self._preview_data = arr.reshape(-1, 3)
         self._marker_points = list(markers or [])
+        # move the label with the preview that owns it, so it is already in
+        # the right place when the frame goes out; paintGL repeats this only
+        # to follow the camera when the view moves mid-pick
+        self._update_draw_readout()
         self.update()
 
     def set_point_mode(self, on: bool):
@@ -1885,7 +1930,8 @@ class Viewport(QOpenGLWidget):
                 t = round(t / self.grid_snap_step) * self.grid_snap_step
             return tuple(float(c) for c in base + t * normalize(axis))
         snap = self.snaps.find(self.camera, px, py, self.width(),
-                               self.height(), base_point=self.snap_base)
+                               self.height(), base_point=self.snap_base,
+                               pending_points=self.pending_points)
         if snap is not None:
             self._active_snap = snap
             return snap[0]
