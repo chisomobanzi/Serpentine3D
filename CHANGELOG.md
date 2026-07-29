@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A fresh install stops picking up an MCP release we do not run on**: `mcp`
+  2.0 renamed `mcp.server.fastmcp` and swapped `httpx` for `httpx2`, so any
+  install resolving `mcp>=1.0` got a server that will not import and lost the
+  HTTP client the AI assistant talks through. `mcp` is now capped below 2.0
+  until the server is ported, and `httpx` — which we import directly — is
+  declared instead of being borrowed from someone else's dependency list. A
+  test now fails on any third-party import the project never asked for.
+
 - **Every distance in the model can now be drawn with the mouse**: a torus'
   tube radius, a wall thickness, a fillet radius, a push/pull depth, a contour
   spacing, an array step, a curve extension, a text height — all of them used
