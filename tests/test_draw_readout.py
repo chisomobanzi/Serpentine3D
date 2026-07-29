@@ -68,11 +68,9 @@ def test_label_sits_by_the_cursor_end_not_the_base():
 
 
 def test_set_preview_positions_the_label_without_waiting_for_a_paint():
-    """Regression: doing this only in paintGL lost a race. Qt composites a
-    QOpenGLWidget's children around the GL paint, so a label first shown
-    *during* paintGL can miss the frame — and when the cursor then stops,
-    no later frame comes to fix it. The label was invisible in AppImage
-    builds and visible in venv ones purely on timing."""
+    """The preview and the number describing it change together, so the
+    label must be placed by whoever changes the preview rather than left
+    for the next frame to sort out."""
     vp, scene = _vp()
     vp.set_preview(_seg((0, 0, 0), (3, 4, 0)), [(0, 0, 0)])
     # no _update_draw_readout() call here — set_preview must have done it

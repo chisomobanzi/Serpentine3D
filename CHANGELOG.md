@@ -9,6 +9,14 @@
   the click will actually place — and it disappears the moment the command
   ends. Asked for on the Rhino forum.
 
+- **The AppImage runs the code it ships**: it started with `python -m`, which
+  puts the launch directory first on the import path, so opening it from a
+  folder that happened to contain a `serpentine3d/` directory ran that code
+  instead of the bundled build — silently, with no error. It no longer takes
+  anything from the launch directory. The build also cleared its own stale
+  wheel from pip's cache: because the version string only moves at release
+  time, rebuilds between releases were shipping the previous build's code.
+
 - **Rhino files open across every core**: a 65259-object `.3dm` took about
   fifteen minutes to open on a 22-core machine, and the machine was idle for
   almost all of it
