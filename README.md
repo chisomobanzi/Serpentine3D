@@ -200,7 +200,9 @@ selected edge fillets together at that radius, previewing live. Hold
 `units` sets the document units (mm/cm/m/in/**feet-and-inches**) with an
 optional model rescale. Every prompt then accepts unit input — `3'6"`,
 `2' 4 1/2"`, `30cm`, `1.5in` — and coordinates support polar entry
-(`10<45`) and Shift-ortho constraint while picking.
+(`10<45`) and Shift-ortho constraint while picking. **Tab** locks the
+direction you are pointing in for any direction, not just the four ortho
+ones, leaving the cursor to set only the distance along it.
 
 ### Scripting & automation
 

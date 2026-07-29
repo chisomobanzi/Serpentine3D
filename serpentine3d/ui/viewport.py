@@ -438,6 +438,7 @@ class Viewport(QOpenGLWidget):
     mouseWorldMoved = Signal(object)        # (x, y, z) while in point-input mode
     cvEditBegan = Signal()                  # control-point drag started
     escapePressed = Signal()
+    tabPressed = Signal()                   # Tab while a point is wanted
     enterShortcut = Signal()                # right-click without dragging
     popupRequested = Signal()               # middle-click without dragging
     displayModeChanged = Signal()           # shaded/rendered/... changed
@@ -487,6 +488,7 @@ class Viewport(QOpenGLWidget):
         self._active_snap = None            # (point, kind) under cursor
         self.snap_base = None               # reference point for perp snap
         self.point_axis = None              # (base, axis) while axis-locked
+        self.dir_lock = None                # (base, dir) frozen by Tab
         self.pending_points = []            # the run being drawn, if any
         self.picked_points = []             # every point picked this command
         self.frame_aspect = None            # cinema frame guide (e.g. 2.39)
@@ -1815,6 +1817,55 @@ class Viewport(QOpenGLWidget):
                                else Qt.CursorShape.ArrowCursor))
         if not on:
             self.set_preview(None)
+            self.dir_lock = None
+
+    def _locked_axis(self):
+        """The Tab lock, if it still belongs to the point being picked.
+
+        The lock is stored with the base it was taken from rather than
+        being cleared by whoever moves on, so a command that picks a run of
+        points does not have to know the lock exists: the moment it sets a
+        new base the old direction stops applying.
+        """
+        if self.dir_lock is None:
+            return None
+        if self.snap_base is None or not np.allclose(
+                np.asarray(self.dir_lock[0], float),
+                np.asarray(self.snap_base, float), atol=1e-9):
+            self.dir_lock = None
+            return None
+        return self.dir_lock
+
+    def toggle_direction_lock(self, px: float | None = None,
+                              py: float | None = None) -> bool:
+        """Freeze (or release) the direction from the base to the cursor.
+
+        Ortho covers the four CPlane directions; this covers the one the
+        cursor is actually in, which is what drawing off an existing wall
+        needs. Returns True if a direction is now locked.
+        """
+        if self._locked_axis() is not None:
+            self.dir_lock = None
+            self.update()
+            return False
+        # a command that picks along its own axis already owns the
+        # direction — there is nothing left for Tab to decide
+        if self.snap_base is None or self.point_axis is not None:
+            return False
+        if px is None:
+            if self._last_mouse is None:
+                return False
+            px, py = self._last_mouse.x(), self._last_mouse.y()
+        aim = self.world_point_at(px, py)
+        if aim is None:
+            return False
+        base = np.asarray(self.snap_base, float)
+        d = np.asarray(aim, float) - base
+        if np.linalg.norm(d) < 1e-9:
+            return False                    # cursor is on the base point
+        self.dir_lock = (tuple(base), tuple(normalize(d)))
+        self.update()
+        return True
 
     def set_display_mode(self, mode: str):
         if mode not in ("shaded", "wireframe", "ghosted", "zebra",
@@ -1932,8 +1983,9 @@ class Viewport(QOpenGLWidget):
             if self.grid_snap:
                 x, y = round(x), round(y)
             return (float(x), float(y), 0.0)
-        if self.point_axis is not None:
-            base, axis = (np.asarray(v, float) for v in self.point_axis)
+        locked = self._locked_axis() or self.point_axis
+        if locked is not None:
+            base, axis = (np.asarray(v, float) for v in locked)
             self._active_snap = None
             origin, direction = self.camera.ray_through(
                 px, py, self.width(), self.height())
@@ -2553,6 +2605,16 @@ class Viewport(QOpenGLWidget):
             self.scene.replace_shape(oid, g.translate(obj.shape, tuple(vec)))
         self.update()
         return True
+
+    def event(self, ev):
+        # Qt spends Tab on focus navigation before keyPressEvent is reached,
+        # so the direction lock has to be claimed here or clicking in the
+        # viewport mid-pick would quietly cost you the key
+        if (ev.type() == ev.Type.KeyPress and ev.key() == Qt.Key.Key_Tab
+                and self.point_mode and self.space == "model"):
+            self.tabPressed.emit()
+            return True
+        return super().event(ev)
 
     def keyPressEvent(self, ev):
         # while a gumball drag is live, type an exact distance/angle/factor

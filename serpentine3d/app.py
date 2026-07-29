@@ -136,6 +136,7 @@ class MainWindow(QMainWindow):
         self.command_line.submitted.connect(self._on_submit)
         self.command_line.cancelled.connect(self._cancel)
         self.command_line.optionClicked.connect(self._on_option_chip)
+        self.command_line.tabPressed.connect(self._toggle_direction_lock)
         self.command_line.input.textEdited.connect(self._live_preview)
         self._wire_viewport(self.viewport)
         self.scene.add_listener(self._update_status)
@@ -297,6 +298,7 @@ class MainWindow(QMainWindow):
         vp.cvEditBegan.connect(
             lambda: self.history.checkpoint("edit control point"))
         vp.escapePressed.connect(self._cancel)
+        vp.tabPressed.connect(self._toggle_direction_lock)
         vp.enterShortcut.connect(self._rmb_enter)
         vp.popupRequested.connect(self._show_mmb_popup)
 
@@ -600,6 +602,19 @@ class MainWindow(QMainWindow):
         self._live_preview(self.command_line.input.text())
         self.command_line.focus()
 
+    def _toggle_direction_lock(self):
+        """Tab while a point is wanted: freeze the direction, type a length.
+
+        Only the viewport the cursor is in has a direction to freeze, so
+        the lock belongs to that one rather than to all of them.
+        """
+        vp = self.active_viewport
+        if vp.toggle_direction_lock():
+            self.command_line.echo("Direction locked (Tab to release)")
+        else:
+            self.command_line.echo("Direction released")
+        vp.update()
+
     def _live_preview(self, text: str):
         req = self.processor.request
         if req is not None and getattr(req, "preview_fn", None) and \
@@ -619,6 +634,7 @@ class MainWindow(QMainWindow):
         self.command_line.set_prompt(self.processor.prompt_text())
         self.command_line.set_options(self.processor.option_chips())
         self.viewport.set_ghost(None)
+        self.command_line.point_pending = isinstance(req, PointReq)
         if isinstance(req, PointReq):
             base = req.rubber_from
             if base is None and req.rubber_pts:

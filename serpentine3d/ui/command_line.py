@@ -60,9 +60,14 @@ class CommandLine(QWidget):
     submitted = Signal(str)         # raw text the user entered
     cancelled = Signal()
     optionClicked = Signal(str)     # option chip clicked -> cycle its value
+    tabPressed = Signal()           # Tab while a point is wanted
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Tab means completion at the "Command" prompt and direction lock
+        # while a command is asking for a point. The two never overlap:
+        # there is no command name to complete once one is running.
+        self.point_pending = False
         self._history: list[str] = []
         self._hist_pos = 0
         self._tab_matches: list[str] = []
@@ -89,7 +94,7 @@ class CommandLine(QWidget):
         self.input.setPlaceholderText(
             "type a command (line, circle, extrude, loft, ...)")
         self.input.returnPressed.connect(self.submit_input)
-        self.input.tabPressed.connect(self._complete)
+        self.input.tabPressed.connect(self._on_tab)
         self.input.textEdited.connect(self._reset_tab)
         self.input.upPressed.connect(self.history_prev)
         self.input.downPressed.connect(self.history_next)
@@ -185,6 +190,12 @@ class CommandLine(QWidget):
 
     def _reset_tab(self):
         self._tab_matches = []
+
+    def _on_tab(self):
+        if self.point_pending:
+            self.tabPressed.emit()
+        else:
+            self._complete()
 
     def _complete(self):
         if not self._tab_matches:

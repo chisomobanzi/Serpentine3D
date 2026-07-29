@@ -4,6 +4,14 @@
 
 ### Added
 
+- Direction lock, on `Tab`. While a command is asking for a point, `Tab`
+  freezes the direction you are pointing in so the cursor only sets how far
+  along it to go — aim once down the wall you are continuing, then type the
+  length. Ortho already did this for the four CPlane directions; this does
+  it for the direction you are actually in, which is the case ortho misses.
+  `Tab` again releases it, and it lapses on its own once the command moves
+  on to the next point. As in Rhino it holds the whole line, so you can
+  still cross back over the base point and pick the other way along it.
 - An isometric view, on `F5`, the View menu, the viewport's view chip and the
   `isometric` (`iso`) command. It looks from the same corner Rhino's
   `SEIsometric` does, at the one tilt that foreshortens all three axes
