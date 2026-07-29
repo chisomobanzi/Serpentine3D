@@ -43,7 +43,9 @@ def export_usda(scene, path: str, only_ids: list | None = None):
         while name in used:
             name += "_"
         used.add(name)
-        color = scene.color_of(obj)
+        # What a renderer should show, which is the material's colour when it
+        # has one — same reasoning as the glTF exporter.
+        color = scene.render_color_of(obj)
         pts = ", ".join(f"({v[0]:.6g}, {v[1]:.6g}, {v[2]:.6g})"
                         for v in mesh.vertices)
         counts = ", ".join("3" for _ in mesh.triangles)

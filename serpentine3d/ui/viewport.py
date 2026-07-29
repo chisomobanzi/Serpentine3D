@@ -1310,10 +1310,16 @@ class Viewport(QOpenGLWidget):
                 grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
                 color = (grey, grey, grey)
             line_color = color
+            surface = color
+            if mode == "rendered" and not selected and not obj.locked:
+                # An imported object can display one colour and render
+                # another; edges stay on the one it displays, the way Rhino
+                # draws them.
+                surface = self.scene.render_color_of(obj)
             # Surfaces are shaded by multiplying this colour, so a near-black
             # one leaves nothing to shade. Lift the fill only — edges keep the
             # object's real colour, so black stays black in wireframe.
-            fill_color = theme.shaded_fill(color)
+            fill_color = theme.shaded_fill(surface)
             if light_background and not selected:
                 # dark linework on paper-white detail backgrounds
                 line_color = (min(color[0], 0.3), min(color[1], 0.3),

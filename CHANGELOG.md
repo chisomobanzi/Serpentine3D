@@ -82,8 +82,20 @@
   ([#4](https://github.com/chisomobanzi/Serpentine3D/issues/4)). Object and
   material colours now come across, and materials arrive with them, so a
   transparent or glossy surface in the file is transparent or glossy here.
-  Saving writes an object's own colour back out, so opening a file and saving
-  it no longer flattens it onto its layers.
+  Saving writes an object's own colour and its material back out, so opening a
+  file and saving it no longer flattens it onto its layers.
+
+- **Rendered mode shows the colour on the material**: an object carries two
+  colours, the one it displays and the one on its material, and the ordinary
+  way to set a drawing up for rendering is to leave every object on its layer
+  colour and put the real colours on materials. Shaded mode is meant to show
+  the layer and Rendered the material; we showed the layer in both, so a
+  drawing whose layers were left at Rhino's default black rendered black
+  ([#4](https://github.com/chisomobanzi/Serpentine3D/issues/4)). Surfaces in
+  Rendered mode now take the material's colour where there is one, while edges
+  stay on the colour the object displays. The glTF and USD exporters follow
+  the same colour, since they were pairing a material's metal and roughness
+  with a colour from somewhere else.
 
 - **Imported meshes are shaded by their surface, not by their triangles**:
   Rhino stores a mesh unwelded — every face owning its own corners — so

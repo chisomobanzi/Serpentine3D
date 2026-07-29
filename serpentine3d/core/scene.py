@@ -60,7 +60,9 @@ class SceneObject:
     group_id: str | None = None        # objects sharing an id select together
     block_id: str | None = None        # instance of a block definition
     color: tuple[float, float, float] | None = None   # None -> layer color
-    material: dict | None = None       # {"metallic","roughness","opacity"}
+    # {"metallic","roughness","opacity"} and optionally "color", which only
+    # rendered mode reads — see Scene.render_color_of
+    material: dict | None = None
     clip_plane: dict | None = None     # {"enabled": bool}: sections the view
     annotation: dict | None = None     # {"text": str}: model-space dot label
     linetype: str = "ByLayer"          # dash style; ByLayer -> use the layer's
@@ -248,6 +250,18 @@ class Scene:
 
     def color_of(self, obj: SceneObject) -> tuple[float, float, float]:
         return obj.color or self.layers.get(obj.layer_id).color
+
+    def render_color_of(self, obj: SceneObject) -> tuple[float, float, float]:
+        """The colour rendered mode draws the object's surfaces in.
+
+        An object carries two colours, the way it does in Rhino: the one it
+        displays, which is the layer's unless it says otherwise, and the one on
+        its material. A drawing set up for rendering usually leaves every
+        object on its layer colour and puts the real colours on materials, so
+        the two are meant to differ (#4). Materials made in the app have no
+        colour of their own, and those objects render the colour they display.
+        """
+        return (obj.material or {}).get("color") or self.color_of(obj)
 
     def clear(self):
         self.objects.clear()

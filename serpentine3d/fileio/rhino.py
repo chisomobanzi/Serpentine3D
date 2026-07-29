@@ -698,10 +698,18 @@ def object_appearance(attrs, layers: dict, materials: dict) -> dict:
 
 
 def _shading(material: dict | None) -> dict | None:
-    """The part of a material the viewport can actually draw."""
+    """The part of a material the viewport can actually draw.
+
+    Colour included: an object whose colour source is its layer can still have
+    a material, and Rendered mode is meant to show the material's colour while
+    shaded mode shows the layer's. That is the ordinary way to set a drawing up
+    for rendering, and it was the half of #4 that reading `attrs.ColorSource`
+    alone never reached.
+    """
     if material is None:
         return None
-    return {k: material[k] for k in ("opacity", "roughness", "metallic")}
+    return {k: material[k]
+            for k in ("color", "opacity", "roughness", "metallic")}
 
 
 def object_to_shapes(geo, report=None) -> list:
@@ -780,6 +788,28 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
 
 # ------------------------------------------------------------------- export
 
+def _write_material(model, seen: dict, material: dict) -> int:
+    """Add a material to the file, or reuse one already written.
+
+    A drawing has a few materials and thousands of objects using them, so
+    identical ones are shared rather than written out per object.
+    """
+    color = material.get("color") or (0.5, 0.5, 0.5)
+    key = (tuple(color), material.get("opacity", 1.0),
+           material.get("roughness", 0.55), material.get("metallic", 0.0))
+    if key in seen:
+        return seen[key]
+
+    mat = r3.Material()
+    mat.DiffuseColor = (int(color[0] * 255), int(color[1] * 255),
+                        int(color[2] * 255), 255)
+    mat.Transparency = 1.0 - _clamp(key[1])
+    mat.Shine = (1.0 - _clamp(key[2])) * MAX_SHINE
+    mat.Reflectivity = _clamp(key[3])
+    seen[key] = model.Materials.Add(mat)
+    return seen[key]
+
+
 def export_3dm(scene, path: str, only_ids: list | None = None):
     model = r3.File3dm()
     layer_index = {}
@@ -794,6 +824,7 @@ def export_3dm(scene, path: str, only_ids: list | None = None):
     objs = scene.all()
     if only_ids:
         objs = [o for o in objs if o.id in only_ids]
+    materials = {}
     for obj in objs:
         attrs = r3.ObjectAttributes()
         attrs.Name = obj.name
@@ -805,6 +836,10 @@ def export_3dm(scene, path: str, only_ids: list | None = None):
                                  int(obj.color[1] * 255),
                                  int(obj.color[2] * 255), 255)
             attrs.ColorSource = r3.ObjectColorSource.ColorFromObject
+        if obj.material:
+            attrs.MaterialIndex = _write_material(model, materials,
+                                                  obj.material)
+            attrs.MaterialSource = r3.ObjectMaterialSource.MaterialFromObject
         if obj.kind == "curve":
             exported = False
             for edge in geometry.edges_of(obj.shape):

@@ -58,9 +58,19 @@ def coloured(tmp_path):
         a.MaterialSource = r3.ObjectMaterialSource.MaterialFromObject
         a.ColorSource = r3.ObjectColorSource.ColorFromMaterial
 
+    def rendered_only(a):
+        """The ordinary Rhino setup: display colour left on the layer, with a
+
+        material assigned for rendering. Shaded shows the layer, Rendered
+        shows the material, and the two are meant to differ.
+        """
+        a.MaterialIndex = 0
+        a.MaterialSource = r3.ObjectMaterialSource.MaterialFromObject
+
     box(0, "by layer", lambda a: None)
     box(1, "by object", by_object)
     box(2, "by material", by_material)
+    box(3, "rendered only", rendered_only)
 
     path = str(tmp_path / "coloured.3dm")
     assert model.Write(path, 8)
@@ -108,6 +118,20 @@ def test_an_object_with_no_material_is_not_given_an_empty_one(coloured):
     assert _by_name(coloured)["by layer"]["material"] is None
 
 
+# ------------------------------------------------- the colour on the material
+
+
+def test_a_material_carries_its_own_colour(coloured):
+    """An object can display one colour and render another. Rhino keeps both:
+
+    the display colour, from the layer here, and the material's, which is the
+    only one Rendered mode shows.
+    """
+    meta = _by_name(coloured)["rendered only"]
+    assert meta["color"] is None, "shaded mode still follows the layer"
+    assert meta["material"]["color"] == pytest.approx(_rgb(BLUE), abs=1e-3)
+
+
 # ------------------------------------------------------- through to the scene
 
 
@@ -119,6 +143,44 @@ def test_the_colours_reach_the_scene(coloured):
     assert got["by layer"] == pytest.approx(_rgb(RED), abs=1e-3)
     assert got["by object"] == pytest.approx(_rgb(GREEN), abs=1e-3)
     assert got["by material"] == pytest.approx(_rgb(BLUE), abs=1e-3)
+
+
+def test_rendered_mode_shows_the_materials_colour(coloured):
+    """The half of #4 the first fix missed: nothing in the file says this
+
+    object's colour comes from its material, and in Rhino the material's
+    colour is still what Rendered draws.
+    """
+    scene = Scene()
+    import_file(scene, coloured)
+    obj = next(o for o in scene.all() if o.name == "rendered only")
+    assert scene.color_of(obj) == pytest.approx(_rgb(RED), abs=1e-3)
+    assert scene.render_color_of(obj) == pytest.approx(_rgb(BLUE), abs=1e-3)
+
+
+def test_an_object_without_a_material_renders_the_colour_it_displays(coloured):
+    scene = Scene()
+    import_file(scene, coloured)
+    obj = next(o for o in scene.all() if o.name == "by layer")
+    assert scene.render_color_of(obj) == pytest.approx(_rgb(RED), abs=1e-3)
+
+
+def test_a_material_colour_survives_being_written_back_out(coloured, tmp_path):
+    """Saving has to write the material out, or opening a rendered drawing
+
+    and saving it throws away every colour it renders with.
+    """
+    scene = Scene()
+    import_file(scene, coloured)
+    out = str(tmp_path / "round-trip.3dm")
+    export_file(scene, out)
+
+    back = Scene()
+    import_file(back, out)
+    obj = next(o for o in back.all() if o.name == "rendered only")
+    assert back.color_of(obj) == pytest.approx(_rgb(RED), abs=1e-2)
+    assert back.render_color_of(obj) == pytest.approx(_rgb(BLUE), abs=1e-2)
+    assert obj.material["opacity"] == pytest.approx(0.75, abs=1e-2)
 
 
 def test_a_colour_survives_being_written_back_out(coloured, tmp_path):

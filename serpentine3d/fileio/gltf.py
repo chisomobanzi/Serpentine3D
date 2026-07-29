@@ -62,7 +62,10 @@ def export_glb(scene, path: str, only_ids: list | None = None):
                           "count": int(len(idx)), "type": "SCALAR"})
         i_acc = len(accessors) - 1
 
-        color = scene.color_of(obj)
+        # The material's own colour where it has one: the rest of this block
+        # is that material, and pairing its metal and roughness with the
+        # object's display colour exports half of each.
+        color = scene.render_color_of(obj)
         m = obj.material or {}
         opacity = float(m.get("opacity", 1.0))
         mat = {

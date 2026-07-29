@@ -258,6 +258,28 @@ def test_glb_export(scene, tmp_path):
     assert len(doc["materials"]) == 2
 
 
+def test_glb_export_uses_the_colour_on_the_material(scene, tmp_path):
+    """glTF writes a PBR material, so its base colour is the rendered one.
+
+    Taking the metal and roughness off the material and the colour from
+    somewhere else exports a material that is half of two.
+    """
+    import json, struct
+    obj = next(o for o in scene.all() if o.kind != "curve")
+    obj.color = (1.0, 0.0, 0.0)
+    obj.material = {"color": (0.0, 0.0, 1.0), "opacity": 1.0,
+                    "roughness": 0.3, "metallic": 0.0}
+    path = str(tmp_path / "out.glb")
+    fileio.export_file(scene, path)
+    with open(path, "rb") as f:
+        f.read(12)
+        jlen, _ = struct.unpack("<II", f.read(8))
+        doc = json.loads(f.read(jlen))
+    base = [m["pbrMetallicRoughness"]["baseColorFactor"][:3]
+            for m in doc["materials"]]
+    assert [0.0, 0.0, 1.0] in base
+
+
 def test_usda_export(scene, tmp_path):
     path = str(tmp_path / "out.usda")
     fileio.export_file(scene, path)
