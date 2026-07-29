@@ -29,6 +29,13 @@ def cmd_right(ctx):
     yield from ()
 
 
+@command("isometric", aliases=("iso",), mutates=False)
+def cmd_isometric(ctx):
+    _vp(ctx).set_view("isometric")
+    ctx.echo("Isometric view.")
+    yield from ()
+
+
 @command("perspective", aliases=("persp",), mutates=False)
 def cmd_persp(ctx):
     _vp(ctx).set_view("perspective")

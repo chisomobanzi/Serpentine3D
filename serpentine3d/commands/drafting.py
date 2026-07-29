@@ -2,23 +2,13 @@
 
 from __future__ import annotations
 
-import math
-
 from ..core import geometry as g
 from ..core.layout import (
     PAPER_SIZES, DetailView, Layout, LinearDim, TextNote, parse_scale,
 )
+# a detail view named "front" should look where the front view looks
+from ..ui.camera import STANDARD_VIEWS as _VIEW_ANGLES
 from .base import NumberReq, OptionReq, PointReq, SelectReq, TextReq, command
-
-_VIEW_ANGLES = {
-    "top": (math.radians(-90), math.radians(89.9)),
-    "bottom": (math.radians(-90), math.radians(-89.9)),
-    "front": (math.radians(-90), 0.0),
-    "back": (math.radians(90), 0.0),
-    "right": (0.0, 0.0),
-    "left": (math.radians(180), 0.0),
-    "perspective": (math.radians(-60), math.radians(30)),
-}
 
 
 def _window(ctx):

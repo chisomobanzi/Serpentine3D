@@ -460,6 +460,8 @@ class MainWindow(QMainWindow):
         self._action(m_view, "Right", "F3", lambda: self.run_command("right"))
         self._action(m_view, "Perspective", "F4",
                      lambda: self.run_command("perspective"))
+        self._action(m_view, "Isometric", "F5",
+                     lambda: self.run_command("isometric"))
         m_view.addSeparator()
         self._action(m_view, "Zoom Extents", "Ctrl+E",
                      lambda: self.run_command("zoomextents"))

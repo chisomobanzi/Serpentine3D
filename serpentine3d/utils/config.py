@@ -145,6 +145,7 @@ RHINO_COMMAND_MAP = {
     "selsrf": "selsrf", "selsolid": "selsolid", "sellast": "sellast",
     "invert": "invert", "isolate": "isolate", "unisolate": "unisolate",
     "top": "top", "front": "front", "right": "right",
+    "isometric": "isometric", "iso": "isometric",
     "perspective": "perspective", "shade": "shaded", "shaded": "shaded",
     "wireframe": "wireframe", "ghosted": "ghosted", "grid": "grid",
     "new": "new", "open": "open", "save": "save", "import": "import",
@@ -170,6 +171,10 @@ RHINO_MACRO_MAP = {
     "setview world left": "left",
     "setview world bottom": "bottom",
     "setview world perspective": "perspective",
+    # our one isometric looks from the south-east, the same corner Rhino's
+    # SEIsometric does; the other three corners are not views we have, and
+    # pointing them here would put the model the wrong way round
+    "setview world seisometric": "isometric",
     "setdisplaymode arctic": "rendered",
     "setdisplaymode rendered": "rendered",
     "setdisplaymode shaded": "shaded",

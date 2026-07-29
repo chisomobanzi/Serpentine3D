@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- An isometric view, on `F5`, the View menu, the viewport's view chip and the
+  `isometric` (`iso`) command. It looks from the same corner Rhino's
+  `SEIsometric` does, at the one tilt that foreshortens all three axes
+  equally, so a cube reads as a cube and you can measure along all three
+  directions off the same picture. Detail views on a layout can use it too.
+
 ### Fixed
 
 - Clicking an edge picks the one in front. Edges were ranked by how near they

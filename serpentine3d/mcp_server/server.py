@@ -233,7 +233,7 @@ def serp_undo(redo: bool = False) -> str:
 def serp_viewport(view: str = "", display_mode: str = "",
                   zoom_extents: bool = False) -> str:
     """Adjust the viewport. view: top/front/right/left/back/bottom/
-    perspective. display_mode: wireframe/shaded/ghosted.
+    isometric/perspective. display_mode: wireframe/shaded/ghosted.
     zoom_extents fits all objects in view."""
     return _call("set_viewport", view=view or None,
                  display_mode=display_mode or None,

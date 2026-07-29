@@ -15,7 +15,7 @@ from . import theme
 
 _VIEWS = [("Top", "top"), ("Front", "front"), ("Right", "right"),
           ("Back", "back"), ("Left", "left"), ("Bottom", "bottom"),
-          ("Perspective", "perspective")]
+          ("Isometric", "isometric"), ("Perspective", "perspective")]
 
 _MODES = [("Shaded", "shaded"), ("Wireframe", "wireframe"),
           ("Ghosted", "ghosted"), ("Rendered", "rendered"),

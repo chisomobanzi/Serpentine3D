@@ -30,6 +30,26 @@ SENSORS = {
 }
 
 
+# (azimuth, elevation) for each view you can ask for by name. Detail views on
+# a layout read the same table, so a name means the same angle wherever it is
+# used — see commands/drafting.py.
+STANDARD_VIEWS = {
+    "perspective": (math.radians(-60), math.radians(30)),
+    "top": (math.radians(-90), math.radians(89.9)),
+    "bottom": (math.radians(-90), math.radians(-89.9)),
+    "front": (math.radians(-90), 0.0),
+    "back": (math.radians(90), 0.0),
+    "right": (0.0, 0.0),
+    "left": (math.radians(180), 0.0),
+    # Halfway between front and right, tilted by the one angle that
+    # foreshortens all three axes equally: atan(1/sqrt(2)), about 35.26
+    # degrees. That is what makes it isometric rather than just a corner
+    # view — the three edges at the near corner of a cube come out the same
+    # length and 120 degrees apart, so you can measure along all of them.
+    "isometric": (math.radians(-45), math.atan(1.0 / math.sqrt(2.0))),
+}
+
+
 class Camera:
     def __init__(self):
         self.target = np.zeros(3)
@@ -134,18 +154,9 @@ class Camera:
         self.distance = radius / math.sin(math.radians(self.fov) / 2) * 1.15
 
     def set_standard_view(self, name: str):
-        views = {
-            "perspective": (math.radians(-60), math.radians(30)),
-            "top": (math.radians(-90), math.radians(89.9)),
-            "bottom": (math.radians(-90), math.radians(-89.9)),
-            "front": (math.radians(-90), 0.0),
-            "back": (math.radians(90), 0.0),
-            "right": (0.0, 0.0),
-            "left": (math.radians(180), 0.0),
-        }
-        if name not in views:
+        if name not in STANDARD_VIEWS:
             raise ValueError(f"Unknown view '{name}'")
-        self.azimuth, self.elevation = views[name]
+        self.azimuth, self.elevation = STANDARD_VIEWS[name]
         # the named axis views are orthographic; only Perspective foreshortens
         self.projection = "perspective" if name == "perspective" else "parallel"
 

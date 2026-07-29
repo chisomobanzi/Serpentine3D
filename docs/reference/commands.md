@@ -70,6 +70,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `grid` | Grid |
 | `gridsnap` | Gridsnap |
 | `gumball` | Gumball |
+| `isometric` (`iso`) | Isometric |
 | `left` | Left |
 | `length` (`len`) | Length |
 | `namedview` (`nv`) | Namedview |
