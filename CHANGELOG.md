@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Internal
+
+- The rule that what is drawn must be the geometry the scene holds is now
+  stated once and checked, rather than relied on. Three bugs in a row were
+  the same shape — the model changed and the picture did not follow — and
+  each was found by eye, on one command, by luck. Thirty-eight editing
+  sessions now run against the invariant, each of them three times over:
+  as the edit happens, across undo and redo, and again with everything
+  treated as heavy enough to mesh in the background with the queue held
+  back, so the edits land on geometry that is still being built. The check
+  is proved able to fail by putting each of the two original bugs back and
+  watching it catch them, and a scenario that edits nothing is a failure
+  rather than a quiet pass.
+
 ### Fixed
 
 - Dragging with the gumball no longer occasionally leaves the drawing
