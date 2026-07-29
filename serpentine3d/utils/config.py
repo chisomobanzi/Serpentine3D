@@ -30,6 +30,7 @@ DEFAULTS = {
         "invert_scroll": False,
         "orbit_speed": 1.0,
         "zoom_speed": 1.0,
+        "chords": {},                  # 'ctrl+shift+mmb' -> command name
     },
     "osnaps": {
         "enabled": True,
@@ -296,3 +297,47 @@ def parse_shortcuts(text: str) -> dict:
             key, cmd = parts
         out[key.strip()] = cmd.strip().lower()
     return out
+
+
+# --- mouse chords --------------------------------------------------------
+#
+# A button held with modifiers, bound to a command. Written the way people
+# actually say it — 'ctrl+shift+mmb', 'MMB+Ctrl+Shift', 'shift+ctrl+middle'
+# are one binding, so nobody has to guess an order or a spelling.
+
+_CHORD_BUTTONS = {"middle": "middle", "mmb": "middle", "wheel": "middle",
+                  "right": "right", "rmb": "right"}
+_CHORD_MODIFIERS = {"ctrl": "ctrl", "control": "ctrl", "cmd": "ctrl",
+                    "command": "ctrl", "meta": "ctrl", "super": "ctrl",
+                    "shift": "shift",
+                    "alt": "alt", "option": "alt", "opt": "alt"}
+_CHORD_ORDER = ("ctrl", "shift", "alt")
+
+
+def chord_key(button: str, *, ctrl: bool = False, shift: bool = False,
+              alt: bool = False) -> str:
+    """The canonical name of a chord, as an event would produce it."""
+    held = [m for m, on in zip(_CHORD_ORDER, (ctrl, shift, alt)) if on]
+    return "+".join([*held, button])
+
+
+def parse_chord(text: str) -> str | None:
+    """Read a written chord into its canonical name, or None if it is not
+    one — a stray key, two buttons, nothing but modifiers."""
+    parts = [p.strip().lower() for p in str(text).split("+")]
+    if not parts or any(not p for p in parts):
+        return None
+    buttons = [_CHORD_BUTTONS[p] for p in parts if p in _CHORD_BUTTONS]
+    mods = {_CHORD_MODIFIERS[p] for p in parts if p in _CHORD_MODIFIERS}
+    if len(buttons) != 1 or len(buttons) + len(mods) != len(parts):
+        return None                    # a stray word, or the same twice
+    return chord_key(buttons[0], ctrl="ctrl" in mods, shift="shift" in mods,
+                     alt="alt" in mods)
+
+
+def chord_command(chords: dict, key: str) -> str | None:
+    """The command bound to a chord, matching however it was written."""
+    for text, command in (chords or {}).items():
+        if parse_chord(text) == key:
+            return str(command)
+    return None

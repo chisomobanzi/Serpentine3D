@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from ..core import linetype as _lt
 from ..core import spatial
+from ..utils import config as _cfg
 from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
 from . import theme
 from .camera import Camera
@@ -444,6 +445,7 @@ class Viewport(QOpenGLWidget):
     tabPressed = Signal()                   # Tab while a point is wanted
     enterShortcut = Signal()                # right-click without dragging
     popupRequested = Signal()               # middle-click without dragging
+    chordActivated = Signal(str)            # a bound mouse chord: command
     displayModeChanged = Signal()           # shaded/rendered/... changed
     viewChanged = Signal(str)               # named view set (top/perspective/…)
     _tessDone = Signal()                    # a background mesh finished
@@ -2423,6 +2425,34 @@ class Viewport(QOpenGLWidget):
                 self.mouseWorldMoved.emit(pt)
         self._last_mouse = pos
 
+    def _fire_chord(self, ev) -> bool:
+        """Run the command bound to this button-and-modifiers, if any.
+
+        Asked on release rather than on press, because these are the same
+        buttons that orbit and pan: acting the moment the button went down
+        would mean holding the modifiers cost you the drag. Nothing is
+        bound out of the box, so this changes nothing until someone asks
+        for it.
+        """
+        chords = (self.config.get("mouse", "chords", default={}) or {}
+                  if self.config else {})
+        if not chords:
+            return False
+        button = {Qt.MouseButton.MiddleButton: "middle",
+                  Qt.MouseButton.RightButton: "right"}.get(ev.button())
+        if button is None:
+            return False
+        mods = ev.modifiers()
+        command = _cfg.chord_command(chords, _cfg.chord_key(
+            button,
+            ctrl=bool(mods & Qt.KeyboardModifier.ControlModifier),
+            shift=bool(mods & Qt.KeyboardModifier.ShiftModifier),
+            alt=bool(mods & Qt.KeyboardModifier.AltModifier)))
+        if not command:
+            return False
+        self.chordActivated.emit(command)
+        return True
+
     def mouseReleaseEvent(self, ev):
         if ev.button() == Qt.MouseButton.RightButton:
             press = getattr(self, "_rmb_press", None)
@@ -2430,16 +2460,20 @@ class Viewport(QOpenGLWidget):
             pos = ev.position()
             if press is not None and \
                     (pos - press).manhattanLength() <= 4:
-                # a click, not an orbit/pan drag: Rhino-style Enter
-                self.enterShortcut.emit()
+                # a click, not an orbit/pan drag
+                if self._fire_chord(ev):
+                    return
+                self.enterShortcut.emit()      # Rhino-style Enter
                 return
         if ev.button() == Qt.MouseButton.MiddleButton:
             press = getattr(self, "_mmb_press", None)
             self._mmb_press = None
             if press is not None and \
                     (ev.position() - press).manhattanLength() <= 4:
-                # a click, not an orbit drag: recent-commands popup
-                self.popupRequested.emit()
+                # a click, not an orbit drag
+                if self._fire_chord(ev):
+                    return
+                self.popupRequested.emit()     # recent commands
                 return
         if ev.button() != Qt.MouseButton.LeftButton:
             if (ev.button() == self._nav_button()

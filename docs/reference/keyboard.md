@@ -18,6 +18,21 @@ remappable in *Settings → Keyboard* and *Settings → Mouse*.
 Orbit can be moved to the **right** mouse button in *Settings → Mouse* (a
 common Rhino preference).
 
+## Mouse chords
+
+A mouse button held with modifiers can run any command. Add one in
+*Settings → Mouse Chords*, or write it into your settings file:
+
+```json
+"mouse": { "chords": { "ctrl+shift+mmb": "zoomselected" } }
+```
+
+The chord fires on a **click**, so a drag with the same keys held still
+orbits and pans as before. Only the middle and right buttons can be bound —
+the left one is busy selecting. Order and spelling don't matter:
+`ctrl+shift+mmb`, `mmb+ctrl+shift` and `shift+ctrl+middle` are one binding.
+Nothing is bound out of the box.
+
 ## Files & editing
 
 | Shortcut | Action |

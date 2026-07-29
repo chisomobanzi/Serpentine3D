@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- Mouse chords: a mouse button held with modifiers can now run any command,
+  the way a key already could. Bind one in *Settings → Mouse Chords* or write
+  it straight into settings — `"mouse": {"chords": {"ctrl+shift+mmb":
+  "zoomselected"}}` — and Ctrl+Shift with a middle click zooms to what's
+  selected. It fires on a click, not on the press, so the same keys held
+  through a drag still orbit and pan; the middle and right buttons can be
+  bound, the left one being busy selecting. Order and spelling are yours to
+  choose: `ctrl+shift+mmb`, `mmb+ctrl+shift` and `shift+ctrl+middle` are one
+  binding, so nobody has to guess the house style. Nothing is bound out of
+  the box, so the mouse behaves exactly as it did until you ask otherwise.
+
 ### Internal
 
 - The rule that what is drawn must be the geometry the scene holds is now

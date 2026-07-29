@@ -301,6 +301,7 @@ class MainWindow(QMainWindow):
         vp.tabPressed.connect(self._toggle_direction_lock)
         vp.enterShortcut.connect(self._rmb_enter)
         vp.popupRequested.connect(self._show_mmb_popup)
+        vp.chordActivated.connect(self.run_command)
 
     def _show_palette(self):
         from .ui.palette import CommandPalette

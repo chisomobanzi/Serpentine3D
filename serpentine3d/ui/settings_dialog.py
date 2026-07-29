@@ -1,7 +1,7 @@
 """Settings dialog: sidebar categories, changes apply immediately.
 
-Deliberately not Rhino's option-tree maze: five flat pages, plain language,
-live apply, and one-click import for Rhino alias files.
+Deliberately not Rhino's option-tree maze: a handful of flat pages, plain
+language, live apply, and one-click import for Rhino alias files.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from ..commands import base as cmd_base
 from ..core.snaps import SNAP_TYPES
-from ..utils.config import parse_rhino_aliases, parse_shortcuts
+from ..utils.config import parse_chord, parse_rhino_aliases, parse_shortcuts
 
 
 def _page(title: str, subtitle: str) -> tuple[QWidget, QVBoxLayout]:
@@ -47,6 +47,7 @@ class SettingsDialog(QDialog):
         self.pages = QStackedWidget()
         for name, builder in [
             ("Mouse", self._mouse_page),
+            ("Mouse Chords", self._chords_page),
             ("Keyboard", self._keyboard_page),
             ("Aliases", self._aliases_page),
             ("Object Snaps", self._osnap_page),
@@ -174,6 +175,47 @@ class SettingsDialog(QDialog):
                      self.cb_sm_zoom.isChecked())
         self.cfg.set("spacemouse", "invert_orbit",
                      self.cb_sm_orbit.isChecked())
+
+    # ------------------------------------------------------------- chords
+
+    def _chords_page(self) -> QWidget:
+        w, layout = _page("Mouse Chords",
+                          "A mouse button held with modifiers, bound to a "
+                          "command: 'ctrl+shift+mmb' runs it on a click. "
+                          "Order and spelling don't matter — 'mmb+ctrl+shift' "
+                          "and 'shift+ctrl+middle' are the same chord. The "
+                          "middle and right buttons can be bound; a drag "
+                          "still orbits and pans as it did.")
+        self.chord_table = QTableWidget(0, 2)
+        self.chord_table.setHorizontalHeaderLabels(["Chord", "Command"])
+        for col in (0, 1):
+            self.chord_table.horizontalHeader().setSectionResizeMode(
+                col, QHeaderView.ResizeMode.Stretch)
+        for chord, cmd in sorted(
+                (self.cfg.get("mouse", "chords", default={}) or {}).items()):
+            self._add_row(self.chord_table, chord, cmd)
+        self.chord_table.itemChanged.connect(self._chords_changed)
+        layout.addWidget(self.chord_table, 1)
+        layout.addLayout(self._table_buttons(
+            self.chord_table, None, on_change=self._chords_changed))
+        return w
+
+    def _chords_changed(self, *_):
+        """Save the chord table. Rows that aren't a chord are dropped rather
+        than stored — a half-typed 'ctrl+shift' is normal while editing, and
+        keeping it would leave a binding that can never fire."""
+        chords = {}
+        for r in range(self.chord_table.rowCount()):
+            chord_item = self.chord_table.item(r, 0)
+            cmd_item = self.chord_table.item(r, 1)
+            if not chord_item or not cmd_item:
+                continue
+            chord = chord_item.text().strip()
+            cmd = cmd_item.text().strip().lower()
+            if not chord or not cmd or parse_chord(chord) is None:
+                continue
+            chords[chord] = cmd
+        self.cfg.set("mouse", "chords", chords)
 
     # ---------------------------------------------------------- keyboard
 
@@ -441,12 +483,13 @@ class SettingsDialog(QDialog):
             lambda: (table.removeRow(table.currentRow())
                      if table.currentRow() >= 0 else None,
                      on_change()))
-        btn_imp = QPushButton("Import…")
-        btn_imp.clicked.connect(import_fn)
         row.addWidget(btn_add)
         row.addWidget(btn_del)
         row.addStretch(1)
-        row.addWidget(btn_imp)
+        if import_fn is not None:      # nothing to import a mouse chord from
+            btn_imp = QPushButton("Import…")
+            btn_imp.clicked.connect(import_fn)
+            row.addWidget(btn_imp)
         return row
 
     def _restore_defaults(self):
