@@ -8,8 +8,14 @@ repo_url: https://github.com/chisomobanzi/Serpentine3D
 repo_name: chisomobanzi/Serpentine3D
 edit_uri: edit/main/docs/
 
+# code-signing-policy.md is written in the present tense - "the Windows builds
+# are digitally signed" - and build-windows.yml has no signing step yet, so
+# building it would put a claim we cannot back on a public URL. It stays in the
+# repo, which is a link SignPath's application can use. Drop it from this list
+# and restore its nav entry once releases are actually signed.
 exclude_docs: |
   gen_commands.py
+  code-signing-policy.md
 
 theme:
   name: material
@@ -57,12 +63,7 @@ nav:
   - Explanation:
       - How it works: explanation/how-it-works.md
   - Coming from Rhino: coming-from-rhino.md
-  # Code signing policy: code-signing-policy.md
-  # Held out of the nav until the signing pipeline is live. The page states in
-  # the present tense that the Windows builds are signed, and build-windows.yml
-  # has no signing step yet, so publishing it to the docs site would be a claim
-  # we cannot back. The file stays in the repo, which is a URL SignPath's
-  # application can point at; restore this line once releases are signed.
+  # Code signing policy: code-signing-policy.md   (see exclude_docs below)
 
 markdown_extensions:
   - admonition
