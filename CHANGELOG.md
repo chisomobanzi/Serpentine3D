@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Fixed
+
+- Opening a drawing with a survey scan in it no longer freezes the window
+  after the file has finished loading. The viewport already kept heavy
+  tessellation off the thread that draws, but meshes skipped that check
+  entirely on the grounds that they convert instantly — true of the couple
+  of hundred small ones in a drawing, and false of a scan. Arriving as a
+  mesh is not arriving ready to draw: Rhino's own vertex normals cost 36µs
+  each to read, 239 s for one 6.6-million-vertex object, so the shading is
+  worked out from the geometry instead, and that takes ten seconds. On a
+  522 MB cave file two such scans held 13.2M of 16.8M vertices and cost 26
+  of the 29 seconds the window spent unresponsive. Meshes past 20,000
+  vertices now build in the background behind a bounding box like any other
+  heavy shape, which moves 24 of those 25 seconds off the drawing thread —
+  and the two scans overlap rather than taking turns, so they cost 12
+  seconds between them rather than 22.
+
 ### Added
 
 - `--version` (and `-V`) on every command: `serp3d`, `serp`, `serp3d-batch`

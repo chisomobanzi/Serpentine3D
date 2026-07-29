@@ -1109,6 +1109,13 @@ class Viewport(QOpenGLWidget):
     # shapes with at least this many faces mesh in the background
     ASYNC_FACE_COUNT = 48
 
+    # Vertices past which a mesh goes to the background too. Shading one
+    # costs about 0.8us a vertex, so this is roughly a frame: below it the
+    # round trip, and the box standing in meanwhile, cost more than just
+    # building the thing. On the cave file it defers 48 of 182 meshes and
+    # moves 24 of their 25 seconds off the thread that draws.
+    ASYNC_MESH_VERTICES = 20_000
+
     def _layer_linetypes(self) -> dict:
         """Every layer's dash style, by id.
 
@@ -1200,17 +1207,26 @@ class Viewport(QOpenGLWidget):
         if obj.id in self._tess_pending:
             return True
         from ..core.mesh import MeshShape
-        if isinstance(obj.shape, MeshShape):
-            return False                    # meshes convert instantly
         try:
             from ..core import geometry as g
-            n = 0
-            for _ in g.faces_of(obj.shape):
-                n += 1
-                if n >= self.ASYNC_FACE_COUNT:
-                    break
-            if n < self.ASYNC_FACE_COUNT:
-                return False
+            if isinstance(obj.shape, MeshShape):
+                # Arriving as a mesh is not the same as arriving ready to
+                # draw. Rhino's own vertex normals are deliberately not read
+                # — 36us each is 239 seconds for one survey scan — so the
+                # shading is worked out from the geometry here instead, and
+                # welding and shading 6.6 million vertices takes ten of them.
+                # Small meshes really do convert instantly, which is why this
+                # was skipped for all of them.
+                if len(obj.shape.vertices) < self.ASYNC_MESH_VERTICES:
+                    return False
+            else:
+                n = 0
+                for _ in g.faces_of(obj.shape):
+                    n += 1
+                    if n >= self.ASYNC_FACE_COUNT:
+                        break
+                if n < self.ASYNC_FACE_COUNT:
+                    return False
             mn, mx = g.bbox(obj.shape)
         except Exception:                                  # noqa: BLE001
             return False
