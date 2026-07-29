@@ -22,9 +22,34 @@
   because the app cannot fork: its tessellation threads hold locks a forked
   child would inherit already locked.
 
+  Sharing objects out, though, means a drawing opens no faster than its
+  dearest single object. The 522 MB cave survey ends in two meshes of 6.6
+  million vertices; each took fifty seconds, and for forty-eight of them the
+  dialog read "Converting object 11631 of 11759" while fifteen of the sixteen
+  workers had nothing to do. A mesh past 200000 vertices is now read in vertex
+  ranges by the whole pool rather than by one worker, which takes that object
+  from 59.5 s to 6.2 s and the file from 77.6 s to 37.2 s.
+
   Progress and Cancel work exactly as before. Files under 8 MB stay on the
   single-process path, where starting a helper would cost more than it saves,
   and `SERP3D_IMPORT_WORKERS=1` forces it everywhere.
+
+- **Imported meshes are shaded by their surface, not by their triangles**:
+  Rhino stores a mesh unwelded — every face owning its own corners — so
+  averaging face normals per vertex index averaged exactly one face and shaded
+  every triangle flat. One survey object came out with 23870 distinct normals
+  across 23369 triangles. Normals are now worked out by welding coincident
+  corners and averaging the faces that meet within 30° of each other, each
+  face weighted by the angle it occupies, so a curved wall is smooth and the
+  rim at the top of it stays sharp. Rhino's own normals are in the file, but
+  rhino3dm hands them over one attribute at a time — 239 s for one object's
+  6.6 million — so they are computed instead.
+
+- **Meshes stopped drawing a wireframe over themselves**: feature edges
+  matched faces by vertex index, and an unwelded mesh shares none, so every
+  triangle edge was called a boundary. One survey object produced 9.9 million
+  of them — 238 MB uploaded to the card and redrawn every frame. Edges are now
+  matched by position.
 
 - **A broken macOS build now fails the build**: 0.5.2's `.dmg` was assembled
   from an empty app bundle and reported success, because the bundle died

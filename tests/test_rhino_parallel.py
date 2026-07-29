@@ -43,6 +43,37 @@ def _boxes_3dm(path, n, layer="Walls"):
     return path
 
 
+def _survey_3dm(path, side=40, boxes=3):
+    """A .3dm whose weight is all in one mesh, the way a survey file's is.
+
+    Quads and triangles both, so a piece boundary has to fall in the middle
+    of each kind.
+    """
+    model = r3.File3dm()
+    m = r3.Mesh()
+    for i in range(side):
+        for j in range(side):
+            m.Vertices.Add(float(i), float(j), float((i * j) % 7))
+    for i in range(side - 1):
+        for j in range(side - 1):
+            a = i * side + j
+            if (i + j) % 3:
+                m.Faces.AddFace(a, a + 1, a + side + 1, a + side)
+            else:
+                m.Faces.AddFace(a, a + 1, a + side)
+    attrs = r3.ObjectAttributes()
+    attrs.Name = "the survey"
+    model.Objects.AddMesh(m, attrs)
+    for i in range(boxes):
+        box = r3.Box(r3.BoundingBox(r3.Point3d(i * 10, 0, 0),
+                                    r3.Point3d(i * 10 + 5, 5, 5)))
+        small = r3.ObjectAttributes()
+        small.Name = f"box {i}"
+        model.Objects.AddBrep(r3.Brep.CreateFromBox(box), small)
+    assert model.Write(path, 8)
+    return path
+
+
 # ------------------------------------------------------------------ batching
 
 def test_batches_cover_every_object_exactly_once():
@@ -166,6 +197,86 @@ def test_a_broken_file_raises_rather_than_returning_nothing(tmp_path):
     bad.write_bytes(b"3D Geometry File Format nope")
     with pytest.raises(IOError):
         rp.import_3dm_parallel(str(bad), workers=2)
+
+
+# ------------------------------------------ one object bigger than a worker
+
+def test_a_mesh_too_big_for_one_worker_is_shared_out():
+    """The cave file ends in two meshes of 6.6 million vertices each. Handing
+    one to a single worker held the bar at 93% for forty-eight seconds while
+    fifteen of the sixteen had nothing left to do."""
+    assert rp._piece_count(6_619_136, 16, 200_000) == 34
+
+
+def test_a_preposterous_mesh_does_not_become_thousands_of_round_trips():
+    assert rp._piece_count(10**10, 16, 200_000) == 64
+
+
+def test_a_mesh_one_worker_can_manage_is_left_alone():
+    """Below the threshold the round trip costs more than the reading."""
+    assert rp._piece_count(1_000, 16, 200_000) == 1
+    assert rp._piece_count(200_000, 16, 200_000) == 1
+
+
+def test_pieces_cover_every_item_exactly_once_and_in_order():
+    """Contiguous, not interleaved as the batches are: the pieces are
+    concatenated back together and a face indexes its vertices by position."""
+    ranges = rp._pieces(1000, 7)
+    assert len(ranges) == 7
+    assert [i for lo, hi in ranges for i in range(lo, hi)] == list(range(1000))
+
+
+def test_there_are_as_many_pieces_as_asked_for_even_of_almost_nothing():
+    """The vertex ranges and the face ranges are paired off, so a mesh with
+    fewer faces than workers must still answer with a range apiece."""
+    assert len(rp._pieces(3, 8)) == 8
+    assert len(rp._pieces(0, 4)) == 4
+
+
+def test_a_mesh_read_in_pieces_comes_back_whole(tmp_path, monkeypatch):
+    """Vertex for vertex and triangle for triangle what one process reads."""
+    path = _survey_3dm(str(tmp_path / "survey.3dm"))
+    serial = rhino.import_3dm(path)
+    # The reader is a separate process, so the threshold travels in the
+    # environment rather than by patching this one.
+    monkeypatch.setenv("SERP3D_IMPORT_SPLIT_VERTICES", "50")
+    parallel = rp.import_3dm_parallel(path, workers=3)
+
+    assert [n for n, _, _ in parallel] == [n for n, _, _ in serial]
+    meshes = [(a, b) for (_, a, _), (_, b, _) in zip(parallel, serial)
+              if isinstance(b, MeshShape)]
+    assert meshes, "the fixture stopped holding a mesh"
+    for got, want in meshes:
+        assert isinstance(got, MeshShape)
+        assert np.array_equal(got.vertices, want.vertices)
+        assert np.array_equal(got.triangles, want.triangles)
+
+
+def test_the_bar_keeps_moving_while_one_object_is_being_read(tmp_path,
+                                                             monkeypatch):
+    """The object count cannot move while a single object is in hand, so the
+    pieces report for it. Otherwise the dialog says 11631 of 11759 and sits
+    there, which is the complaint that started this."""
+    path = _survey_3dm(str(tmp_path / "survey.3dm"))
+    monkeypatch.setenv("SERP3D_IMPORT_SPLIT_VERTICES", "50")
+    seen = []
+    rp.import_3dm_parallel(path, progress=Progress(
+        lambda f, m: seen.append((f, m))), workers=3)
+
+    during = [f for f, m in seen if "piece" in m]
+    assert len(set(during)) > 1, seen
+    assert during == sorted(during), "progress went backwards"
+    assert max(during) <= 1.0
+
+
+def test_a_split_mesh_is_still_the_object_it_was(tmp_path, monkeypatch):
+    """Name and layer belong to the object, not to whichever worker happened
+    to read its first thousand vertices."""
+    path = _survey_3dm(str(tmp_path / "survey.3dm"))
+    monkeypatch.setenv("SERP3D_IMPORT_SPLIT_VERTICES", "50")
+    names = [n for n, _, _ in rp.import_3dm_parallel(path, workers=3)]
+    assert names[0] == "the survey"
+    assert names[1:] == ["box 0", "box 1", "box 2"]
 
 
 # ---------------------------------------- keeping the window alive meanwhile

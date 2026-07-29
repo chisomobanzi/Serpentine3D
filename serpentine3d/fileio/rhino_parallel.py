@@ -25,6 +25,14 @@ between a fix and a disappointment, all of them measured:
     one thread-free process is spawned, and *it* reads the file and forks the
     converters.
 
+  * **Share out the one object nobody else can help with.** Sharing objects
+    out means a drawing converts no faster than its dearest single object. A
+    survey file ends in two meshes of 6.6 million vertices, fifty seconds
+    each, and the last fifty-eight seconds of a seventy-four second import
+    were fifteen workers watching one read a mesh. Past SPLIT_VERTICES a mesh
+    is read in vertex ranges by the whole pool instead: 74 s to 32 s, and the
+    object itself 59.5 s to 6.2 s.
+
 Shapes come back down a pipe. A MeshShape is numpy and pickles as it stands;
 a TopoDS_Shape does not pickle at all — it aborts the interpreter — so it
 travels as a BinTools archive, about 6 KB and half a millisecond each.
@@ -41,6 +49,7 @@ import os
 import sys
 import traceback
 
+import numpy as np
 import rhino3dm as r3
 
 from ..core.mesh import MeshShape
@@ -64,6 +73,14 @@ MAX_WORKERS = 16
 # Without fork every worker holds its own copy of the model, so the ceiling
 # is memory rather than cores.
 MAX_WORKERS_WITHOUT_FORK = 4
+
+# Vertices past which one mesh is read by several workers instead of one.
+# Objects are shared out, so a drawing converts as fast as its dearest single
+# object: the cave file's last two are 6.6 million vertices each, fifty
+# seconds apiece, and for those fifty seconds fifteen of the sixteen workers
+# had nothing to do and the bar sat at 93%. Below the threshold the round trip
+# through the pool costs more than the reading.
+SPLIT_VERTICES = 200_000
 
 
 def _available_cores() -> int:
@@ -121,6 +138,49 @@ def worker_count(requested: int | None = None) -> int:
             pass
     cap = MAX_WORKERS if hasattr(os, "fork") else MAX_WORKERS_WITHOUT_FORK
     return max(1, min(cap, _available_cores()))
+
+
+def split_vertices(requested: int | None = None) -> int:
+    """Vertices past which a mesh is worth more than one worker.
+
+    SERP3D_IMPORT_SPLIT_VERTICES overrides it. The reader is a process of its
+    own, so that is also how a test says so.
+    """
+    if requested is None:
+        requested = os.environ.get("SERP3D_IMPORT_SPLIT_VERTICES")
+    if requested:
+        try:
+            return max(1, int(requested))
+        except (TypeError, ValueError):
+            pass
+    return SPLIT_VERTICES
+
+
+def _piece_count(vertices: int, workers: int, limit: int) -> int:
+    """How many pieces one mesh is worth.
+
+    A piece of `limit` vertices, rather than one worker's share of the mesh:
+    more pieces than workers pack the pool tighter when several meshes are
+    split at once, and each one is a line on the dialog, so the sentence
+    changes every second or two instead of once a wave. The ceiling is there
+    to stop a preposterous mesh from becoming thousands of round trips.
+    """
+    if limit <= 0 or vertices <= limit:
+        return 1
+    return max(2, min(4 * workers, math.ceil(vertices / limit)))
+
+
+def _pieces(count: int, parts: int) -> list[tuple[int, int]]:
+    """`count` items as exactly `parts` contiguous [lo, hi) ranges.
+
+    Contiguous, unlike the batches: the pieces are concatenated back together
+    in order, and a face indexes its vertices by position. Exactly `parts` of
+    them, empty ones included, so a mesh's vertex ranges and its face ranges
+    pair off even when it has fewer faces than there are workers.
+    """
+    parts = max(1, parts)
+    edges = [count * k // parts for k in range(parts + 1)]
+    return list(zip(edges[:-1], edges[1:]))
 
 
 def _batches(total: int, size: int = BATCH) -> list[list[int]]:
@@ -191,21 +251,60 @@ def _init_worker(path: str):
 
 
 def _convert(indices: list[int]):
-    """[(index, name, layer index, [encoded shape])] for one batch."""
+    """[(index, name, layer index, [encoded shape], size)] for one batch.
+
+    A mesh too big for one worker is not converted here. Its vertex and face
+    counts come back instead, as `size`, and the reader shares the reading of
+    it out; everything else answers with `size` None and its shapes.
+    """
     from . import rhino
 
+    limit = split_vertices()
     out = []
     for i in indices:
         obj = _MODEL.Objects[i]
+        geo = obj.Geometry
+        attrs = obj.Attributes
+        if isinstance(geo, r3.Mesh) and len(geo.Vertices) > limit:
+            out.append((i, attrs.Name or "", attrs.LayerIndex, [],
+                        (len(geo.Vertices), len(geo.Faces))))
+            continue
         try:
-            shapes = rhino.object_to_shapes(obj.Geometry)
+            shapes = rhino.object_to_shapes(geo)
         except Exception:                                       # noqa: BLE001
             shapes = []
         encoded = [_encode(s) for s in shapes
                    if s is not None and not s.IsNull()]
-        attrs = obj.Attributes
-        out.append((i, attrs.Name or "", attrs.LayerIndex, encoded))
+        out.append((i, attrs.Name or "", attrs.LayerIndex, encoded, None))
     return out
+
+
+def _read_piece(job):
+    """One slice of one mesh: (object index, piece number, vertices, tris).
+
+    Indexed, not iterated, because a worker starting part way in has no
+    cheaper way to get there: skipping to the middle with islice costs nearly
+    half what reading it does. Index once per vertex and read the three
+    coordinates off what comes back — `vl[i].X, vl[i].Y, vl[i].Z` builds three
+    points and costs twice as much as building one.
+    """
+    index, part, vlo, vhi, flo, fhi = job
+    mesh = _MODEL.Objects[index].Geometry
+    vl = mesh.Vertices
+    rows = []
+    for i in range(vlo, vhi):
+        v = vl[i]
+        rows.append((v.X, v.Y, v.Z))
+    fl = mesh.Faces
+    tris = []
+    for i in range(flo, fhi):
+        a, b, c, d = fl[i]
+        tris.append((a, b, c))
+        if d != c:
+            tris.append((a, c, d))
+    return (index, part,
+            np.array(rows, float).reshape(-1, 3),
+            np.array(tris, np.uint32).reshape(-1, 3))
 
 
 def _convert_in_pool(path: str, workers: int, cancel=None):
@@ -233,14 +332,65 @@ def _convert_in_pool(path: str, workers: int, cancel=None):
 
     ctx = mp.get_context("fork" if hasattr(os, "fork") else "spawn")
     done = 0
+    deferred = {}
     with ctx.Pool(min(workers, len(batches)),
                   initializer=_init_worker, initargs=(path,)) as pool:
         for results in pool.imap_unordered(_convert, batches):
             if cancel is not None and cancel.is_set():
                 pool.terminate()
                 return
-            done += len(results)
-            yield ("batch", done, total, results)
+            rows = []
+            for index, name, layer, encoded, size in results:
+                if size is None:
+                    rows.append((index, name, layer, encoded))
+                else:
+                    deferred[index] = (name, layer, size)
+            done += len(rows)
+            yield ("batch", done, total, rows)
+        if deferred:
+            yield from _share_out(pool, deferred, done, total, workers, cancel)
+
+
+def _share_out(pool, deferred, done, total, workers, cancel):
+    """Read the objects too big for one worker across the whole pool.
+
+    They are left till last because nothing knows an object's size until a
+    worker has looked at it, and asking beforehand means the reader walking
+    the file alone. By the time they come round the pool is otherwise idle,
+    so the pieces of every deferred mesh go in together and the last object
+    finishes in about the time one worker would have needed for a sixteenth
+    of it.
+    """
+    limit = split_vertices()
+    jobs, held = [], {}
+    for index, (_, _, (vertices, faces)) in deferred.items():
+        parts = _piece_count(vertices, workers, limit)
+        spans = zip(_pieces(vertices, parts), _pieces(faces, parts))
+        held[index] = [None] * parts
+        for part, ((vlo, vhi), (flo, fhi)) in enumerate(spans):
+            jobs.append((index, part, vlo, vhi, flo, fhi))
+
+    # The object count cannot move while a single object is in hand, so the
+    # pieces report instead — a bar that stops is a bar that has hung.
+    lo, span = done / (total or 1), len(deferred) / (total or 1)
+    for k, (index, part, verts, tris) in enumerate(
+            pool.imap_unordered(_read_piece, jobs), 1):
+        if cancel is not None and cancel.is_set():
+            pool.terminate()
+            return
+        pieces = held[index]
+        pieces[part] = (verts, tris)
+        yield ("status", lo + span * k / len(jobs),
+               f"Reading a large mesh, {k} of {len(jobs)} pieces")
+        if all(piece is not None for piece in pieces):
+            shape = MeshShape(
+                np.concatenate([piece[0] for piece in pieces]),
+                np.concatenate([piece[1] for piece in pieces]))
+            del held[index]
+            name, layer, _ = deferred[index]
+            done += 1
+            yield ("batch", done, total,
+                   [(index, name, layer, [_encode(shape)])])
 
 
 def _read_file(path: str, workers: int, conn, cancel):
