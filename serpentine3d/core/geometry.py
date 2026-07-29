@@ -207,18 +207,34 @@ def join_curves(shapes: list) -> TopoDS_Shape:
 
 
 def apply_matrix(shape, matrix):
-    """Apply a 4x4 similarity transform (rotation + translation +
-    uniform scale). OCCT's gp_Trsf cannot express shear/non-uniform."""
+    """Apply any 4x4 affine transform: rotation, translation, scale, shear.
+
+    A gp_Trsf only holds similarities, and handed a matrix it cannot express
+    it does not refuse — it quietly rounds to the nearest one it can, so a
+    1x1x3 stretch used to come back a cube of the same volume. Anything that
+    is not a similarity goes through gp_GTrsf instead, which costs more but
+    means what it says. Block instances in a .3dm are routinely scaled
+    unevenly, so this is a road well travelled.
+    """
     import numpy as np
     from .mesh import MeshShape
     m = np.asarray(matrix, float)
     if isinstance(shape, MeshShape):
         return shape.transformed(m)
-    trsf = gp_Trsf()
-    trsf.SetValues(m[0, 0], m[0, 1], m[0, 2], m[0, 3],
-                   m[1, 0], m[1, 1], m[1, 2], m[1, 3],
-                   m[2, 0], m[2, 1], m[2, 2], m[2, 3])
-    return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+    a = m[:3, :3]
+    # a similarity is a rotation times a single scale, so A@A.T is that
+    # scale squared on the diagonal and nothing anywhere else
+    square = a @ a.T
+    if np.allclose(square, np.eye(3) * square[0, 0], atol=1e-9):
+        trsf = gp_Trsf()
+        trsf.SetValues(m[0, 0], m[0, 1], m[0, 2], m[0, 3],
+                       m[1, 0], m[1, 1], m[1, 2], m[1, 3],
+                       m[2, 0], m[2, 1], m[2, 2], m[2, 3])
+        return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+    gt = gp_GTrsf()
+    gt.SetVectorialPart(gp_Mat(*a.flatten()))
+    gt.SetTranslationPart(gp_XYZ(*m[:3, 3]))
+    return _gtransform(shape, gt)
 
 
 def curve_endpoints(shape) -> tuple[Point, Point]:

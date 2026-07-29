@@ -158,6 +158,32 @@ def test_scale_uniform_and_nonuniform():
     assert g.volume(stretched) == pytest.approx(6.0, rel=1e-5)
 
 
+def test_apply_matrix_moves_and_turns():
+    box = g.make_box((0, 0, 0), 1, 1, 1)
+    m = np.eye(4)
+    m[:3, 3] = (5, 0, 0)
+    mn, mx = g.bbox(g.apply_matrix(box, m))
+    assert mn[0] == pytest.approx(5.0, abs=1e-6)
+    assert mx[0] == pytest.approx(6.0, abs=1e-6)
+
+
+def test_apply_matrix_keeps_an_uneven_scale_uneven():
+    """A matrix that stretches one axis has to come out stretched.
+
+    OCCT's gp_Trsf only holds similarities, and rather than refusing a matrix
+    it cannot express it quietly rounds it to the nearest one — a 1x1x3 box
+    came out a cube with the same volume. Block instances in a .3dm are
+    routinely scaled unevenly, so this is not a corner case.
+    """
+    box = g.make_box((0, 0, 0), 1, 1, 1)
+    m = np.diag([1.0, 1.0, 3.0, 1.0])
+    mn, mx = g.bbox(g.apply_matrix(box, m))
+    assert mx[0] - mn[0] == pytest.approx(1.0, abs=1e-6)
+    assert mx[1] - mn[1] == pytest.approx(1.0, abs=1e-6)
+    assert mx[2] - mn[2] == pytest.approx(3.0, abs=1e-6)
+    assert g.volume(g.apply_matrix(box, m)) == pytest.approx(3.0, rel=1e-5)
+
+
 def test_mirror():
     box = g.make_box((1, 0, 0), 1, 1, 1)
     m = g.mirror(box, (0, 0, 0), (1, 0, 0))

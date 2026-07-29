@@ -23,6 +23,21 @@
 
 ### Fixed
 
+- Blocks come in from a `.3dm`. An instance imported as nothing at all, and
+  the definition it placed imported as loose objects sitting at the origin, so
+  a drawing that placed one block fifty times gave you one ghost copy in the
+  wrong place and none of the fifty. Serpentine3D has no block object of its
+  own, so an instance now arrives as its content moved into place — the trade
+  Rhino's own Explode makes. Blocks inside blocks are placed through every
+  level, a member keeps its own layer and material, a member set to take its
+  colour from its parent takes the instance's, and the pieces are named after
+  the instance that placed them so you can find them again. Both import paths
+  do it, the single-process one and the pool of processes a large file goes
+  through.
+- An unevenly scaled object keeps its shape. The transform everything went
+  through only holds similarities, and handed a matrix it could not express it
+  did not refuse — it quietly rounded to the nearest one it could, so a block
+  stretched 1x1x3 came back a cube of the same volume.
 - Clicking an edge picks the one in front. Edges were ranked by how near they
   fell to the cursor on screen and by nothing else, so an edge on the far side
   of a model could take a click away from the one drawn over it, and the only

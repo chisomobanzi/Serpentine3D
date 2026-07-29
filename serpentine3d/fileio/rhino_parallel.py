@@ -61,6 +61,7 @@ from .progress import Progress
 _MODEL = None
 _LAYERS: dict = {}
 _MATERIALS: dict = {}
+_BLOCKS: dict = {}
 
 # Spawning a process and importing the kernel into it costs a couple of
 # seconds, which most .3dm files do not take to convert in the first place.
@@ -248,7 +249,7 @@ def _decode(payload):
 
 def _init_worker(path: str):
     """Fill in the model only where fork did not hand one over."""
-    global _MODEL, _LAYERS, _MATERIALS
+    global _MODEL, _LAYERS, _MATERIALS, _BLOCKS
     from . import rhino
 
     if _MODEL is None:
@@ -257,14 +258,21 @@ def _init_worker(path: str):
     # objects and a few dozen layers.
     _LAYERS = rhino.read_layers(_MODEL)
     _MATERIALS = rhino.read_materials(_MODEL)
+    _BLOCKS = rhino.read_blocks(_MODEL)
 
 
 def _convert(indices: list[int]):
-    """[(index, name, appearance, [encoded shape], size)] for one batch.
+    """[(index, [(name, appearance, [encoded shape])], size)] for one batch.
 
     Appearance is resolved here rather than by the reader, because working out
     where an object's colour comes from means reading its attributes, and that
     is exactly the per-object binding cost the pool exists to share out.
+
+    One object is usually one named group of shapes, but a block instance is
+    as many as the definition it places has members, each with a name and a
+    colour of its own — so the answer is a list of them and not a single name.
+    An object that brings nothing at all, which is what a definition's own
+    content is, answers with an empty one.
 
     A mesh too big for one worker is not converted here. Its vertex and face
     counts come back instead, as `size`, and the reader shares the reading of
@@ -278,10 +286,29 @@ def _convert(indices: list[int]):
         obj = _MODEL.Objects[i]
         geo = obj.Geometry
         attrs = obj.Attributes
+        if attrs.IsInstanceDefinitionObject:
+            # Kept in the object table but not in the drawing: only the
+            # instances that place it put it anywhere.
+            out.append((i, [], None))
+            continue
         meta = rhino.object_appearance(attrs, _LAYERS, _MATERIALS)
         if isinstance(geo, r3.Mesh) and len(geo.Vertices) > limit:
-            out.append((i, attrs.Name or "", meta, [],
+            out.append((i, [(attrs.Name or "", meta, [])],
                         (len(geo.Vertices), len(geo.Faces))))
+            continue
+        if isinstance(geo, r3.InstanceReference):
+            # Expanded whole, however big its members are: sharing one out
+            # would mean reading a mesh in ranges and then placing the ranges
+            # separately, and a definition holding a survey mesh is not a
+            # drawing anyone has yet brought us.
+            name = rhino.placed_block_name(attrs, geo, _BLOCKS, i)
+            try:
+                parts = rhino.instance_to_objects(geo, name, meta, _BLOCKS,
+                                                  _LAYERS, _MATERIALS)
+            except Exception:                                   # noqa: BLE001
+                parts = []
+            out.append((i, [(part_name, part_meta, [_encode(shape)])
+                            for part_name, shape, part_meta in parts], None))
             continue
         try:
             shapes = rhino.object_to_shapes(geo)
@@ -289,7 +316,7 @@ def _convert(indices: list[int]):
             shapes = []
         encoded = [_encode(s) for s in shapes
                    if s is not None and not s.IsNull()]
-        out.append((i, attrs.Name or "", meta, encoded, None))
+        out.append((i, [(attrs.Name or "", meta, encoded)], None))
     return out
 
 
@@ -351,12 +378,16 @@ def _convert_in_pool(path: str, workers: int, cancel=None):
                 pool.terminate()
                 return
             rows = []
-            for index, name, meta, encoded, size in results:
-                if size is None:
-                    rows.append((index, name, meta, encoded))
-                else:
-                    deferred[index] = (name, meta, size)
-            done += len(rows)
+            for index, parts, size in results:
+                if size is not None:
+                    deferred[index] = (parts[0][0], parts[0][1], size)
+                    continue
+                # Counted whether or not it brought anything with it: a
+                # definition's own content is an object the workers are done
+                # with, and leaving it out held the bar short of the end.
+                done += 1
+                if parts:
+                    rows.append((index, parts))
             yield ("batch", done, total, rows)
         if deferred:
             yield from _share_out(pool, deferred, done, total, workers, cancel)
@@ -401,7 +432,7 @@ def _share_out(pool, deferred, done, total, workers, cancel):
             name, meta, _ = deferred[index]
             done += 1
             yield ("batch", done, total,
-                   [(index, name, meta, [_encode(shape)])])
+                   [(index, [(name, meta, [_encode(shape)])])])
 
 
 def _read_file(path: str, workers: int, conn, cancel):
@@ -464,9 +495,10 @@ def _assemble(messages, report, opening: str = "") -> list[tuple[str, object,
         kind = message[0]
         if kind == "batch":
             _, done, total, results = message
-            rows.extend((index, name, meta,
-                         [_decode(payload) for payload in encoded])
-                        for index, name, meta, encoded in results)
+            rows.extend((index, [(name, meta,
+                                  [_decode(p) for p in encoded])
+                                 for name, meta, encoded in parts])
+                        for index, parts in results)
             latest = (done / (total or 1),
                       f"Converting object {done} of {total}")
             report(*latest)
@@ -493,10 +525,11 @@ def _assemble(messages, report, opening: str = "") -> list[tuple[str, object,
     # worker was quickest, and the fallback names count in file order.
     rows.sort(key=lambda row: row[0])
     out, counter = [], 0
-    for _, name, meta, shapes in rows:
-        for shape in shapes:
-            counter += 1
-            out.append((name or f"3dm object {counter:02d}", shape, meta))
+    for _, parts in rows:
+        for name, meta, shapes in parts:
+            for shape in shapes:
+                counter += 1
+                out.append((name or f"3dm object {counter:02d}", shape, meta))
     return out
 
 

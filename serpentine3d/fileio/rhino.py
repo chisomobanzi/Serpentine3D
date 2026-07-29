@@ -35,6 +35,7 @@ from .rhino_parallel import (MIN_PARALLEL_BYTES, _spawn_executable,
 # 11759 objects is 11759 enum constructions otherwise.
 _COLOR_FROM_OBJECT = int(r3.ObjectColorSource.ColorFromObject)
 _COLOR_FROM_MATERIAL = int(r3.ObjectColorSource.ColorFromMaterial)
+_COLOR_FROM_PARENT = int(r3.ObjectColorSource.ColorFromParent)
 _MATERIAL_FROM_OBJECT = int(r3.ObjectMaterialSource.MaterialFromObject)
 # Rhino's shine is 0..255, where 255 is a mirror.
 MAX_SHINE = 255.0
@@ -670,7 +671,8 @@ def _clamp(value: float) -> float:
         return 0.0
 
 
-def object_appearance(attrs, layers: dict, materials: dict) -> dict:
+def object_appearance(attrs, layers: dict, materials: dict,
+                      parent: dict | None = None) -> dict:
     """How one object should look: {layer, layer_color, color, material}.
 
     `color` is an override and is None when the layer decides, which is the
@@ -678,6 +680,12 @@ def object_appearance(attrs, layers: dict, materials: dict) -> dict:
     they do in Rhino. Shared with the parallel importer, which resolves this
     in the worker: the two paths disagreeing would be worse than either being
     wrong.
+
+    `parent` is the appearance of the block instance this object was placed
+    by, if any. Inside a block a member can say its colour comes from its
+    parent, which is how one definition gets placed in several colours; with
+    no parent to ask, that source used to read as "no override" and the
+    instance's colour was thrown away.
     """
     layer = layers.get(attrs.LayerIndex, {})
     index = attrs.MaterialIndex \
@@ -692,6 +700,10 @@ def object_appearance(attrs, layers: dict, materials: dict) -> dict:
         color = (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0)
     elif source == _COLOR_FROM_MATERIAL and material is not None:
         color = material["color"]
+    elif source == _COLOR_FROM_PARENT and parent is not None:
+        # the instance's own colour, or its layer's if it has none — either
+        # way the member follows the instance and not its own layer
+        color = parent["color"] or parent["layer_color"]
 
     return {"layer": layer.get("name"), "layer_color": layer.get("color"),
             "color": color, "material": _shading(material)}
@@ -710,6 +722,113 @@ def _shading(material: dict | None) -> dict | None:
         return None
     return {k: material[k]
             for k in ("color", "opacity", "roughness", "metallic")}
+
+
+# A definition that contains itself would otherwise place forever. Rhino will
+# not let you build one, but a file can arrive with one in it.
+MAX_BLOCK_DEPTH = 16
+
+
+def read_blocks(model) -> dict:
+    """{definition id: {"name", "members": [(geometry, attributes), ...]}}.
+
+    Read once per file, like the layer and material tables: a drawing has a
+    handful of definitions and can have thousands of instances of them.
+    """
+    blocks = {}
+    for idef in model.InstanceDefinitions:
+        members = []
+        for member_id in idef.GetObjectIds():
+            obj = model.Objects.FindId(member_id)
+            if obj is not None:
+                members.append((obj.Geometry, obj.Attributes))
+        blocks[str(idef.Id)] = {"name": (idef.Name or "").strip(),
+                                "members": members}
+    return blocks
+
+
+def _xform_matrix(xform):
+    """A rhino3dm Transform as a 4x4 numpy matrix."""
+    return np.array(
+        [[xform.M00, xform.M01, xform.M02, xform.M03],
+         [xform.M10, xform.M11, xform.M12, xform.M13],
+         [xform.M20, xform.M21, xform.M22, xform.M23],
+         [xform.M30, xform.M31, xform.M32, xform.M33]], float)
+
+
+def flatten_instance(geo, blocks: dict, depth: int = 0) -> list:
+    """An instance as [(member geometry, member attributes, 4x4)].
+
+    Serpentine3D has no block object of its own, so an instance comes in as
+    its content moved into place — the same trade Rhino's Explode makes. A
+    definition can hold instances of other definitions, and each level's
+    transform applies to everything below it, so this walks down composing
+    them.
+    """
+    if depth >= MAX_BLOCK_DEPTH:
+        return []
+    here = _xform_matrix(geo.Xform)
+    definition = blocks.get(str(geo.ParentIdefId)) or {}
+    out = []
+    for member_geo, member_attrs in definition.get("members", ()):
+        if isinstance(member_geo, r3.InstanceReference):
+            for inner_geo, inner_attrs, inner in flatten_instance(
+                    member_geo, blocks, depth + 1):
+                out.append((inner_geo, inner_attrs, here @ inner))
+        else:
+            out.append((member_geo, member_attrs, here))
+    return out
+
+
+def placed_block_name(attrs, geo, blocks: dict, index: int) -> str:
+    """What a placed block is called before its parts are named.
+
+    An unnamed instance falls back to its definition's name rather than to a
+    running count of what has been imported so far: the parallel importer
+    sees the file in strided pieces across several processes and has no such
+    count to keep, and the two paths naming the same object differently
+    would be worse than either name being poor.
+    """
+    definition = blocks.get(str(geo.ParentIdefId)) or {}
+    return (attrs.Name or definition.get("name")
+            or f"3dm block {index + 1:02d}")
+
+
+def _part_name(instance_name: str, member_attrs, index: int,
+               total: int) -> str:
+    """What one piece of a placed block is called in the object list.
+
+    A block is one object in Rhino and several here, so the pieces are named
+    after the instance that placed them or they cannot be found again.
+    """
+    if total == 1:
+        return instance_name
+    member = (member_attrs.Name or "").strip()
+    return f"{instance_name}: {member or f'part {index + 1}'}"
+
+
+def instance_to_objects(geo, instance_name: str, instance_meta: dict,
+                        blocks: dict, layers: dict, materials: dict,
+                        report=None) -> list:
+    """One placed block as the [(name, shape, meta)] it brings with it."""
+    step = report or Progress()
+    parts = flatten_instance(geo, blocks)
+    out = []
+    for index, (member_geo, member_attrs, matrix) in enumerate(parts):
+        meta = object_appearance(member_attrs, layers, materials,
+                                 parent=instance_meta)
+        name = _part_name(instance_name, member_attrs, index, len(parts))
+        for shape in object_to_shapes(member_geo, step):
+            if shape is None or shape.IsNull():
+                continue
+            try:
+                placed = geometry.apply_matrix(shape, matrix)
+            except Exception:                               # noqa: BLE001
+                # A transform OCCT will not perform is better skipped than
+                # allowed to put the piece in the wrong place.
+                continue
+            out.append((name, placed, meta))
+    return out
 
 
 def object_to_shapes(geo, report=None) -> list:
@@ -766,6 +885,7 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
 
     layers = read_layers(model)
     materials = read_materials(model)
+    blocks = read_blocks(model)
 
     out = []
     counter = 0
@@ -776,12 +896,25 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
         step = report.part(index / total, (index + 1) / total,
                            f"Converting object {index + 1} of {total}")
         step(0.0)
-        meta = object_appearance(obj.Attributes, layers, materials)
+        attrs = obj.Attributes
+        if attrs.IsInstanceDefinitionObject:
+            # A definition's content is not in the drawing; only the
+            # instances that place it are. Importing it too put a ghost copy
+            # of every block at the origin.
+            continue
+        meta = object_appearance(attrs, layers, materials)
+        if isinstance(obj.Geometry, r3.InstanceReference):
+            name = placed_block_name(attrs, obj.Geometry, blocks, index)
+            for part in instance_to_objects(obj.Geometry, name, meta, blocks,
+                                            layers, materials, step):
+                counter += 1
+                out.append(part)
+            continue
         for shape in object_to_shapes(obj.Geometry, step):
             if shape is None or shape.IsNull():
                 continue
             counter += 1
-            name = obj.Attributes.Name or f"3dm object {counter:02d}"
+            name = attrs.Name or f"3dm object {counter:02d}"
             out.append((name, shape, meta))
     return out
 
