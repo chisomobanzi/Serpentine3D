@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.5.3 — 2026-07-29
+
+An import release, and both halves of it came from one person opening their
+own Rhino files. A 65259-object survey took about fifteen minutes to open
+([#3](https://github.com/chisomobanzi/Serpentine3D/issues/3)), and when it
+opened it had none of its colours
+([#4](https://github.com/chisomobanzi/Serpentine3D/issues/4)). Neither was the
+machine's fault: the first was rhino3dm's Python binding being read one
+attribute at a time on one core, the second was the importer reading an
+object's layer and ignoring everywhere else Rhino keeps a colour.
+
+The rest is about not needing to know a number before you can draw one. Twelve
+commands that would only take a typed distance now take a drag with a live
+preview of the result, and the length reads out beside the cursor as you pull.
 
 - **A fresh install stops picking up an MCP release we do not run on**: `mcp`
   2.0 renamed `mcp.server.fastmcp` and swapped `httpx` for `httpx2`, so any
