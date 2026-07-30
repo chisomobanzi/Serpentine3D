@@ -46,13 +46,13 @@ import io
 import math
 import multiprocessing as mp
 import os
-import sys
 import traceback
 
 import numpy as np
 import rhino3dm as r3
 
 from ..core.mesh import MeshShape
+from ..utils.spawn import spawn_executable as _spawn_executable
 from .progress import Progress
 
 # Set once in the reader process; forked converters inherit it, and on
@@ -97,38 +97,6 @@ def _available_cores() -> int:
         return len(os.sched_getaffinity(0))
     except AttributeError:                          # not Linux
         return os.cpu_count() or 1
-
-
-def _spawn_executable() -> str | None:
-    """The interpreter a spawned helper should run, or None if there isn't one.
-
-    Inside an AppImage `sys.executable` is the AppImage, not python:
-    python-appimage sets it that way so re-running it reproduces the whole
-    environment. multiprocessing takes it at face value and starts the child
-    as `TheApp.AppImage -c "...spawn_main()..."`, which the AppImage's launcher
-    hands to the app as arguments — so every worker opened another window,
-    none of them ran the helper, and the import waited on a pipe forever.
-
-    Naming the real interpreter fixes it. If it cannot be found we say so
-    rather than guess, and the caller stays on the single-process path.
-
-    Everywhere else the answer is the interpreter already running — not
-    sys._base_executable, which in a virtualenv is the system python: it has
-    none of our dependencies and never runs the venv's editable-install hook,
-    so helpers died on import and every parallel import quietly became a
-    serial one.
-    """
-    exe = sys.executable
-    bundle = os.environ.get("APPIMAGE")
-    if not bundle or os.path.realpath(exe) != os.path.realpath(bundle):
-        return exe
-
-    version = f"python{sys.version_info.major}.{sys.version_info.minor}"
-    for prefix in (sys.prefix, sys.base_prefix):
-        candidate = os.path.join(prefix, "bin", version)
-        if os.access(candidate, os.X_OK):
-            return candidate
-    return None
 
 
 def worker_count(requested: int | None = None) -> int:

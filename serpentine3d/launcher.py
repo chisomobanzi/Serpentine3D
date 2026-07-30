@@ -26,6 +26,15 @@ def main() -> int:
     import multiprocessing
     multiprocessing.freeze_support()
 
+    # The hidden-line worker gets in the same way, and for the same reason:
+    # a bundle has no python to call, so it re-runs the app with this flag.
+    # It is a helper, not the app — so no splash, no window, no Qt at all.
+    from .utils.spawn import HLR_WORKER_FLAG
+    if HLR_WORKER_FLAG in sys.argv:
+        from .core.hlr import _worker_main
+        _worker_main()
+        return 0
+
     # Answered before Qt or the kernel is touched. An installed build is one
     # opaque file, and the moment you want to ask it what it is, is the
     # moment it is misbehaving — possibly too badly to survive importing

@@ -4,6 +4,21 @@
 
 ### Fixed
 
+- Placing a detail view on a layout no longer opens copies of the
+  application. Hidden-line removal runs in a worker process, because OpenCASCADE
+  can crash on a drawing seen edge-on and losing one detail beats losing the
+  session. The worker was started as `sys.executable -m serpentine3d.core.hlr`,
+  and in an installed build `sys.executable` is the application, not python:
+  the flags meant nothing to it, so it did what it does when it is handed
+  arguments it cannot read — it opened a window. The copy never answered, the
+  drawing sat waiting on a pipe with no timeout, and the next repaint started
+  another one. Reported as a crash, and on a machine with a few gigabytes to
+  spare that is how it ends. The worker is now named properly — the interpreter
+  inside the bundle where there is one, otherwise the app re-run with a flag it
+  answers before it loads any of the graphics stack — a build with no way to
+  start a worker at all does the work in-process instead of launching anything,
+  and a worker that stops answering is given up on rather than waited for.
+
 - The Settings window can be moved on its own again. GNOME attaches modal
   dialogs to their parent, so Settings was pinned to the middle of the
   drawing it was about and dragging it dragged the whole application along
