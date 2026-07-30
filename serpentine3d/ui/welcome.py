@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme
+from .dialogs import untether
 from .splash import mark_pixmap
 
 _GITHUB = "https://github.com/chisomobanzi/Serpentine3D"
@@ -51,17 +52,14 @@ class WelcomeScreen(QDialog):
         self.win = window
         self.setObjectName("welcome")
         self.setWindowTitle("Welcome to Serpentine3D")
-        # A NORMAL window type (not DIALOG) with no transient-for hint, so
-        # GNOME's attach-modal-dialogs can't glue it to the main window
-        # (drags it, can't resize). Still application-modal via exec().
-        self.setWindowFlags(Qt.WindowType.Window)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.setFixedSize(660, 460)
         self.setStyleSheet(_QSS)
         self._build()
-        if window is not None:                 # centre over the main window
-            c = window.frameGeometry().center()
-            self.move(c.x() - self.width() // 2, c.y() - self.height() // 2)
+        # Still application-modal through exec(); untether only decides what
+        # kind of window it is, and on Linux that has to be a NORMAL one or
+        # GNOME glues it to the main window.
+        untether(self, over=window)
 
     def _build(self):
         outer = QVBoxLayout(self)

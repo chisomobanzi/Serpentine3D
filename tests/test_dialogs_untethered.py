@@ -89,6 +89,25 @@ def test_untether_puts_the_dialog_over_the_window_it_belongs_to(win):
                - win.frameGeometry().center().y()) <= 1
 
 
+def test_the_welcome_screen_follows_the_same_rule(win, monkeypatch):
+    """It asked for a NORMAL window type itself, on every platform it ran on.
+    Off Linux nothing was gluing it to anything, so all that bought was the
+    loss of the staying-above-its-parent a dialog has for free."""
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert WelcomeScreen(win).windowType() == Qt.WindowType.Dialog
+
+
+def test_the_welcome_screen_still_lands_over_the_window(win):
+    """Whichever way it gets its window type, it opens where you are."""
+    win.setGeometry(200, 150, 900, 700)
+    dlg = WelcomeScreen(win)
+
+    assert abs(dlg.frameGeometry().center().x()
+               - win.frameGeometry().center().x()) <= 1
+    assert abs(dlg.frameGeometry().center().y()
+               - win.frameGeometry().center().y()) <= 1
+
+
 def test_untether_leaves_other_platforms_alone(win, monkeypatch):
     """Only GNOME attaches dialogs. Elsewhere a DIALOG-type window is the
     right thing to be, and taking it away would cost the dialog its

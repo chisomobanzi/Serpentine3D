@@ -202,6 +202,14 @@
 
 ### Fixed
 
+- The welcome screen stays above the window it opened over, on macOS and
+  Windows. It asked for a plain window type of its own on every platform, which
+  is what Linux needs — GNOME glues a dialog to the main window otherwise — but
+  everywhere else nothing was gluing it to anything, so all that bought was a
+  window that could fall behind the one it belongs to. It now goes through the
+  same rule the file picker and the settings panel do, which asks that only
+  where it is needed and centres the screen over the window either way.
+
 - A drawing saved by a newer build opens in an older one. Detail frames and
   annotations were rebuilt from the file by handing it straight to the class,
   which meant the file had to name exactly the fields that build had. It never
