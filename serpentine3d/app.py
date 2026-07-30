@@ -106,8 +106,10 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea,
                            self._cmd_dock)
 
-        self.properties = PropertiesPanel(self.scene, self.selection,
-                                          self.history)
+        self.properties = PropertiesPanel(
+            self.scene, self.selection, self.history,
+            # a sheet's selection belongs to whichever pane is showing it
+            viewport_source=lambda: self.active_viewport)
         self._prop_dock = QDockWidget("Properties", self)
         self._prop_dock.setObjectName("propertiesDock")
         self._prop_dock.setWidget(self.properties)
@@ -194,6 +196,7 @@ class MainWindow(QMainWindow):
         self._active_vp = vp
         self.ctx.viewport = vp                   # commands act on this pane
         self._refresh_space_tabs()
+        self.properties.refresh()                # and so does the panel
 
     def eventFilter(self, obj, ev):
         if ev.type() == QEvent.Type.MouseButtonPress \
@@ -291,6 +294,7 @@ class MainWindow(QMainWindow):
         vp.installEventFilter(self)
         vp.displayModeChanged.connect(self._update_status)
         vp.layoutSelectionChanged.connect(self._update_status)
+        vp.layoutSelectionChanged.connect(self.properties.refresh)
         vp.history = self.history
         vp.objectClicked.connect(self._on_object_clicked)
         vp.emptyClicked.connect(self._on_empty_clicked)
@@ -1195,6 +1199,7 @@ class MainWindow(QMainWindow):
                     "'text'/'dim' annotate, double-click a detail to enter "
                     "it.")
         self._update_status()
+        self.properties.refresh()       # different space, different selection
 
     # ------------------------------------------------------------- settings
 

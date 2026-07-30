@@ -21,9 +21,8 @@
   before this still open, and files with paper geometry in them open in 0.5.5 as
   sheets without it.
 
-  Not yet: the property panel does not offer its colour, linetype or
-  lineweight; and `point` is still refused on paper, because the sheet draws
-  paper geometry as lines and a point object has none.
+  Not yet: `point` is still refused on paper, because the sheet draws paper
+  geometry as lines and a point object has none.
 
 - Paper geometry can be picked. A click on a border, a bubble or a title strip
   selects it, Shift or Ctrl adds to the selection, a band takes several, the
@@ -36,6 +35,16 @@
   the annotations over the geometry first and on the geometry before the detail
   frames it is drawn across — the order it is all painted in, read from the top
   down.
+
+- The properties panel shows the paper geometry picked on a sheet: its name, its
+  ink, its dash pattern and its printed width, each one edit and one undo. The
+  rows on offer are the ones that mean something there — no layer, because the
+  sheet is its own ink and paper geometry is not on a model layer, and a
+  lineweight and a linetype, which are a printed drawing's business and not a
+  model object's. It is measured in millimetres of paper whatever the document's
+  units are, and the type says "Curve on paper" so a curve on the sheet cannot
+  be mistaken for one in the model. Colour falls back to the sheet's ink rather
+  than to a layer's, so the reset beside the swatch reads "By sheet".
 
 ### Fixed
 
