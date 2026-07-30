@@ -1,20 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.5 — 2026-07-30
 
 ### Added
-
-- A detail frame's corners are things you can pick, not just handles you can
-  drag. Select a detail and click one of its gold grips: the corner fills dark
-  to say it is chosen, and `move` then puts it at typed paper millimetres
-  instead of wherever your hand lands. A corner is where two edges meet, so
-  moving one alone stretches the frame in both directions; Shift-click the two
-  corners of an edge and that edge travels; take all four and the whole detail
-  does. Dragging works on the whole picked set too, so a grip drag can now move
-  an edge. With no corner picked, `move` on a sheet moves whatever else is
-  picked there — details and annotations alike, in millimetres on the paper.
-  Escape lets go of the corner first and the detail second, and none of it
-  touches the model.
 
 - You can drag a selection on a layout sheet, and pick more than one thing at a
   time. Dragging on empty paper sweeps a band out of it: left to right takes
@@ -28,6 +16,18 @@
   broken even though clicking a detail had always selected it. Resize grips
   still belong to a lone detail, since dragging one corner of five rectangles
   would have to mean something for the other four and it does not.
+
+- A detail frame's corners are things you can pick, not just handles you can
+  drag. Select a detail and click one of its gold grips: the corner fills dark
+  to say it is chosen, and `move` then puts it at typed paper millimetres
+  instead of wherever your hand lands. A corner is where two edges meet, so
+  moving one alone stretches the frame in both directions; Shift-click the two
+  corners of an edge and that edge travels; take all four and the whole detail
+  does. Dragging works on the whole picked set too, so a grip drag can now move
+  an edge. With no corner picked, `move` on a sheet moves whatever else is
+  picked there — details and annotations alike, in millimetres on the paper.
+  Escape lets go of the corner first and the detail second, and none of it
+  touches the model.
 
 - The command line finishes the name for you. Type `deta` and the box reads
   `detail`, with the letters you did not type selected, so Enter — or a
@@ -45,6 +45,29 @@
   turning into `layer` — nothing is guessed over a backspace, and nothing is
   guessed at all while a command is asking for a value, where the words belong
   to the command and not to the registry.
+
+- Mouse chords: a mouse button held with modifiers can now run any command,
+  the way a key already could. Bind one in *Settings → Shortcuts* or write it
+  straight into settings — `"mouse": {"chords": {"ctrl+shift+mmb":
+  "zoomselected"}}` — and Ctrl+Shift with a middle click zooms to what's
+  selected. It fires on a click, not on the press, so the same keys held
+  through a drag still orbit and pan; the middle and right buttons can be
+  bound, the left one being busy selecting. Order and spelling are yours to
+  choose: `ctrl+shift+mmb`, `mmb+ctrl+shift` and `shift+ctrl+middle` are one
+  binding, so nobody has to guess the house style. Nothing is bound out of
+  the box, so the mouse behaves exactly as it did until you ask otherwise.
+  Keys and chords now share one Settings page, since both answer the same
+  question and which device a binding lives on is a poor thing to have to
+  guess at.
+
+- `--version` (and `-V`) on every command: `serp3d`, `serp`, `serp3d-batch`
+  and `serp3d-mcp`. An installed build is one opaque file — an AppImage, a
+  .dmg, an .exe — and until now the only place the version appeared was the
+  splash screen, so answering "which build is this?" meant launching the
+  whole app. `serp3d` and `serp3d-batch` answer before Qt or the geometry
+  kernel is loaded, which matters because you reach for `--version` when a
+  build is misbehaving, and a build broken enough to ask about may not
+  survive importing 150 MB of OpenCASCADE to tell you.
 
 ### Fixed
 
@@ -72,22 +95,6 @@
   home, and the rule that no dialog is glued to the window that opened it is
   checked for every dialog the app puts on screen rather than remembered a
   fifth time.
-
-### Internal
-
-- The rule that what is drawn must be the geometry the scene holds is now
-  stated once and checked, rather than relied on. Three bugs in a row were
-  the same shape — the model changed and the picture did not follow — and
-  each was found by eye, on one command, by luck. Thirty-eight editing
-  sessions now run against the invariant, each of them three times over:
-  as the edit happens, across undo and redo, and again with everything
-  treated as heavy enough to mesh in the background with the queue held
-  back, so the edits land on geometry that is still being built. The check
-  is proved able to fail by putting each of the two original bugs back and
-  watching it catch them, and a scenario that edits nothing is a failure
-  rather than a quiet pass.
-
-### Fixed
 
 - Dragging with the gumball no longer occasionally leaves the drawing
   behind. The object really did move — the gumball sat where it now was,
@@ -171,31 +178,19 @@
   and the two scans overlap rather than taking turns, so they cost 12
   seconds between them rather than 22.
 
-### Added
+### Internal
 
-- Mouse chords: a mouse button held with modifiers can now run any command,
-  the way a key already could. Bind one in *Settings → Shortcuts* or write it
-  straight into settings — `"mouse": {"chords": {"ctrl+shift+mmb":
-  "zoomselected"}}` — and Ctrl+Shift with a middle click zooms to what's
-  selected. It fires on a click, not on the press, so the same keys held
-  through a drag still orbit and pan; the middle and right buttons can be
-  bound, the left one being busy selecting. Order and spelling are yours to
-  choose: `ctrl+shift+mmb`, `mmb+ctrl+shift` and `shift+ctrl+middle` are one
-  binding, so nobody has to guess the house style. Nothing is bound out of
-  the box, so the mouse behaves exactly as it did until you ask otherwise.
-  Keys and chords now share one Settings page, since both answer the same
-  question and which device a binding lives on is a poor thing to have to
-  guess at.
-
-- `--version` (and `-V`) on every command: `serp3d`, `serp`, `serp3d-batch`
-  and `serp3d-mcp`. An installed build is one opaque file — an AppImage, a
-  .dmg, an .exe — and until now the only place the version appeared was the
-  splash screen, so answering "which build is this?" meant launching the
-  whole app. `serp3d` and `serp3d-batch` answer before Qt or the geometry
-  kernel is loaded, which matters because you reach for `--version` when a
-  build is misbehaving, and a build broken enough to ask about may not
-  survive importing 150 MB of OpenCASCADE to tell you.
-
+- The rule that what is drawn must be the geometry the scene holds is now
+  stated once and checked, rather than relied on. Three bugs in a row were
+  the same shape — the model changed and the picture did not follow — and
+  each was found by eye, on one command, by luck. Thirty-eight editing
+  sessions now run against the invariant, each of them three times over:
+  as the edit happens, across undo and redo, and again with everything
+  treated as heavy enough to mesh in the background with the queue held
+  back, so the edits land on geometry that is still being built. The check
+  is proved able to fail by putting each of the two original bugs back and
+  watching it catch them, and a scenario that edits nothing is a failure
+  rather than a quiet pass.
 ## 0.5.4 — 2026-07-29
 
 ### Added
