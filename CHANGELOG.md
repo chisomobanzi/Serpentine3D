@@ -21,10 +21,21 @@
   before this still open, and files with paper geometry in them open in 0.5.5 as
   sheets without it.
 
-  Not yet: paper geometry cannot be selected or deleted on the sheet, so it is
-  undo or nothing for now; the property panel does not offer its colour,
-  linetype or lineweight; and `point` is still refused on paper, because the
-  sheet draws paper geometry as lines and a point object has none.
+  Not yet: the property panel does not offer its colour, linetype or
+  lineweight; and `point` is still refused on paper, because the sheet draws
+  paper geometry as lines and a point object has none.
+
+- Paper geometry can be picked. A click on a border, a bubble or a title strip
+  selects it, Shift or Ctrl adds to the selection, a band takes several, the
+  cursor drags what is picked across the sheet, typed coordinates move it, and
+  Delete takes it off in one undo. It is picked by its ink, the way a curve is
+  in the model, so a click inside a border means the page and not the border,
+  and a crossing band inside one leaves it be. Picked geometry goes gold
+  instead of getting a dashed box around it: two lines that overlap share a
+  box, and the point of picking one is knowing which you have. A click lands on
+  the annotations over the geometry first and on the geometry before the detail
+  frames it is drawn across — the order it is all painted in, read from the top
+  down.
 
 ### Fixed
 

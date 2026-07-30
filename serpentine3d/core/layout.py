@@ -341,6 +341,87 @@ def annotation_at(layout, px: float, py: float, tol: float = 2.0):
     return None
 
 
+def paper_object_at(layout, px: float, py: float, tol: float = 2.0):
+    """Topmost paper geometry near a paper point -> PaperObject or None.
+
+    Picked by its ink, the way a curve is picked in the model: what a border
+    encloses is the rest of the sheet, and a click in the middle of the page
+    means the page.
+    """
+    for obj in reversed(layout.objects):        # drawn last, so on top
+        for poly in obj.polylines:
+            for a, b in zip(poly[:-1], poly[1:]):
+                if _dist_seg(px, py, a, b) <= tol:
+                    return obj
+    return None
+
+
+def paper_object_bounds(obj) -> tuple:
+    """Paper-space bbox (x0, y0, x1, y1) of paper geometry.
+
+    From the polylines rather than the shape's own bbox, so a curve is only as
+    big as it draws and the answer follows the same cache a repaint uses.
+    """
+    xs, ys = [], []
+    for poly in obj.polylines:
+        for p in poly:
+            xs.append(float(p[0]))
+            ys.append(float(p[1]))
+    if not xs:
+        return (0.0, 0.0, 0.0, 0.0)
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _seg_hits_rect(a, b, lo: tuple, hi: tuple) -> bool:
+    """Does the segment a-b touch the axis-aligned rect? (Liang-Barsky.)"""
+    x0, y0 = float(a[0]), float(a[1])
+    dx, dy = float(b[0]) - x0, float(b[1]) - y0
+    t0, t1 = 0.0, 1.0
+    for p, q in ((-dx, x0 - lo[0]), (dx, hi[0] - x0),
+                 (-dy, y0 - lo[1]), (dy, hi[1] - y0)):
+        if p == 0.0:
+            if q < 0.0:
+                return False            # parallel to this edge and outside it
+        else:
+            r = q / p
+            if p < 0.0:
+                if r > t1:
+                    return False
+                t0 = max(t0, r)
+            else:
+                if r < t0:
+                    return False
+                t1 = min(t1, r)
+    return True
+
+
+def paper_object_crosses(obj, x0: float, y0: float,
+                         x1: float, y1: float) -> bool:
+    """Does any of the geometry's ink fall inside the paper rect?
+
+    A crossing band asks what it touches, and a bounding box is the wrong
+    answer for paper geometry: a border's box is the whole page, so a box test
+    hands over the border for any band drawn anywhere inside it.
+    """
+    lo = (min(x0, x1), min(y0, y1))
+    hi = (max(x0, x1), max(y0, y1))
+    for poly in obj.polylines:
+        for a, b in zip(poly[:-1], poly[1:]):
+            if _seg_hits_rect(a, b, lo, hi):
+                return True
+    return False
+
+
+def move_paper_object(obj, dx: float, dy: float):
+    """Slide paper geometry across the sheet by millimetres.
+
+    There is no x/y to add to — the shape *is* the position — so this replaces
+    the shape, which is also the only edit a shared undo checkpoint allows.
+    """
+    from . import geometry
+    obj.shape = geometry.translate(obj.shape, (dx, dy, 0.0))
+
+
 def _point_in_poly(px: float, py: float, pts: list) -> bool:
     inside = False
     n = len(pts)

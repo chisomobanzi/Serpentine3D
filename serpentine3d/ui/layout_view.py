@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
 from ..core import hlr, linetype
 from ..utils.math3d import look_at, ortho, perspective
+from . import theme
 
 PAPER_COLOR = (0.94, 0.94, 0.92, 1.0)
 PAPER_SHADOW = (0.05, 0.05, 0.06, 0.5)
@@ -126,6 +127,17 @@ class LayoutView:
         # to be seen, the same way the annotations on top of it are
         self._paint_objects(lay, mvp)
 
+    def _object_ink(self, obj) -> tuple:
+        """What colour to draw paper geometry in, picked or not.
+
+        Picked geometry goes gold, the way it does in the model, rather than
+        getting a dashed box like the annotations: two lines that overlap share
+        a box, and the whole point of picking one is knowing which you have.
+        """
+        if any(k == "object" and o is obj for k, o in self.selected):
+            return (*theme.SELECTION_COLOR, 1.0)
+        return (*obj.color, 1.0) if obj.color else LINE_VISIBLE
+
     def _paint_objects(self, lay, mvp):
         """Geometry drawn on the paper itself, in millimetres."""
         for obj in lay.objects:
@@ -139,7 +151,7 @@ class LayoutView:
                     segs.append(np.stack([pts[:-1], pts[1:]], axis=1))
             if not segs:
                 continue
-            color = ((*obj.color, 1.0) if obj.color else LINE_VISIBLE)
+            color = self._object_ink(obj)
             # a lineweight is millimetres on the printed sheet, so it scales
             # with the zoom; floored at a pixel, because 0.25mm on a whole page
             # is a quarter of one and a border you cannot see is worse than a
@@ -371,7 +383,8 @@ class LayoutView:
         """Where each kind of pickable thing lives on a sheet."""
         return {"note": lay.notes, "dim": lay.dims, "rdim": lay.rdims,
                 "adim": lay.adims, "leader": lay.leaders,
-                "hatch": lay.hatches, "detail": lay.details}
+                "hatch": lay.hatches, "object": lay.objects,
+                "detail": lay.details}
 
     def _prune(self):
         """Forget anything no longer on the sheet — undo and delete both
@@ -399,6 +412,8 @@ class LayoutView:
         painter.setPen(QPen(gold, 2, Qt.PenStyle.DashLine))
         painter.setBrush(QColor(0, 0, 0, 0))
         for kind, obj in self.selected:
+            if kind == "object":
+                continue           # drawn in gold itself, see `_object_ink`
             if kind == "detail":
                 x0, y0 = self.paper_to_screen(obj.x, obj.y)
                 x1, y1 = self.paper_to_screen(obj.x + obj.w, obj.y + obj.h)
@@ -621,8 +636,13 @@ class LayoutView:
                     self._drag_last = (px, py)
                     return True
         self.corners = []           # anything but a grip is a coarser pick
-        from ..core.layout import annotation_at
+        from ..core.layout import annotation_at, paper_object_at
+        # In paint order, topmost first: annotations sit over the geometry, the
+        # geometry sits over the detail frames it is drawn across.
         hit = annotation_at(lay, px, py, tol=max(tol, 2.0))
+        if hit is None:
+            obj = paper_object_at(lay, px, py, tol=max(tol, 2.0))
+            hit = ("object", obj) if obj is not None else None
         if hit is None:
             det = lay.detail_at(px, py)
             hit = ("detail", det) if det is not None else None
@@ -654,7 +674,10 @@ class LayoutView:
         dy = py - self._drag_last[1]
         mode, corners, picks = self._drag
         for kind, obj in picks:
-            if kind != "detail":
+            if kind == "object":
+                from ..core.layout import move_paper_object
+                move_paper_object(obj, dx, dy)
+            elif kind != "detail":
                 from ..core.layout import move_annotation
                 move_annotation(kind, obj, dx, dy)
             elif mode == "move":
@@ -688,12 +711,23 @@ class LayoutView:
         bx, by = self.screen_to_paper(sx1, sy1)
         lo = (min(ax, bx), min(ay, by))
         hi = (max(ax, bx), max(ay, by))
-        from ..core.layout import annotation_bounds
+        from ..core.layout import (
+            annotation_bounds, paper_object_bounds, paper_object_crosses,
+        )
         out = []
         for kind, pool in self._pools(lay).items():
             for obj in pool:
+                if kind == "object" and crossing:
+                    # Its ink, not its box: a window band can stay with the box
+                    # (enclosing the box is enclosing every point in it), but a
+                    # crossing band asks what it actually touches.
+                    if paper_object_crosses(obj, *lo, *hi):
+                        out.append((kind, obj))
+                    continue
                 if kind == "detail":
                     b = (obj.x, obj.y, obj.x + obj.w, obj.y + obj.h)
+                elif kind == "object":
+                    b = paper_object_bounds(obj)
                 else:
                     b = annotation_bounds(kind, obj)
                 if crossing:
@@ -758,7 +792,7 @@ class LayoutView:
     def move_selected(self, dx: float, dy: float) -> int:
         """Shift every picked sheet item by paper millimetres."""
         self._prune()
-        from ..core.layout import move_annotation
+        from ..core.layout import move_annotation, move_paper_object
         moved = 0
         for kind, obj in self.selected:
             if kind == "detail":
@@ -767,6 +801,8 @@ class LayoutView:
                 obj.x += dx
                 obj.y += dy
                 self._hlr_cache.pop(obj.id, None)
+            elif kind == "object":
+                move_paper_object(obj, dx, dy)
             else:
                 move_annotation(kind, obj, dx, dy)
             moved += 1
@@ -786,6 +822,9 @@ class LayoutView:
             if kind == "detail":
                 lay.details.remove(obj)
                 self._hlr_cache.pop(obj.id, None)
+                gone = True
+            elif kind == "object":
+                lay.objects.remove(obj)
                 gone = True
             elif delete_annotation(lay, kind, obj):
                 gone = True
