@@ -488,6 +488,7 @@ class Viewport(QOpenGLWidget):
         self._draw_readout.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._draw_span = None              # (from, to) of the open leg
+        self._draw_frame = None             # (sides, corner) when it is a box
         from .viewport_hud import ViewportHud
         self._hud = ViewportHud(self)       # top-left view/display chips
         self.history = None                 # set by the main window
@@ -809,6 +810,27 @@ class Viewport(QOpenGLWidget):
         self._gumball_readout.setVisible(True)
         self._gumball_readout.raise_()
 
+    def _readout_anchor(self, pt):
+        """Where on screen a number about `pt` belongs, or None when the point
+        is not on screen to sit beside."""
+        if self.space == "model":
+            scr = self.camera.project(np.asarray([pt], float),
+                                      self.width(), self.height())[0]
+            if scr[2] <= 0:                     # the point is behind the camera
+                return None
+            return float(scr[0]), float(scr[1])
+        # A sheet has no model camera on screen, so the label is placed on the
+        # paper the point was drawn on.
+        end = self._on_paper([pt])[0]
+        return self.layout_view.paper_to_screen(float(end[0]), float(end[1]))
+
+    def _readout_length(self, length: float) -> str:
+        """In the units it was drawn in: the model's through a detail or in the
+        model window, millimetres on the paper itself."""
+        if self.space == "model" or self._drawing_through() is not None:
+            return self.scene.format_length(length)
+        return _units.format_length(length, "mm")
+
     def _update_draw_readout(self):
         """Show how long the leg under the cursor is while a command is
         picking points — the number you are actually aiming for, without
@@ -816,8 +838,9 @@ class Viewport(QOpenGLWidget):
         span = self._draw_span
         ghost = (self.layout_view.ghost_detail if self.space != "model"
                  else None)
+        frame = self._draw_frame
         length = float(np.linalg.norm(span[1] - span[0])) if span else 0.0
-        if not length and ghost is None:
+        if not length and ghost is None and frame is None:
             if not self._draw_readout.isHidden():
                 self._draw_readout.setVisible(False)
             return
@@ -830,24 +853,24 @@ class Viewport(QOpenGLWidget):
                                                       ghost.y + ghost.h)
             text = (f"{ghost.w:.1f} × {ghost.h:.1f} mm"
                     f" · {ghost.scale_text()}")
-        elif self.space == "model":
-            scr = self.camera.project(np.asarray([span[1]], float),
-                                      self.width(), self.height())[0]
-            if scr[2] <= 0:                 # cursor point behind the camera
+        elif frame is not None:
+            # Anything else dragged out as a frame, for the same reason: two
+            # sides at the corner they meet at, rather than one number about a
+            # diagonal nobody asked for.
+            lengths, at = frame
+            anchor = self._readout_anchor(at)
+            if anchor is None:
                 self._draw_readout.setVisible(False)
                 return
-            cx, cy = float(scr[0]), float(scr[1])
-            text = self.scene.format_length(length)
+            cx, cy = anchor
+            text = " × ".join(self._readout_length(v) for v in lengths)
         else:
-            # A sheet has no model camera on screen, so the label is placed on
-            # the paper; and a leg is measured where it was drawn — in model
-            # units through a detail, in millimetres on the paper itself.
-            end = self._on_paper([span[1]])[0]
-            cx, cy = self.layout_view.paper_to_screen(float(end[0]),
-                                                      float(end[1]))
-            text = (self.scene.format_length(length)
-                    if self._drawing_through() is not None
-                    else _units.format_length(length, "mm"))
+            anchor = self._readout_anchor(span[1])
+            if anchor is None:              # cursor point behind the camera
+                self._draw_readout.setVisible(False)
+                return
+            cx, cy = anchor
+            text = self._readout_length(length)
         self._draw_readout.setText(text)
         self._draw_readout.adjustSize()
         w, h = self._draw_readout.width(), self._draw_readout.height()
@@ -2016,11 +2039,28 @@ class Viewport(QOpenGLWidget):
                                arr[-1][1].astype(float))
             self._preview_data = arr.reshape(-1, 3)
         self._marker_points = list(markers or [])
+        # A leg and a frame are two answers to the same question, so setting
+        # either one puts the other away. This is the one every command comes
+        # through, and it runs first.
+        self._draw_frame = None
         # move the label with the preview that owns it, so it is already in
         # the right place when the frame goes out; paintGL repeats this only
         # to follow the camera when the view moves mid-pick
         self._update_draw_readout()
         self.update()
+
+    def set_frame_readout(self, sides, at):
+        """The sides of a box being dragged out, to read at the corner `at`.
+
+        What a rubber band would have said, for the commands that cannot have
+        one: their ghost is already under the cursor, so a band could only cut
+        across it, and its length would measure a diagonal rather than the
+        thing being drawn.
+        """
+        self._draw_frame = ((tuple(sides), at)
+                            if sides and at is not None
+                            and all(s > 1e-9 for s in sides) else None)
+        self._update_draw_readout()
 
     def set_point_mode(self, on: bool):
         self.point_mode = on

@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..core import geometry as g
-from .base import PointReq, SelectReq, command
+from .base import PointReq, SelectReq, command, frame_sides
 
 
 def _rubber(pts):
@@ -147,7 +147,7 @@ def cmd_rectangle(ctx):
              cp.to_world(u2, v2), cp.to_world(u1, v2)], closed=True)
 
     c2 = yield PointReq("Opposite corner", rubber_from=c1,
-                        preview_fn=_rect_to)
+                        preview_fn=_rect_to, rubber_sides=frame_sides(c1, cp))
     if cp.is_world_xy():
         obj = ctx.add(g.make_rectangle(c1, c2))
     else:

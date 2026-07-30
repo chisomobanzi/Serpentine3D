@@ -1,7 +1,7 @@
 """View and display commands (non-mutating)."""
 
 from ..core import geometry as g
-from .base import OptionReq, PointReq, SelectReq, TextReq, command
+from .base import OptionReq, PointReq, SelectReq, TextReq, command, frame_sides
 
 
 def _vp(ctx):
@@ -131,7 +131,8 @@ def cmd_clippingplane(ctx):
              cp.to_world(u2, v2), cp.to_world(u1, v2)], closed=True))
 
     c2 = yield PointReq("Opposite corner", rubber_from=c1,
-                        choices={"Flip": ["No", "Yes"]}, preview_fn=_rect)
+                        choices={"Flip": ["No", "Yes"]}, preview_fn=_rect,
+                        rubber_sides=frame_sides(c1, ctx.cplane))
     face = _rect(c2)
     if face is None:
         ctx.echo("Degenerate rectangle — no clipping plane created.")

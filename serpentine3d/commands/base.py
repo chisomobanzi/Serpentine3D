@@ -38,6 +38,8 @@ class PointReq(Req):
     default: Point | None = None
     rubber_from: Point | None = None      # draw rubber-band line while picking
     rubber_pts: list | None = None        # accumulated points (polyline preview)
+    rubber_sides: object = None           # point -> the sides of the frame it
+                                          # spans: no band, and two numbers
     allow_empty: bool = False             # Enter with no input -> None (done)
     extra_options: tuple = ()             # typed keywords returned verbatim
     choices: dict | None = None
@@ -46,6 +48,20 @@ class PointReq(Req):
     number_from: object = None            # (base, dir) or point-fn: '10' ->
                                           # base+10*dir / number_from(10.0)
     allow_number: bool = False            # bare number returns the float
+
+
+def frame_sides(corner, cplane):
+    """A `rubber_sides` for a rectangle dragged out from `corner`.
+
+    Measured on the plane it is being drawn on, which is the only place the
+    two numbers mean anything: a rectangle on a tilted plane has sides of its
+    own, and the world's idea of them is a pair of shadows.
+    """
+    def sides(p):
+        u1, v1, _ = cplane.from_world(corner)
+        u2, v2, _ = cplane.from_world(p)
+        return (abs(u2 - u1), abs(v2 - v1))
+    return sides
 
 
 @dataclass

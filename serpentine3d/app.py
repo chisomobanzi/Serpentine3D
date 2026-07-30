@@ -758,13 +758,22 @@ class MainWindow(QMainWindow):
         pts = list(req.rubber_pts or [])
         if req.rubber_from is not None:
             pts = [req.rubber_from]
+        sides = req.rubber_sides
         if pts:
             markers = list(pts)
             chain = pts + ([cursor] if cursor is not None else [])
-            if len(chain) >= 2:
+            # A band is a line drawn to say where the next one goes. When what
+            # is being dragged out is a frame, the ghost has already drawn it
+            # and the band can only be its diagonal — a slash across the middle
+            # of the shape it was meant to help place. The number it carried is
+            # still wanted, so it is asked for as sides instead of a length.
+            if len(chain) >= 2 and sides is None:
                 arr = np.asarray(chain, np.float32)
                 segs = np.stack([arr[:-1], arr[1:]], axis=1)
         self.viewport.set_preview(segs if len(segs) else None, markers)
+        if sides is not None:
+            self.viewport.set_frame_readout(
+                sides(cursor) if cursor is not None else None, cursor)
 
     def _delete_selected(self):
         if self.viewport.space != "model":

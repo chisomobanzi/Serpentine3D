@@ -19,8 +19,11 @@ def cmd_box(ctx):
             [c1, (p[0], c1[1], c1[2]), (p[0], p[1], c1[2]),
              (c1[0], p[1], c1[2])], closed=True)
 
+    def _base_sides(p):                 # the base is world-axis, as _rect is
+        return (abs(p[0] - c1[0]), abs(p[1] - c1[1]))
+
     c2 = yield PointReq("Opposite corner of base", rubber_from=c1,
-                        preview_fn=_rect)
+                        preview_fn=_rect, rubber_sides=_base_sides)
     dx, dy = c2[0] - c1[0], c2[1] - c1[1]
     up = (0.0, 0.0, 1.0)
 

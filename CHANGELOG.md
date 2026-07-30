@@ -202,6 +202,17 @@
 
 ### Fixed
 
+- Dragging out a rectangle no longer draws a line across it. `rectangle`,
+  `box` and `clippingplane` all ask for an opposite corner while a ghost of
+  the frame is already under the cursor, and all three were also hanging a
+  rubber band from the first corner — which could only run corner to opposite
+  corner, straight through the middle of the shape it was meant to be helping
+  you place. The number that band carried was the length of that diagonal;
+  it now reads the two sides instead, at the corner you are dragging, in the
+  units they are being drawn in and on the plane they are being drawn on. A
+  band that is still the line being drawn — `line`, an arc, a circle's radius,
+  the height of a box — is untouched.
+
 - The welcome screen stays above the window it opened over, on macOS and
   Windows. It asked for a plain window type of its own on every platform, which
   is what Linux needs — GNOME glues a dialog to the main window otherwise — but
