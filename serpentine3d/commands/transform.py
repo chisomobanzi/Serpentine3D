@@ -11,8 +11,49 @@ def _ghost(objs, fn):
     return g.make_compound([fn(o.shape) for o in objs])
 
 
+def _sheet_view(ctx):
+    """The layout view, when the command is aimed at a sheet.
+
+    None in model space — and None for the headless stub viewport, which has
+    no pick to move.
+    """
+    vp = ctx.viewport
+    if vp is None or getattr(vp, "space", "model") == "model":
+        return None
+    lv = getattr(vp, "layout_view", None)
+    return lv if hasattr(lv, "move_corners") else None
+
+
+def _move_on_paper(ctx, lv):
+    """Move what is picked on a sheet, in paper millimetres.
+
+    A corner takes the two edges that meet at it, so `move` reshapes a frame
+    from typed coordinates exactly as dragging its grip does. With no corner
+    picked, whole sheet items travel instead. The model is untouched either
+    way — nothing here is model space.
+    """
+    if not lv.corners and not lv.selected:
+        ctx.echo("Nothing is picked on this sheet — click a detail, an "
+                 "annotation, or a corner grip first.")
+        return
+    what = "corner" if lv.corners else "sheet item"
+    p1 = yield PointReq(f"Point to move the {what} from")
+    p2 = yield PointReq("Point to move to", rubber_from=p1)
+    dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+    moved = lv.move_corners(dx, dy) if lv.corners else \
+        lv.move_selected(dx, dy)
+    if not moved:
+        ctx.echo("Nothing moved — the detail is locked.")
+        return
+    ctx.echo(f"Moved {moved} {what}(s) by {dx:g}, {dy:g} mm on the sheet.")
+
+
 @command("move", aliases=("m",))
 def cmd_move(ctx):
+    lv = _sheet_view(ctx)
+    if lv is not None:
+        yield from _move_on_paper(ctx, lv)
+        return
     objs = yield SelectReq("Select objects to move")
     p1 = yield PointReq("Point to move from")
 

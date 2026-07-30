@@ -306,6 +306,41 @@ def move_annotation(kind: str, obj, dx: float, dy: float):
         obj.points = [[p[0] + dx, p[1] + dy] for p in obj.points]
 
 
+MIN_DETAIL_MM = 5.0
+
+
+def detail_corners(det) -> tuple:
+    """The frame's four corners, anticlockwise from the bottom-left.
+
+    A picked corner is named by its index here, so the order is part of the
+    contract rather than a detail of how the grips get drawn.
+    """
+    return ((det.x, det.y), (det.x + det.w, det.y),
+            (det.x + det.w, det.y + det.h), (det.x, det.y + det.h))
+
+
+def nudge_detail_corners(det, indices, dx: float, dy: float):
+    """Shift the named corners of a detail frame by paper millimetres.
+
+    A corner is where two edges meet, so moving one on its own stretches the
+    frame in both directions. Take the two corners of an edge and that edge
+    travels; take all four and the whole detail does.
+    """
+    idx = set(indices)
+    x0, y0 = det.x, det.y
+    x1, y1 = det.x + det.w, det.y + det.h
+    if idx & {0, 3}:
+        x0 += dx
+    if idx & {1, 2}:
+        x1 += dx
+    if idx & {0, 1}:
+        y0 += dy
+    if idx & {2, 3}:
+        y1 += dy
+    det.x, det.w = min(x0, x1), max(abs(x1 - x0), MIN_DETAIL_MM)
+    det.y, det.h = min(y0, y1), max(abs(y1 - y0), MIN_DETAIL_MM)
+
+
 def delete_annotation(layout, kind: str, obj) -> bool:
     pool = {"note": layout.notes, "dim": layout.dims,
             "rdim": layout.rdims, "adim": layout.adims,

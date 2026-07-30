@@ -2720,8 +2720,13 @@ class Viewport(QOpenGLWidget):
                     and lv.delete_selected():
                 self.update()
                 return
-            if ev.key() == Qt.Key.Key_Escape and lv.selected:
-                lv.selected = []
+            if ev.key() == Qt.Key.Key_Escape and (lv.selected or lv.corners):
+                # A first Escape lets go of the corner, a second of the
+                # detail it belongs to.
+                if lv.corners:
+                    lv.corners = []
+                else:
+                    lv.selected = []
                 self.layoutSelectionChanged.emit()
                 self.update()
                 return

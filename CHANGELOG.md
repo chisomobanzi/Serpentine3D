@@ -4,6 +4,18 @@
 
 ### Added
 
+- A detail frame's corners are things you can pick, not just handles you can
+  drag. Select a detail and click one of its gold grips: the corner fills dark
+  to say it is chosen, and `move` then puts it at typed paper millimetres
+  instead of wherever your hand lands. A corner is where two edges meet, so
+  moving one alone stretches the frame in both directions; Shift-click the two
+  corners of an edge and that edge travels; take all four and the whole detail
+  does. Dragging works on the whole picked set too, so a grip drag can now move
+  an edge. With no corner picked, `move` on a sheet moves whatever else is
+  picked there — details and annotations alike, in millimetres on the paper.
+  Escape lets go of the corner first and the detail second, and none of it
+  touches the model.
+
 - You can drag a selection on a layout sheet, and pick more than one thing at a
   time. Dragging on empty paper sweeps a band out of it: left to right takes
   what it wholly encloses, right to left takes anything it touches, the same

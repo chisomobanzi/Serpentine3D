@@ -1328,8 +1328,14 @@ class MainWindow(QMainWindow):
         n = len(self.scene.all())
         # On a sheet, what is picked lives in the layout view; a readout
         # stuck on "0 selected" is most of why picking looked broken there.
-        sel = (len(self.viewport.layout_view.selected)
-               if self.viewport.space != "model" else len(self.selection.ids))
+        sel = len(self.selection.ids)
+        if self.viewport.space != "model":
+            lv = self.viewport.layout_view
+            # A corner is a smaller thing than the detail it belongs to, so
+            # say which of the two the count is about.
+            picked = len(lv.corners)
+            sel = (f"{picked} corner{'' if picked == 1 else 's'}"
+                   if picked else len(lv.selected))
         mode = self.viewport.display_mode
         layer = self.scene.layers.current.name
         filt = ""

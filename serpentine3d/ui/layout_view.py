@@ -50,10 +50,12 @@ class LayoutView:
         self.px_per_mm = 2.0
         self.entered_detail: str | None = None
         self.selected: list = []                 # [(kind, obj)] on this sheet
+        self.corners: list = []                  # [(detail, index)] grips
         self.box: tuple | None = None            # live band, screen px
         self._box_add = False
-        self._drag: tuple | None = None          # (mode, corner, picks)
+        self._drag: tuple | None = None          # (mode, corners, picks)
         self._press_hit: tuple | None = None
+        self._press_corner: tuple | None = None
         self._drag_last: tuple | None = None
         self._drag_moved = False
         self._fitted_for: str | None = None
@@ -351,10 +353,16 @@ class LayoutView:
         lay = self.layout
         if lay is None:
             self.selected = []
+            self.corners = []
             return
         pools = self._pools(lay)
         self.selected = [(k, o) for k, o in self.selected
                          if o in pools.get(k, ())]
+        # A corner is a grip on a lone detail, so it cannot outlive that.
+        lone = (self.selected[0][1]
+                if len(self.selected) == 1 and self.selected[0][0] == "detail"
+                else None)
+        self.corners = [(d, i) for d, i in self.corners if d is lone]
 
     def _paint_selection(self, painter: QPainter):
         lay = self.layout
@@ -378,10 +386,19 @@ class LayoutView:
         # Grips resize, and resizing several rectangles at once from one
         # corner has no meaning, so they only appear on a lone detail.
         if len(self.selected) == 1 and self.selected[0][0] == "detail":
-            painter.setBrush(gold)
-            for gx, gy in self._corners(self.selected[0][1]):
+            det = self.selected[0][1]
+            picked = {i for d, i in self.corners if d is det}
+            painter.setPen(QPen(gold, 1))
+            for i, (gx, gy) in enumerate(self._corners(det)):
                 sx, sy = self.paper_to_screen(gx, gy)
-                painter.drawRect(int(sx) - 4, int(sy) - 4, 8, 8)
+                # A chosen corner has to read as chosen beside three that are
+                # merely available, so it fills dark and grows.
+                if i in picked:
+                    painter.setBrush(QColor(50, 62, 84))
+                    painter.drawRect(int(sx) - 5, int(sy) - 5, 11, 11)
+                else:
+                    painter.setBrush(gold)
+                    painter.drawRect(int(sx) - 4, int(sy) - 4, 8, 8)
             painter.setBrush(QColor(0, 0, 0, 0))
 
     def _paint_box(self, painter: QPainter):
@@ -527,8 +544,8 @@ class LayoutView:
 
     @staticmethod
     def _corners(det):
-        return ((det.x, det.y), (det.x + det.w, det.y),
-                (det.x + det.w, det.y + det.h), (det.x, det.y + det.h))
+        from ..core.layout import detail_corners
+        return detail_corners(det)
 
     def _take(self, hit: tuple, add: bool):
         """Make `hit` the selection — or, holding the key, one more of it.
@@ -545,6 +562,17 @@ class LayoutView:
         else:
             self.selected = self.selected + [hit]
 
+    def _take_corner(self, pick: tuple, add: bool):
+        """Same hand as `_take`, one level down: a grip of a lone detail."""
+        if not add:
+            if pick not in self.corners:
+                self.corners = [pick]
+            return
+        if pick in self.corners:
+            self.corners = [c for c in self.corners if c != pick]
+        else:
+            self.corners = self.corners + [pick]
+
     def press(self, sx: float, sy: float, add: bool = False) -> bool:
         """LMB press while idle: select / start dragging sheet items."""
         lay = self.layout
@@ -557,12 +585,16 @@ class LayoutView:
             det = self.selected[0][1]
             for i, (gx, gy) in enumerate(self._corners(det)):
                 if abs(px - gx) <= tol and abs(py - gy) <= tol:
-                    if det.locked:
+                    self._take_corner((det, i), add)
+                    if det.locked or (det, i) not in self.corners:
                         return True
+                    self._press_corner = None if add else (det, i)
                     self.vp.window_checkpoint("resize detail")
-                    self._drag = ("resize", i, [("detail", det)])
+                    self._drag = ("resize", [c for _, c in self.corners],
+                                  [("detail", det)])
                     self._drag_last = (px, py)
                     return True
+        self.corners = []           # anything but a grip is a coarser pick
         from ..core.layout import annotation_at
         hit = annotation_at(lay, px, py, tol=max(tol, 2.0))
         if hit is None:
@@ -594,7 +626,7 @@ class LayoutView:
         px, py = self.screen_to_paper(sx, sy)
         dx = px - self._drag_last[0]
         dy = py - self._drag_last[1]
-        mode, corner, picks = self._drag
+        mode, corners, picks = self._drag
         for kind, obj in picks:
             if kind != "detail":
                 from ..core.layout import move_annotation
@@ -604,18 +636,8 @@ class LayoutView:
                 obj.y += dy
                 self._hlr_cache.pop(obj.id, None)
             else:
-                x0, y0 = obj.x, obj.y
-                x1, y1 = obj.x + obj.w, obj.y + obj.h
-                if corner in (0, 3):
-                    x0 += dx
-                else:
-                    x1 += dx
-                if corner in (0, 1):
-                    y0 += dy
-                else:
-                    y1 += dy
-                obj.x, obj.w = min(x0, x1), max(abs(x1 - x0), 5.0)
-                obj.y, obj.h = min(y0, y1), max(abs(y1 - y0), 5.0)
+                from ..core.layout import nudge_detail_corners
+                nudge_detail_corners(obj, corners, dx, dy)
                 self._hlr_cache.pop(obj.id, None)
         self._drag_moved = True
         self._drag_last = (px, py)
@@ -682,9 +704,49 @@ class LayoutView:
             # start of a drag. It wasn't, so it was a choice: keep the one.
             if self._press_hit is not None:
                 self.selected = [self._press_hit]
+            if self._press_corner is not None:
+                self.corners = [self._press_corner]
         self._drag = None
         self._drag_moved = False
         self._press_hit = None
+        self._press_corner = None
+
+    def move_corners(self, dx: float, dy: float) -> int:
+        """Shift every picked corner by paper millimetres.
+
+        The same maths the grip drag uses, reached from typed coordinates
+        instead of from the mouse. Returns how many corners moved.
+        """
+        self._prune()
+        if not self.corners:
+            return 0
+        det = self.corners[0][0]
+        if det.locked:
+            return 0
+        from ..core.layout import nudge_detail_corners
+        nudge_detail_corners(det, [i for _, i in self.corners], dx, dy)
+        self._hlr_cache.pop(det.id, None)
+        self.vp.scene.notify("layouts")
+        return len(self.corners)
+
+    def move_selected(self, dx: float, dy: float) -> int:
+        """Shift every picked sheet item by paper millimetres."""
+        self._prune()
+        from ..core.layout import move_annotation
+        moved = 0
+        for kind, obj in self.selected:
+            if kind == "detail":
+                if obj.locked:
+                    continue
+                obj.x += dx
+                obj.y += dy
+                self._hlr_cache.pop(obj.id, None)
+            else:
+                move_annotation(kind, obj, dx, dy)
+            moved += 1
+        if moved:
+            self.vp.scene.notify("layouts")
+        return moved
 
     def delete_selected(self) -> bool:
         lay = self.layout
