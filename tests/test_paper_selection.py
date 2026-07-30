@@ -75,6 +75,14 @@ def test_tolerance_is_the_caller_s_to_widen(bare_sheet):
     assert paper_object_at(lay, 70.0, 23.0, tol=4.0) is obj
 
 
+def test_a_curve_is_found_on_its_arc_and_not_at_its_centre(bare_sheet):
+    """Whatever the shape, it is the tessellated ink that is asked."""
+    lay, _border = bare_sheet
+    bubble = lay.add(g.make_circle((200.0, 150.0, 0.0), 20.0), name="Bubble")
+    assert paper_object_at(lay, 220.0, 150.0) is bubble
+    assert paper_object_at(lay, 200.0, 150.0) is None
+
+
 def test_the_topmost_object_wins(bare_sheet):
     """Drawn last is drawn on top, so it is what a click means."""
     lay, first = bare_sheet
