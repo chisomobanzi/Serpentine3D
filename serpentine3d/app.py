@@ -637,6 +637,9 @@ class MainWindow(QMainWindow):
         self.command_line.set_options(self.processor.option_chips())
         self.viewport.set_ghost(None)
         self.command_line.point_pending = isinstance(req, PointReq)
+        # Only guess at command names at the "Command" prompt; mid-command the
+        # words belong to the command, not to the registry.
+        self.command_line.awaiting_command = not busy
         if isinstance(req, PointReq):
             base = req.rubber_from
             if base is None and req.rubber_pts:

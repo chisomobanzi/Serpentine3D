@@ -2,21 +2,47 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout,
-    QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QPlainTextEdit, QPushButton,
+    QVBoxLayout, QWidget,
 )
 
-from ..commands.base import completions
+from ..commands.base import completions, resolve
+
+MAX_SUGGESTIONS = 8
+
+
+def rank_completions(prefix: str, recent: list[str]) -> list[str]:
+    """Command names starting with `prefix`, best guess first.
+
+    Alphabetical order is no guess at all: it offers `tolerance` to someone
+    typing `to`, and files `detailborder` in ahead of `detailmode`. What you
+    ran lately comes first, then the shortest name — which puts the plain
+    command in front of the variants built on top of it.
+    """
+    order = {n: i for i, n in enumerate(recent)}
+    return sorted(completions(prefix),
+                  key=lambda n: (order.get(n, len(order)), len(n), n))
 
 
 class CommandInput(QLineEdit):
+    # Set on every keypress: a guess must not be filled back in over a
+    # deletion, or the box fights the person trying to correct it.
+    deleting = False
+
     tabPressed = Signal()
     upPressed = Signal()
     downPressed = Signal()
     escPressed = Signal()
+    focusLost = Signal()
+
+    def focusOutEvent(self, ev):
+        # Whatever is being suggested floats over the viewport, so it must not
+        # outlive the typing that asked for it.
+        self.focusLost.emit()
+        super().focusOutEvent(ev)
 
     def event(self, ev):
         if ev.type() == ev.Type.KeyPress and ev.key() == Qt.Key.Key_Tab:
@@ -32,6 +58,7 @@ class CommandInput(QLineEdit):
 
     def keyPressEvent(self, ev):
         key = ev.key()
+        self.deleting = key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete)
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             # QLineEdit fires returnPressed but leaves the event ignored;
             # consume it here or it bubbles to the main window, whose
@@ -68,10 +95,12 @@ class CommandLine(QWidget):
         # while a command is asking for a point. The two never overlap:
         # there is no command name to complete once one is running.
         self.point_pending = False
+        # Whether the prompt is "Command". A command asking for a value picks
+        # its own words: "to" at an option prompt is the start of one of them,
+        # not an invitation to run Top.
+        self.awaiting_command = True
         self._history: list[str] = []
         self._hist_pos = 0
-        self._tab_matches: list[str] = []
-        self._tab_index = 0
 
         mono = QFont("monospace")
         mono.setStyleHint(QFont.StyleHint.TypeWriter)
@@ -93,12 +122,33 @@ class CommandLine(QWidget):
         self.input.setFont(mono)
         self.input.setPlaceholderText(
             "type a command (line, circle, extrude, loft, ...)")
+
+        # The other matches, listed above the input because the command line
+        # lives at the bottom of the window. It takes no focus: every keystroke
+        # still belongs to the box, which is where you are looking.
+        self.suggestions = QListWidget(self)
+        self.suggestions.setFont(mono)
+        self.suggestions.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.suggestions.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.suggestions.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.suggestions.setStyleSheet(
+            "QListWidget { background: #26272b; color: #c9cacd;"
+            " border: 1px solid #3a3b40; outline: none; }"
+            "QListWidget::item { padding: 1px 6px; }"
+            "QListWidget::item:selected { background: #33343a;"
+            " color: #d8b44a; }")
+        self.suggestions.hide()
+        self.suggestions.itemClicked.connect(self._on_suggestion_clicked)
+
         self.input.returnPressed.connect(self.submit_input)
         self.input.tabPressed.connect(self._on_tab)
-        self.input.textEdited.connect(self._reset_tab)
-        self.input.upPressed.connect(self.history_prev)
-        self.input.downPressed.connect(self.history_next)
+        self.input.textEdited.connect(self._on_typed)
+        self.input.upPressed.connect(self._on_up)
+        self.input.downPressed.connect(self._on_down)
         self.input.escPressed.connect(self.input.clear)
+        self.input.escPressed.connect(self.suggestions.hide)
+        self.input.focusLost.connect(self.suggestions.hide)
         self.input.escPressed.connect(self.cancelled.emit)
 
         self._chip_row = QHBoxLayout()
@@ -158,6 +208,7 @@ class CommandLine(QWidget):
 
     def run_command(self, text: str):
         """Run as if typed at the prompt (records history)."""
+        self.suggestions.hide()
         text = text.strip()
         if text:
             self._history.append(text)
@@ -179,6 +230,7 @@ class CommandLine(QWidget):
         """Submit the current input text exactly as pressing Enter does:
         record history, clear the box, and emit `submitted`. Public so a
         right-click in the viewport can act as Enter (Rhino-style)."""
+        self.suggestions.hide()
         text = self.input.text()
         self.input.clear()
         if text.strip():
@@ -188,8 +240,79 @@ class CommandLine(QWidget):
 
     # -- internals --
 
-    def _reset_tab(self):
-        self._tab_matches = []
+    def _on_typed(self, text: str):
+        """Guess at what is being typed, unless a command is asking for a value.
+
+        The guess is filled in only when letters are being added to the end:
+        putting it back over a backspace makes the box fight whoever is trying
+        to correct it, and there is nothing to guess in the middle of a word.
+        """
+        if not self.awaiting_command:
+            self.suggestions.hide()
+            return
+        appending = (not self.input.deleting
+                     and self.input.cursorPosition() == len(text))
+        self._offer(text.strip(), fill=appending)
+
+    def _offer(self, prefix: str, fill: bool):
+        """List what `prefix` could be, and maybe make it the best of them.
+
+        Filling in leaves the letters that were not typed selected, so the next
+        keystroke replaces them — and so Enter, or a right-click in the
+        viewport, submits the whole name rather than the prefix.
+
+        A prefix that already names a command or an alias is never extended:
+        `line` must not become `linetype` under someone's fingers, and `l`
+        must not become `layer` when it is the alias for line.
+        """
+        self.suggestions.clear()
+        matches = rank_completions(prefix, self.recent_commands()) if prefix \
+            else []
+        if not matches:
+            self.suggestions.hide()
+            return
+        self.suggestions.addItems(matches[:MAX_SUGGESTIONS])
+        self.suggestions.setCurrentRow(0)
+        self._place_suggestions()
+        if fill and resolve(prefix) is None:
+            self.input.setText(matches[0])
+            self.input.setSelection(len(prefix), len(matches[0]) - len(prefix))
+
+    def _place_suggestions(self):
+        """Stand the list on the command line, growing upwards.
+
+        Reparented onto the window rather than onto the command line: the dock
+        is only tall enough for the echo area and the prompt, so the list has to
+        be free to cover the viewport instead. It clears the whole dock rather
+        than just the input, which keeps the echoed history — and the
+        Model/Layout tabs — readable while it is up. Only as wide as the names
+        in it: this is a hint, not a panel.
+        """
+        win = self.window()
+        if self.suggestions.parentWidget() is not win:
+            self.suggestions.setParent(win)
+        row_h = self.suggestions.sizeHintForRow(0)
+        if row_h <= 0:
+            row_h = self.input.fontMetrics().height() + 2
+        height = self.suggestions.count() * row_h + 4
+        width = min(max(200, self.suggestions.sizeHintForColumn(0) + 24),
+                    max(200, self.input.width()))
+        self.suggestions.setGeometry(
+            self.input.mapTo(win, QPoint(0, 0)).x(),
+            max(0, self.mapTo(win, QPoint(0, 0)).y() - height), width, height)
+        self.suggestions.raise_()
+        self.suggestions.show()
+
+    def _use_row(self, row: int):
+        """Put a whole name in the box — no selected tail, it was chosen."""
+        self.suggestions.setCurrentRow(row)
+        item = self.suggestions.item(row)
+        if item is not None:
+            self.input.setText(item.text())
+
+    def _on_suggestion_clicked(self, item):
+        self.input.setText(item.text())
+        self.submit_input()
 
     def _on_tab(self):
         if self.point_pending:
@@ -198,15 +321,31 @@ class CommandLine(QWidget):
             self._complete()
 
     def _complete(self):
-        if not self._tab_matches:
-            prefix = self.input.text().strip()
-            if not prefix:
-                return
-            self._tab_matches = completions(prefix)
-            self._tab_index = 0
-        if self._tab_matches:
-            self.input.setText(self._tab_matches[self._tab_index])
-            self._tab_index = (self._tab_index + 1) % len(self._tab_matches)
+        """Tab: take the highlighted match, and on the next Tab the one after.
+
+        Unlike typing, Tab is an outright request, so it will extend a name
+        that is already a command — cycling `line` on to `linetype`.
+        """
+        if self.suggestions.isHidden() or not self.suggestions.count():
+            self._offer(self.input.text().strip(), fill=False)
+            if self.suggestions.count():
+                self._use_row(0)
+            return
+        self._use_row((self.suggestions.currentRow() + 1)
+                      % self.suggestions.count())
+
+    def _on_up(self):
+        if self.suggestions.isHidden() or not self.suggestions.count():
+            self.history_prev()
+        else:
+            self._use_row(max(0, self.suggestions.currentRow() - 1))
+
+    def _on_down(self):
+        if self.suggestions.isHidden() or not self.suggestions.count():
+            self.history_next()
+        else:
+            self._use_row(min(self.suggestions.currentRow() + 1,
+                              self.suggestions.count() - 1))
 
     def keyPressEvent(self, ev):
         if ev.key() == Qt.Key.Key_Escape:

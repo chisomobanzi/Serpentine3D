@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added
+
+- The command line finishes the name for you. Type `deta` and the box reads
+  `detail`, with the letters you did not type selected, so Enter — or a
+  right-click in the viewport — runs the whole command instead of reporting
+  `Unknown command: deta`. Tab cycled through the matches before this, but
+  cycling is invisible until you press it and nobody presses a key to find out
+  whether it does anything, so in practice every command had to be typed out in
+  full. The other matches are listed above the prompt; Up and Down walk them
+  while the list is up and go back to walking the history when it is not, Tab
+  still cycles, and clicking one runs it. What was run lately is guessed first
+  and the plain command comes before the variants built on it, because
+  alphabetical order offers `tolerance` to someone typing `to`. A name that is
+  already a command is never quietly extended — `line` does not become
+  `linetype` under your fingers, and `l` stays the alias for line rather than
+  turning into `layer` — nothing is guessed over a backspace, and nothing is
+  guessed at all while a command is asking for a value, where the words belong
+  to the command and not to the registry.
+
 ### Fixed
 
 - Placing a detail view on a layout no longer opens copies of the
