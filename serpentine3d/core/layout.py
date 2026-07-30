@@ -154,6 +154,7 @@ class PaperObject:
     linetype: str = "Continuous"
     lineweight: float = 0.25             # millimetres, as on a drawing
     _plines: tuple | None = field(default=None, repr=False, compare=False)
+    _pts: tuple | None = field(default=None, repr=False, compare=False)
 
     @property
     def polylines(self) -> list:
@@ -174,6 +175,26 @@ class PaperObject:
         lines = hlr.edges_to_polylines(geometry.edges_of(self.shape))
         self._plines = (self.shape, lines)
         return lines
+
+    @property
+    def points(self) -> list:
+        """The shape's free-standing points, in paper millimetres.
+
+        A point object is the one thing on a sheet with no line work in it, so
+        walking edges walks past it. Kept apart from `polylines` rather than
+        folded in as a polyline of one, because everything reading polylines
+        reads them as something to walk along: dashing them, measuring them,
+        asking what a click landed near.
+
+        Keyed on the shape the same way `polylines` is, and for the same reason.
+        """
+        cached = self._pts
+        if cached is not None and cached[0] is self.shape:
+            return cached[1]
+        from . import geometry
+        pts = geometry.free_points(self.shape)
+        self._pts = (self.shape, pts)
+        return pts
 
     def __deepcopy__(self, memo):
         """Copy for the undo stack, sharing the shape.
@@ -381,6 +402,10 @@ def paper_object_at(layout, px: float, py: float, tol: float = 2.0):
             for a, b in zip(poly[:-1], poly[1:]):
                 if _dist_seg(px, py, a, b) <= tol:
                     return obj
+        # a point has no ink to be near, so being near the point is the test
+        for p in obj.points:
+            if math.hypot(px - float(p[0]), py - float(p[1])) <= tol:
+                return obj
     return None
 
 
@@ -395,6 +420,9 @@ def paper_object_bounds(obj) -> tuple:
         for p in poly:
             xs.append(float(p[0]))
             ys.append(float(p[1]))
+    for p in obj.points:
+        xs.append(float(p[0]))
+        ys.append(float(p[1]))
     if not xs:
         return (0.0, 0.0, 0.0, 0.0)
     return (min(xs), min(ys), max(xs), max(ys))
@@ -437,6 +465,10 @@ def paper_object_crosses(obj, x0: float, y0: float,
         for a, b in zip(poly[:-1], poly[1:]):
             if _seg_hits_rect(a, b, lo, hi):
                 return True
+    for p in obj.points:
+        if (lo[0] <= float(p[0]) <= hi[0]
+                and lo[1] <= float(p[1]) <= hi[1]):
+            return True
     return False
 
 

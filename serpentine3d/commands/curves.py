@@ -176,10 +176,9 @@ def cmd_closecrv(ctx):
     ctx.echo(f"Closed {done} curve(s).")
 
 
-# not "any": a point object is a vertex, a vertex has no edges, and the sheet
-# draws paper geometry as lines — it would be stored and never seen. Refused
-# on bare paper until there is something to draw it with.
-@command("point", aliases=("pt",))
+# "any" since the sheet draws vertices as well as edges: a point on paper is a
+# mark on the page, at the millimetres it was put at, and it is not printed.
+@command("point", aliases=("pt",), space="any")
 def cmd_point(ctx):
     count = 0
     p = yield PointReq("Location of point object")

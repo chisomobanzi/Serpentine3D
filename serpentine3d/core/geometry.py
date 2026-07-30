@@ -1588,6 +1588,39 @@ def point_coords(shape) -> Point:
     return (p.X(), p.Y(), p.Z())
 
 
+def free_points(shape) -> list:
+    """The vertices in a shape that no edge already draws.
+
+    A point object is a vertex, and a vertex is the one thing in a shape with
+    nothing to walk along: whatever draws a shape by its edges draws none of it.
+    The corners of a curve are left out, since the curve is already there — what
+    comes back is what would otherwise not be seen at all.
+    """
+    if shape is None:
+        return []
+    if shape.ShapeType() == occ.VERTEX:
+        return [point_coords(shape)]
+    if shape.ShapeType() != occ.COMPOUND:
+        return []
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+    owners = TopTools_IndexedDataMapOfShapeListOfShape()
+    TopExp.MapShapesAndAncestors_s(shape, occ.VERTEX, occ.EDGE, owners)
+    exp = TopExp_Explorer(shape, occ.VERTEX)
+    out, seen = [], set()
+    while exp.More():
+        v = occ.to_vertex(exp.Current())
+        exp.Next()
+        key = hash(v)                     # the shape's own hash, not a
+        if key in seen:                   # wrapper's address (see edges_of)
+            continue
+        seen.add(key)
+        idx = owners.FindIndex(v)
+        if idx == 0 or owners.FindFromIndex(idx).Size() == 0:
+            out.append(point_coords(v))
+    return out
+
+
 def pipe(rail, radius: float, cap: bool = True) -> TopoDS_Shape:
     """Tube of the given radius around a rail curve."""
     if radius <= 0:

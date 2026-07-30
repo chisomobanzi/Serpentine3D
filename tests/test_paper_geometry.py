@@ -333,13 +333,16 @@ def test_a_curve_in_the_model_is_untouched():
     assert len(w.scene.all()) == 1
 
 
-def test_a_point_object_is_refused_rather_than_drawn_invisibly(bare_sheet):
-    """A vertex has no edges and the sheet draws lines, so a point on paper
-    would be stored and never seen. Refusing says so; storing it lies."""
+def test_a_point_object_lands_on_the_paper_and_is_drawn(bare_sheet):
+    """A vertex has no edges, so the sheet drew nothing for it and the command
+    was refused rather than storing something invisible. The sheet draws
+    vertices now — see test_paper_points.py — so it is geometry like the
+    rest."""
     w, lay = bare_sheet
-    _run(w, "point", "50,50,0")
-    assert lay.objects == []
+    _run(w, "point", "50,50,0", "")
     assert w.scene.all() == []
+    assert len(lay.objects) == 1
+    assert lay.objects[0].points
 
 
 def test_a_solid_is_still_refused_on_bare_paper(bare_sheet):

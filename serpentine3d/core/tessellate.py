@@ -312,26 +312,7 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         mesh.iso_segments = np.concatenate(isos).astype(np.float32)
 
     # free-standing points: vertex shapes and vertices dangling in compounds
-    free_pts = []
-    if shape.ShapeType() == occ.VERTEX:
-        free_pts.append(geometry.point_coords(shape))
-    elif shape.ShapeType() == occ.COMPOUND:
-        from OCP.TopExp import TopExp
-        from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
-        owners = TopTools_IndexedDataMapOfShapeListOfShape()
-        TopExp.MapShapesAndAncestors_s(shape, occ.VERTEX, occ.EDGE, owners)
-        exp = TopExp_Explorer(shape, occ.VERTEX)
-        seen = set()
-        while exp.More():
-            v = occ.to_vertex(exp.Current())
-            exp.Next()
-            key = hash(v)                 # the shape's own hash, not a
-            if key in seen:               # wrapper's address (see edges_of)
-                continue
-            seen.add(key)
-            idx = owners.FindIndex(v)
-            if idx == 0 or owners.FindFromIndex(idx).Size() == 0:
-                free_pts.append(geometry.point_coords(v))
+    free_pts = geometry.free_points(shape)
     if free_pts:
         mesh.points = np.asarray(free_pts, np.float32)
     return mesh

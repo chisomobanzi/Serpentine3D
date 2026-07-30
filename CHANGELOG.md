@@ -120,6 +120,19 @@
   whole model and come back undivided, so they stay grey under a picked object,
   as do the faces a section cut fills in.
 
+- `point` works on a sheet. It was refused there, and the reason was honest: a
+  point object is a vertex, a vertex has no edges, and the sheet drew geometry
+  by walking edges, so the point would have been stored and never seen again.
+  The sheet draws vertices now — a small cross, the same size on screen however
+  far the page is zoomed, since a point says where something is and has no size
+  of its own. It is geometry like the rest of what is on the paper: clicking the
+  cross picks it, either band takes it, it goes gold when it is picked, Delete
+  removes it, and it is still there when the file is opened again. Placed inside
+  a detail it is a model point, as everything drawn through a detail is.
+
+  A point is a mark to work to rather than ink, so it is not printed — the same
+  as in Rhino, and the reason nothing changed in the PDF or DXF export.
+
 ### Fixed
 
 - A detail you have stepped into is a window into the model, and drawing through

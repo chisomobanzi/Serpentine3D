@@ -25,6 +25,21 @@ BORDER_ACTIVE = (0.85, 0.64, 0.25, 1.0)
 LINE_VISIBLE = (0.10, 0.10, 0.12, 1.0)
 LINE_HIDDEN = (0.45, 0.45, 0.5, 1.0)
 DIM_COLOR = (0.20, 0.30, 0.55, 1.0)
+POINT_MARK_PX = 4.0                     # half a point's cross, on screen
+
+
+def point_marks(points, size: float) -> np.ndarray:
+    """A cross for each point, as (M, 2, 3) segments in the points' own units.
+
+    Squared to the page rather than drawn as an x, so it reads as a crosshair
+    over the place it marks and not as a mark of its own.
+    """
+    segs = []
+    for p in points:
+        x, y, z = float(p[0]), float(p[1]), float(p[2])
+        segs.append([[x - size, y, z], [x + size, y, z]])
+        segs.append([[x, y - size, z], [x, y + size, z]])
+    return np.asarray(segs, np.float32).reshape(-1, 2, 3)
 
 
 def hlr_visible_segments(by_obj, to_paper, is_picked) -> list:
@@ -275,8 +290,18 @@ class LayoutView:
             return (*theme.SELECTION_COLOR, 1.0)
         return (*obj.color, 1.0) if obj.color else LINE_VISIBLE
 
+    def _point_mark_size(self) -> float:
+        """Half the width of a point's cross, in paper millimetres.
+
+        Fixed on screen rather than on the paper: a point mark says where
+        something is and has no size of its own, so zooming into the page must
+        not grow it into a plus sign the size of the drawing.
+        """
+        return POINT_MARK_PX / max(self.px_per_mm, 1e-6)
+
     def _paint_objects(self, lay, mvp):
         """Geometry drawn on the paper itself, in millimetres."""
+        mark = self._point_mark_size()
         for obj in lay.objects:
             pattern = linetype.pattern_for(obj.linetype)
             segs = []
@@ -286,16 +311,21 @@ class LayoutView:
                              in linetype.dash_polyline(pts, pattern)]
                 else:
                     segs.append(np.stack([pts[:-1], pts[1:]], axis=1))
-            if not segs:
-                continue
             color = self._object_ink(obj)
-            # a lineweight is millimetres on the printed sheet, so it scales
-            # with the zoom; floored at a pixel, because 0.25mm on a whole page
-            # is a quarter of one and a border you cannot see is worse than a
-            # border a shade too heavy
-            width = max(1.0, obj.lineweight * self.px_per_mm)
-            self._draw_segs(mvp, np.concatenate(
-                [s.reshape(-1, 2, 3) for s in segs]), color, width)
+            if segs:
+                # a lineweight is millimetres on the printed sheet, so it scales
+                # with the zoom; floored at a pixel, because 0.25mm on a whole
+                # page is a quarter of one and a border you cannot see is worse
+                # than a border a shade too heavy
+                width = max(1.0, obj.lineweight * self.px_per_mm)
+                self._draw_segs(mvp, np.concatenate(
+                    [s.reshape(-1, 2, 3) for s in segs]), color, width)
+            # a point object has no edges, so nothing above draws it: it is a
+            # cross of its own, at the weight a mark takes rather than the
+            # object's lineweight, which is about ink and this is not ink
+            marks = point_marks(obj.points, mark)
+            if len(marks):
+                self._draw_segs(mvp, marks, color, 1.6)
 
     def _paint_detail_body(self, detail, paper_mvp):
         """The view inside a detail's rectangle, however it is drawn."""
