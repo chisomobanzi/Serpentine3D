@@ -574,10 +574,8 @@ class LayoutView:
 
     def _pools(self, lay) -> dict:
         """Where each kind of pickable thing lives on a sheet."""
-        return {"note": lay.notes, "dim": lay.dims, "rdim": lay.rdims,
-                "adim": lay.adims, "leader": lay.leaders,
-                "hatch": lay.hatches, "object": lay.objects,
-                "detail": lay.details}
+        from ..core.layout import sheet_pools
+        return sheet_pools(lay)
 
     def _prune(self):
         """Forget anything no longer on the sheet — undo and delete both
@@ -1020,6 +1018,38 @@ class LayoutView:
         if moved:
             self.vp.scene.notify("layouts")
         return moved
+
+    def copy_selected(self, dx: float, dy: float) -> int:
+        """Duplicate every picked sheet item, the copy offset by millimetres.
+
+        It is the copy that moves and the original that is left alone, which
+        is what lets a locked frame be copied: the lock is about the frame not
+        being disturbed, and it is not. It also leaves the picked items still
+        picked, so a second copy is measured from the same place as the first
+        instead of walking away from it.
+        """
+        lay = self.layout
+        self._prune()
+        if lay is None or not self.selected:
+            return 0
+        from ..core.layout import (copy_sheet_item, move_annotation,
+                                   move_paper_object)
+        made = 0
+        for kind, obj in list(self.selected):
+            dup = copy_sheet_item(lay, kind, obj)
+            if dup is None:
+                continue
+            if kind == "detail":
+                dup.x += dx
+                dup.y += dy
+            elif kind == "object":
+                move_paper_object(dup, dx, dy)
+            else:
+                move_annotation(kind, dup, dx, dy)
+            made += 1
+        if made:
+            self.vp.scene.notify("layouts")
+        return made
 
     def delete_selected(self) -> bool:
         lay = self.layout

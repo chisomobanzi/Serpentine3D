@@ -558,6 +558,35 @@ def nudge_detail_corners(det, indices, dx: float, dy: float):
     det.y, det.h = min(y0, y1), max(abs(y1 - y0), MIN_DETAIL_MM)
 
 
+def sheet_pools(layout) -> dict:
+    """Where each kind of pickable thing on a sheet lives."""
+    return {"note": layout.notes, "dim": layout.dims, "rdim": layout.rdims,
+            "adim": layout.adims, "leader": layout.leaders,
+            "hatch": layout.hatches, "object": layout.objects,
+            "detail": layout.details}
+
+
+def copy_sheet_item(layout, kind: str, obj):
+    """Duplicate a sheet item into the pool it came from, and return the copy.
+
+    Deep, and then given a fresh id. Deep because what the sheet holds is
+    mostly plain data — a detail's target, a leader's points — and a copy
+    sharing those would swing or drag both when either was touched. The id
+    because it is the one field that must not be copied: a hidden-line cache,
+    a saved file and a selection all tell two frames apart by it.
+
+    The copy lands exactly on the original, since where it goes is the
+    caller's question and not every kind moves the same way.
+    """
+    pool = sheet_pools(layout).get(kind)
+    if pool is None or obj not in pool:
+        return None
+    dup = copy.deepcopy(obj)
+    dup.id = _uid()
+    pool.append(dup)
+    return dup
+
+
 def delete_annotation(layout, kind: str, obj) -> bool:
     pool = {"note": layout.notes, "dim": layout.dims,
             "rdim": layout.rdims, "adim": layout.adims,

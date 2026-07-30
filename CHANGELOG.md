@@ -21,9 +21,6 @@
   before this still open, and files with paper geometry in them open in 0.5.5 as
   sheets without it.
 
-  Not yet: `point` is still refused on paper, because the sheet draws paper
-  geometry as lines and a point object has none.
-
 - Paper geometry can be picked. A click on a border, a bubble or a title strip
   selects it, Shift or Ctrl adds to the selection, a band takes several, the
   cursor drags what is picked across the sheet, typed coordinates move it, and
@@ -147,6 +144,20 @@
   model, so inside one a command works on the model and asks for objects by
   clicking them through the frame; on bare paper there is no model to ask about,
   so the sheet is the answer.
+
+- `copy` follows the same rule. On a sheet it duplicates what is picked —
+  geometry, detail frames, annotations — offset by paper millimetres, and keeps
+  going until you press Enter, the way it always has in the model. Before, it
+  was one of the commands that waited on bare paper for a selection that could
+  not be made. Inside a detail it still copies model objects.
+
+  The copy is a new thing on the page and not a second name for the old one: it
+  gets its own id, its own shape and its own copy of anything the original held,
+  so panning one detail does not swing the other. The originals stay picked and
+  untouched, which is what lets a locked frame be copied — the lock is about the
+  frame not being disturbed, and it is not — and means each repeat is measured
+  from the same place rather than walking away from it. The whole command is one
+  undo, however many copies it made.
 
 ### Fixed
 

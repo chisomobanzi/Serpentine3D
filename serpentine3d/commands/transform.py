@@ -56,8 +56,37 @@ def cmd_move(ctx):
     ctx.echo(f"Moved {len(objs)} object(s).")
 
 
-@command("copy", aliases=("co", "cp"))
+def _copy_on_paper(ctx, lv):
+    """Copy what is picked on a sheet, in paper millimetres.
+
+    Whole items only, unlike `move`: a corner grip is a way of reshaping the
+    frame it belongs to, and a corner on its own is not something there can be
+    two of. The originals stay picked, so every repeat is measured from the
+    same thing rather than from the copy before it.
+    """
+    if not lv.selected:
+        ctx.echo("Nothing is picked on this sheet — click the geometry, a "
+                 "detail frame or an annotation first.")
+        return
+    items = len(lv.selected)
+    p1 = yield PointReq("Point to copy the sheet item from")
+    count = 0
+    while True:
+        p2 = yield PointReq("Point to copy to (Enter to finish)",
+                            rubber_from=p1, allow_empty=count > 0)
+        if p2 is None:
+            break
+        lv.copy_selected(p2[0] - p1[0], p2[1] - p1[1])
+        count += 1
+    ctx.echo(f"Copied {items} sheet item(s) {count} time(s).")
+
+
+@command("copy", aliases=("co", "cp"), space="any")
 def cmd_copy(ctx):
+    lv = ctx.sheet_view()
+    if lv is not None:
+        yield from _copy_on_paper(ctx, lv)
+        return
     objs = yield SelectReq("Select objects to copy")
     p1 = yield PointReq("Point to copy from")
 
