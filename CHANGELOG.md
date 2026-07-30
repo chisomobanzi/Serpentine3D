@@ -83,10 +83,6 @@
   own geometry, its frames and its corners. The readout counts what is picked in
   a detail as the model objects it is, not as the nothing the sheet had picked.
 
-  Not yet: a detail in hidden-line or technical mode draws cached line work, so
-  the object picked through one is selected everywhere but does not go gold in
-  that frame.
-
 - The gumball comes with what you pick in a detail. Stepping into a detail and
   clicking a model object puts the same handles on it that the model window
   gives it, and they are dragged the same way: an arrow moves, a knob scales, a
@@ -104,6 +100,25 @@
   the handles that do work, and a handle you cannot use is worse than no handle.
   The rest are drawn over the drawing rather than in it, so an object that
   nearly fills its frame still has handles you can reach past the edge of it.
+
+- A hidden-line detail shows what is picked. Such a detail is line work and
+  nothing else — no faces to tint — and the line work was one heap of polylines
+  with nothing in it to say which object each came from, so an object picked
+  through one was gold in every other frame on the sheet and black in the frame
+  you picked it in. Its outline now goes gold like anywhere else, and a detail in
+  technical mode with it. The hidden-line pass already keeps its visible edges
+  apart per object, to give each one its own dash pattern; carrying the object's
+  name out alongside them is enough, because the ink is then chosen when the
+  frame is painted. So picking something does not send the projection round
+  again, which is the expensive part and the reason the result is cached. A
+  picked object keeps its dashes, since going gold says that it is picked and not
+  that it is solid, and gold is drawn last, so an edge shared between a picked
+  object and one that is not reads as picked. What goes to PDF and to DXF is
+  unchanged: a print has no selection in it.
+
+  Not yet: the dashed lines behind an object are computed in one pass over the
+  whole model and come back undivided, so they stay grey under a picked object,
+  as do the faces a section cut fills in.
 
 ### Fixed
 

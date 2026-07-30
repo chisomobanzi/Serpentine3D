@@ -27,6 +27,44 @@ LINE_HIDDEN = (0.45, 0.45, 0.5, 1.0)
 DIM_COLOR = (0.20, 0.30, 0.55, 1.0)
 
 
+def hlr_visible_segments(by_obj, to_paper, is_picked) -> list:
+    """A detail's visible line work as (ink, segments), in the order to draw.
+
+    `by_obj` is what the hidden-line pass carried out: one (object id,
+    linetype name, polylines) for each object it drew. Grouping the polylines
+    by the ink they take rather than by the object they came from keeps the
+    drawing to two uploads however many objects are in it, and the picked ink
+    comes last, so where a picked object shares an edge with one that is not,
+    what you see is that it is picked.
+
+    A linetype is dashed here rather than by the line renderer, so it dashes
+    the same on screen as it does on paper — and a picked object keeps its
+    dashes, since going gold says it is picked and not that it is solid.
+    """
+    from ..core import linetype as _lt
+
+    plain, gold = [], []
+    for oid, name, polys in by_obj:
+        pattern = _lt.pattern_for(name)
+        into = gold if oid is not None and is_picked(oid) else plain
+        for poly in polys:
+            p = to_paper(poly[:, :2])
+            if len(p) < 2:
+                continue
+            if pattern:
+                pairs = _lt.dash_polyline(p, pattern)
+                if len(pairs):
+                    into.append(np.asarray(pairs, np.float32))
+            else:
+                into.append(np.stack([p[:-1], p[1:]], axis=1))
+    out = []
+    for segs, ink in ((plain, LINE_VISIBLE),
+                      (gold, (*theme.SELECTION_COLOR, 1.0))):
+        if segs:
+            out.append((ink, np.concatenate(segs).astype(np.float32)))
+    return out
+
+
 def detail_direction(detail) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(view_dir_towards_viewer, right, up) for a detail camera."""
     ce = math.cos(detail.elevation)
@@ -372,7 +410,7 @@ class LayoutView:
 
         if not shapes:
             data = {"visible": [], "hidden": [], "cut": cut_polys,
-                    "visible_lt": []}
+                    "visible_lt": [], "visible_by_obj": []}
             self._hlr_cache[detail.id] = (key, data)
             return data
 
@@ -382,21 +420,28 @@ class LayoutView:
         res = hlr.hlr_project_safe(shapes, origin=detail.target,
                                    view_dir=d, x_dir=right)
         by_shape = res.get("visible_by_shape") or []
+        by_obj = []                 # (object id, linetype name, polylines)
+        if by_shape:
+            for i, obj in enumerate(objs):
+                by_obj.append((obj.id,
+                               lts[i] if i < len(lts) else "Continuous",
+                               hlr.edges_to_polylines(
+                                   by_shape[i] if i < len(by_shape) else [])))
+        else:                                   # older worker: no split
+            # Nothing to say which object any of it came from, so it belongs to
+            # no object: it draws, and nothing in it can go gold.
+            by_obj = [(None, "Continuous", hlr.edges_to_polylines(
+                res["visible"] + res["outline"]))]
         visible = []
         lt_groups: dict = {}
-        if by_shape:
-            for i in range(len(shapes)):
-                polys = hlr.edges_to_polylines(
-                    by_shape[i] if i < len(by_shape) else [])
-                name = lts[i] if i < len(lts) else "Continuous"
-                (visible if name == "Continuous"
-                 else lt_groups.setdefault(name, [])).extend(polys)
-        else:                                   # older worker: no split
-            visible = hlr.edges_to_polylines(res["visible"] + res["outline"])
+        for _oid, name, polys in by_obj:
+            (visible if name == "Continuous"
+             else lt_groups.setdefault(name, [])).extend(polys)
         data = {"visible": visible,
                 "hidden": hlr.edges_to_polylines(res["hidden"]),
                 "cut": cut_polys,
-                "visible_lt": [(n, p) for n, p in lt_groups.items()]}
+                "visible_lt": [(n, p) for n, p in lt_groups.items()],
+                "visible_by_obj": by_obj}
         self._hlr_cache[detail.id] = (key, data)
         return data
 
@@ -436,26 +481,12 @@ class LayoutView:
             if segs_h:
                 allh = np.concatenate(segs_h)
                 self._draw_segs(paper_mvp, allh, LINE_HIDDEN, 1.0)
-        segs_v = []
-        for poly in data["visible"]:
-            p = to_paper(poly[:, :2])
-            segs_v.append(np.stack([p[:-1], p[1:]], axis=1))
-        if segs_v:
-            self._draw_segs(paper_mvp, np.concatenate(segs_v),
-                            LINE_VISIBLE, 1.6)
-        # non-Continuous linetypes: same ink, dashed per their pattern
-        from ..core import linetype as _lt
-        for name, polys in data.get("visible_lt", []):
-            pattern = _lt.pattern_for(name)
-            dsegs = []
-            for poly in polys:
-                p = to_paper(poly[:, :2])
-                pairs = (_lt.dash_polyline(p, pattern) if pattern
-                         else list(zip(p[:-1], p[1:])))
-                dsegs.extend([a, b] for a, b in pairs)
-            if dsegs:
-                self._draw_segs(paper_mvp, np.asarray(dsegs, np.float32),
-                                LINE_VISIBLE, 1.6)
+        # Visible edges, in the inks they take: a hidden-line detail has no
+        # faces to tint, so ink is the only way it can show what is picked.
+        picked = self.vp.selection.is_selected
+        for ink, segs in hlr_visible_segments(data.get("visible_by_obj", []),
+                                              to_paper, picked):
+            self._draw_segs(paper_mvp, segs, ink, 1.6)
         # section-cut faces: heavy outline + 45-degree hatching
         cut = data.get("cut") or []
         if cut:
