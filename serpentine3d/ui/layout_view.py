@@ -26,6 +26,7 @@ LINE_VISIBLE = (0.10, 0.10, 0.12, 1.0)
 LINE_HIDDEN = (0.45, 0.45, 0.5, 1.0)
 DIM_COLOR = (0.20, 0.30, 0.55, 1.0)
 POINT_MARK_PX = 4.0                     # half a point's cross, on screen
+ZOOM_PAD = 1.05                         # air around what a zoom was asked for
 
 
 def point_marks(points, size: float) -> np.ndarray:
@@ -251,6 +252,150 @@ class LayoutView:
         return ortho(self.pan[0] - half_w, self.pan[0] + half_w,
                      self.pan[1] - half_h, self.pan[1] + half_h,
                      -10, 10)
+
+    # -------------------------------------------------------------- zooming
+
+    def zoom_paper(self, x0: float, y0: float, x1: float, y1: float):
+        """Frame that rectangle of paper, in millimetres."""
+        w, h = self.vp.width(), self.vp.height()
+        rw = max(abs(x1 - x0), 1e-3)
+        rh = max(abs(y1 - y0), 1e-3)
+        self.px_per_mm = float(np.clip(min(w / (rw * ZOOM_PAD),
+                                           h / (rh * ZOOM_PAD)), 0.05, 100))
+        self.pan = np.array([(x0 + x1) / 2, (y0 + y1) / 2])
+        lay = self.layout
+        if lay is not None and self.vp.isVisible():
+            # Count the sheet as fitted, or the first paint after switching to
+            # it would fit it over the top of this and the zoom would never be
+            # seen at all.
+            #
+            # Only once the view is on screen, though. A pane built a moment
+            # ago still reports the size it was constructed at, and an extra
+            # viewport opened straight onto a sheet zooms before the window
+            # has decided how big it is — a fit worked out from that size is
+            # wrong by however much the layout is about to change it, and the
+            # first paint is the one that knows better.
+            self._fitted_for = lay.id
+        self.vp.update()
+
+    def sheet_bounds(self) -> tuple | None:
+        """The page, and everything on it.
+
+        The page alone is nearly always the same answer. It is not when a
+        border has been dragged off the edge, and that is exactly the case
+        where a way back to it is wanted — a zoom that cannot show you the
+        thing you have lost is no way back.
+        """
+        lay = self.layout
+        if lay is None:
+            return None
+        from ..core.layout import sheet_item_bounds
+        box = [0.0, 0.0, float(lay.paper_w), float(lay.paper_h)]
+        for kind, pool in self._pools(lay).items():
+            for obj in pool:
+                x0, y0, x1, y1 = sheet_item_bounds(kind, obj)
+                box = [min(box[0], x0), min(box[1], y0),
+                       max(box[2], x1), max(box[3], y1)]
+        return tuple(box)
+
+    def zoom_extents(self) -> bool:
+        """Show all of whatever is showing: the page, or a detail's model."""
+        det = self._entered()
+        if det is not None:
+            lo, hi = self.vp.scene.bbox()
+            self._zoom_detail_box(det, lo, hi)
+            return True
+        bounds = self.sheet_bounds()
+        if bounds is None:
+            return False
+        self.zoom_paper(*bounds)
+        return True
+
+    def zoom_selected(self) -> bool:
+        """Frame what is picked. False when nothing is.
+
+        Which selection that means is the question `sheet_view` answers for
+        every other command: the sheet's own items on bare paper, the model
+        objects inside a detail.
+        """
+        det = self._entered()
+        if det is not None:
+            box = self.vp.selected_bbox()
+            if box is None:
+                return False
+            self._zoom_detail_box(det, *box)
+            return True
+        self._prune()
+        if not self.selected:
+            return False
+        from ..core.layout import sheet_item_bounds
+        boxes = [sheet_item_bounds(k, o) for k, o in self.selected]
+        self.zoom_paper(min(b[0] for b in boxes), min(b[1] for b in boxes),
+                        max(b[2] for b in boxes), max(b[3] for b in boxes))
+        return True
+
+    def zoom_window(self, p1, p2) -> bool:
+        """Frame the window two picked points span.
+
+        On bare paper they are paper points, because that is the only thing a
+        point there can be; inside a detail they are model points, for the
+        same reason in reverse.
+        """
+        det = self._entered()
+        if det is not None:
+            from ..core.layout import detail_project
+            ax, ay = detail_project(det, p1)
+            bx, by = detail_project(det, p2)
+            self._zoom_detail_rect(det, ax, ay, bx, by)
+            return True
+        self.zoom_paper(p1[0], p1[1], p2[0], p2[1])
+        return True
+
+    def zoom_steps(self, steps: float) -> bool:
+        """Zoom about the middle of the view by the wheel's own amount.
+
+        Through `wheel`, so that typing `zoom In` and rolling the wheel are
+        one behaviour and not two that have to agree.
+        """
+        ok = self.wheel(steps, self.vp.width() / 2, self.vp.height() / 2)
+        self.vp.update()
+        return ok
+
+    def _zoom_detail_rect(self, det, x0: float, y0: float,
+                          x1: float, y1: float) -> bool:
+        """Aim and scale a detail so that piece of its paper fills the frame.
+
+        Millimetres at the scale the detail is at now, which is what comes
+        back from projecting model points through it.
+        """
+        if det.locked:
+            return False
+        from ..core.layout import detail_unproject
+        # Re-aimed before it is re-scaled: unprojecting reads the scale, so a
+        # target worked out at the new one would name a different point.
+        det.target = detail_unproject(det, (x0 + x1) / 2, (y0 + y1) / 2)
+        grow = max(abs(x1 - x0) / det.w, abs(y1 - y0) / det.h)
+        if grow > 1e-9:            # a point has no size to fill a frame with
+            det.scale_denom = max(det.scale_denom * grow * ZOOM_PAD, 1e-6)
+        self._hlr_cache.pop(det.id, None)
+        self.vp.scene.notify("layouts")
+        self.vp.update()
+        return True
+
+    def _zoom_detail_box(self, det, lo, hi) -> bool:
+        """Frame a model bounding box inside a detail.
+
+        All eight corners, since a detail looking at an angle turns the box
+        on the page and the near corners are not the wide ones.
+        """
+        from ..core.layout import detail_project
+        pts = [detail_project(det, (x, y, z))
+               for x in (lo[0], hi[0]) for y in (lo[1], hi[1])
+               for z in (lo[2], hi[2])]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        return self._zoom_detail_rect(det, min(xs), min(ys),
+                                      max(xs), max(ys))
 
     # ------------------------------------------------------------- painting
 

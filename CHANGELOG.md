@@ -178,6 +178,28 @@
   Copy and paste now say what they did through the same channel as every other
   command, so scripts and the RPC bridge hear them too.
 
+- Zoom drives what you are actually looking at. Every zoom drove the model
+  camera, which on a sheet is the one thing you cannot see: `zoom Extents` on
+  bare paper silently re-aimed it and left the page exactly where it was, and
+  `zoom Window` was refused outright, because a window wants two points and
+  bare paper has no model point to give. Inside a detail both moved the camera
+  and left the detail alone.
+
+  On bare paper a zoom is now about the page. `zoom Window` frames the
+  millimetres you picked, `zoom Selected` frames what is picked on the sheet,
+  and `zoom Extents` shows the whole page — together with anything dragged off
+  the edge of it, which is the case you most need a way back from. Inside a
+  detail a zoom is about the detail: the window you pick is model points, as
+  every point in a detail is, and the detail is re-aimed and re-scaled to show
+  it, exactly as rolling the wheel there does. A locked detail stays put, for
+  the same reason the wheel leaves it alone. `zoom In` and `zoom Out` go
+  through the wheel itself, so typing them and rolling it are one behaviour
+  rather than two that have to agree.
+
+  Answered once, where the viewport decides, rather than in each command — so
+  the RPC bridge, the file-open fit and an extra pane opened straight onto a
+  sheet all follow the same rule.
+
 ### Fixed
 
 - A detail you have stepped into is a window into the model, and drawing through

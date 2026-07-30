@@ -631,6 +631,20 @@ def annotation_bounds(kind: str, obj) -> tuple:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+def sheet_item_bounds(kind: str, obj) -> tuple:
+    """Paper-space bbox (x0, y0, x1, y1) of anything a sheet holds.
+
+    The three kinds each already knew their own bounds; what was missing was
+    one question that could be asked of a mixed handful of them, which is
+    what a selection on a sheet is.
+    """
+    if kind == "detail":
+        return (obj.x, obj.y, obj.x + obj.w, obj.y + obj.h)
+    if kind == "object":
+        return paper_object_bounds(obj)
+    return annotation_bounds(kind, obj)
+
+
 def enclosing_polygon(polylines: list, px: float, py: float):
     """Smallest closed polyline (paper coords) containing the point."""
     best = None

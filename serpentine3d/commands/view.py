@@ -43,7 +43,7 @@ def cmd_persp(ctx):
     yield from ()
 
 
-@command("zoomextents", aliases=("ze", "zea"), mutates=False)
+@command("zoomextents", aliases=("ze", "zea"), mutates=False, space="any")
 def cmd_zoom_extents(ctx):
     _vp(ctx).zoom_extents()
     ctx.echo("Zoomed to extents.")
@@ -218,7 +218,7 @@ def cmd_spacemouse(ctx):
                  "Sensitivity and inversion live in Settings > Mouse.")
 
 
-@command("zoom", aliases=("z",), mutates=False)
+@command("zoom", aliases=("z",), mutates=False, space="any")
 def cmd_zoom(ctx):
     """Zoom the active view: Selected, Extents, a picked Window, In, Out."""
     vp = _vp(ctx)
@@ -236,11 +236,10 @@ def cmd_zoom(ctx):
     elif mode == "Extents":
         vp.zoom_extents()
     else:
-        vp.camera.zoom(3.0 if mode == "In" else -3.0)
-        vp.update()
+        vp.zoom_steps(3.0 if mode == "In" else -3.0)
 
 
-@command("zoomselected", aliases=("zs",), mutates=False)
+@command("zoomselected", aliases=("zs",), mutates=False, space="any")
 def cmd_zoomselected(ctx):
     """Frame the current selection in the active view."""
     vp = _vp(ctx)
@@ -249,7 +248,7 @@ def cmd_zoomselected(ctx):
     yield from ()
 
 
-@command("zoomwindow", aliases=("zw",), mutates=False)
+@command("zoomwindow", aliases=("zw",), mutates=False, space="any")
 def cmd_zoomwindow(ctx):
     """Zoom into a window picked with two corner points."""
     vp = _vp(ctx)

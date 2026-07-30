@@ -2100,33 +2100,67 @@ class Viewport(QOpenGLWidget):
         window has room at the sides that a square one does not."""
         return self.width() / max(self.height(), 1)
 
+    def _zooms_the_sheet(self):
+        """The layout view, when a zoom means what is on screen and not the
+        camera.
+
+        On a sheet the camera is the one thing you cannot see, so a zoom that
+        drove it moved nothing and looked broken. Answered here rather than in
+        each command, because everything that zooms — the commands, the RPC,
+        opening a file — comes through these three methods.
+        """
+        return None if self.space == "model" else self.layout_view
+
     def zoom_extents(self):
+        lv = self._zooms_the_sheet()
+        if lv is not None and lv.zoom_extents():
+            return
         self.camera.zoom_extents(self.scene.bbox(), self._aspect())
         self.update()
 
-    def zoom_selected(self) -> bool:
-        """Frame the selection. False when nothing is selected."""
+    def selected_bbox(self):
+        """The selection's model-space bounds, None when nothing is picked."""
         objs = [o for i in self.selection.ids
                 if (o := self.scene.get(i)) is not None]
         if not objs:
-            return False
+            return None
         # o.bbox(), not geometry.bbox(o.shape): objects remember their own
         # bounds, and zooming to a whole drawing would otherwise measure
         # every one of them again.
         boxes = np.array([o.bbox() for o in objs], float)
-        self.camera.zoom_extents((tuple(boxes[:, 0].min(axis=0)),
-                                  tuple(boxes[:, 1].max(axis=0))),
-                                 self._aspect())
+        return (tuple(boxes[:, 0].min(axis=0)),
+                tuple(boxes[:, 1].max(axis=0)))
+
+    def zoom_selected(self) -> bool:
+        """Frame the selection. False when nothing is selected."""
+        lv = self._zooms_the_sheet()
+        if lv is not None:
+            return lv.zoom_selected()
+        box = self.selected_bbox()
+        if box is None:
+            return False
+        self.camera.zoom_extents(box, self._aspect())
         self.update()
         return True
 
     def zoom_to_points(self, p1, p2):
-        """Frame the axis-aligned window spanned by two world points."""
+        """Frame the axis-aligned window spanned by two picked points."""
+        lv = self._zooms_the_sheet()
+        if lv is not None and lv.zoom_window(p1, p2):
+            return
         mn = np.minimum(np.asarray(p1, float), np.asarray(p2, float))
         mx = np.maximum(np.asarray(p1, float), np.asarray(p2, float))
         pad = max(float(np.linalg.norm(mx - mn)) * 0.05, 0.5)
         self.camera.zoom_extents((tuple(mn - pad), tuple(mx + pad)),
                                  self._aspect())
+        self.update()
+
+    def zoom_steps(self, steps: float):
+        """Zoom in or out about the middle of the view, as the wheel does."""
+        lv = self._zooms_the_sheet()
+        if lv is not None and lv.zoom_steps(steps):
+            return
+        self.camera.zoom(steps)
         self.update()
 
     def set_view(self, name: str):
