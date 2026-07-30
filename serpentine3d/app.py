@@ -1353,11 +1353,15 @@ class MainWindow(QMainWindow):
         sel = len(self.selection.ids)
         if self.viewport.space != "model":
             lv = self.viewport.layout_view
-            # A corner is a smaller thing than the detail it belongs to, so
-            # say which of the two the count is about.
-            picked = len(lv.corners)
-            sel = (f"{picked} corner{'' if picked == 1 else 's'}"
-                   if picked else len(lv.selected))
+            # Except inside a detail, which is a window into the model: what a
+            # click in there picks is a model object, and the model's count is
+            # the one to show.
+            if lv._entered() is None:
+                # A corner is a smaller thing than the detail it belongs to, so
+                # say which of the two the count is about.
+                picked = len(lv.corners)
+                sel = (f"{picked} corner{'' if picked == 1 else 's'}"
+                       if picked else len(lv.selected))
         mode = self.viewport.display_mode
         layer = self.scene.layers.current.name
         filt = ""

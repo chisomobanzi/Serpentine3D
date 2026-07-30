@@ -698,6 +698,7 @@ class Viewport(QOpenGLWidget):
             self._sync_gpu()
             self.layout_view.paint()
             self._draw_pending(self.layout_view._paper_mvp())
+            self._draw_selection_box(w, h)   # sweeping inside a detail
             GL.glBindVertexArray(0)
             self._use(0)
             GL.glDisable(GL.GL_SCISSOR_TEST)
@@ -1590,6 +1591,38 @@ class Viewport(QOpenGLWidget):
         from .layout_view import detail_plane
         return detail_plane(detail)
 
+    def _detail_eye(self):
+        """The detail everything is being seen through, as a camera, or None.
+
+        Unlike `_drawing_through` this does not care what a running command
+        wants: picking an object inside a detail is looking at the model
+        whether anything is running or not.
+        """
+        if self.space == "model":
+            return None
+        detail = self.layout_view._entered()
+        if detail is None:
+            return None
+        from .layout_view import DetailEye
+        return DetailEye(self.layout_view, detail)
+
+    def _eye(self):
+        """What screen positions are measured through: a detail, or the
+        camera. Everything that projects to pick or to snap asks this."""
+        return self._detail_eye() or self.camera
+
+    def _pick_mode(self) -> str:
+        """The display mode picking should believe.
+
+        Inside a detail that is the detail's own: a wireframe view has no
+        faces to hit, whatever the model window behind it is set to.
+        """
+        if self.space != "model":
+            detail = self.layout_view._entered()
+            if detail is not None:
+                return detail.display_mode
+        return self.display_mode
+
     def _on_paper(self, pts) -> np.ndarray:
         """Points as paper millimetres, wherever they came from.
 
@@ -1633,8 +1666,17 @@ class Viewport(QOpenGLWidget):
             self._draw_lines(self._preview, mvp,
                              (*theme.SELECTION_COLOR, 0.9), 1.6)
         if snap is not None:
-            segs = _snap_marker(snap[1], np.asarray(snap[0], np.float32),
-                                *self.camera.right_up(), size * 0.95)
+            # A snap inside a detail is a model point drawn on the paper, so
+            # the marker comes back out through the window like the rest of
+            # the preview and is squared to the paper, not to the model.
+            if self.space != "model" and self._drawing_through() is not None:
+                at = self._on_paper([snap[0]])[0]
+                axes = (np.array([1.0, 0.0, 0.0], np.float32),
+                        np.array([0.0, 1.0, 0.0], np.float32))
+            else:
+                at = np.asarray(snap[0], np.float32)
+                axes = self.camera.right_up()
+            segs = _snap_marker(snap[1], at, *axes, size * 0.95)
             self._preview.update(segs)
             self._draw_lines(self._preview, mvp, (1.0, 1.0, 1.0, 0.95), 2.0)
         GL.glEnable(GL.GL_DEPTH_TEST)
@@ -2150,6 +2192,19 @@ class Viewport(QOpenGLWidget):
             x, y = self.layout_view.screen_to_paper(px, py)
             entered = self._drawing_through()
             if entered is not None:
+                # Inside a detail you are picking in the model, so the model's
+                # own features are what to land on — through the detail,
+                # because that is where they appear on screen. Before the grid,
+                # for the reason it is before it in the model: the grid is
+                # where a point goes when nothing better is near it.
+                snap = self.snaps.find(
+                    self._eye(), px, py, self.width(), self.height(),
+                    base_point=self.snap_base,
+                    pending_points=self.pending_points,
+                    picked_points=self.picked_points)
+                if snap is not None:
+                    self._active_snap = snap
+                    return snap[0]
                 from ..core.layout import detail_model_point
                 return detail_model_point(
                     entered, x, y,
@@ -2221,7 +2276,8 @@ class Viewport(QOpenGLWidget):
             return np.zeros(0, bool)
         corners = np.where(_BOX_CORNERS[None, :, :],
                            maxs[:, None, :], mins[:, None, :])
-        scr = self.camera.project(corners.reshape(-1, 3), w, h).reshape(n, 8, 3)
+        scr = self._eye().project(corners.reshape(-1, 3),
+                                  w, h).reshape(n, 8, 3)
         xs, ys = scr[:, :, 0], scr[:, :, 1]
         outside = ((xs.max(axis=1) < x0) | (xs.min(axis=1) > x1)
                    | (ys.max(axis=1) < y0) | (ys.min(axis=1) > y1))
@@ -2292,7 +2348,8 @@ class Viewport(QOpenGLWidget):
 
     def pick_object(self, px: float, py: float) -> str | None:
         w, h = self.width(), self.height()
-        origin, direction = self.camera.ray_through(px, py, w, h)
+        eye = self._eye()
+        origin, direction = eye.ray_through(px, py, w, h)
         best_id, best_depth = None, np.inf
 
         r = PICK_RADIUS_PX
@@ -2304,7 +2361,7 @@ class Viewport(QOpenGLWidget):
             mesh = obj.mesh
             depth = np.inf
             hit = False
-            if mesh.has_faces and self.display_mode != "wireframe":
+            if mesh.has_faces and self._pick_mode() != "wireframe":
                 tris, _ = self._near_triangles(mesh, px - r, py - r,
                                                px + r, py + r, w, h)
                 t = ray_triangle_hits(origin, direction,
@@ -2319,7 +2376,7 @@ class Viewport(QOpenGLWidget):
                 segs, _ = self._near_segments(mesh, px - r, py - r,
                                               px + r, py + r, w, h)
                 pts = segs.reshape(-1, 3)
-                scr = self.camera.project(pts, w, h)
+                scr = eye.project(pts, w, h)
                 a, b = scr[0::2], scr[1::2]
                 d2 = _point_segment_dist2(np.array([px, py]), a[:, :2],
                                           b[:, :2])
@@ -2333,7 +2390,7 @@ class Viewport(QOpenGLWidget):
                             depth = seg_depth
                         hit = True
             if len(mesh.points):
-                scr = self.camera.project(mesh.points.astype(float), w, h)
+                scr = eye.project(mesh.points.astype(float), w, h)
                 d2 = ((scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2)
                 near = d2 < PICK_RADIUS_PX ** 2
                 if near.any():
@@ -2352,7 +2409,8 @@ class Viewport(QOpenGLWidget):
     def pick_subobject(self, px: float, py: float):
         """(obj_id, "edge"|"face", index) under the pixel, or None."""
         w, h = self.width(), self.height()
-        origin, direction = self.camera.ray_through(px, py, w, h)
+        eye = self._eye()
+        origin, direction = eye.ray_through(px, py, w, h)
         # edges first (they are the smaller target)
         r = PICK_RADIUS_PX
         selectable = [obj for obj in self.scene.visible_objects()
@@ -2371,7 +2429,7 @@ class Viewport(QOpenGLWidget):
                                             px + r, py + r, w, h)
             if not len(segs):
                 continue
-            scr = self.camera.project(segs.reshape(-1, 3), w, h)
+            scr = eye.project(segs.reshape(-1, 3), w, h)
             a, b = scr[0::2], scr[1::2]
             d2 = _point_segment_dist2(np.array([px, py]), a[:, :2],
                                       b[:, :2])
@@ -2472,6 +2530,14 @@ class Viewport(QOpenGLWidget):
                 if self.layout_view.click_outside_exits(pos.x(), pos.y()):
                     self.update()
                     return
+                # Anything still inside an entered detail is a click on the
+                # model seen through it, so it is taken the way a click in the
+                # model window is: held until release, which is what tells a
+                # pick from the start of a band.
+                if self.layout_view._entered() is not None:
+                    self._press_pos = pos
+                    self._box_active = False
+                    return
                 add = bool(ev.modifiers() & (
                     Qt.KeyboardModifier.ShiftModifier
                     | Qt.KeyboardModifier.ControlModifier))
@@ -2504,6 +2570,11 @@ class Viewport(QOpenGLWidget):
         dx = pos.x() - self._last_mouse.x()
         dy = pos.y() - self._last_mouse.y()
         if self.space != "model":
+            if ev.buttons() & Qt.MouseButton.LeftButton \
+                    and self._press_pos is not None:
+                self._track_band(pos)        # sweeping the model in a detail
+                self._last_mouse = pos
+                return
             if ev.buttons() & Qt.MouseButton.LeftButton \
                     and self.layout_view.drag_selected(pos.x(), pos.y()):
                 self._last_mouse = pos
@@ -2566,16 +2637,21 @@ class Viewport(QOpenGLWidget):
                         pass
         elif (self._press_pos is not None
                 and ev.buttons() & Qt.MouseButton.LeftButton):
-            if (abs(pos.x() - self._press_pos.x()) > 4
-                    or abs(pos.y() - self._press_pos.y()) > 4):
-                self._box_active = True
-                self._box_end = pos
-                self.update()
+            self._track_band(pos)
         elif self.point_mode:
             pt = self.world_point_at(pos.x(), pos.y())
             if pt is not None:
                 self.mouseWorldMoved.emit(pt)
         self._last_mouse = pos
+
+    def _track_band(self, pos):
+        """Grow the selection band, once the press has moved far enough to be
+        a sweep rather than a click."""
+        if (abs(pos.x() - self._press_pos.x()) > 4
+                or abs(pos.y() - self._press_pos.y()) > 4):
+            self._box_active = True
+            self._box_end = pos
+            self.update()
 
     def _fire_chord(self, ev) -> bool:
         """Run the command bound to this button-and-modifiers, if any.
@@ -2633,6 +2709,10 @@ class Viewport(QOpenGLWidget):
                 self.update()      # navigation ended: recompute HLR view
             return
         if self.space != "model":
+            if self._press_pos is not None or self._box_active:
+                self._finish_pick(ev)      # the press was inside a detail
+                self.update()
+                return
             self.layout_view.release_drag()
             self.layoutSelectionChanged.emit()
             self.update()
@@ -2653,6 +2733,14 @@ class Viewport(QOpenGLWidget):
         if self._cv_drag is not None:
             self._cv_drag = None
             return
+        self._finish_pick(ev)
+
+    def _finish_pick(self, ev):
+        """What a left release does to the selection, band or single click.
+
+        The same on a sheet as in the model window, because inside a detail it
+        is the same objects being picked through the same kind of projection.
+        """
         if self._box_active and self._press_pos is not None:
             x0, y0 = self._press_pos.x(), self._press_pos.y()
             x1, y1 = self._box_end.x(), self._box_end.y()
@@ -2671,8 +2759,7 @@ class Viewport(QOpenGLWidget):
                 return
             mods = ev.modifiers()
             if (mods & Qt.KeyboardModifier.ControlModifier
-                    and mods & Qt.KeyboardModifier.ShiftModifier
-                    and self.space == "model"):
+                    and mods & Qt.KeyboardModifier.ShiftModifier):
                 hit = self.pick_subobject(pos.x(), pos.y())
                 if hit is not None:
                     self.selection.toggle_subobject(*hit)
@@ -2687,6 +2774,7 @@ class Viewport(QOpenGLWidget):
     def _box_pick(self, x0, y0, x1, y1, crossing: bool) -> list[str]:
         rect = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
         w, h = self.width(), self.height()
+        eye = self._eye()
         picked = []
         selectable = [obj for obj in self.scene.visible_objects()
                       if self.scene.is_selectable(obj.id)
@@ -2708,7 +2796,7 @@ class Viewport(QOpenGLWidget):
                 pts = mesh.vertices
             else:
                 continue
-            scr = self.camera.project(pts.astype(float), w, h)
+            scr = eye.project(pts.astype(float), w, h)
             valid = scr[:, 2] > 0
             if not valid.any():
                 continue

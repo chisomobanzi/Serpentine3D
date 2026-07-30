@@ -170,6 +170,9 @@ def test_a_point_in_a_top_detail_is_level_with_the_plane(sheet):
     det = details["top"]
     _enter(w, det)
     w.viewport.point_space = "model"
+    # about the plane a free pick lands on, so nothing to be pulled off it by:
+    # a corner of the box seen a few pixels away is not one of these two
+    w.viewport.snaps.enabled = False
     for frac in ((0.1, 0.1), (0.9, 0.9)):
         pos = _at(w, det, *frac)
         pt = w.viewport.world_point_at(pos.x(), pos.y())

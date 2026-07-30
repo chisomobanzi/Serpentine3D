@@ -59,6 +59,35 @@
   on the second corner any more — the frame shows both corners, and a diagonal
   drawn across the view being framed hides the one thing worth looking at.
 
+- The model can be reached through a detail you have stepped into: its features
+  snap, and its objects are picked. End, mid, centre, quadrant, intersection,
+  perpendicular and nearest all find model geometry through the detail, so a
+  line drawn between two corners of a solid on a sheet comes out on those two
+  corners at the model's own coordinates rather than near them. A snap is looked
+  for before the grid, as it is in the model window, and it reaches geometry that
+  is not on the plane the detail's free picks land on — a corner behind that
+  plane snaps, which is what makes a detail a window rather than a tracing sheet.
+  The marker is drawn on the paper, squared to it, at the place in the frame
+  where the model point appears.
+
+  A click inside a detail picks the model object under it: Shift or Ctrl adds and
+  toggles, a click on nothing clears, Ctrl+Shift picks an edge or a face, and a
+  band swept inside the frame takes a window or a crossing of what it covers. The
+  object goes gold in every detail it appears in, because one model object seen
+  through two windows is still one object, and the commands that ask for objects
+  — `delete`, `move`, `copy` — are answered by what was picked on the sheet. What
+  a detail clips at its frame is not pickable through it, however near the paper
+  says the cursor came, and faces answer to the detail's own display mode: a
+  wireframe detail has edges to hit and no faces. Picking does not step you back
+  out of the detail, and a click on the paper outside one still picks the sheet's
+  own geometry, its frames and its corners. The readout counts what is picked in
+  a detail as the model objects it is, not as the nothing the sheet had picked.
+
+  Not yet: a detail in hidden-line or technical mode draws cached line work, so
+  the object picked through one is selected everywhere but does not go gold in
+  that frame; and there is no gumball on a sheet, so what is picked is moved by
+  typing rather than by dragging a handle.
+
 ### Fixed
 
 - A detail you have stepped into is a window into the model, and drawing through

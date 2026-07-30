@@ -56,6 +56,69 @@ def detail_plane(detail):
     return CPlane(origin=detail.target, normal=d, xdir=right, name="Detail")
 
 
+class DetailEye:
+    """A detail seen as a camera, so the model can be reached through it.
+
+    Snapping and picking both ask a camera the same two questions — where does
+    this model point land on screen, and what does this pixel look along — and
+    measure the answers in viewport pixels. Through a detail the projection is
+    two steps, the model onto the paper and the paper onto the screen, and it
+    has to be the same two steps a pick runs backwards or a snap would not sit
+    under the cursor that found it.
+    """
+
+    projection = "parallel"          # a detail is an orthographic window
+
+    def __init__(self, layout_view, detail):
+        self.lv = layout_view
+        self.detail = detail
+
+    def _eye_distance(self) -> float:
+        """How far back the viewer stands, as the drawing puts it."""
+        det = self.detail
+        return (max(det.w, det.h) * det.scale_denom * 4 + 1000) * 0.5
+
+    def project(self, points, width: int, height: int) -> np.ndarray:
+        """Model points -> (N, 3) of screen x, screen y, depth from the eye."""
+        from ..core.layout import detail_basis
+        det = self.detail
+        arr = np.asarray(points, float).reshape(-1, 3)
+        d, right, up = detail_basis(det)
+        rel = arr - np.asarray(det.target, float)
+        u = (rel @ right) / det.scale_denom
+        v = (rel @ up) / det.scale_denom
+        out = np.empty((len(arr), 3))
+        ppm = self.lv.px_per_mm     # the paper transform, one call for all
+        out[:, 0] = width / 2 + (det.x + det.w / 2 + u - self.lv.pan[0]) * ppm
+        out[:, 1] = height / 2 - (det.y + det.h / 2 + v - self.lv.pan[1]) * ppm
+        out[:, 2] = self._eye_distance() - rel @ d
+        # A detail clips what it shows to its own rectangle, so a point
+        # outside it is not under the cursor however close the paper says it
+        # came. Behind the eye is how everything here says "not pickable".
+        outside = (np.abs(u) > det.w / 2) | (np.abs(v) > det.h / 2)
+        out[outside, 2] = -1.0
+        return out
+
+    def ray_through(self, px: float, py: float, width: int,
+                    height: int) -> tuple[np.ndarray, np.ndarray]:
+        """Line of sight through a pixel: (origin behind the model, view dir).
+
+        Parallel, so every pixel looks the same way and only the origin moves —
+        set back far enough that everything the detail draws is in front of it,
+        the way a camera at a distance is.
+        """
+        from ..core.layout import detail_basis, detail_unproject
+        d, _right, _up = detail_basis(self.detail)
+        paper = self.lv.screen_to_paper(px, py)
+        on_plane = np.asarray(detail_unproject(self.detail, *paper), float)
+        return on_plane + d * self._eye_distance(), -d
+
+    def right_up(self) -> tuple[np.ndarray, np.ndarray]:
+        from ..core.layout import detail_basis
+        _d, right, up = detail_basis(self.detail)
+        return right, up
+
+
 class LayoutView:
     def __init__(self, viewport):
         self.vp = viewport
