@@ -191,6 +191,7 @@
   is proved able to fail by putting each of the two original bugs back and
   watching it catch them, and a scenario that edits nothing is a failure
   rather than a quiet pass.
+
 ## 0.5.4 — 2026-07-29
 
 ### Added
