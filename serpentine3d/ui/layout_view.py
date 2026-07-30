@@ -13,7 +13,7 @@ from OpenGL import GL
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
-from ..core import hlr
+from ..core import hlr, linetype
 from ..utils.math3d import look_at, ortho, perspective
 
 PAPER_COLOR = (0.94, 0.94, 0.92, 1.0)
@@ -121,6 +121,32 @@ class LayoutView:
 
         for detail in lay.details:
             self._paint_detail(lay, detail, mvp)
+
+        # after the details: a border or a bubble drawn over a view is meant
+        # to be seen, the same way the annotations on top of it are
+        self._paint_objects(lay, mvp)
+
+    def _paint_objects(self, lay, mvp):
+        """Geometry drawn on the paper itself, in millimetres."""
+        for obj in lay.objects:
+            pattern = linetype.pattern_for(obj.linetype)
+            segs = []
+            for pts in obj.polylines:
+                if pattern:
+                    segs += [np.stack(pair) for pair
+                             in linetype.dash_polyline(pts, pattern)]
+                else:
+                    segs.append(np.stack([pts[:-1], pts[1:]], axis=1))
+            if not segs:
+                continue
+            color = ((*obj.color, 1.0) if obj.color else LINE_VISIBLE)
+            # a lineweight is millimetres on the printed sheet, so it scales
+            # with the zoom; floored at a pixel, because 0.25mm on a whole page
+            # is a quarter of one and a border you cannot see is worse than a
+            # border a shade too heavy
+            width = max(1.0, obj.lineweight * self.px_per_mm)
+            self._draw_segs(mvp, np.concatenate(
+                [s.reshape(-1, 2, 3) for s in segs]), color, width)
 
     def _paint_detail(self, lay, detail, paper_mvp):
         vp = self.vp

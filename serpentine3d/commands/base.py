@@ -183,6 +183,39 @@ class CommandContext:
         from ..core.cplane import CPlane
         return CPlane()
 
+    def on_bare_paper(self) -> bool:
+        """True when a pick can only name paper, and not the model.
+
+        Inside a detail it can name both — the detail is a window onto the
+        model, so the viewport unprojects through it.
+        """
+        vp = self.viewport
+        if vp is None or getattr(vp, "space", "model") == "model":
+            return False
+        lv = getattr(vp, "layout_view", None)
+        return getattr(lv, "entered_detail", None) is None
+
+    def add(self, shape, name: str | None = None):
+        """Put a new shape where the command is drawing it.
+
+        The model, normally. On bare paper there is no model point the command
+        could have been given, so what it drew is paper geometry and belongs to
+        the sheet — the millimetres it was handed are the millimetres it keeps.
+        Inside a detail the picks were model points already, so it goes in the
+        model like anything else.
+
+        Commands that can only mean the model — a box, an extrusion — never
+        reach here on paper: the processor refuses their first point instead.
+        """
+        lay = self.viewport.layout_view.layout if self.on_bare_paper() else None
+        if lay is None:
+            return self.scene.add(shape, name=name)
+        obj = lay.add(shape, name=name)
+        # so the checkpoint taken at the start of the command is kept: it is
+        # discarded if the scene says nothing changed, and a sheet is the scene
+        self.scene.notify("layouts")
+        return obj
+
     def add_echo_listener(self, fn):
         self._echo_fns.append(fn)
 
@@ -417,22 +450,11 @@ class CommandProcessor:
         self._prepare_request()
         self._notify()
 
-    def _on_bare_paper(self) -> bool:
-        """True when a pick can only name paper, and not the model.
-
-        Inside a detail it can name both — the detail is a window onto the
-        model, so the viewport unprojects through it.
-        """
-        vp = self.ctx.viewport
-        if vp is None or getattr(vp, "space", "model") == "model":
-            return False
-        lv = getattr(vp, "layout_view", None)
-        return getattr(lv, "entered_detail", None) is None
-
     def _prepare_request(self):
         req = self.request
         if (isinstance(req, PointReq) and self.active is not None
-                and self.active.space == "model" and self._on_bare_paper()):
+                and self.active.space == "model"
+                and self.ctx.on_bare_paper()):
             # Bare paper is not somewhere a model coordinate exists, and
             # answering with millimetres put the geometry in the model at the
             # paper's numbers. Cancel first, so that the reason is the last

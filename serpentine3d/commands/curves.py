@@ -14,15 +14,15 @@ def _rubber(pts):
     return np.stack([a[:-1], a[1:]], axis=1)
 
 
-@command("line", aliases=("l",))
+@command("line", aliases=("l",), space="any")
 def cmd_line(ctx):
     p1 = yield PointReq("Start of line")
     p2 = yield PointReq("End of line", rubber_from=p1)
-    obj = ctx.scene.add(g.make_line(p1, p2))
+    obj = ctx.add(g.make_line(p1, p2))
     ctx.echo(f"Created {obj.name}.")
 
 
-@command("polyline", aliases=("pl", "pline"))
+@command("polyline", aliases=("pl", "pline"), space="any")
 def cmd_polyline(ctx):
     pts = [(yield PointReq("Start of polyline"))]
     while True:
@@ -35,15 +35,15 @@ def cmd_polyline(ctx):
         if p is None:
             break
         if p == "close":
-            obj = ctx.scene.add(g.make_polyline(pts, closed=True))
+            obj = ctx.add(g.make_polyline(pts, closed=True))
             ctx.echo(f"Created closed {obj.name}.")
             return
         pts.append(p)
-    obj = ctx.scene.add(g.make_polyline(pts))
+    obj = ctx.add(g.make_polyline(pts))
     ctx.echo(f"Created {obj.name} with {len(pts)} points.")
 
 
-@command("curve", aliases=("cv", "interpcrv"))
+@command("curve", aliases=("cv", "interpcrv"), space="any")
 def cmd_curve(ctx):
     """NURBS curve interpolated through picked points."""
     pts = [(yield PointReq("First point of curve"))]
@@ -54,11 +54,11 @@ def cmd_curve(ctx):
         if p is None:
             break
         pts.append(p)
-    obj = ctx.scene.add(g.make_interp_curve(pts))
+    obj = ctx.add(g.make_interp_curve(pts))
     ctx.echo(f"Created {obj.name} through {len(pts)} points.")
 
 
-@command("circle", aliases=("c", "ci"))
+@command("circle", aliases=("c", "ci"), space="any")
 def cmd_circle(ctx):
     center = yield PointReq("Center of circle")
     normal = tuple(ctx.cplane.normal)
@@ -76,21 +76,21 @@ def cmd_circle(ctx):
     if r < 1e-9:
         ctx.echo("Zero radius — no circle created.")
         return
-    obj = ctx.scene.add(g.make_circle(center, r, normal=normal))
+    obj = ctx.add(g.make_circle(center, r, normal=normal))
     ctx.echo(f"Created {obj.name} (r={r:g}).")
 
 
-@command("arc", aliases=("a",))
+@command("arc", aliases=("a",), space="any")
 def cmd_arc(ctx):
     p1 = yield PointReq("Start of arc")
     p2 = yield PointReq("Point on arc", rubber_from=p1)
     p3 = yield PointReq("End of arc", rubber_from=p2,
                         preview_fn=lambda p: g.make_arc_3pt(p1, p2, p))
-    obj = ctx.scene.add(g.make_arc_3pt(p1, p2, p3))
+    obj = ctx.add(g.make_arc_3pt(p1, p2, p3))
     ctx.echo(f"Created {obj.name}.")
 
 
-@command("ellipse", aliases=("el",))
+@command("ellipse", aliases=("el",), space="any")
 def cmd_ellipse(ctx):
     import math
     center = yield PointReq("Center of ellipse")
@@ -126,11 +126,11 @@ def cmd_ellipse(ctx):
     if shape is None:
         ctx.echo("Zero minor radius — no ellipse created.")
         return
-    obj = ctx.scene.add(shape)
+    obj = ctx.add(shape)
     ctx.echo(f"Created {obj.name} ({r1:g} x {math.dist(center, tp):g}).")
 
 
-@command("rectangle", aliases=("rect", "rec"))
+@command("rectangle", aliases=("rect", "rec"), space="any")
 def cmd_rectangle(ctx):
     c1 = yield PointReq("First corner")
     cp = ctx.cplane
@@ -149,7 +149,7 @@ def cmd_rectangle(ctx):
     c2 = yield PointReq("Opposite corner", rubber_from=c1,
                         preview_fn=_rect_to)
     if cp.is_world_xy():
-        obj = ctx.scene.add(g.make_rectangle(c1, c2))
+        obj = ctx.add(g.make_rectangle(c1, c2))
     else:
         u1, v1, _ = cp.from_world(c1)
         u2, v2, _ = cp.from_world(c2)
@@ -158,7 +158,7 @@ def cmd_rectangle(ctx):
             raise GeometryError("Degenerate rectangle")
         pts = [cp.to_world(u1, v1), cp.to_world(u2, v1),
                cp.to_world(u2, v2), cp.to_world(u1, v2)]
-        obj = ctx.scene.add(g.make_polyline(pts, closed=True))
+        obj = ctx.add(g.make_polyline(pts, closed=True))
     ctx.echo(f"Created {obj.name}.")
 
 
@@ -176,12 +176,15 @@ def cmd_closecrv(ctx):
     ctx.echo(f"Closed {done} curve(s).")
 
 
+# not "any": a point object is a vertex, a vertex has no edges, and the sheet
+# draws paper geometry as lines — it would be stored and never seen. Refused
+# on bare paper until there is something to draw it with.
 @command("point", aliases=("pt",))
 def cmd_point(ctx):
     count = 0
     p = yield PointReq("Location of point object")
     while p is not None:
-        ctx.scene.add(g.make_point(p))
+        ctx.add(g.make_point(p))
         count += 1
         p = yield PointReq("Next point (Enter to finish)", allow_empty=True)
     ctx.echo(f"Placed {count} point object(s).")

@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Added
+
+- You can draw on the sheet itself. A border, a title strip, a detail bubble, a
+  north arrow — `line`, `polyline`, `curve`, `circle`, `arc`, `ellipse` and
+  `rectangle` now draw on the paper when you are on a sheet with no detail
+  entered, in millimetres, and leave the model alone. Inside a detail
+  the same commands draw in the model, where the detail is looking, so nothing
+  about drawing in a detail or in the model changes. Paper geometry is a real
+  shape rather than a list of points, so it is saved with the sheet, carries its
+  own colour, linetype and lineweight, is drawn over the details the way the
+  annotations are, and comes back with an undo. A lineweight is millimetres on
+  the printed page — 0.25 by default, 0.7 for a border that should look like
+  one — so it prints at the width it says and is only floored at one pixel on
+  screen, where a quarter of a millimetre is a quarter of a pixel. It goes out
+  with the sheet to PDF and to DXF, where it lands on its own `PAPER` layer so a
+  border can be turned off without losing the drawing it frames. Files written
+  before this still open, and files with paper geometry in them open in 0.5.5 as
+  sheets without it.
+
+  Not yet: paper geometry cannot be selected or deleted on the sheet, so it is
+  undo or nothing for now; the property panel does not offer its colour,
+  linetype or lineweight; and `point` is still refused on paper, because the
+  sheet draws paper geometry as lines and a point object has none.
+
 ### Fixed
 
 - Drawing inside a detail draws in the model, where the detail is looking. A
@@ -22,11 +46,12 @@
 - On bare paper, a command that needs a model point says so instead of
   guessing. There is no model point out on the paper, and answering with
   millimetres was how the geometry ended up in the model at the paper's
-  numbers. Each command now declares which space its points are in, so `line`
-  and `box` stop at the prompt and name both ways on — double-click a detail to
-  work inside it, or annotate the sheet with `text`, `dim`, `leader` or
-  `hatch` — while `text`, `dim` and the rest of the paper commands are
-  unaffected, inside a detail as much as out. The refusal happens at the point
+  numbers. Each command now declares which space its points are in, so a `box`
+  or an `extrude` stops at the prompt and names both ways on — double-click a
+  detail to work inside it, or annotate the sheet with `text`, `dim`, `leader`
+  or `hatch` — while `text`, `dim` and the rest of the paper commands are
+  unaffected, inside a detail as much as out, and the curve commands draw on the
+  paper instead (see Added). The refusal happens at the point
   prompt rather than at the command, so `zoom` still offers Extents, In, Out
   and Selected on a sheet and only declines its Window.
 

@@ -148,12 +148,13 @@ def test_a_command_declares_which_space_its_points_are_in():
     """`mutates` already gates checkpointing from the registry; the space a
     command's points live in belongs in the same place."""
     from serpentine3d.commands.base import resolve
-    assert resolve("line").space == "model"
-    assert resolve("box").space == "model"
+    assert resolve("box").space == "model"       # nothing else it could mean
     assert resolve("text").space == "paper"
     assert resolve("dim").space == "paper"
     assert resolve("detail").space == "paper"
     assert resolve("move").space == "any"        # handles either itself
+    # a curve draws in the model, or on the paper — see test_paper_geometry.py
+    assert resolve("line").space == "any"
 
 
 def test_drawing_inside_a_detail_puts_geometry_in_the_model(sheet):
@@ -189,12 +190,16 @@ def test_typed_coordinates_in_a_detail_are_model_coordinates(sheet):
 
 
 def test_drawing_on_bare_paper_is_refused_rather_than_guessed(sheet):
-    w, lv, _ = sheet
+    """A curve on bare paper is drawn on the paper (test_paper_geometry.py); a
+    solid has nowhere to go, since paper geometry is flat millimetres, and says
+    so rather than landing in the model at the sheet's numbers."""
+    w, lv, lay = sheet
     lv.entered_detail = None
     said = []
     w.ctx.add_echo_listener(said.append)
-    _run(w, "line", "50,50,0", "150,100,0")
+    _run(w, "box", "50,50,0", "150,100,0", "30")
     assert w.scene.all() == []
+    assert lay.objects == []
     # the message has to name both ways out, or it only says no
     told = " ".join(said).lower()
     assert "detail" in told and "model" in told
@@ -207,7 +212,7 @@ def test_a_refused_command_leaves_nothing_to_undo(sheet):
     w, lv, _ = sheet
     lv.entered_detail = None
     assert not w.history.can_undo
-    _run(w, "line", "50,50,0")
+    _run(w, "box", "50,50,0")
     assert not w.history.can_undo
 
 

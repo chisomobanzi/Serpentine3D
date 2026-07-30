@@ -12,7 +12,7 @@ import math
 import ezdxf
 import numpy as np
 
-from ..core import geometry
+from ..core import geometry, linetype
 from ..core.tessellate import tessellate
 
 
@@ -170,6 +170,9 @@ def export_layout_dxf(window, layout, path: str):
         doc.linetypes.add(hidden_lt, pattern=[2.5, 1.5, -1.0])
     doc.layers.get("HIDDEN").dxf.linetype = hidden_lt
     doc.layers.add("ANNOT")
+    # paper geometry on its own layer, so a border can be turned off without
+    # losing the drawing it frames
+    doc.layers.add("PAPER")
 
     lv = window.viewport.layout_view
     for detail in layout.details:
@@ -195,6 +198,19 @@ def export_layout_dxf(window, layout, path: str):
              (detail.x + detail.w, detail.y + detail.h),
              (detail.x, detail.y + detail.h)],
             close=True, dxfattribs={"layer": "ANNOT"})
+
+    # geometry drawn on the paper itself: already in paper millimetres, which
+    # is what a 2D DXF wants, so it goes out as it is
+    for obj in layout.objects:
+        attribs = {"layer": "PAPER",
+                   "lineweight": round(obj.lineweight * 100)}   # DXF: 1/100mm
+        if linetype.pattern_for(obj.linetype):
+            attribs["linetype"] = hidden_lt
+        if obj.color:
+            attribs["true_color"] = _true_color(obj.color)
+        for poly in obj.polylines:
+            msp.add_lwpolyline([(p[0], p[1]) for p in poly],
+                               dxfattribs=dict(attribs))
 
     for note in layout.notes:
         msp.add_text(note.text, height=note.height, dxfattribs={

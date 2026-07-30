@@ -1554,11 +1554,13 @@ class Viewport(QOpenGLWidget):
     def _drawing_through(self):
         """The detail the running command is drawing through, or None.
 
-        Only when it asked for a model point: a paper command inside a detail
-        is still writing on the paper. Everything that has to turn one space
-        into the other asks this, so there is one answer.
+        Never for a paper command: one of those inside a detail is still
+        writing on the paper. A curve command says "any" and means it — in a
+        detail it draws in the model, on bare paper it draws on the sheet — so
+        the entered detail is what decides for it. Everything that has to turn
+        one space into the other asks this, so there is one answer.
         """
-        if self.space == "model" or self.point_space != "model":
+        if self.space == "model" or self.point_space == "paper":
             return None
         return self.layout_view._entered()
 

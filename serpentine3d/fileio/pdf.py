@@ -7,10 +7,13 @@ shaded details are rendered to an image via an offscreen framebuffer.
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import QSizeF, Qt
+from PySide6.QtCore import QPointF, QSizeF, Qt
 from PySide6.QtGui import (
     QColor, QFont, QPageLayout, QPageSize, QPainter, QPdfWriter, QPen,
+    QPolygonF,
 )
+
+from ..core import linetype as _lt
 
 
 def export_layout_pdf(window, layout, path: str):
@@ -69,6 +72,8 @@ def _paint_layout(painter: QPainter, window, layout, k: float):
             lx, ly = pt(detail.x + 1.5, detail.y + 1.5)
             painter.drawText(int(lx), int(ly), detail.scale_text())
 
+    _paint_paper_objects(painter, layout, k, pt)
+
     from ..ui import annot_paint
     scene = window.scene
     idx = 1
@@ -77,6 +82,29 @@ def _paint_layout(painter: QPainter, window, layout, k: float):
             idx = i + 1
     annot_paint.draw_all(painter, pt, k, layout, scene, sheet_index=idx,
                          sheet_count=max(len(scene.layouts), 1))
+
+
+def _paint_paper_objects(painter, layout, k, pt):
+    """Geometry drawn on the paper itself, in millimetres.
+
+    Over the details, the way it is on screen: a border or a bubble drawn on top
+    of a view is meant to be seen. Its lineweight is millimetres on the printed
+    sheet, which is exactly what this is printing, so it needs no adjusting.
+    """
+    for obj in layout.objects:
+        width = max(obj.lineweight, 0.01) * k
+        pen = QPen(QColor(*[int(c * 255) for c in obj.color])
+                   if obj.color else QColor(15, 15, 18), width)
+        # Qt dash units are multiples of the pen width, so a paper-mm pattern
+        # has to be divided by the weight it is drawn at
+        pattern = _lt.pattern_for(obj.linetype)
+        if pattern:
+            pen.setDashPattern([max(v, 0.01) / max(obj.lineweight, 0.01)
+                                for v in pattern])
+        painter.setPen(pen)
+        for poly in obj.polylines:
+            painter.drawPolyline(QPolygonF(
+                [QPointF(*pt(p[0], p[1])) for p in poly]))
 
 
 def _paint_detail_vector(painter, layout_view, detail, layout, k):

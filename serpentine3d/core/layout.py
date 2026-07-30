@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 import math
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 # landscape (width, height) in mm
 PAPER_SIZES = {
@@ -133,6 +133,63 @@ class AngularDim:
     x2: float = 0.0
     y2: float = 0.0
     radius: float = 15.0   # arc placement radius, mm
+
+
+@dataclass
+class PaperObject:
+    """Geometry drawn on the paper itself, in millimetres.
+
+    A real shape rather than a list of points, so that offset, trim, fillet
+    and the rest work on a border or a detail bubble the same way they work on
+    the model. Nothing here is seen through a detail: 100 means 100mm across
+    the sheet.
+
+    Keep every field but the shape immutable — the copy below is shallow, and
+    a list or dict here would be shared between undo checkpoints.
+    """
+    id: str = field(default_factory=_uid)
+    shape: object = None                 # a TopoDS shape in paper millimetres
+    name: str = ""
+    color: tuple | None = None           # None -> the sheet's default ink
+    linetype: str = "Continuous"
+    lineweight: float = 0.25             # millimetres, as on a drawing
+    _plines: tuple | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def polylines(self) -> list:
+        """The shape as (N, 3) polylines, in paper millimetres.
+
+        Polylines rather than loose segments, so that a dash pattern runs
+        along a whole curve instead of restarting at every tessellation step.
+
+        Keyed on the shape it measured rather than cleared by hand: a shape is
+        changed here by swapping in a new one, so the answer expires by itself
+        and there is no invalidation to forget at a call site — the same trick
+        `SceneObject.bbox` uses.
+        """
+        cached = self._plines
+        if cached is not None and cached[0] is self.shape:
+            return cached[1]
+        from . import geometry, hlr
+        lines = hlr.edges_to_polylines(geometry.edges_of(self.shape))
+        self._plines = (self.shape, lines)
+        return lines
+
+    def __deepcopy__(self, memo):
+        """Copy for the undo stack, sharing the shape.
+
+        `copy.deepcopy` of a TopoDS shape raises outright — it will not
+        pickle — and there is nothing to gain by copying one: a shape is never
+        edited in place, an edit replaces it, so two checkpoints can hold the
+        same shape safely. The same bargain `SceneObject.clone` makes.
+
+        It lives here rather than in `Layout.clone` because anything that
+        copies a scene reaches a layout eventually, and the object that owns
+        the shape is the one place that knows this.
+        """
+        twin = replace(self)
+        memo[id(self)] = twin
+        return twin
 
 
 def hatch_lines(points: list, angle_deg: float,
@@ -430,6 +487,7 @@ class Layout:
     paper_h: float = 297.0
     margin: float = 10.0
     details: list = field(default_factory=list)
+    objects: list = field(default_factory=list)      # PaperObject, paper mm
     notes: list = field(default_factory=list)
     dims: list = field(default_factory=list)
     leaders: list = field(default_factory=list)
@@ -439,6 +497,9 @@ class Layout:
     scale_bars: list = field(default_factory=list)   # [x, y, scale_denom]
     title_block: dict = field(default_factory=dict)
     revisions: list = field(default_factory=list)    # [[rev, date, note]]
+    # per-kind name counters for `add`; not saved, because the names are, and
+    # `add` skips past a name already on the sheet
+    _counters: dict = field(default_factory=dict, repr=False, compare=False)
 
     def detail_at(self, px: float, py: float) -> DetailView | None:
         for d in reversed(self.details):        # topmost first
@@ -446,11 +507,60 @@ class Layout:
                 return d
         return None
 
+    def add(self, shape, name: str | None = None) -> PaperObject:
+        """Put geometry on the paper, in millimetres.
+
+        Named the way `Scene.add` names, from a counter rather than the length
+        of the list, so a name is not handed out twice after a delete. The
+        counter is not saved with the sheet, so it steps over the names that
+        came back from a file.
+        """
+        from . import geometry
+        kind = geometry.shape_kind(shape)
+        if name is None:
+            taken = {o.name for o in self.objects}
+            n = self._counters.get(kind, 0)
+            while True:
+                n += 1
+                name = f"{kind.capitalize()} {n:02d}"
+                if name not in taken:
+                    break
+            self._counters[kind] = n
+        obj = PaperObject(shape=shape, name=name)
+        self.objects.append(obj)
+        return obj
+
     def clone(self) -> "Layout":
         return copy.deepcopy(self)
 
 
 # ------------------------------------------------------------- serialization
+
+def _paper_object_to_json(obj) -> dict:
+    """A paper shape as BREP text, the same way a model object is stored."""
+    import base64
+
+    from . import geometry
+    return {
+        "id": obj.id, "name": obj.name,
+        "color": list(obj.color) if obj.color else None,
+        "linetype": obj.linetype, "lineweight": obj.lineweight,
+        "brep": base64.b64encode(
+            geometry.shape_to_bytes(obj.shape)).decode("ascii"),
+    }
+
+
+def _paper_object_from_json(od: dict) -> PaperObject:
+    import base64
+
+    from . import geometry
+    return PaperObject(
+        id=od.get("id", _uid()), name=od.get("name", ""),
+        color=tuple(od["color"]) if od.get("color") else None,
+        linetype=od.get("linetype", "Continuous"),
+        lineweight=float(od.get("lineweight", 0.25)),
+        shape=geometry.shape_from_bytes(base64.b64decode(od["brep"])))
+
 
 def layouts_to_json(layouts: list) -> list:
     out = []
@@ -460,6 +570,7 @@ def layouts_to_json(layouts: list) -> list:
             "paper_w": lay.paper_w, "paper_h": lay.paper_h,
             "margin": lay.margin,
             "details": [vars(d).copy() for d in lay.details],
+            "objects": [_paper_object_to_json(o) for o in lay.objects],
             "notes": [vars(n).copy() for n in lay.notes],
             "dims": [vars(d).copy() for d in lay.dims],
             "leaders": [vars(x).copy() for x in lay.leaders],
@@ -482,6 +593,8 @@ def layouts_from_json(data: list) -> list:
                      margin=ld.get("margin", 10.0))
         for dd in ld.get("details", []):
             lay.details.append(DetailView(**dd))
+        for od in ld.get("objects", []):
+            lay.objects.append(_paper_object_from_json(od))
         for nd in ld.get("notes", []):
             lay.notes.append(TextNote(**nd))
         for dd in ld.get("dims", []):
