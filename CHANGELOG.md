@@ -159,6 +159,25 @@
   from the same place rather than walking away from it. The whole command is one
   undo, however many copies it made.
 
+- Ctrl+C and Ctrl+V work on a sheet, and carry across sheets. Copy takes what
+  is picked on the paper — geometry, detail frames, annotations — and paste
+  puts it onto whichever sheet is showing, which need not be the one it came
+  from: that is how a title block gets from the first sheet to the rest. What
+  lands arrives at the same millimetres it was copied from and arrives picked,
+  so it can be moved into place at once and so you can see it arrived at all.
+  One undo takes back the whole paste.
+
+  The two halves ask different questions on purpose. Copy asks where you are,
+  because a sheet has two things on it that could be meant — inside a detail it
+  still copies model objects. Paste asks the clipboard, because what it holds
+  is not in doubt: model objects go to the model wherever you are standing, and
+  it says so when you are on a sheet at the time, since from bare paper they
+  land somewhere you cannot see. Sheet items in the model window say to switch
+  to a sheet rather than going quiet.
+
+  Copy and paste now say what they did through the same channel as every other
+  command, so scripts and the RPC bridge hear them too.
+
 ### Fixed
 
 - A detail you have stepped into is a window into the model, and drawing through

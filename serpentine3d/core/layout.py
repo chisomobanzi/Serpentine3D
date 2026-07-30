@@ -567,7 +567,7 @@ def sheet_pools(layout) -> dict:
 
 
 def copy_sheet_item(layout, kind: str, obj):
-    """Duplicate a sheet item into the pool it came from, and return the copy.
+    """Duplicate a sheet item onto a layout, and return the copy.
 
     Deep, and then given a fresh id. Deep because what the sheet holds is
     mostly plain data — a detail's target, a leader's points — and a copy
@@ -575,11 +575,15 @@ def copy_sheet_item(layout, kind: str, obj):
     because it is the one field that must not be copied: a hidden-line cache,
     a saved file and a selection all tell two frames apart by it.
 
+    The layout is where the copy goes, not where the original came from: a
+    border copied on one sheet and a border pasted onto the next are the same
+    act, and nothing about the original is needed to carry it out.
+
     The copy lands exactly on the original, since where it goes is the
     caller's question and not every kind moves the same way.
     """
     pool = sheet_pools(layout).get(kind)
-    if pool is None or obj not in pool:
+    if pool is None:
         return None
     dup = copy.deepcopy(obj)
     dup.id = _uid()

@@ -777,15 +777,42 @@ class MainWindow(QMainWindow):
             self.run_command("delete")
 
     def _copy_selected(self):
+        """Copy asks where you are, because what is meant is in doubt.
+
+        A sheet has two things on it a command could mean, and the same rule
+        that decides that for `move`, `delete` and `copy` decides it here.
+        """
+        import copy as _copy
+        lv = self.ctx.sheet_view()
+        if lv is not None:
+            lv._prune()
+            if not lv.selected:
+                return
+            self._clipboard = ("sheet", [(k, _copy.deepcopy(o))
+                                         for k, o in lv.selected])
+            self.ctx.echo(f"Copied {len(lv.selected)} sheet item(s).")
+            return
         objs = self.selection.objects()
         if not objs:
             return
-        self._clipboard = [(o.name, o.shape, o.layer_id) for o in objs]
-        self.command_line.echo(f"Copied {len(objs)} object(s).")
+        self._clipboard = ("model", [(o.name, o.shape, o.layer_id)
+                                     for o in objs])
+        self.ctx.echo(f"Copied {len(objs)} object(s).")
 
     def _paste(self):
+        """Paste asks the clipboard, because what it holds is not in doubt.
+
+        Only where to put it is, and there is one answer: model objects go to
+        the model wherever you are standing, sheet items go onto the sheet
+        that is showing — which need not be the one they were copied from,
+        and that is the point of it.
+        """
         clip = getattr(self, "_clipboard", None)
         if not clip:
+            return
+        kind, items = clip
+        if kind == "sheet":
+            self._paste_on_sheet(items)
             return
         from .core import geometry as g
         self.history.checkpoint("paste")
@@ -795,12 +822,34 @@ class MainWindow(QMainWindow):
         # Scene.batched. The clipboard holds whatever was selected, which on
         # a survey drawing is thousands of things.
         with self.scene.batched():
-            for name, shape, layer_id in clip:
+            for name, shape, layer_id in items:
                 lid = layer_id if layer_id in live else None
                 pasted.append(self.scene.add(g.copy_shape(shape),
                                              layer_id=lid))
         self.selection.set([o.id for o in pasted])
-        self.command_line.echo(f"Pasted {len(pasted)} object(s).")
+        where = "" if self.viewport.space == "model" else " into the model"
+        self.ctx.echo(f"Pasted {len(pasted)} object(s){where}.")
+
+    def _paste_on_sheet(self, items):
+        """Put copied sheet items onto whichever sheet is showing."""
+        lv = self.viewport.layout_view
+        lay = lv.layout if self.viewport.space != "model" else None
+        if lay is None:
+            self.ctx.echo(f"{len(items)} sheet item(s) on the clipboard — "
+                          "switch to a sheet to paste them.")
+            return
+        from .core.layout import copy_sheet_item
+        self.history.checkpoint("paste")
+        pasted = [(k, copy_sheet_item(lay, k, o)) for k, o in items]
+        pasted = [(k, o) for k, o in pasted if o is not None]
+        # Picked where they land, so they can be moved into place at once —
+        # they arrive exactly on top of what they were copied from, and being
+        # picked is what shows they arrived at all.
+        lv.selected = pasted
+        lv.corners = []
+        self.scene.notify("layouts")
+        self.viewport.update()
+        self.ctx.echo(f"Pasted {len(pasted)} sheet item(s) onto {lay.name}.")
 
     # ------------------------------------------------------------ file dialogs
 
