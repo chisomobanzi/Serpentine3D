@@ -290,6 +290,7 @@ class MainWindow(QMainWindow):
     def _wire_viewport(self, vp):
         vp.installEventFilter(self)
         vp.displayModeChanged.connect(self._update_status)
+        vp.layoutSelectionChanged.connect(self._update_status)
         vp.history = self.history
         vp.objectClicked.connect(self._on_object_clicked)
         vp.emptyClicked.connect(self._on_empty_clicked)
@@ -745,6 +746,12 @@ class MainWindow(QMainWindow):
         self.viewport.set_preview(segs if len(segs) else None, markers)
 
     def _delete_selected(self):
+        if self.viewport.space != "model":
+            # On a sheet the pick is the layout's own, not the scene's.
+            if self.viewport.layout_view.delete_selected():
+                self.viewport.update()
+                self._update_status()
+            return
         if self.selection.ids and not self.processor.busy:
             self.run_command("delete")
 
@@ -1319,7 +1326,10 @@ class MainWindow(QMainWindow):
 
     def _update_status(self):
         n = len(self.scene.all())
-        sel = len(self.selection.ids)
+        # On a sheet, what is picked lives in the layout view; a readout
+        # stuck on "0 selected" is most of why picking looked broken there.
+        sel = (len(self.viewport.layout_view.selected)
+               if self.viewport.space != "model" else len(self.selection.ids))
         mode = self.viewport.display_mode
         layer = self.scene.layers.current.name
         filt = ""

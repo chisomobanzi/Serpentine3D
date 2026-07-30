@@ -4,6 +4,19 @@
 
 ### Added
 
+- You can drag a selection on a layout sheet, and pick more than one thing at a
+  time. Dragging on empty paper sweeps a band out of it: left to right takes
+  what it wholly encloses, right to left takes anything it touches, the same
+  hand as in model space, so the habit carries between the two. Shift or Ctrl
+  adds to what is already picked, whether you click or sweep, and Escape drops
+  the lot. Dragging any one of the picked items moves all of them, Delete
+  removes all of them in a single undo step, and the status bar counts what is
+  picked on the sheet instead of reporting the model selection — which was
+  always `0 selected` there, and was most of why picking on a sheet looked
+  broken even though clicking a detail had always selected it. Resize grips
+  still belong to a lone detail, since dragging one corner of five rectangles
+  would have to mean something for the other four and it does not.
+
 - The command line finishes the name for you. Type `deta` and the box reads
   `detail`, with the letters you did not type selected, so Enter — or a
   right-click in the viewport — runs the whole command instead of reporting

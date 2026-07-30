@@ -49,8 +49,11 @@ class LayoutView:
         self.pan = np.array([0.0, 0.0])      # paper mm at viewport centre
         self.px_per_mm = 2.0
         self.entered_detail: str | None = None
-        self.selected: tuple | None = None       # (kind, obj) on this sheet
-        self._drag: tuple | None = None          # (mode, kind, obj, corner)
+        self.selected: list = []                 # [(kind, obj)] on this sheet
+        self.box: tuple | None = None            # live band, screen px
+        self._box_add = False
+        self._drag: tuple | None = None          # (mode, corner, picks)
+        self._press_hit: tuple | None = None
         self._drag_last: tuple | None = None
         self._drag_moved = False
         self._fitted_for: str | None = None
@@ -334,38 +337,73 @@ class LayoutView:
             lambda x, y: self.paper_to_screen(x, y),
             self.px_per_mm, lay, scene,
             sheet_index=idx, sheet_count=max(len(scene.layouts), 1))
+        self._paint_box(painter)        # last: the band sits over everything
+
+    def _pools(self, lay) -> dict:
+        """Where each kind of pickable thing lives on a sheet."""
+        return {"note": lay.notes, "dim": lay.dims, "rdim": lay.rdims,
+                "adim": lay.adims, "leader": lay.leaders,
+                "hatch": lay.hatches, "detail": lay.details}
+
+    def _prune(self):
+        """Forget anything no longer on the sheet — undo and delete both
+        take objects out from under a selection."""
+        lay = self.layout
+        if lay is None:
+            self.selected = []
+            return
+        pools = self._pools(lay)
+        self.selected = [(k, o) for k, o in self.selected
+                         if o in pools.get(k, ())]
 
     def _paint_selection(self, painter: QPainter):
         lay = self.layout
-        if lay is None or self.selected is None:
-            return
-        kind, obj = self.selected
-        pools = {"note": lay.notes, "dim": lay.dims, "rdim": lay.rdims,
-                 "adim": lay.adims, "leader": lay.leaders,
-                 "hatch": lay.hatches, "detail": lay.details}
-        if obj not in pools.get(kind, ()):
-            self.selected = None                # stale after undo/delete
+        self._prune()
+        if lay is None or not self.selected:
             return
         gold = QColor(217, 166, 62)
         painter.setPen(QPen(gold, 2, Qt.PenStyle.DashLine))
         painter.setBrush(QColor(0, 0, 0, 0))
-        if kind == "detail":
-            x0, y0 = self.paper_to_screen(obj.x, obj.y)
-            x1, y1 = self.paper_to_screen(obj.x + obj.w, obj.y + obj.h)
+        for kind, obj in self.selected:
+            if kind == "detail":
+                x0, y0 = self.paper_to_screen(obj.x, obj.y)
+                x1, y1 = self.paper_to_screen(obj.x + obj.w, obj.y + obj.h)
+            else:
+                from ..core.layout import annotation_bounds
+                bx0, by0, bx1, by1 = annotation_bounds(kind, obj)
+                x0, y0 = self.paper_to_screen(bx0 - 1, by0 - 1)
+                x1, y1 = self.paper_to_screen(bx1 + 1, by1 + 1)
             painter.drawRect(int(min(x0, x1)), int(min(y0, y1)),
                              int(abs(x1 - x0)), int(abs(y0 - y1)))
+        # Grips resize, and resizing several rectangles at once from one
+        # corner has no meaning, so they only appear on a lone detail.
+        if len(self.selected) == 1 and self.selected[0][0] == "detail":
             painter.setBrush(gold)
-            for gx, gy in self._corners(obj):
+            for gx, gy in self._corners(self.selected[0][1]):
                 sx, sy = self.paper_to_screen(gx, gy)
                 painter.drawRect(int(sx) - 4, int(sy) - 4, 8, 8)
             painter.setBrush(QColor(0, 0, 0, 0))
-        else:
-            from ..core.layout import annotation_bounds
-            x0, y0, x1, y1 = annotation_bounds(kind, obj)
-            sx0, sy0 = self.paper_to_screen(x0 - 1, y0 - 1)
-            sx1, sy1 = self.paper_to_screen(x1 + 1, y1 + 1)
-            painter.drawRect(int(min(sx0, sx1)), int(min(sy0, sy1)),
-                             int(abs(sx1 - sx0)), int(abs(sy0 - sy1)))
+
+    def _paint_box(self, painter: QPainter):
+        """The rubber band: gold for a window that must enclose, slate for a
+        crossing that need only touch.
+
+        Model space paints the crossing white, which it can afford against a
+        dark viewport. Paper is nearly white, so both inks here are darker
+        than the sheet, and a wash inside says which way round it is going.
+        """
+        if self.box is None:
+            return
+        x0, y0, x1, y1 = self.box
+        crossing = x1 < x0
+        colour = QColor(64, 78, 102) if crossing else QColor(176, 132, 40)
+        wash = QColor(colour)
+        wash.setAlpha(30)
+        painter.setPen(QPen(colour, 1, Qt.PenStyle.DashLine))
+        painter.setBrush(wash)
+        painter.drawRect(int(min(x0, x1)), int(min(y0, y1)),
+                         int(abs(x1 - x0)), int(abs(y1 - y0)))
+        painter.setBrush(QColor(0, 0, 0, 0))
 
     # ------------------------------------------------------------ GL helpers
 
@@ -492,55 +530,79 @@ class LayoutView:
         return ((det.x, det.y), (det.x + det.w, det.y),
                 (det.x + det.w, det.y + det.h), (det.x, det.y + det.h))
 
-    def press(self, sx: float, sy: float) -> bool:
+    def _take(self, hit: tuple, add: bool):
+        """Make `hit` the selection — or, holding the key, one more of it.
+
+        Pressing on something already picked leaves the rest alone, because
+        the press that starts a drag must not first throw the group away.
+        """
+        if not add:
+            if hit not in self.selected:
+                self.selected = [hit]
+            return
+        if hit in self.selected:
+            self.selected = [s for s in self.selected if s != hit]
+        else:
+            self.selected = self.selected + [hit]
+
+    def press(self, sx: float, sy: float, add: bool = False) -> bool:
         """LMB press while idle: select / start dragging sheet items."""
         lay = self.layout
         if lay is None or self.entered_detail is not None:
             return False
         px, py = self.screen_to_paper(sx, sy)
         tol = max(7.0 / self.px_per_mm, 0.8)
-        if self.selected and self.selected[0] == "detail":
-            det = self.selected[1]
+        self._prune()
+        if len(self.selected) == 1 and self.selected[0][0] == "detail":
+            det = self.selected[0][1]
             for i, (gx, gy) in enumerate(self._corners(det)):
                 if abs(px - gx) <= tol and abs(py - gy) <= tol:
                     if det.locked:
                         return True
                     self.vp.window_checkpoint("resize detail")
-                    self._drag = ("resize", "detail", det, i)
+                    self._drag = ("resize", i, [("detail", det)])
                     self._drag_last = (px, py)
                     return True
         from ..core.layout import annotation_at
         hit = annotation_at(lay, px, py, tol=max(tol, 2.0))
+        if hit is None:
+            det = lay.detail_at(px, py)
+            hit = ("detail", det) if det is not None else None
         if hit is not None:
-            self.selected = hit
-            self.vp.window_checkpoint("move annotation")
-            self._drag = ("move",) + hit + (-1,)
-            self._drag_last = (px, py)
-            return True
-        det = lay.detail_at(px, py)
-        if det is not None:
-            self.selected = ("detail", det)
-            if not det.locked:
-                self.vp.window_checkpoint("move detail")
-                self._drag = ("move", "detail", det, -1)
+            self._take(hit, add)
+            movable = [(k, o) for k, o in self.selected
+                       if k != "detail" or not o.locked]
+            if movable and hit in self.selected:
+                self._press_hit = None if add else hit
+                self.vp.window_checkpoint("move sheet item")
+                self._drag = ("move", -1, movable)
                 self._drag_last = (px, py)
             return True
-        if self.selected is not None:
-            self.selected = None
-            return True
-        return False
+        # Empty paper: sweep a band out of it.
+        if not add:
+            self.selected = []
+        self.box = (sx, sy, sx, sy)
+        self._box_add = add
+        return True
 
     def drag_selected(self, sx: float, sy: float) -> bool:
+        if self.box is not None:
+            self.box = self.box[:2] + (sx, sy)
+            return True
         if self._drag is None:
             return False
         px, py = self.screen_to_paper(sx, sy)
         dx = px - self._drag_last[0]
         dy = py - self._drag_last[1]
-        mode, kind, obj, corner = self._drag
-        if kind == "detail":
-            if mode == "move":
+        mode, corner, picks = self._drag
+        for kind, obj in picks:
+            if kind != "detail":
+                from ..core.layout import move_annotation
+                move_annotation(kind, obj, dx, dy)
+            elif mode == "move":
                 obj.x += dx
                 obj.y += dy
+                self._hlr_cache.pop(obj.id, None)
             else:
                 x0, y0 = obj.x, obj.y
                 x1, y1 = obj.x + obj.w, obj.y + obj.h
@@ -554,43 +616,95 @@ class LayoutView:
                     y1 += dy
                 obj.x, obj.w = min(x0, x1), max(abs(x1 - x0), 5.0)
                 obj.y, obj.h = min(y0, y1), max(abs(y1 - y0), 5.0)
-            self._hlr_cache.pop(obj.id, None)
-        else:
-            from ..core.layout import move_annotation
-            move_annotation(kind, obj, dx, dy)
+                self._hlr_cache.pop(obj.id, None)
         self._drag_moved = True
         self._drag_last = (px, py)
         self.vp.scene.notify("layouts")
         return True
 
+    # ------------------------------------------------------------ band pick
+
+    def _box_picks(self) -> list:
+        """Everything the band has, in sheet order.
+
+        Left to right is a window and must enclose; right to left is a
+        crossing and need only touch. Same hand as model space, so the
+        habit carries between the two.
+        """
+        lay = self.layout
+        if lay is None or self.box is None:
+            return []
+        sx0, sy0, sx1, sy1 = self.box
+        crossing = sx1 < sx0
+        ax, ay = self.screen_to_paper(sx0, sy0)
+        bx, by = self.screen_to_paper(sx1, sy1)
+        lo = (min(ax, bx), min(ay, by))
+        hi = (max(ax, bx), max(ay, by))
+        from ..core.layout import annotation_bounds
+        out = []
+        for kind, pool in self._pools(lay).items():
+            for obj in pool:
+                if kind == "detail":
+                    b = (obj.x, obj.y, obj.x + obj.w, obj.y + obj.h)
+                else:
+                    b = annotation_bounds(kind, obj)
+                if crossing:
+                    inside = (b[0] <= hi[0] and b[2] >= lo[0]
+                              and b[1] <= hi[1] and b[3] >= lo[1])
+                else:
+                    inside = (b[0] >= lo[0] and b[2] <= hi[0]
+                              and b[1] >= lo[1] and b[3] <= hi[1])
+                if inside:
+                    out.append((kind, obj))
+        return out
+
     def release_drag(self):
+        if self.box is not None:
+            sx0, sy0, sx1, sy1 = self.box
+            # A press that went nowhere is a click on empty paper, which has
+            # already cleared the selection; picking on it would take the
+            # whole sheet.
+            if abs(sx1 - sx0) > 4 or abs(sy1 - sy0) > 4:
+                picks = self._box_picks()
+                if self._box_add:
+                    self.selected += [p for p in picks
+                                      if p not in self.selected]
+                else:
+                    self.selected = picks
+            self.box = None
+            self._box_add = False
+            return
         if self._drag is None:
             return
         if not self._drag_moved:
             self.vp.window_discard_checkpoint()
+            # The press held the whole group together in case it was the
+            # start of a drag. It wasn't, so it was a choice: keep the one.
+            if self._press_hit is not None:
+                self.selected = [self._press_hit]
         self._drag = None
         self._drag_moved = False
+        self._press_hit = None
 
     def delete_selected(self) -> bool:
         lay = self.layout
-        if lay is None or self.selected is None:
+        self._prune()
+        if lay is None or not self.selected:
             return False
-        kind, obj = self.selected
-        if kind == "detail":
-            if obj not in lay.details:
-                self.selected = None
-                return False
-            self.vp.window_checkpoint("delete detail")
-            lay.details.remove(obj)
-            self._hlr_cache.pop(obj.id, None)
-        else:
-            from ..core.layout import delete_annotation
-            self.vp.window_checkpoint("delete annotation")
-            if not delete_annotation(lay, kind, obj):
-                self.vp.window_discard_checkpoint()
-                self.selected = None
-                return False
-        self.selected = None
+        from ..core.layout import delete_annotation
+        self.vp.window_checkpoint("delete sheet items")
+        gone = False
+        for kind, obj in self.selected:
+            if kind == "detail":
+                lay.details.remove(obj)
+                self._hlr_cache.pop(obj.id, None)
+                gone = True
+            elif delete_annotation(lay, kind, obj):
+                gone = True
+        self.selected = []
+        if not gone:
+            self.vp.window_discard_checkpoint()
+            return False
         self.vp.scene.notify("layouts")
         return True
 

@@ -448,6 +448,7 @@ class Viewport(QOpenGLWidget):
     chordActivated = Signal(str)            # a bound mouse chord: command
     displayModeChanged = Signal()           # shaded/rendered/... changed
     viewChanged = Signal(str)               # named view set (top/perspective/…)
+    layoutSelectionChanged = Signal()       # sheet items picked or dropped
     _tessDone = Signal()                    # a background mesh finished
 
     def __init__(self, scene, selection, config=None, parent=None):
@@ -2324,7 +2325,11 @@ class Viewport(QOpenGLWidget):
                 if self.layout_view.click_outside_exits(pos.x(), pos.y()):
                     self.update()
                     return
-                if self.layout_view.press(pos.x(), pos.y()):
+                add = bool(ev.modifiers() & (
+                    Qt.KeyboardModifier.ShiftModifier
+                    | Qt.KeyboardModifier.ControlModifier))
+                if self.layout_view.press(pos.x(), pos.y(), add=add):
+                    self.layoutSelectionChanged.emit()
                     self.update()
                 return
             handle = self.gumball.hit_test(pos.x(), pos.y())
@@ -2482,6 +2487,9 @@ class Viewport(QOpenGLWidget):
             return
         if self.space != "model":
             self.layout_view.release_drag()
+            self.layoutSelectionChanged.emit()
+            self.update()
+            return
         if self.gumball.drag is not None:
             press = getattr(self, "_gumball_press", None)
             moved = (press is not None
@@ -2712,8 +2720,9 @@ class Viewport(QOpenGLWidget):
                     and lv.delete_selected():
                 self.update()
                 return
-            if ev.key() == Qt.Key.Key_Escape and lv.selected is not None:
-                lv.selected = None
+            if ev.key() == Qt.Key.Key_Escape and lv.selected:
+                lv.selected = []
+                self.layoutSelectionChanged.emit()
                 self.update()
                 return
         d = self._NUDGE_KEYS.get(ev.key())
