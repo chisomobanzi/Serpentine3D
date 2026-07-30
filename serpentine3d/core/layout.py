@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 import math
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 
 # landscape (width, height) in mm
 PAPER_SIZES = {
@@ -750,6 +750,26 @@ def _paper_object_from_json(od: dict) -> PaperObject:
         shape=geometry.shape_from_bytes(base64.b64decode(od["brep"])))
 
 
+def _rebuild(cls, d: dict):
+    """A sheet item from what the file says, keeping what the class knows.
+
+    `cls(**d)` demanded that the file name exactly the fields this build has,
+    which it will not do for long: the moment a field is added, a drawing
+    saved by the newer build stops opening in the older one — not with the
+    new field missing, but with a TypeError and no drawing at all. The same
+    the other way for a field ever dropped.
+
+    So a key this build has never heard of is let go, and a field the file
+    never mentions takes the class's default. Losing something there is no
+    way to draw is a small loss; refusing to open the sheet is a total one.
+    Letting it go rather than keeping it is deliberate too: an object holding
+    a field it does not understand would write it back out on the next save
+    and claim to have meant it.
+    """
+    known = {f.name for f in fields(cls)}
+    return cls(**{k: v for k, v in d.items() if k in known})
+
+
 def layouts_to_json(layouts: list) -> list:
     out = []
     for lay in layouts:
@@ -779,22 +799,15 @@ def layouts_from_json(data: list) -> list:
                      paper_w=ld.get("paper_w", 420.0),
                      paper_h=ld.get("paper_h", 297.0),
                      margin=ld.get("margin", 10.0))
-        for dd in ld.get("details", []):
-            lay.details.append(DetailView(**dd))
         for od in ld.get("objects", []):
             lay.objects.append(_paper_object_from_json(od))
-        for nd in ld.get("notes", []):
-            lay.notes.append(TextNote(**nd))
-        for dd in ld.get("dims", []):
-            lay.dims.append(LinearDim(**dd))
-        for xd in ld.get("leaders", []):
-            lay.leaders.append(Leader(**xd))
-        for xd in ld.get("hatches", []):
-            lay.hatches.append(Hatch(**xd))
-        for xd in ld.get("rdims", []):
-            lay.rdims.append(RadialDim(**xd))
-        for xd in ld.get("adims", []):
-            lay.adims.append(AngularDim(**xd))
+        for key, cls in (("details", DetailView), ("notes", TextNote),
+                         ("dims", LinearDim), ("leaders", Leader),
+                         ("hatches", Hatch), ("rdims", RadialDim),
+                         ("adims", AngularDim)):
+            pool = getattr(lay, key)
+            for d in ld.get(key, []):
+                pool.append(_rebuild(cls, d))
         lay.scale_bars = [list(b) for b in ld.get("scale_bars", [])]
         lay.title_block = dict(ld.get("title_block", {}))
         lay.revisions = [list(r) for r in ld.get("revisions", [])]

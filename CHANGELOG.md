@@ -202,6 +202,21 @@
 
 ### Fixed
 
+- A drawing saved by a newer build opens in an older one. Detail frames and
+  annotations were rebuilt from the file by handing it straight to the class,
+  which meant the file had to name exactly the fields that build had. It never
+  will for long: the moment a field is added — a detail's section plane, a
+  note's style — a sheet saved by the newer build stops opening in the older
+  one, and not with the new field missing but with an error and no drawing at
+  all. One stray key cost you the whole file.
+
+  A field this build has never heard of is now let go, and a field the file
+  never mentions takes its default. It is let go rather than kept, so that the
+  next save does not write back something this build never drew and claim to
+  have meant it — which does mean a sheet saved by an older build loses what
+  that build could not read. Losing a field there is no way to draw is a small
+  loss; refusing to open the drawing is a total one.
+
 - A detail you have stepped into is a window into the model, and drawing through
   it works like one. Two things stopped it. The construction plane inside a
   detail was still the world plane, so a rectangle drawn in a front, side or
