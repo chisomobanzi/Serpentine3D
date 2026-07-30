@@ -175,6 +175,13 @@ class WelcomeScreen(QDialog):
             lay.addStretch(1)
             return card
         listing = QListWidget()
+        # The dialog has a fixed width, so a long name cannot be given room —
+        # it can only be scrolled sideways to, in a bar nothing here is styled
+        # for. Shorten it in the middle instead: the end of a filename says
+        # what kind of file it is, and the whole path is on the tooltip.
+        listing.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        listing.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         for p in files[:8]:
             item = QListWidgetItem(os.path.basename(p))
             item.setToolTip(p)

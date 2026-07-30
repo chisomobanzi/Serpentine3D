@@ -202,6 +202,13 @@
 
 ### Fixed
 
+- A long filename in the welcome screen's recent list is shortened rather
+  than scrolled to. The dialog is a fixed width, so the name could never be
+  given room — it could only push a horizontal scrollbar into the bottom of
+  the card and ask you to drag it sideways. It now gives in the middle, where
+  a file's own name is, rather than at the end, where its kind is; the whole
+  path is still on the tooltip.
+
 - Dragging out a rectangle no longer draws a line across it. `rectangle`,
   `box` and `clippingplane` all ask for an opposite corner while a ghost of
   the frame is already under the cursor, and all three were also hanging a
