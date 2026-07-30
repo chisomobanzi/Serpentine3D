@@ -234,11 +234,40 @@ DEFAULT_STYLES = {
 }
 
 
+def _on_axis(v, tol: float = 5e-3):
+    """`v` with components a whisker from 0 or ±1 rounded to them."""
+    import numpy as np
+    out = np.asarray(v, float).copy()
+    near = np.abs(np.abs(out) - 1.0) < tol
+    out[np.abs(out) < tol] = 0.0
+    out[near] = np.sign(out[near])
+    n = np.linalg.norm(out)
+    return out / n if n > 1e-12 else np.asarray(v, float)
+
+
+def detail_basis(detail):
+    """The basis a detail's geometry is measured in: view dir, right, up.
+
+    The named views are aimed 0.1 degrees off vertical so the camera basis
+    never degenerates. Geometry must not inherit that lean — a line drawn in a
+    top view has to come out level — so an axis the basis is within a whisker
+    of is the axis it gets.
+    """
+    import numpy as np
+    from ..ui.layout_view import detail_direction
+    d, right, _up = detail_direction(detail)
+    d, right = _on_axis(d), _on_axis(right)
+    right = right - np.dot(right, d) * d
+    n = np.linalg.norm(right)
+    if n > 1e-12:
+        right = right / n
+    return d, right, np.cross(right, -d)
+
+
 def detail_project(detail, model_pt) -> tuple[float, float]:
     """Model-space point -> paper mm through a detail's camera."""
     import numpy as np
-    from ..ui.layout_view import detail_direction
-    d, right, up = detail_direction(detail)
+    d, right, up = detail_basis(detail)
     rel = np.asarray(model_pt, float) - np.asarray(detail.target, float)
     u = float(np.dot(rel, right)) / detail.scale_denom
     v = float(np.dot(rel, up)) / detail.scale_denom
@@ -248,8 +277,7 @@ def detail_project(detail, model_pt) -> tuple[float, float]:
 def detail_unproject(detail, px: float, py: float) -> list:
     """Paper mm -> model-space point on the detail's view plane."""
     import numpy as np
-    from ..ui.layout_view import detail_direction
-    d, right, up = detail_direction(detail)
+    d, right, up = detail_basis(detail)
     u = (px - detail.x - detail.w / 2) * detail.scale_denom
     v = (py - detail.y - detail.h / 2) * detail.scale_denom
     return [float(c) for c in

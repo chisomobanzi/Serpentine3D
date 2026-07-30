@@ -178,8 +178,14 @@ class CommandContext:
 
     @property
     def cplane(self):
+        """The plane the running command draws on.
+
+        The viewport is asked rather than told: inside a detail the plane is
+        the one that detail looks at, and a command has no business knowing
+        whether it is being run through a window onto the model.
+        """
         if self.viewport is not None:
-            return self.viewport.cplane
+            return self.viewport.active_cplane()
         from ..core.cplane import CPlane
         return CPlane()
 

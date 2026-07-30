@@ -44,6 +44,18 @@ def detail_direction(detail) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return d, right, up
 
 
+def detail_plane(detail):
+    """The construction plane a detail looks at.
+
+    Its picks already land on this plane — they are unprojected out of the same
+    basis — so drawing on it throws nothing away.
+    """
+    from ..core.cplane import CPlane
+    from ..core.layout import detail_basis
+    d, right, _up = detail_basis(detail)
+    return CPlane(origin=detail.target, normal=d, xdir=right, name="Detail")
+
+
 class LayoutView:
     def __init__(self, viewport):
         self.vp = viewport
@@ -594,6 +606,24 @@ class LayoutView:
         detail = lay.detail_at(px, py)
         self.entered_detail = detail.id if detail else None
         return True
+
+    def step_into_detail(self, sx: float, sy: float):
+        """Enter the detail under the cursor, and say which one, or None.
+
+        A command waiting for a point never sees a double-click — the press
+        picks a point before the second click arrives — so while one is running
+        it is the single click landing on a detail that steps into it. Nothing
+        happens for the detail already entered: there the click is a point.
+        """
+        lay = self.layout
+        if lay is None:
+            return None
+        px, py = self.screen_to_paper(sx, sy)
+        detail = lay.detail_at(px, py)
+        if detail is None or detail.id == self.entered_detail:
+            return None
+        self.entered_detail = detail.id
+        return detail
 
     def click_outside_exits(self, sx: float, sy: float) -> bool:
         """Returns True if the click exited an entered detail."""

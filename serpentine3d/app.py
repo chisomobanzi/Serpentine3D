@@ -300,6 +300,7 @@ class MainWindow(QMainWindow):
         vp.emptyClicked.connect(self._on_empty_clicked)
         vp.boxSelected.connect(self._on_box_selected)
         vp.pointPicked.connect(self._on_point_picked)
+        vp.detailEntered.connect(self._on_detail_entered)
         vp.mouseWorldMoved.connect(self._on_mouse_world)
         vp.cvEditBegan.connect(
             lambda: self.history.checkpoint("edit control point"))
@@ -725,6 +726,12 @@ class MainWindow(QMainWindow):
         if isinstance(self.processor.request, PointReq):
             self.ctx.last_point = point
             self.processor.provide(point)
+
+    def _on_detail_entered(self, detail):
+        """A click stepped into a detail instead of placing a point."""
+        self.ctx.echo(f"Now drawing inside the detail ({detail.scale_text()})"
+                      " — pick again to place the point.")
+        self._update_status()
 
     def _on_mouse_world(self, point):
         self._refresh_rubber(point)

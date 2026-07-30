@@ -41,3 +41,7 @@ class StubViewport:
         self.space = space          # a layout id puts commands on that sheet
         self.layout_view = StubLayoutView()
         self.cplane = CPlane()
+
+    def active_cplane(self):
+        """No detail is ever entered here, so it is the world plane."""
+        return self.cplane

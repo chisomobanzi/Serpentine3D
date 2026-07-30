@@ -61,6 +61,33 @@
 
 ### Fixed
 
+- A detail you have stepped into is a window into the model, and drawing through
+  it works like one. Two things stopped it. The construction plane inside a
+  detail was still the world plane, so a rectangle drawn in a front, side or
+  back view had both of its corners on one line of that plane and came out
+  degenerate — nothing was made and the command reported an error — while a
+  circle, an arc or an ellipse came out lying flat in world XY, edge-on to the
+  view it was drawn in, which also looks like nothing was made. The plane inside
+  a detail is now the plane the detail looks at, which is where its picks land
+  already, so everything built on a plane — rectangles, circles, arcs, polygons,
+  the direction an `extrude` goes, the axis a `revolve` turns about — is built in
+  the view you are looking at.
+
+  And a command that is waiting for a point never saw the double-click that
+  steps into a detail: the press picked a point before the second click arrived,
+  so the clicks meant as a way in landed on the paper and drew there instead. On
+  a sheet, a click that lands on a detail while a command wants a point now steps
+  into that detail and says so, and the clicks after it draw through it. A click
+  on the detail you are already in is a point, as it was, and a command that
+  wants paper millimetres — `text` and the dimensions — is not diverted into a
+  detail by one.
+
+  Geometry drawn in a top or bottom view also comes out level now. Those views
+  are aimed a tenth of a degree off vertical so the camera basis cannot
+  degenerate, and a line drawn through one used to inherit that lean; the basis a
+  detail measures geometry in is now squared to the axes it is a whisker from,
+  while the camera keeps its tilt.
+
 - The preview of what a command is about to make is drawn on a sheet, and in
   technical display mode. `rectangle` on a sheet showed a single line from the
   first corner to the cursor and no rectangle — and so did `circle`, `arc` and

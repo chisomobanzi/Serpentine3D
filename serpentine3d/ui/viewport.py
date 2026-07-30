@@ -450,6 +450,7 @@ class Viewport(QOpenGLWidget):
     displayModeChanged = Signal()           # shaded/rendered/... changed
     viewChanged = Signal(str)               # named view set (top/perspective/…)
     layoutSelectionChanged = Signal()       # sheet items picked or dropped
+    detailEntered = Signal(object)           # stepped into a detail mid-command
     _tessDone = Signal()                    # a background mesh finished
 
     def __init__(self, scene, selection, config=None, parent=None):
@@ -1574,6 +1575,21 @@ class Viewport(QOpenGLWidget):
             return None
         return self.layout_view._entered()
 
+    def active_cplane(self):
+        """The plane being drawn on right now.
+
+        Inside a detail that is the plane the detail looks at, because that is
+        where its picks land: on the world plane instead, a rectangle drawn in
+        a front view has both corners on one line of it and comes out
+        degenerate, and a circle comes out lying flat, edge-on to the view it
+        was drawn in.
+        """
+        detail = self._drawing_through()
+        if detail is None:
+            return self.cplane
+        from .layout_view import detail_plane
+        return detail_plane(detail)
+
     def _on_paper(self, pts) -> np.ndarray:
         """Points as paper millimetres, wherever they came from.
 
@@ -2437,6 +2453,17 @@ class Viewport(QOpenGLWidget):
                     self.gumball.cancel_drag()
                 self.update()
             if self.point_mode:
+                # On a sheet, a command that can draw in the model needs a way
+                # into a detail while it is running: without one its clicks
+                # land on the paper, which is how a rectangle meant for the
+                # model ends up drawn on the sheet.
+                if self.space != "model" and self.point_space != "paper":
+                    detail = self.layout_view.step_into_detail(pos.x(),
+                                                               pos.y())
+                    if detail is not None:
+                        self.detailEntered.emit(detail)
+                        self.update()
+                        return
                 pt = self.world_point_at(pos.x(), pos.y())
                 if pt is not None:
                     self.pointPicked.emit(pt)
