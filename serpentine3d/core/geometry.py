@@ -158,12 +158,17 @@ def edges_of(shape) -> list:
     out, seen = [], set()
     exp = TopExp_Explorer(shape, occ.EDGE)
     while exp.More():
-        e = exp.Current()
-        # a wire visits shared edges twice; dedupe on TShape identity
-        key = hash(e.TShape())
+        # a shell visits a shared edge once per face it belongs to, so dedupe.
+        # On the edge, whose hash is OCC's own — same underlying shape and
+        # placement, either orientation. Not on `TShape()`: that hands back a
+        # fresh wrapper each call and hashes its address, so it says nothing
+        # about the edge, and a freed address handed out again would collide
+        # and lose one.
+        edge = occ.to_edge(exp.Current())
+        key = hash(edge)
         if key not in seen:
             seen.add(key)
-            out.append(occ.to_edge(e))
+            out.append(edge)
         exp.Next()
     return out
 

@@ -325,8 +325,8 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         while exp.More():
             v = occ.to_vertex(exp.Current())
             exp.Next()
-            key = hash(v.TShape())
-            if key in seen:
+            key = hash(v)                 # the shape's own hash, not a
+            if key in seen:               # wrapper's address (see edges_of)
                 continue
             seen.add(key)
             idx = owners.FindIndex(v)

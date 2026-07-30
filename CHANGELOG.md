@@ -28,6 +28,17 @@
 
 ### Fixed
 
+- Edges stop going missing. A shape's edge list was de-duplicated on a key that
+  described nothing: OCC hands back a fresh wrapper object each time it is asked
+  for an edge's underlying shape, and the key was that wrapper's address. So a
+  freed address handed out again for the next edge read as a duplicate, and one
+  of two different edges silently disappeared — a box that printed without its
+  top edge, a rectangle that drew with three sides, free points in a compound
+  that went unplotted. Rare, and it moved around, because it depended on
+  what the allocator handed out. The edge itself is the key now. Shared edges
+  are also de-duplicated for real for the first time, so a solid's linework is
+  drawn once rather than once per face it belongs to.
+
 - Drawing inside a detail draws in the model, where the detail is looking. A
   sheet has two spaces on it — the paper is millimetres, a detail is a window
   onto the model — but a pick used to be paper millimetres either way, and
