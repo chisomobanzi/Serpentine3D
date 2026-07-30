@@ -201,6 +201,25 @@ class CommandContext:
         lv = getattr(vp, "layout_view", None)
         return getattr(lv, "entered_detail", None) is None
 
+    def sheet_view(self):
+        """The layout view, when a command asking for objects means the sheet.
+
+        A sheet has two things on it a command could mean: the sheet's own
+        geometry, frames and annotations, and the model seen through a detail.
+        The same thing that decides where a point lands decides this — a detail
+        is a window onto the model, so inside one a command is working on the
+        model and can ask for model objects the ordinary way, by clicking them
+        through the frame. On bare paper there is no model to ask about and no
+        click that could name one, so the sheet is the answer, and a command
+        that went looking for model objects there would wait for ever.
+
+        None for the headless stub viewport, which has no sheet to pick on.
+        """
+        if not self.on_bare_paper():
+            return None
+        lv = getattr(self.viewport, "layout_view", None)
+        return lv if hasattr(lv, "delete_selected") else None
+
     def add(self, shape, name: str | None = None):
         """Put a new shape where the command is drawing it.
 

@@ -133,6 +133,21 @@
   A point is a mark to work to rather than ink, so it is not printed — the same
   as in Rhino, and the reason nothing changed in the PDF or DXF export.
 
+- `delete` takes what is picked on a sheet. It never asked the sheet at all, so
+  a border or a detail frame picked on paper and then deleted left the command
+  waiting for a model selection that no click on bare paper can make: it sat
+  there until it was cancelled, and nothing was deleted. It removes them now,
+  says how many, and Ctrl+Z brings them back. The Delete key always did this,
+  and now the typed command agrees with the key.
+
+  `move` had the same question the other way round: it asked only the sheet, so
+  a model object picked through a detail was told that nothing was picked, when
+  plainly something was. Both go through one rule now, and it is the rule that
+  already decides where a drawn point lands — a detail is a window onto the
+  model, so inside one a command works on the model and asks for objects by
+  clicking them through the frame; on bare paper there is no model to ask about,
+  so the sheet is the answer.
+
 ### Fixed
 
 - A detail you have stepped into is a window into the model, and drawing through

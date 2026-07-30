@@ -11,19 +11,6 @@ def _ghost(objs, fn):
     return g.make_compound([fn(o.shape) for o in objs])
 
 
-def _sheet_view(ctx):
-    """The layout view, when the command is aimed at a sheet.
-
-    None in model space — and None for the headless stub viewport, which has
-    no pick to move.
-    """
-    vp = ctx.viewport
-    if vp is None or getattr(vp, "space", "model") == "model":
-        return None
-    lv = getattr(vp, "layout_view", None)
-    return lv if hasattr(lv, "move_corners") else None
-
-
 def _move_on_paper(ctx, lv):
     """Move what is picked on a sheet, in paper millimetres.
 
@@ -33,8 +20,8 @@ def _move_on_paper(ctx, lv):
     way — nothing here is model space.
     """
     if not lv.corners and not lv.selected:
-        ctx.echo("Nothing is picked on this sheet — click a detail, an "
-                 "annotation, or a corner grip first.")
+        ctx.echo("Nothing is picked on this sheet — click the geometry, a "
+                 "detail frame, an annotation or a corner grip first.")
         return
     what = "corner" if lv.corners else "sheet item"
     p1 = yield PointReq(f"Point to move the {what} from")
@@ -50,7 +37,7 @@ def _move_on_paper(ctx, lv):
 
 @command("move", aliases=("m",), space="any")
 def cmd_move(ctx):
-    lv = _sheet_view(ctx)
+    lv = ctx.sheet_view()
     if lv is not None:
         yield from _move_on_paper(ctx, lv)
         return

@@ -4,8 +4,19 @@ from ..core import geometry as g
 from .base import NumberReq, OptionReq, SelectReq, TextReq, command
 
 
-@command("delete", aliases=("del", "erase"))
+@command("delete", aliases=("del", "erase"), space="any")
 def cmd_delete(ctx):
+    lv = ctx.sheet_view()
+    if lv is not None:
+        # what is picked on a sheet is the sheet's own, and the sheet is what
+        # knows how to take a frame or an annotation out of itself
+        count = len(lv.selected)
+        if not lv.delete_selected():
+            ctx.echo("Nothing is picked on this sheet — click the geometry, "
+                     "a detail frame or an annotation first.")
+            return
+        ctx.echo(f"Deleted {count} sheet item(s).")
+        return
     objs = yield SelectReq("Select objects to delete")
     for o in objs:
         ctx.scene.remove(o.id)
