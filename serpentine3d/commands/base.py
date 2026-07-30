@@ -108,6 +108,12 @@ class CommandDef:
     aliases: tuple = ()
     label: str = ""
     mutates: bool = True
+    # Which space this command's picked points are in: "model" coordinates,
+    # "paper" millimetres on a sheet, or "any" for the few that read the
+    # viewport and cope with either. Only a sheet can tell them apart, and
+    # the default is the safe one — a command that never said is not let
+    # loose on paper it cannot mean anything about.
+    space: str = "model"
 
 
 _REGISTRY: dict[str, CommandDef] = {}
@@ -115,10 +121,11 @@ _ALIASES: dict[str, str] = {}
 
 
 def command(name: str, aliases: tuple = (), label: str = "",
-            mutates: bool = True):
+            mutates: bool = True, space: str = "model"):
     def wrap(fn):
         cd = CommandDef(name=name.lower(), fn=fn, aliases=aliases,
-                        label=label or name.capitalize(), mutates=mutates)
+                        label=label or name.capitalize(), mutates=mutates,
+                        space=space)
         _REGISTRY[cd.name] = cd
         for a in aliases:
             _ALIASES[a.lower()] = cd.name
@@ -410,8 +417,36 @@ class CommandProcessor:
         self._prepare_request()
         self._notify()
 
+    def _on_bare_paper(self) -> bool:
+        """True when a pick can only name paper, and not the model.
+
+        Inside a detail it can name both — the detail is a window onto the
+        model, so the viewport unprojects through it.
+        """
+        vp = self.ctx.viewport
+        if vp is None or getattr(vp, "space", "model") == "model":
+            return False
+        lv = getattr(vp, "layout_view", None)
+        return getattr(lv, "entered_detail", None) is None
+
     def _prepare_request(self):
         req = self.request
+        if (isinstance(req, PointReq) and self.active is not None
+                and self.active.space == "model" and self._on_bare_paper()):
+            # Bare paper is not somewhere a model coordinate exists, and
+            # answering with millimetres put the geometry in the model at the
+            # paper's numbers. Cancel first, so that the reason is the last
+            # thing said rather than buried under "cancelled".
+            # Two lines, because only the newest line or two is on screen and
+            # each half has to stand on its own: what went wrong, then what to
+            # do about it.
+            label = self.active.label
+            self.cancel()
+            self.ctx.echo(f"{label} needs a point in the model, "
+                          "and bare paper is not the model.")
+            self.ctx.echo("Double-click a detail to work inside it, or "
+                          "annotate the sheet with text, dim, leader or hatch.")
+            return
         if isinstance(req, SelectReq):
             self._select_buffer = []
             if (req.allow_preselected and self.ctx.selection.ids):

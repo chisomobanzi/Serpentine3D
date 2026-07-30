@@ -110,7 +110,7 @@ def cmd_layout(ctx):
 
 # ------------------------------------------------------------------ details
 
-@command("detail")
+@command("detail", space="paper")
 def cmd_detail(ctx):
     lay = _active_layout(ctx)
     if lay is None:
@@ -315,7 +315,7 @@ def cmd_exportpdf(ctx):
 
 # -------------------------------------------------------------- annotations
 
-@command("text", aliases=("note",))
+@command("text", aliases=("note",), space="paper")
 def cmd_text(ctx):
     lay = _active_layout(ctx)
     if lay is None:
@@ -336,7 +336,7 @@ def cmd_text(ctx):
     ctx.echo("Note placed.")
 
 
-@command("dim", aliases=("dimension", "dimlinear"))
+@command("dim", aliases=("dimension", "dimlinear"), space="paper")
 def cmd_dim(ctx):
     lay = _active_layout(ctx)
     if lay is None:
@@ -378,7 +378,7 @@ def cmd_dim(ctx):
              + (f" (anchored to detail at {detail.scale_text()})"
                 if dim.detail_id else " mm on paper"))
 
-@command("leader")
+@command("leader", space="paper")
 def cmd_leader(ctx):
     lay = _active_layout(ctx)
     if lay is None:
@@ -401,7 +401,7 @@ def cmd_leader(ctx):
     ctx.echo("Leader placed.")
 
 
-@command("hatch")
+@command("hatch", space="paper")
 def cmd_hatch(ctx):
     lay = _active_layout(ctx)
     if lay is None:
@@ -456,7 +456,7 @@ def _dim_scale_at(lay, x, y):
             else 1.0)
 
 
-@command("dimradius", aliases=("dimr",))
+@command("dimradius", aliases=("dimr",), space="paper")
 def cmd_dimradius(ctx):
     lay = _active_layout(ctx)
     if lay is None:
@@ -474,7 +474,7 @@ def cmd_dimradius(ctx):
     ctx.echo("Radius dimension placed.")
 
 
-@command("dimdiameter", aliases=("dimdia",))
+@command("dimdiameter", aliases=("dimdia",), space="paper")
 def cmd_dimdiameter(ctx):
     lay = _active_layout(ctx)
     if lay is None:
@@ -491,7 +491,7 @@ def cmd_dimdiameter(ctx):
     ctx.echo("Diameter dimension placed.")
 
 
-@command("dimangle", aliases=("dimangular",))
+@command("dimangle", aliases=("dimangular",), space="paper")
 def cmd_dimangle(ctx):
     lay = _active_layout(ctx)
     if lay is None:
@@ -528,7 +528,7 @@ def cmd_titleblock(ctx):
              "fill automatically).")
 
 
-@command("scalebar")
+@command("scalebar", space="paper")
 def cmd_scalebar(ctx):
     lay = _active_layout(ctx)
     if lay is None:
@@ -659,7 +659,7 @@ def cmd_dimstyle(ctx):
              "set it on existing annotations with 'annotedit'.")
 
 
-@command("annotedit", aliases=("editnote", "edittext"))
+@command("annotedit", aliases=("editnote", "edittext"), space="paper")
 def cmd_annotedit(ctx):
     """Edit the annotation nearest a picked point (text, style)."""
     lay = _active_layout(ctx)
@@ -694,7 +694,7 @@ def cmd_annotedit(ctx):
     ctx.echo("Annotation updated.")
 
 
-@command("sheetindex")
+@command("sheetindex", space="paper")
 def cmd_sheetindex(ctx):
     """Place an index of all sheets as a note on the current layout."""
     lay = _active_layout(ctx)
@@ -734,7 +734,7 @@ def cmd_revision(ctx):
              f"({len(lay.revisions)} row(s) in the table).")
 
 
-@command("dot", aliases=("annotationdot",))
+@command("dot", aliases=("annotationdot",), space="paper")
 def cmd_dot(ctx):
     """Model-space annotation dots: a label bubble anchored to a 3D point.
     Dots keep their size on screen and always face the camera."""

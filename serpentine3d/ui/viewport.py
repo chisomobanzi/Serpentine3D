@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from ..core import linetype as _lt
 from ..core import spatial
 from ..utils import config as _cfg
+from ..utils import units as _units
 from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
 from . import theme
 from .camera import Camera
@@ -497,6 +498,9 @@ class Viewport(QOpenGLWidget):
         self.dir_lock = None                # (base, dir) frozen by Tab
         self.pending_points = []            # the run being drawn, if any
         self.picked_points = []             # every point picked this command
+        # what the running command's points mean: "model" coordinates or
+        # "paper" millimetres. Only a sheet can tell the two apart.
+        self.point_space = "model"
         self.frame_aspect = None            # cinema frame guide (e.g. 2.39)
         self.grid_snap = bool(config.get("grid_snap")) if config else False
         self.grid_snap_step = (float(config.get("grid_snap_step",
@@ -701,6 +705,7 @@ class Viewport(QOpenGLWidget):
             self.layout_view.paint_overlay(painter)
             painter.end()
             self._reset_gl_state()      # QPainter bound its own program
+            self._update_draw_readout()  # follow the paper when the view moves
             return
 
         view = self.camera.view_matrix()
@@ -804,16 +809,29 @@ class Viewport(QOpenGLWidget):
             if not self._draw_readout.isHidden():
                 self._draw_readout.setVisible(False)
             return
-        scr = self.camera.project(np.asarray([span[1]], float),
-                                  self.width(), self.height())[0]
-        if scr[2] <= 0:                     # cursor point behind the camera
-            self._draw_readout.setVisible(False)
-            return
-        self._draw_readout.setText(self.scene.format_length(length))
+        if self.space == "model":
+            scr = self.camera.project(np.asarray([span[1]], float),
+                                      self.width(), self.height())[0]
+            if scr[2] <= 0:                 # cursor point behind the camera
+                self._draw_readout.setVisible(False)
+                return
+            cx, cy = float(scr[0]), float(scr[1])
+            text = self.scene.format_length(length)
+        else:
+            # A sheet has no model camera on screen, so the label is placed on
+            # the paper; and a leg is measured where it was drawn — in model
+            # units through a detail, in millimetres on the paper itself.
+            end = self._on_paper([span[1]])[0]
+            cx, cy = self.layout_view.paper_to_screen(float(end[0]),
+                                                      float(end[1]))
+            text = (self.scene.format_length(length)
+                    if self._drawing_through() is not None
+                    else _units.format_length(length, "mm"))
+        self._draw_readout.setText(text)
         self._draw_readout.adjustSize()
         w, h = self._draw_readout.width(), self._draw_readout.height()
-        x = max(2, min(int(scr[0]) + 18, self.width() - w - 2))
-        y = max(2, min(int(scr[1]) - 14 - h, self.height() - h - 2))
+        x = max(2, min(int(cx) + 18, self.width() - w - 2))
+        y = max(2, min(int(cy) - 14 - h, self.height() - h - 2))
         self._draw_readout.move(x, y)
         self._draw_readout.setVisible(True)
         self._draw_readout.raise_()
@@ -1533,9 +1551,40 @@ class Viewport(QOpenGLWidget):
         GL.glDrawElements(GL.GL_TRIANGLES, gpu.thick_count,
                           GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
 
+    def _drawing_through(self):
+        """The detail the running command is drawing through, or None.
+
+        Only when it asked for a model point: a paper command inside a detail
+        is still writing on the paper. Everything that has to turn one space
+        into the other asks this, so there is one answer.
+        """
+        if self.space == "model" or self.point_space != "model":
+            return None
+        return self.layout_view._entered()
+
+    def _on_paper(self, pts) -> np.ndarray:
+        """Points as paper millimetres, wherever they came from.
+
+        A model point picked through a detail has to come back out through
+        the same window it went in, or it lands on the sheet at the model's
+        own numbers.
+        """
+        arr = np.asarray(pts, np.float32).reshape(-1, 3)
+        entered = self._drawing_through()
+        if entered is None:
+            return arr
+        from ..core.layout import detail_project
+        out = np.zeros_like(arr)
+        for i, p in enumerate(arr):
+            out[i, :2] = detail_project(entered, p)
+        return out
+
     def _draw_preview(self, mvp):
         pts = self._preview_data
         markers = self._marker_points
+        if self.space != "model" and self._drawing_through() is not None:
+            pts = self._on_paper(pts) if len(pts) else pts
+            markers = [self._on_paper([m])[0] for m in markers]
         snap = self._active_snap if self.point_mode else None
         if len(pts) == 0 and not markers and snap is None:
             return
@@ -2014,10 +2063,19 @@ class Viewport(QOpenGLWidget):
     def world_point_at(self, px: float, py: float):
         """Point for the pixel: object snap if near one, else CPlane (z=0).
 
-        In a layout, returns paper coordinates in millimetres (x, y, 0)."""
+        On a sheet this is paper millimetres (x, y, 0) — except inside an
+        entered detail, where a command asking for a model point gets the
+        model point that detail is showing. `point_space` is what says which
+        of the two the caller means."""
         if self.space != "model":
             self._active_snap = None
             x, y = self.layout_view.screen_to_paper(px, py)
+            entered = self._drawing_through()
+            if entered is not None:
+                from ..core.layout import detail_model_point
+                return detail_model_point(
+                    entered, x, y,
+                    self.grid_snap_step if self.grid_snap else 0.0)
             if self.grid_snap:
                 x, y = round(x), round(y)
             return (float(x), float(y), 0.0)

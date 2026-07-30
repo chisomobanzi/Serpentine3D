@@ -48,7 +48,7 @@ def _move_on_paper(ctx, lv):
     ctx.echo(f"Moved {moved} {what}(s) by {dx:g}, {dy:g} mm on the sheet.")
 
 
-@command("move", aliases=("m",))
+@command("move", aliases=("m",), space="any")
 def cmd_move(ctx):
     lv = _sheet_view(ctx)
     if lv is not None:

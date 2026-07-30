@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Drawing inside a detail draws in the model, where the detail is looking. A
+  sheet has two spaces on it — the paper is millimetres, a detail is a window
+  onto the model — but a pick used to be paper millimetres either way, and
+  every command that draws believed it had been handed a model point. So a
+  `line` on a sheet quietly put a curve in your *model* at the paper's
+  coordinates, and doing it inside a detail did the same thing rather than
+  drawing where the detail was pointed. Now a pick inside a detail comes back
+  as the model point that detail shows, on the plane it looks at, and the grid
+  snaps in model units there because a round number belongs to the geometry
+  being built and not to the paper it is seen through. The rubber band and the
+  length readout come back out through the same window, so they land on the
+  geometry you picked from instead of at the model's own numbers on a sheet
+  measured in millimetres. Typing a coordinate inside a detail still means the
+  model coordinate you typed; it is the cursor that needed translating.
+
+- On bare paper, a command that needs a model point says so instead of
+  guessing. There is no model point out on the paper, and answering with
+  millimetres was how the geometry ended up in the model at the paper's
+  numbers. Each command now declares which space its points are in, so `line`
+  and `box` stop at the prompt and name both ways on — double-click a detail to
+  work inside it, or annotate the sheet with `text`, `dim`, `leader` or
+  `hatch` — while `text`, `dim` and the rest of the paper commands are
+  unaffected, inside a detail as much as out. The refusal happens at the point
+  prompt rather than at the command, so `zoom` still offers Extents, In, Out
+  and Selected on a sheet and only declines its Window.
+
+- The length readout appears while you draw on a sheet. It was positioned with
+  the model camera, which is not what is on screen there, so it went wherever
+  that camera happened to be looking. It now sits by the cursor on the paper,
+  and a leg is measured where it was drawn: in model units through a detail, in
+  millimetres on the paper itself, whatever units the model is drawn in.
+
 ## 0.5.5 — 2026-07-30
 
 ### Added

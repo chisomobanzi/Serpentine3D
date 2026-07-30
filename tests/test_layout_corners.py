@@ -346,7 +346,11 @@ def test_move_on_a_sheet_with_nothing_picked_says_so(sheet):
 def test_move_on_a_sheet_leaves_the_model_alone(sheet):
     w, lv, lay = sheet
     api = SerpApi(w)
+    # the box has to be built in the model; bare paper has no model point to
+    # build it from, and says so rather than guessing (test_layout_space.py)
+    w.viewport.space = "model"
     api.command("box", inputs=["0,0,0", "40,40,0", "30"])
+    w.viewport.space = lay.id
     obj = w.scene.all()[0]
     before = obj.shape
     det = lay.details[0]

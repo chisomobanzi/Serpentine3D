@@ -647,12 +647,18 @@ class MainWindow(QMainWindow):
                 base = req.rubber_pts[-1]
             pending = list(req.rubber_pts or [])
             picked = list(self.processor.picked_points)
+            # On a sheet the same pixel is both paper millimetres and a model
+            # point seen through a detail; which one it is depends on what the
+            # command asked for, so the registry's answer travels with it.
+            active = self.processor.active
+            space = active.space if active is not None else "model"
             for vp in self.all_viewports():
                 vp.set_point_mode(True)
                 vp.snap_base = base
                 vp.point_axis = req.axis_lock
                 vp.pending_points = pending
                 vp.picked_points = picked
+                vp.point_space = space
             self._refresh_rubber(None)
         else:
             for vp in self.all_viewports():
@@ -661,6 +667,7 @@ class MainWindow(QMainWindow):
                 vp.point_axis = None
                 vp.pending_points = []
                 vp.picked_points = []
+                vp.point_space = "model"
                 vp.set_preview(None)
         self.osnap_bar.refresh()
         self._update_status()

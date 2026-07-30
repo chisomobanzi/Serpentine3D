@@ -199,6 +199,25 @@ def detail_unproject(detail, px: float, py: float) -> list:
             np.asarray(detail.target, float) + right * u + up * v]
 
 
+def detail_model_point(detail, px: float, py: float,
+                       grid_step: float = 0.0) -> tuple:
+    """The model point a detail shows at paper (px, py).
+
+    Inside a detail you are drawing in the model, and the plane you draw on
+    is the one the detail looks at — the same relationship the CPlane has to
+    model space. Any grid snap therefore rounds in model units on that
+    plane, because a round number here belongs to the geometry that gets
+    built, not to the paper it is being viewed on.
+    """
+    if grid_step > 0:
+        cx, cy = detail.x + detail.w / 2, detail.y + detail.h / 2
+        u = round((px - cx) * detail.scale_denom / grid_step) * grid_step
+        v = round((py - cy) * detail.scale_denom / grid_step) * grid_step
+        px = cx + u / detail.scale_denom
+        py = cy + v / detail.scale_denom
+    return tuple(round(c, 9) for c in detail_unproject(detail, px, py))
+
+
 def resolve_associative(layout):
     """Refresh paper coordinates of detail-anchored dimensions."""
     details = {d.id: d for d in layout.details}
