@@ -253,8 +253,13 @@ class Camera:
         return cached[1], cached[2], cached[3]
 
     def project(self, points: np.ndarray, width: int,
-                height: int) -> np.ndarray:
-        """World points (N,3) -> pixel coords + depth (N,3): x_px, y_px, w."""
+                height: int, clipped: bool = True) -> np.ndarray:
+        """World points (N,3) -> pixel coords + depth (N,3): x_px, y_px, w.
+
+        `clipped` is nothing to a camera, which shows the whole window; it is
+        here because a detail is asked the same question and does have an edge
+        to fall off, and both have to answer the same call.
+        """
         n = len(points)
         hom = np.hstack([points, np.ones((n, 1))])
         mvp, pos, fwd = self._view_proj(width, height)

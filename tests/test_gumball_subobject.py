@@ -57,6 +57,12 @@ class _VP:
     def height(self):
         return 600
 
+    def _detail_eye(self):
+        return None          # a model window is not looking through a detail
+
+    def _eye(self):
+        return self.camera
+
     def window_checkpoint(self, label):
         self._checkpoints.append(label)
 

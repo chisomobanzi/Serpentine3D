@@ -60,7 +60,11 @@ class Gumball:
 
     def active(self) -> bool:
         vp = self.vp
-        if not (self.enabled and vp.space == "model" and not vp.point_mode):
+        # A sheet on its own has nothing for a gumball to hold — paper geometry
+        # is dragged by its own ink — but inside a detail what is picked is a
+        # model object, so it gets the handles the model window gives it.
+        on_model = vp.space == "model" or vp._detail_eye() is not None
+        if not (self.enabled and on_model and not vp.point_mode):
             return False
         if self.drag is not None:            # a drag stays live to its end
             return True
@@ -250,9 +254,60 @@ class Gumball:
         # drawing costs more than the measuring used to.
         boxes = np.array([o.bbox() for o in objs], float)
         anchor = (boxes[:, 0].min(axis=0) + boxes[:, 1].max(axis=0)) / 2
-        cp = self.vp.cplane
+        cp = self._plane()
         return anchor, (np.asarray(cp.xdir), np.asarray(cp.ydir),
                         np.asarray(cp.normal))
+
+    def _plane(self):
+        """The plane the axes lie in.
+
+        Inside a detail it is the plane the detail looks at, so two arrows lie
+        along the view and the third runs away from you — which is the way the
+        drawing is being read. The construction plane the model window is set
+        to would put all three of them at an angle to a front view.
+        """
+        eye = self.vp._detail_eye()
+        if eye is None:
+            return self.vp.cplane
+        from .layout_view import detail_plane
+        return detail_plane(eye.detail)
+
+    def _project(self, pts):
+        """Where gumball geometry lands on screen, frame or no frame.
+
+        The handles are drawn over the drawing rather than in it, so a detail's
+        edge does not cut them off the way it cuts off the model they hold: an
+        object that nearly fills its window would otherwise have handles nobody
+        can reach.
+        """
+        vp = self.vp
+        return vp._eye().project(np.asarray(pts, float), vp.width(),
+                                 vp.height(), clipped=False)
+
+    def _view_dir(self, anchor):
+        """Which way the eye looks where the gumball is."""
+        vp = self.vp
+        scr = self._project([anchor])[0]
+        _origin, direction = vp._eye().ray_through(
+            float(scr[0]), float(scr[1]), vp.width(), vp.height())
+        return np.asarray(direction, float)
+
+    def _usable(self, kind, axis, axes, vdir) -> bool:
+        """Whether a handle can be dragged from where it is being looked at.
+
+        An arrow pointing straight away from you, and a circle or pad seen
+        exactly edge-on, are a ray parallel to the line or the plane it would
+        be dragged along: that has no answer, or every answer, so the drag is
+        refused. A handle that would be refused is better not drawn and not
+        hit at all — in a detail, which looks squarely down one axis, they
+        would otherwise lie right on top of the handles that do work.
+        """
+        if vdir is None:
+            return True
+        along = abs(float(np.dot(np.asarray(axes[axis], float), vdir)))
+        if kind in ("move", "scale"):
+            return along < 1.0 - 1e-6       # the line is not the line of sight
+        return along > 1e-6                 # the plane faces you at all
 
     def _draw_anchor(self):
         """Where the gumball is drawn this frame. During a move/pad drag
@@ -270,11 +325,8 @@ class Gumball:
 
     def _size_world(self, anchor) -> float:
         """World length that projects to SIZE_PX pixels at the anchor."""
-        cam = self.vp.camera
-        w, h = self.vp.width(), self.vp.height()
-        right, _ = cam.right_up()
-        probe = np.stack([anchor, anchor + right])
-        scr = cam.project(probe, w, h)
+        right, _ = self.vp._eye().right_up()
+        scr = self._project(np.stack([anchor, anchor + right]))
         px = float(np.hypot(scr[1, 0] - scr[0, 0], scr[1, 1] - scr[0, 1]))
         if px < 1e-6:
             return 1.0
@@ -296,6 +348,7 @@ class Gumball:
             return
         anchor, axes = state
         s = self._size_world(anchor)
+        vdir = self._view_dir(anchor)
         GL.glDisable(GL.GL_DEPTH_TEST)
 
         def color_for(handle, base):
@@ -306,6 +359,8 @@ class Gumball:
 
         # rotation circles
         for i in range(3):
+            if not self._usable("rot", i, axes, vdir):
+                continue
             u, v = axes[(i + 1) % 3], axes[(i + 2) % 3]
             pts = []
             for k in range(49):
@@ -319,6 +374,8 @@ class Gumball:
 
         # plane pads
         for i in range(3):
+            if not self._usable("pad", i, axes, vdir):
+                continue
             u, v = axes[(i + 1) % 3], axes[(i + 2) % 3]
             c0 = anchor + (u + v) * PAD0 * s
             c1 = anchor + u * PAD1 * s + v * PAD0 * s
@@ -330,6 +387,8 @@ class Gumball:
 
         # shafts + cones + scale knobs
         for i in range(3):
+            if not self._usable("move", i, axes, vdir):
+                continue
             axis = axes[i]
             color = color_for(("move", i), AXIS_COLORS[i])
             a0 = anchor + axis * SHAFT0 * s
@@ -416,7 +475,7 @@ class Gumball:
         self._tris(mvp, np.asarray(tris, np.float32), color)
 
     def _knob(self, mvp, center, s, color):
-        cam = self.vp.camera
+        cam = self.vp._eye()
         right, up = cam.right_up()
         r = 0.06 * s
         c0 = center - right * r - up * r
@@ -426,8 +485,20 @@ class Gumball:
         self._tris(mvp, np.asarray([c0, c1, c2, c0, c2, c3], np.float32),
                    color)
 
+    def _paper(self, pts):
+        """The points to upload: as they are, or where they appear on a sheet.
+
+        The handles are built in the model, like everything a detail shows, so
+        on a sheet they come back out through the window that is showing them
+        rather than landing on the paper at the model's own numbers. Both
+        uploads go through here, so nothing drawn can miss it.
+        """
+        eye = self.vp._detail_eye()
+        return pts if eye is None else eye.to_paper(pts)
+
     def _lines(self, mvp, pts, color, width):
         vp = self.vp
+        pts = self._paper(pts)
         vp._preview.update(pts.reshape(-1, 3).astype(np.float32))
         vp._set_line_uniforms(mvp, color)
         vp._line_width(width)
@@ -436,6 +507,7 @@ class Gumball:
 
     def _tris(self, mvp, pts, color):
         vp = self.vp
+        pts = self._paper(pts)
         vp._preview.update(pts.astype(np.float32))
         vp._set_line_uniforms(mvp, color)
         GL.glBindVertexArray(vp._preview.vao)
@@ -450,8 +522,7 @@ class Gumball:
         if d is None:
             return None
         anchor = np.asarray(d["anchor"], float)
-        scr = self.vp.camera.project(np.asarray([anchor], float),
-                                     self.vp.width(), self.vp.height())[0]
+        scr = self._project([anchor])[0]
         if scr[2] <= 0:
             return None
         kind = d["handle"][0]
@@ -480,11 +551,10 @@ class Gumball:
             return None
         anchor, axes = state
         s = self._size_world(anchor)
-        cam = self.vp.camera
-        w, h = self.vp.width(), self.vp.height()
+        vdir = self._view_dir(anchor)     # what is not worth testing for
 
         def scr(p):
-            out = cam.project(np.asarray([p], float), w, h)[0]
+            out = self._project([p])[0]
             return out[:2] if out[2] > 0 else None
 
         cursor = np.array([px, py])
@@ -507,11 +577,15 @@ class Gumball:
 
         # scale knobs (smallest targets first)
         for i in range(3):
+            if not self._usable("scale", i, axes, vdir):
+                continue
             p = scr(anchor + axes[i] * SCALE_POS * s)
             if p is not None and np.linalg.norm(p - cursor) < 6.5:
                 return ("scale", i)
         # pads
         for i in range(3):
+            if not self._usable("pad", i, axes, vdir):
+                continue
             u, v = axes[(i + 1) % 3], axes[(i + 2) % 3]
             corners = [anchor + (u * a + v * b) * s
                        for a, b in ((PAD0, PAD0), (PAD1, PAD0),
@@ -521,6 +595,8 @@ class Gumball:
                 return ("pad", i)
         # arrows (shaft + cone)
         for i in range(3):
+            if not self._usable("move", i, axes, vdir):
+                continue
             a = scr(anchor + axes[i] * SHAFT0 * s)
             b = scr(anchor + axes[i] * CONE1 * s)
             if a is None or b is None:
@@ -529,6 +605,8 @@ class Gumball:
                 return ("move", i)
         # rotation circles
         for i in range(3):
+            if not self._usable("rot", i, axes, vdir):
+                continue
             u, v = axes[(i + 1) % 3], axes[(i + 2) % 3]
             best = np.inf
             for k in range(36):
@@ -599,7 +677,7 @@ class Gumball:
                 vp.selection.set([o.id for o in new_objs])
                 objs = new_objs
             originals = {o.id: o.shape for o in objs}
-        origin, direction = vp.camera.ray_through(px, py, vp.width(),
+        origin, direction = vp._eye().ray_through(px, py, vp.width(),
                                                   vp.height())
         kind, i = handle
         ref = None
@@ -641,7 +719,7 @@ class Gumball:
         vp = self.vp
         anchor, axes = d["anchor"], d["axes"]
         kind, i = d["handle"]
-        origin, direction = vp.camera.ray_through(px, py, vp.width(),
+        origin, direction = vp._eye().ray_through(px, py, vp.width(),
                                                   vp.height())
         uniform = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
         d["moved"] = True

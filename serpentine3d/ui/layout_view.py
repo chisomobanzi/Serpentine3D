@@ -78,8 +78,15 @@ class DetailEye:
         det = self.detail
         return (max(det.w, det.h) * det.scale_denom * 4 + 1000) * 0.5
 
-    def project(self, points, width: int, height: int) -> np.ndarray:
-        """Model points -> (N, 3) of screen x, screen y, depth from the eye."""
+    def project(self, points, width: int, height: int,
+                clipped: bool = True) -> np.ndarray:
+        """Model points -> (N, 3) of screen x, screen y, depth from the eye.
+
+        `clipped` off asks where a point would appear if the frame did not cut
+        it off, which is what the gumball wants: it is drawn over the drawing
+        rather than in it, and a handle you cannot reach because the object
+        nearly fills the window is no handle.
+        """
         from ..core.layout import detail_basis
         det = self.detail
         arr = np.asarray(points, float).reshape(-1, 3)
@@ -95,8 +102,9 @@ class DetailEye:
         # A detail clips what it shows to its own rectangle, so a point
         # outside it is not under the cursor however close the paper says it
         # came. Behind the eye is how everything here says "not pickable".
-        outside = (np.abs(u) > det.w / 2) | (np.abs(v) > det.h / 2)
-        out[outside, 2] = -1.0
+        if clipped:
+            outside = (np.abs(u) > det.w / 2) | (np.abs(v) > det.h / 2)
+            out[outside, 2] = -1.0
         return out
 
     def ray_through(self, px: float, py: float, width: int,
@@ -117,6 +125,20 @@ class DetailEye:
         from ..core.layout import detail_basis
         _d, right, up = detail_basis(self.detail)
         return right, up
+
+    def to_paper(self, points) -> np.ndarray:
+        """Model points as the paper millimetres they are drawn at.
+
+        The first of the two steps `project` takes, on its own: anything drawn
+        on a sheet in the model's own coordinates has to be brought out onto
+        the paper before the sheet's own transform can put it on screen.
+        """
+        from ..core.layout import detail_project
+        arr = np.asarray(points, np.float32).reshape(-1, 3)
+        out = np.zeros_like(arr)
+        for i, p in enumerate(arr):
+            out[i, :2] = detail_project(self.detail, p)
+        return out
 
 
 class LayoutView:

@@ -276,7 +276,9 @@ def test_clicking_in_a_detail_selects_the_model_object(sheet):
 def test_clicking_empty_space_in_a_detail_clears_the_selection(sheet):
     w, _lay, det, box, _wire = sheet
     w.selection.set([box.id])
-    _click(w, _frame(w, det, 0.5, 0.97))
+    # a corner of the frame: past the end of the box, and outside the reach of
+    # the gumball the selection puts at its centre
+    _click(w, _frame(w, det, 0.03, 0.03))
     assert w.selection.ids == []
 
 

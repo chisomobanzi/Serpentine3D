@@ -85,8 +85,25 @@
 
   Not yet: a detail in hidden-line or technical mode draws cached line work, so
   the object picked through one is selected everywhere but does not go gold in
-  that frame; and there is no gumball on a sheet, so what is picked is moved by
-  typing rather than by dragging a handle.
+  that frame.
+
+- The gumball comes with what you pick in a detail. Stepping into a detail and
+  clicking a model object puts the same handles on it that the model window
+  gives it, and they are dragged the same way: an arrow moves, a knob scales, a
+  pad moves in a plane, a circle rotates, and a click that does not move arms
+  the handle so an exact number can be typed instead. The readout follows the
+  drag on the paper. The axes are the detail's own — the plane it looks at —
+  rather than the model window's construction plane, so in a front view the
+  arrows go across and up the page and the third one runs away from you, which
+  is the way the drawing is being read.
+
+  A detail looks squarely down one axis, and squarely down an axis a third of
+  the handles have no drag in them: an arrow pointing straight at you cannot be
+  pushed anywhere and a circle seen exactly edge-on has no arc to follow. Those
+  are left out rather than drawn and refused — edge-on they land right on top of
+  the handles that do work, and a handle you cannot use is worse than no handle.
+  The rest are drawn over the drawing rather than in it, so an object that
+  nearly fills its frame still has handles you can reach past the edge of it.
 
 ### Fixed
 
