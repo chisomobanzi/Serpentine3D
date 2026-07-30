@@ -110,6 +110,12 @@ def cmd_layout(ctx):
 
 # ------------------------------------------------------------------ details
 
+def _frame(a, b) -> tuple:
+    """The rectangle two opposite corners make, in paper millimetres."""
+    return (min(a[0], b[0]), min(a[1], b[1]),
+            abs(b[0] - a[0]), abs(b[1] - a[1]))
+
+
 @command("detail", space="paper")
 def cmd_detail(ctx):
     lay = _active_layout(ctx)
@@ -117,8 +123,10 @@ def cmd_detail(ctx):
         ctx.echo("Switch to a layout first (create one with 'layout').")
         return
         yield  # pragma: no cover
-    c1 = yield PointReq("First corner of detail (on the paper)")
-    c2 = yield PointReq("Opposite corner", rubber_from=c1)
+    # The view and the scale come before the frame: they are what a frame is
+    # a window onto, so until they are answered there is nothing to show
+    # inside the rectangle being dragged — and knowing whether the model fits
+    # is the whole reason for dragging it slowly.
     view = yield OptionReq(
         "View direction",
         options=["Top", "Front", "Right", "Left", "Back", "Bottom",
@@ -130,26 +138,46 @@ def cmd_detail(ctx):
         ctx.echo(f"Could not parse scale '{scale_text}' — using 1:10.")
         denom = 10.0
 
-    x, y = min(c1[0], c2[0]), min(c1[1], c2[1])
-    w, h = abs(c2[0] - c1[0]), abs(c2[1] - c1[1])
-    if w < 5 or h < 5:
-        ctx.echo("Detail too small (min 5mm).")
-        return
     az, el = _VIEW_ANGLES[view.lower()]
     bounds = ctx.scene.bbox()
     target = [0.0, 0.0, 0.0]
     if bounds is not None:
         target = [(a + b) / 2 for a, b in zip(bounds[0], bounds[1])]
-    detail = DetailView(x=x, y=y, w=w, h=h, azimuth=az, elevation=el,
-                        target=target,
+    # One detail, sized as the cursor moves and then placed: the sheet caches
+    # a detail's hidden lines under its id, so a preview that made a new one
+    # every mouse move would re-project the whole model every mouse move.
+    detail = DetailView(azimuth=az, elevation=el, target=target,
                         perspective=(view == "Perspective"),
                         scale_denom=float(denom),
-                        display_mode="hidden")
+                        display_mode="wireframe")
     if view == "Perspective" and bounds is not None:
         import numpy as np
         radius = float(np.linalg.norm(
             np.subtract(bounds[1], bounds[0]))) / 2 or 10.0
         detail.perspective_distance = radius * 2.5
+
+    c1 = yield PointReq("First corner of detail (on the paper)")
+
+    def _frame_to(p):
+        x, y, w, h = _frame(c1, p)
+        if w < 1 or h < 1:
+            return None                  # nothing a frame that thin can show
+        detail.x, detail.y, detail.w, detail.h = x, y, w, h
+        return detail
+
+    # No rubber band: the gold frame already shows both corners, and a green
+    # diagonal drawn across the view being framed hides the one thing the
+    # preview is for.
+    c2 = yield PointReq("Opposite corner", preview_fn=_frame_to)
+
+    x, y, w, h = _frame(c1, c2)
+    if w < 5 or h < 5:
+        ctx.echo("Detail too small (min 5mm).")
+        return
+    detail.x, detail.y, detail.w, detail.h = x, y, w, h
+    # Wireframe was for keeping up with the cursor; the detail that stays on
+    # the sheet is a drawing.
+    detail.display_mode = "hidden"
     lay.details.append(detail)
     ctx.scene.notify()
     ctx.echo(f"Detail created: {view} at {detail.scale_text()} "

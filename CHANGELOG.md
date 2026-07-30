@@ -46,6 +46,19 @@
   be mistaken for one in the model. Colour falls back to the sheet's ink rather
   than to a layer's, so the reset beside the swatch reads "By sheet".
 
+- `detail` shows you the view while you are still deciding where to put it. The
+  frame is dragged as a gold dashed rectangle with the model live inside it, at
+  the scale you asked for, and a readout at the corner gives its width, its
+  height and that scale — so "will the plan fit on this sheet at 1:50" is a
+  question you answer by looking rather than by placing a detail and undoing it.
+  The view direction and the scale are asked first, because they are what the
+  frame is a window onto and there is nothing to draw inside it until they are
+  answered. The preview is wireframe while it moves and the placed detail is
+  hidden-line as before: a hidden-line pass is one projection of the whole model,
+  which is not something to repeat on every mouse move. There is no rubber band
+  on the second corner any more — the frame shows both corners, and a diagonal
+  drawn across the view being framed hides the one thing worth looking at.
+
 ### Fixed
 
 - The preview of what a command is about to make is drawn on a sheet, and in
@@ -57,6 +70,10 @@
   call now, so a paint path cannot pick up one and forget the other, and a
   preview of model geometry drawn inside a detail comes back out through that
   detail rather than sitting on the sheet at the model's own numbers.
+
+- A preview is cleared from every pane it was drawn in. It was set on all of
+  them and cleared on one, so in a split view the panes you were not working in
+  kept the last ghost of a finished command.
 
 - Edges stop going missing. A shape's edge list was de-duplicated on a key that
   described nothing: OCC hands back a fresh wrapper object each time it is asked

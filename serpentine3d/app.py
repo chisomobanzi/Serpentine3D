@@ -640,7 +640,10 @@ class MainWindow(QMainWindow):
         req = self.processor.request
         self.command_line.set_prompt(self.processor.prompt_text())
         self.command_line.set_options(self.processor.option_chips())
-        self.viewport.set_ghost(None)
+        # every pane, because a ghost is set on every pane: clearing one of
+        # them leaves a preview on the others that no command owns any more
+        for vp in self.all_viewports():
+            vp.set_ghost(None)
         self.command_line.point_pending = isinstance(req, PointReq)
         # Only guess at command names at the "Command" prompt; mid-command the
         # words belong to the command, not to the registry.

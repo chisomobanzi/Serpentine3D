@@ -50,6 +50,7 @@ class LayoutView:
         self.pan = np.array([0.0, 0.0])      # paper mm at viewport centre
         self.px_per_mm = 2.0
         self.entered_detail: str | None = None
+        self.ghost_detail = None                 # detail a command is sizing
         self.selected: list = []                 # [(kind, obj)] on this sheet
         self.corners: list = []                  # [(detail, index)] grips
         self.box: tuple | None = None            # live band, screen px
@@ -122,6 +123,7 @@ class LayoutView:
 
         for detail in lay.details:
             self._paint_detail(lay, detail, mvp)
+        self._paint_ghost_detail(mvp)
 
         # after the details: a border or a bubble drawn over a view is meant
         # to be seen, the same way the annotations on top of it are
@@ -160,13 +162,46 @@ class LayoutView:
             self._draw_segs(mvp, np.concatenate(
                 [s.reshape(-1, 2, 3) for s in segs]), color, width)
 
-    def _paint_detail(self, lay, detail, paper_mvp):
-        vp = self.vp
+    def _paint_detail_body(self, detail, paper_mvp):
+        """The view inside a detail's rectangle, however it is drawn."""
         mode = detail.display_mode
         if mode in ("wireframe", "shaded", "ghosted"):
             self._paint_detail_3d(detail, mode)
         else:
             self._paint_detail_hlr(detail, paper_mvp)
+
+    def set_ghost_detail(self, detail):
+        """The detail a running command is still sizing, or None.
+
+        A detail's hidden lines are cached under its id like any other's, so a
+        ghost that never got placed would leave the whole model's linework
+        behind it — that goes when the ghost does.
+        """
+        old = self.ghost_detail
+        if old is detail:
+            return
+        if old is not None:
+            lay = self.layout
+            if lay is None or not any(d is old for d in lay.details):
+                self._hlr_cache.pop(old.id, None)
+        self.ghost_detail = detail
+        self.vp.update()
+
+    def _paint_ghost_detail(self, paper_mvp):
+        """The detail a command is still drawing, so the frame is not a guess.
+
+        Gold and dashed: nothing on the sheet is gold until it is real.
+        """
+        detail = self.ghost_detail
+        if detail is None or detail.w < 1 or detail.h < 1:
+            return
+        self._paint_detail_body(detail, paper_mvp)
+        self._stroke_rect(paper_mvp, detail.x, detail.y, detail.w, detail.h,
+                          (*theme.SELECTION_COLOR, 1.0), dashed=True,
+                          width=1.6)
+
+    def _paint_detail(self, lay, detail, paper_mvp):
+        self._paint_detail_body(detail, paper_mvp)
         entered = detail.id == self.entered_detail
         if detail.show_border or entered:
             color = BORDER_ACTIVE if entered else BORDER_COLOR

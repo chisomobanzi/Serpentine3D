@@ -803,12 +803,23 @@ class Viewport(QOpenGLWidget):
         picking points — the number you are actually aiming for, without
         looking away from what you are drawing."""
         span = self._draw_span
+        ghost = (self.layout_view.ghost_detail if self.space != "model"
+                 else None)
         length = float(np.linalg.norm(span[1] - span[0])) if span else 0.0
-        if not length:
+        if not length and ghost is None:
             if not self._draw_readout.isHidden():
                 self._draw_readout.setVisible(False)
             return
-        if self.space == "model":
+        if ghost is not None:
+            # A detail is a frame, not a leg: its width and height are the
+            # numbers being aimed for, the scale beside them is what says
+            # whether the model will fit inside them, and the corner they meet
+            # at is where they belong — there is no band to hang them off.
+            cx, cy = self.layout_view.paper_to_screen(ghost.x + ghost.w,
+                                                      ghost.y + ghost.h)
+            text = (f"{ghost.w:.1f} × {ghost.h:.1f} mm"
+                    f" · {ghost.scale_text()}")
+        elif self.space == "model":
             scr = self.camera.project(np.asarray([span[1]], float),
                                       self.width(), self.height())[0]
             if scr[2] <= 0:                 # cursor point behind the camera
@@ -1807,7 +1818,19 @@ class Viewport(QOpenGLWidget):
     # ------------------------------------------------------------- public API
 
     def set_ghost(self, shape):
-        """Translucent preview of a pending command result (or None)."""
+        """Translucent preview of a pending command result (or None).
+
+        A pending detail view is a window onto the model rather than a shape,
+        so there is nothing to tessellate: the sheet draws it the way it draws
+        the details already on it.
+        """
+        from ..core.layout import DetailView
+        if isinstance(shape, DetailView):
+            self.layout_view.set_ghost_detail(shape)
+            self._update_draw_readout()   # the frame's size is the readout
+            self.update()
+            return
+        self.layout_view.set_ghost_detail(None)
         if shape is None:
             if self._ghost is not None:
                 self._ghost = None
