@@ -28,6 +28,16 @@
 
 ### Fixed
 
+- The preview of what a command is about to make is drawn on a sheet, and in
+  technical display mode. `rectangle` on a sheet showed a single line from the
+  first corner to the cursor and no rectangle — and so did `circle`, `arc` and
+  `ellipse` — because a sheet drew the rubber band and never asked for the shape
+  at all. Technical display mode in the model had lost it the same way, for every
+  command that previews one, `box` and `extrude` included. Both are drawn by one
+  call now, so a paint path cannot pick up one and forget the other, and a
+  preview of model geometry drawn inside a detail comes back out through that
+  detail rather than sitting on the sheet at the model's own numbers.
+
 - Edges stop going missing. A shape's edge list was de-duplicated on a key that
   described nothing: OCC hands back a fresh wrapper object each time it is asked
   for an edge's underlying shape, and the key was that wrapper's address. So a

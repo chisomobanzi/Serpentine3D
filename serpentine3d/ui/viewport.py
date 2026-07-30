@@ -696,7 +696,7 @@ class Viewport(QOpenGLWidget):
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
             self._sync_gpu()
             self.layout_view.paint()
-            self._draw_preview(self.layout_view._paper_mvp())
+            self._draw_pending(self.layout_view._paper_mvp())
             GL.glBindVertexArray(0)
             self._use(0)
             GL.glDisable(GL.GL_SCISSOR_TEST)
@@ -713,7 +713,7 @@ class Viewport(QOpenGLWidget):
 
         if self.display_mode == "technical":
             self._paint_technical(w, h)
-            self._draw_preview(mvp)
+            self._draw_pending(mvp)
             self._draw_selection_box(w, h)
             return
 
@@ -722,8 +722,7 @@ class Viewport(QOpenGLWidget):
         self._draw_image_planes(mvp)
         self._sync_gpu()
         self._draw_objects(mvp, view)
-        self._draw_ghost(mvp)
-        self._draw_preview(mvp)
+        self._draw_pending(mvp)
         self._draw_control_points(mvp)
         self._draw_combs(mvp)
         self.gumball.paint(mvp)
@@ -1853,27 +1852,65 @@ class Viewport(QOpenGLWidget):
             GL.glUniform4fv(self._uloc(prog, "uClips"),
                             len(clips), np.asarray(clips, np.float32))
 
-    def _draw_ghost(self, mvp):
+    def _ghost_geometry(self):
+        """The pending result's triangles and lines, where they are drawn.
+
+        The same journey the rubber band makes: a ghost of model geometry
+        drawn through a detail has to come back out through that detail, or
+        it lands on the sheet at the model's own numbers.
+        """
         dm = self._ghost
-        if dm is None or self._preview is None:
+        if dm is None:
+            return None, None
+        tris = (dm.vertices[dm.triangles.ravel()]
+                if dm.has_faces and len(dm.triangles) else None)
+        segs = (dm.edge_segments.reshape(-1, 3)
+                if len(dm.edge_segments) else None)
+        if self.space != "model" and self._drawing_through() is not None:
+            tris = None if tris is None else self._on_paper(tris)
+            segs = None if segs is None else self._on_paper(segs)
+        return tris, segs
+
+    def _draw_ghost(self, mvp):
+        if self._preview is None:
+            return
+        tris, segs = self._ghost_geometry()
+        if tris is None and segs is None:
             return
         gold = theme.SELECTION_COLOR
-        if dm.has_faces and len(dm.triangles):
-            pts = dm.vertices[dm.triangles.ravel()]
-            self._preview.update(pts.astype(np.float32))
+        # on a sheet everything is flat at z=0, so the order it is drawn in is
+        # the only thing that says what is on top — same reason the rubber
+        # band stops testing depth
+        flat = self.space != "model"
+        if flat:
+            GL.glDisable(GL.GL_DEPTH_TEST)
+        if tris is not None:
+            pts = tris.astype(np.float32)
+            self._preview.update(pts)
             self._set_line_uniforms(mvp, (*gold, 0.22))
             GL.glDepthMask(False)
             GL.glBindVertexArray(self._preview.vao)
             GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
             GL.glDepthMask(True)
-        if len(dm.edge_segments):
-            segs = dm.edge_segments.reshape(-1, 3).astype(np.float32)
+        if segs is not None:
+            segs = segs.astype(np.float32)
             self._preview.update(segs)
             self._set_line_uniforms(mvp, (*gold, 0.85))
             self._line_width(1.6)
             GL.glBindVertexArray(self._preview.vao)
             GL.glDrawArrays(GL.GL_LINES, 0, len(segs))
             self._line_width(1.0)
+        if flat:
+            GL.glEnable(GL.GL_DEPTH_TEST)
+
+    def _draw_pending(self, mvp):
+        """What the running command would make, and where you are drawing it.
+
+        One call, because a paint path that draws the rubber band and forgets
+        the ghost turns a rectangle into a line from corner to corner.
+        """
+        self._draw_ghost(mvp)
+        self._draw_preview(mvp)
 
     def set_preview(self, segments: np.ndarray | None,
                     markers: list | None = None):
