@@ -166,6 +166,12 @@ def _import_file(scene, path: str, ext: str, report) -> int:
                     if existing is None:
                         existing = scene.layers.create(
                             lname, meta.get("layer_color"))
+                        # A reference layer arrives switched off, the way
+                        # the file keeps it (GitHub #5).
+                        if not meta.get("layer_visible", True):
+                            scene.layers.set_visible(existing.id, False)
+                        if meta.get("layer_locked"):
+                            scene.layers.set_locked(existing.id, True)
                     layer_map[lname] = existing.id
                 layer_id = layer_map[lname]
             # Not `obj`: that name is the .obj importer, one branch above.
@@ -176,13 +182,16 @@ def _import_file(scene, path: str, ext: str, report) -> int:
                 added.color = meta["color"]
             if meta.get("material"):
                 added.material = dict(meta["material"])
+            if not meta.get("visible", True):
+                added.visible = False
             adding.tick(done / count, f"Adding object {done} of {count}")
         return len(items)
     raise ValueError(f"Unsupported import format: {ext}")
 
 
 def export_file(scene, path: str, only_ids: list | None = None,
-                thumbnail: bytes | None = None, stl_quality: str = "standard"):
+                thumbnail: bytes | None = None, stl_quality: str = "standard",
+                rhino_version: int = 8):
     """Export scene (or subset) to a file, format by extension."""
     ext = os.path.splitext(path)[1].lower()
     objs = scene.all()

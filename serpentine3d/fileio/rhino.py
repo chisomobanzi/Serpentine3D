@@ -625,8 +625,13 @@ def _worth_parallelising(path: str) -> bool:
 
 
 def read_layers(model) -> dict:
-    """{layer index: {name, color, material}} — plain data, so it can cross
-    a pipe."""
+    """{layer index: {name, color, material, visible, locked}} — plain data,
+    so it can cross a pipe.
+
+    Visible and Locked ride along because a working Rhino file keeps its
+    reference and construction layers switched off; ignoring the flags put
+    everything on show (GitHub #5).
+    """
     layers = {}
     for i in range(len(model.Layers)):
         layer = model.Layers[i]
@@ -635,6 +640,8 @@ def read_layers(model) -> dict:
             "name": layer.Name,
             "color": (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0),
             "material": layer.RenderMaterialIndex,
+            "visible": bool(layer.Visible),
+            "locked": bool(layer.Locked),
         }
     return layers
 
@@ -705,8 +712,17 @@ def object_appearance(attrs, layers: dict, materials: dict,
         # way the member follows the instance and not its own layer
         color = parent["color"] or parent["layer_color"]
 
+    # A member of a hidden instance is hidden with it, however the member's
+    # own flag reads inside the definition.
+    visible = bool(attrs.Visible)
+    if parent is not None:
+        visible = visible and parent.get("visible", True)
+
     return {"layer": layer.get("name"), "layer_color": layer.get("color"),
-            "color": color, "material": _shading(material)}
+            "layer_visible": layer.get("visible", True),
+            "layer_locked": layer.get("locked", False),
+            "color": color, "material": _shading(material),
+            "visible": visible}
 
 
 def _shading(material: dict | None) -> dict | None:
@@ -951,6 +967,8 @@ def export_3dm(scene, path: str, only_ids: list | None = None):
         rl.Name = layer.name
         rl.Color = (int(layer.color[0] * 255), int(layer.color[1] * 255),
                     int(layer.color[2] * 255), 255)
+        rl.Visible = bool(layer.visible)
+        rl.Locked = bool(layer.locked)
         idx = model.Layers.Add(rl)
         layer_index[layer.id] = idx
 
@@ -962,6 +980,9 @@ def export_3dm(scene, path: str, only_ids: list | None = None):
         attrs = r3.ObjectAttributes()
         attrs.Name = obj.name
         attrs.LayerIndex = layer_index.get(obj.layer_id, 0)
+        # Hidden goes with the object: a file saved mid-work should open
+        # elsewhere looking the way it was left (GitHub #5).
+        attrs.Visible = bool(obj.visible)
         # An object that overrides its layer has to say so, or opening a file
         # and saving it flattens every object onto its layer's colour.
         if obj.color is not None:
