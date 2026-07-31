@@ -188,15 +188,54 @@ def cmd_scale(ctx):
 
 @command("scalenu")
 def cmd_scale_nu(ctx):
+    """Scale by a different amount along each axis: type the three
+    factors, or grab a reference point and drag it to where it should end
+    up (live preview either way)."""
     objs = yield SelectReq("Select objects to scale (non-uniform)")
     center = yield PointReq("Base point")
-    sx = yield NumberReq("X factor", default=1.0)
-    sy = yield NumberReq("Y factor", default=1.0)
-    sz = yield NumberReq("Z factor", default=1.0)
+
+    def _apply(s, factors):
+        return g.scale(s, center, 1.0, factors=factors)
+
+    def _preview(factors):
+        if not all(abs(f) > 1e-9 for f in factors):
+            return None
+        return _ghost(objs, lambda s: _apply(s, factors))
+
+    ref = yield PointReq("X factor, or first reference point",
+                         rubber_from=center, allow_number=True,
+                         preview_fn=lambda v: _preview((v, 1.0, 1.0)))
+    if isinstance(ref, float):
+        sx = ref
+        sy = yield NumberReq("Y factor", default=1.0,
+                             preview_fn=lambda v: _preview((sx, v, 1.0)))
+        sz = yield NumberReq("Z factor", default=1.0,
+                             preview_fn=lambda v: _preview((sx, sy, v)))
+        factors = (sx, sy, sz)
+    else:
+        span = [r - c for c, r in zip(center, ref)]
+        if all(abs(d) < 1e-12 for d in span):
+            ctx.echo("Reference point is on the base point — cancelled.")
+            return
+
+        def _factors(p):
+            # Per axis, and only where the reference point gave one a
+            # length to be a ratio of: an axis it does not move along is
+            # not being asked about, so it keeps its size.
+            return tuple((c - b) / d if abs(d) > 1e-9 else 1.0
+                         for b, d, c in zip(center, span, p))
+
+        p2 = yield PointReq("Second reference point (drag to scale)",
+                            rubber_from=center,
+                            preview_fn=lambda p: _preview(_factors(p)))
+        factors = _factors(p2)
+    if not all(abs(f) > 1e-9 for f in factors):
+        ctx.echo("Zero scale factor — cancelled.")
+        return
     for o in objs:
-        ctx.scene.replace_shape(
-            o.id, g.scale(o.shape, center, 1.0, factors=(sx, sy, sz)))
-    ctx.echo(f"Scaled {len(objs)} object(s).")
+        ctx.scene.replace_shape(o.id, _apply(o.shape, factors))
+    ctx.echo("Scaled {} object(s) by {}.".format(
+        len(objs), " × ".join(f"{f:g}" for f in factors)))
 
 
 @command("mirror", aliases=("mi",))

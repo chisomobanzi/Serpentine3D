@@ -4,6 +4,19 @@
 
 ### Added
 
+- `scalenu` can be pointed at rather than typed at. Every other scale command
+  lets you grab a reference point and drag it to where it should end up;
+  scalenu wanted three numbers and showed you nothing until it was over,
+  which is the one scale where the numbers are hardest to work out in your
+  head, because there are three of them and each is about a different
+  direction. Its first prompt now takes a point as well as a factor: pick
+  one and a second point sets every axis at once, each by how much further
+  the point ended up than it started, with a ghost of the result following
+  the cursor. An axis the reference point does not move along has no
+  reference length, so nothing about it is being asked and it keeps its
+  size. Typing the factors works exactly as before, and now previews as you
+  type each one.
+
 - You can draw on the sheet itself. A border, a title strip, a detail bubble, a
   north arrow — `line`, `polyline`, `curve`, `circle`, `arc`, `ellipse` and
   `rectangle` now draw on the paper when you are on a sheet with no detail
