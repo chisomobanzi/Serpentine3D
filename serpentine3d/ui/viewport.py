@@ -459,7 +459,12 @@ class Viewport(QOpenGLWidget):
         self.selection = selection
         self.config = config
         self.camera = Camera()
-        self.display_mode = "shaded"        # shaded | wireframe | ghosted
+        # The configured default, not a hardcoded one: a wireframe person
+        # should not have to say so again every launch (GitHub #5). A value
+        # the config carries but no mode matches means shaded, not a crash.
+        mode = (config.get("display", "default_mode", default="shaded")
+                if config else "shaded")
+        self.display_mode = mode if mode in self.DISPLAY_MODES else "shaded"
         self._view_name = "perspective"     # last-picked named view (for HUD)
         self.grid_visible = True
         self.point_mode = False             # command wants a point click
@@ -2147,9 +2152,11 @@ class Viewport(QOpenGLWidget):
         self.update()
         return True
 
+    DISPLAY_MODES = ("shaded", "wireframe", "ghosted", "zebra",
+                     "curvature", "technical", "draft", "rendered")
+
     def set_display_mode(self, mode: str):
-        if mode not in ("shaded", "wireframe", "ghosted", "zebra",
-                        "curvature", "technical", "draft", "rendered"):
+        if mode not in self.DISPLAY_MODES:
             raise ValueError(f"Unknown display mode '{mode}'")
         if mode == "curvature":
             from ..core import tessellate as _tess

@@ -9,7 +9,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
+    QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView,
+    QLabel,
     QListWidget, QMessageBox, QPushButton, QRadioButton, QSlider, QSpinBox,
     QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -466,12 +467,27 @@ class SettingsDialog(QDialog):
         row2.addWidget(QLabel("units"))
         row2.addStretch(1)
         layout.addLayout(row2)
+
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("New viewports open in"))
+        self.cb_mode = QComboBox()
+        from .viewport import Viewport
+        for mode in Viewport.DISPLAY_MODES:
+            self.cb_mode.addItem(mode.capitalize(), mode)
+        current = self.cfg.get("display", "default_mode", default="shaded")
+        index = self.cb_mode.findData(current)
+        self.cb_mode.setCurrentIndex(index if index >= 0 else 0)
+        self.cb_mode.currentIndexChanged.connect(self._display_changed)
+        row3.addWidget(self.cb_mode)
+        row3.addStretch(1)
+        layout.addLayout(row3)
         layout.addStretch(1)
         return w
 
     def _display_changed(self, *_):
         self.cfg.set("display", "grid_extent", self.sp_extent.value())
         self.cfg.set("display", "grid_major", self.sp_major.value())
+        self.cfg.set("display", "default_mode", self.cb_mode.currentData())
         self.window.viewport.set_grid_params(self.sp_extent.value(),
                                              self.sp_major.value())
 

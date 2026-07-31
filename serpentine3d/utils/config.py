@@ -53,6 +53,16 @@ DEFAULTS = {
     "display": {
         "grid_extent": 100,
         "grid_major": 10,
+        # What a fresh viewport shows: shaded | wireframe | ghosted | zebra
+        # | curvature | technical | draft | rendered
+        "default_mode": "shaded",
+    },
+    # Window geometry, dock state and view layout from the last session,
+    # written on close — see MainWindow._remember_window.
+    "window": {
+        "geometry": "",
+        "state": "",
+        "layout": "single",
     },
 }
 

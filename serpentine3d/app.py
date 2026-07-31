@@ -126,6 +126,7 @@ class MainWindow(QMainWindow):
         # resizeDocks gets redistributed once the layout is realised)
         QTimer.singleShot(0, self._balance_docks)
         self._ai_dock = None                # created on first use
+        self._restore_window()              # last session's layout, if any
 
         # command engine
         self.ctx = CommandContext(self.scene, self.selection, self.history,
@@ -225,7 +226,11 @@ class MainWindow(QMainWindow):
     def _balance_docks(self):
         """Give the primary viewport the bulk of the window and keep the
         side panels + command strip compact. Runs once after show, when the
-        dock layout is realised."""
+        dock layout is realised — unless last session's layout was restored,
+        in which case the user already chose their widths and re-imposing
+        280 px would undo them every launch (GitHub #5)."""
+        if getattr(self, "_docks_restored", False):
+            return
         w = max(self.width(), 800)
         self.resizeDocks([self._primary_dock, self._prop_dock],
                          [w - 300, 280], Qt.Orientation.Horizontal)
@@ -1125,6 +1130,34 @@ class MainWindow(QMainWindow):
         if self.autosave.maybe_autosave():
             self.statusBar().showMessage("Autosaved.", 2500)
 
+    def _restore_window(self):
+        """Come back the way the window was left: geometry, dock sizes and
+        the quad layout all reset every launch, which read as "no standard
+        configuration" (GitHub #5). Restored state also means _balance_docks
+        must keep its hands off the panel widths the user chose.
+        """
+        from PySide6.QtCore import QByteArray
+        self._docks_restored = False
+        geometry = self.cfg.get("window", "geometry", default="")
+        if geometry:
+            self.restoreGeometry(QByteArray.fromBase64(geometry.encode()))
+        if self.cfg.get("window", "layout", default="single") == "quad":
+            # Before restoreState, so the aux docks exist to restore onto.
+            self.set_view_layout("quad")
+        state = self.cfg.get("window", "state", default="")
+        if state and self.restoreState(QByteArray.fromBase64(state.encode())):
+            self._docks_restored = True
+
+    def _remember_window(self):
+        self.cfg.set("window", "geometry",
+                     bytes(self.saveGeometry().toBase64()).decode())
+        self.cfg.set("window", "state",
+                     bytes(self.saveState().toBase64()).decode())
+        self.cfg.set("window", "layout",
+                     "quad" if self.aux_docks
+                     and self.aux_docks[0].isVisibleTo(self) else "single")
+        self.cfg.save()
+
     def closeEvent(self, ev):
         if self.dirty and self.scene.all():
             ret = QMessageBox.question(
@@ -1141,6 +1174,11 @@ class MainWindow(QMainWindow):
                 if self.dirty:          # save was cancelled
                     ev.ignore()
                     return
+        # Only a window somebody actually saw: a headless one (tests, a
+        # crashed pre-show launch) closing would overwrite the layout the
+        # user chose with default-constructed geometry.
+        if self.isVisible():
+            self._remember_window()
         self.autosave.clean_exit()
         super().closeEvent(ev)
 

@@ -55,7 +55,12 @@ QMainWindow, QWidget {
 
 QMainWindow::separator {
     background: #1b1c1f;
-    width: 3px; height: 3px;
+    /* 3px was nearly ungrabbable — the panels read as fixed-width (#5) */
+    width: 6px; height: 6px;
+}
+
+QMainWindow::separator:hover {
+    background: #8a6a2f;
 }
 
 QDockWidget {
