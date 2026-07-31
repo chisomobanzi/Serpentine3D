@@ -32,7 +32,7 @@ _KOFI = ("https://ko-fi.com/chisomobanzi/"
 
 _BLURB = ("An open-source NURBS surface modeller — freeform surfaces, solids "
           "and drafting sheets, on Linux, Windows and macOS.")
-_NAME_STORY = ("Named for the serpentine stone of Zimbabwean Shona "
+_NAME_STORY = ("Named after the serpentine stone of Zimbabwean Shona "
                "sculpture.")
 
 _QSS = f"""
