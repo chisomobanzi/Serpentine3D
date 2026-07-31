@@ -72,6 +72,7 @@ Nothing is bound out of the box.
 - **Tab** completes command names; **↑ / ↓** recall history.
 - **Enter** on an empty line repeats the last command; a **right-click** in
   the viewport is Enter — it runs what you've typed or repeats the last
-  command.
+  command. `delete` is never repeated, so a right-click after deleting
+  something repeats whatever you were doing before it instead.
 - Type command options inline (`cap=n`) or click the chips under the prompt.
 - ++f1++ opens the searchable [command reference](commands.md) inside the app.

@@ -4,7 +4,7 @@ from ..core import geometry as g
 from .base import NumberReq, OptionReq, SelectReq, TextReq, command
 
 
-@command("delete", aliases=("del", "erase"), space="any")
+@command("delete", aliases=("del", "erase"), space="any", repeatable=False)
 def cmd_delete(ctx):
     lv = ctx.sheet_view()
     if lv is not None:

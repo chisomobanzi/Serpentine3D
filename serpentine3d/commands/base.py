@@ -124,6 +124,11 @@ class CommandDef:
     aliases: tuple = ()
     label: str = ""
     mutates: bool = True
+    # Whether an empty Enter, or a right-click on an idle prompt, may repeat
+    # this command. Rhino keeps a list it will never repeat and delete is on
+    # it: right-clicking is a reflex, and a reflex should not be able to
+    # throw away the geometry that is still picked.
+    repeatable: bool = True
     # Which space this command's picked points are in: "model" coordinates,
     # "paper" millimetres on a sheet, or "any" for the few that read the
     # viewport and cope with either. Only a sheet can tell them apart, and
@@ -137,11 +142,12 @@ _ALIASES: dict[str, str] = {}
 
 
 def command(name: str, aliases: tuple = (), label: str = "",
-            mutates: bool = True, space: str = "model"):
+            mutates: bool = True, space: str = "model",
+            repeatable: bool = True):
     def wrap(fn):
         cd = CommandDef(name=name.lower(), fn=fn, aliases=aliases,
                         label=label or name.capitalize(), mutates=mutates,
-                        space=space)
+                        space=space, repeatable=repeatable)
         _REGISTRY[cd.name] = cd
         for a in aliases:
             _ALIASES[a.lower()] = cd.name
@@ -455,7 +461,11 @@ class CommandProcessor:
             return False
         self.active = cd
         self.picked_points = []
-        self.last_command = cd.name
+        if cd.repeatable:
+            # A command that is never repeated does not disturb the repeat
+            # target either: after delete, Enter still repeats whatever you
+            # were doing before it.
+            self.last_command = cd.name
         self.ctx.echo(f"> {cd.name}")
         if cd.mutates:
             self._start_revision = self.ctx.scene.revision
