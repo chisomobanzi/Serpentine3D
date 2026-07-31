@@ -21,7 +21,7 @@ construction plane, STEP/OBJ/FBX interchange, and a dark, focused interface.
 The whole modelling engine also runs headless, so the same geometry you build by
 hand can be scripted, batch-processed, or driven by an AI.
 
-Named for the serpentine stone of Zimbabwean Shona sculpture, and for the
+Named after the serpentine stone of Zimbabwean Shona sculpture, and the
 S-curve at the heart of NURBS geometry.
 
 ![Two interlinked bands modelled and rendered in Serpentine3D](assets/showcase.webp)
