@@ -914,8 +914,12 @@ class MainWindow(QMainWindow):
         untether(dlg)
         if dlg.exec() and dlg.selectedFiles():
             path = dlg.selectedFiles()[0]
+            # Some formats mean more than an extension — "Rhino 6 (*.3dm)"
+            # carries the version — so the caller can ask what was picked.
+            self._picked_filter = dlg.selectedNameFilter()
             return (fileio.ensure_suffix(path, dlg.selectedNameFilter())
                     if save else path)
+        self._picked_filter = ""
         return ""
 
     def _file_open(self):
@@ -1019,17 +1023,29 @@ class MainWindow(QMainWindow):
     def _file_save(self, force_dialog: bool = False):
         path = self.ctx.current_path
         if force_dialog or not path:
-            path = self._pick_file(save=True, title="Save",
-                                   name="untitled.serp",
-                                   filters="Serpentine3D (*.serp)")
+            # Rhino formats sit beside the native one: round-tripping a .3dm
+            # should not require finding Export (#5). _pick_file already
+            # gives a typed bare name the chosen filter's extension.
+            path = self._pick_file(
+                save=True, title="Save", name="untitled.serp",
+                filters="Serpentine3D (*.serp);;Rhino 8 (*.3dm);;"
+                        "Rhino 7 (*.3dm);;Rhino 6 (*.3dm);;Rhino 5 (*.3dm)")
             if not path:
                 return
-            if not path.endswith(".serp"):
-                path += ".serp"
+            self._save_rhino_version = fileio.rhino_version_from_filter(
+                getattr(self, "_picked_filter", ""))
         try:
-            fileio.export_file(self.scene, path)
+            fileio.export_file(self.scene, path,
+                               rhino_version=getattr(
+                                   self, "_save_rhino_version", 8))
             self.ctx.current_path = path
-            self.command_line.echo(f"Saved {path}")
+            if path.lower().endswith(".3dm"):
+                # Honest about the trade before anyone loses a sheet to it.
+                self.command_line.echo(
+                    f"Saved {path} — Rhino format; layouts and history "
+                    "are kept only in .serp")
+            else:
+                self.command_line.echo(f"Saved {path}")
             self.mark_saved()
             self.add_recent(path)
         except Exception as exc:                              # noqa: BLE001
@@ -1068,8 +1084,10 @@ class MainWindow(QMainWindow):
                 return
         try:
             ids = self.selection.ids or None
-            fileio.export_file(self.scene, path, only_ids=ids,
-                               stl_quality=stl_quality)
+            fileio.export_file(
+                self.scene, path, only_ids=ids, stl_quality=stl_quality,
+                rhino_version=fileio.rhino_version_from_filter(
+                    getattr(self, "_picked_filter", "")))
             scope = "selection" if ids else "scene"
             self.command_line.echo(f"Exported {scope} to {path}")
         except Exception as exc:                              # noqa: BLE001

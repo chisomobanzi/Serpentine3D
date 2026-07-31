@@ -34,9 +34,12 @@ def _thumbnail(ctx) -> bytes | None:
 @command("save", mutates=False)
 def cmd_save(ctx):
     default = getattr(ctx, "current_path", None)
-    path = yield TextReq("Save as (.serp path)", default=default)
+    path = yield TextReq("Save as (.serp or .3dm path)", default=default)
     path = _expand(path)
-    if not path.endswith(".serp"):
+    # Only a name with no writable extension gets the native one: typed
+    # "out.3dm" used to become out.3dm.serp, so saving to Rhino needed
+    # the menus (#5).
+    if os.path.splitext(path)[1].lower() not in fileio.EXPORT_EXTS:
         path += ".serp"
     fileio.export_file(ctx.scene, path, thumbnail=_thumbnail(ctx))
     ctx.current_path = path

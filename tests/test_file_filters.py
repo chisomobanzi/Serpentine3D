@@ -202,3 +202,21 @@ def test_unsupported_extension_still_rejected(tmp_path):
     path.write_bytes(b"")
     with pytest.raises(ValueError, match="Unsupported import format"):
         fileio.import_file(Scene(), str(path))
+
+
+def test_export_offers_every_rhino_version():
+    """GitHub #5: a file for a colleague on Rhino 6 must not need Rhino 8 to
+    open — the version is picked where the format is."""
+    f = fileio.export_filter()
+    for version in (8, 7, 6, 5):
+        assert f"Rhino {version} (*.3dm)" in f
+
+
+def test_rhino_version_reads_off_the_chosen_filter():
+    assert fileio.rhino_version_from_filter("Rhino 7 (*.3dm)") == 7
+    assert fileio.rhino_version_from_filter("Rhino 5 (*.3dm)") == 5
+    # anything else — old filter text, no filter, another format — means
+    # current, not a crash
+    assert fileio.rhino_version_from_filter("Rhino (*.3dm)") == 8
+    assert fileio.rhino_version_from_filter("STEP (*.step *.stp)") == 8
+    assert fileio.rhino_version_from_filter("") == 8

@@ -333,3 +333,51 @@ def test_a_scene_is_never_left_half_built(tmp_path):
     fileio.import_file(scene, path,
                        progress=lambda f, m: "Adding" not in m)
     assert len(scene.all()) == 1
+
+
+def test_3dm_export_honours_the_asked_version(scene, tmp_path):
+    """GitHub #5: the file must open in whatever Rhino the recipient runs."""
+    import rhino3dm as r3
+    for version in (5, 6, 7, 8):
+        path = str(tmp_path / f"v{version}.3dm")
+        fileio.export_file(scene, path, rhino_version=version)
+        back = r3.File3dm.Read(path)
+        assert back is not None
+        assert back.ArchiveVersion == version * 10
+        assert len(back.Objects)
+
+
+def test_save_command_keeps_a_typed_3dm_extension(scene, tmp_path):
+    """`save out.3dm` used to write out.3dm.serp — the .serp suffix was
+    forced onto anything typed, so saving to Rhino needed the menus (#5)."""
+    from serpentine3d.commands.file import cmd_save
+
+    class _Ctx:
+        def __init__(self):
+            self.scene = scene
+            self.current_path = None
+            self.window = None
+            self.viewport = None
+
+        def echo(self, msg):
+            self.said = msg
+
+    target = str(tmp_path / "typed.3dm")
+    gen = cmd_save(_Ctx())
+    next(gen)
+    try:
+        gen.send(target)
+    except StopIteration:
+        pass
+    assert os.path.exists(target)
+    assert not os.path.exists(target + ".serp")
+
+    # a bare name still gets the native suffix
+    bare = str(tmp_path / "untyped")
+    gen = cmd_save(_Ctx())
+    next(gen)
+    try:
+        gen.send(bare)
+    except StopIteration:
+        pass
+    assert os.path.exists(bare + ".serp")

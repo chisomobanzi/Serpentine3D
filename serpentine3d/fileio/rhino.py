@@ -1010,7 +1010,8 @@ def _write_material(model, seen: dict, material: dict) -> int:
     return seen[key]
 
 
-def export_3dm(scene, path: str, only_ids: list | None = None):
+def export_3dm(scene, path: str, only_ids: list | None = None,
+               version: int = 8):
     model = r3.File3dm()
     layer_index = {}
     for layer in scene.layers.all():
@@ -1065,5 +1066,5 @@ def export_3dm(scene, path: str, only_ids: list | None = None):
         rm.Normals.ComputeNormals()
         model.Objects.AddMesh(rm, attrs)
 
-    if not model.Write(path, 8):
+    if not model.Write(path, int(version)):
         raise IOError(f"Could not write 3dm file: {path}")

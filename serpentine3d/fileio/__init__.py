@@ -24,7 +24,12 @@ IMPORT_FORMATS = [
 EXPORT_FORMATS = [
     ("Serpentine3D", (".serp",)),
     ("STEP", (".step", ".stp")),
-    ("Rhino", (".3dm",)),
+    # One entry per Rhino version: the version is picked where the format is,
+    # because a file for a colleague on Rhino 6 must not need 8 to open (#5).
+    ("Rhino 8", (".3dm",)),
+    ("Rhino 7", (".3dm",)),
+    ("Rhino 6", (".3dm",)),
+    ("Rhino 5", (".3dm",)),
     ("Wavefront OBJ", (".obj",)),
     ("Autodesk FBX", (".fbx",)),
     ("STL — 3D printing", (".stl",)),
@@ -78,6 +83,23 @@ def suffix_for_filter(name_filter: str) -> str:
     if not head or not tail:
         return ""
     return tail.split()[0].rstrip(")").lower()
+
+
+def rhino_version_from_filter(name_filter: str) -> int:
+    """The Rhino version a chosen export filter names; 8 when it names none.
+
+    Parsed leniently — a filter that is not "Rhino N (…)" (another format,
+    old saved filter text, nothing at all) means current, never a crash.
+    """
+    head = name_filter.partition("(")[0].split()
+    if len(head) == 2 and head[0] == "Rhino":
+        try:
+            version = int(head[1])
+            if 2 <= version <= 8:
+                return version
+        except ValueError:
+            pass
+    return 8
 
 
 def ensure_suffix(path: str, name_filter: str) -> str:
@@ -225,7 +247,8 @@ def export_file(scene, path: str, only_ids: list | None = None,
         return
     if ext == ".3dm":
         from . import rhino
-        rhino.export_3dm(scene, path, only_ids=only_ids)
+        rhino.export_3dm(scene, path, only_ids=only_ids,
+                         version=rhino_version)
         return
     if ext == ".dxf":
         from . import dxf as dxf_mod

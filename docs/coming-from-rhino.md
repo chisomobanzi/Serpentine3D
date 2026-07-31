@@ -21,8 +21,9 @@ page maps your habits over and is honest about the gaps.
 - **Two-space drafting** — model space plus paper-space **layouts** with
   detail views, associative dimensions and hidden-line output. See
   [Make a drawing sheet](howto/drawings.md).
-- **Interchange** — reads and writes `.3dm` (exact NURBS curves), STEP, and
-  more. See [File formats](reference/file-formats.md).
+- **Interchange** — reads and writes `.3dm` for Rhino 5–8 (curves stay exact
+  NURBS; surfaces write as meshes — use STEP for an exact surface round
+  trip), STEP, and more. See [File formats](reference/file-formats.md).
 
 ## Bring your Rhino settings over
 

@@ -7,7 +7,7 @@ format is chosen by extension.
 |---|:---:|:---:|---|
 | `.serp` | ✓ | ✓ | Native: JSON scene + embedded binary BREP, thumbnail and metadata |
 | `.step` / `.stp` | ✓ | ✓ | Exact BREP exchange via OpenCASCADE |
-| `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps import as untrimmed NURBS faces, export as meshes; layers preserved |
+| `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps import as trimmed NURBS faces, export as meshes (use STEP for exact surfaces); layers with visibility/lock and hidden objects preserved; writes Rhino 5–8 |
 | `.obj` | ✓ | ✓ | Tessellated mesh with `.mtl` colours |
 | `.fbx` | ✓ | ✓ | Autodesk FBX (**binary**) — tessellated meshes; imports/exports cleanly to Blender, Maya, Unreal, Unity |
 | `.stl` | ✓ | ✓ | 3D printing — watertight binary (or ASCII) STL for slicers, with draft→ultra mesh-quality presets on export |
@@ -19,7 +19,9 @@ format is chosen by extension.
 
 ## Notes
 
-- **Exact vs. mesh.** `.serp`, `.step` and `.3dm` carry exact geometry.
+- **Exact vs. mesh.** `.serp` and `.step` carry exact geometry both ways;
+  `.3dm` is exact for curves but writes surfaces and solids as meshes — for
+  an exact round trip through Rhino, export STEP and `import` it there.
   `.obj`, `.fbx`, `.stl`, `.3mf`, `.glb` and `.usd` are tessellated meshes —
   the display deflection (or STL quality preset) sets how fine.
 - **Layouts.** `exportpdf` and `exportsvg` write drawing sheets, honouring
