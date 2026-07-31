@@ -4,6 +4,16 @@
 
 ### Added
 
+- The About box says which version you are running. It is opened for one of
+  two reasons — somebody wants to know what this program is, or somebody is
+  filing a bug and needs to say what they are on — and it answered the first
+  and not the second, because it never named its own version. It now carries
+  a build table: the version, Python, Qt, the OpenCASCADE kernel and the
+  host platform, each selectable, with one button that puts the lot on the
+  clipboard in the shape an issue wants it pasted. Links to the docs, the
+  repository and the support page sit alongside, and the licence and where
+  the name comes from are still on it.
+
 - `scalenu` can be pointed at rather than typed at. Every other scale command
   lets you grab a reference point and drag it to where it should end up;
   scalenu wanted three numbers and showed you nothing until it was over,

@@ -1327,11 +1327,8 @@ class MainWindow(QMainWindow):
         self.command_line.echo(f"Commands: {names}")
 
     def _about(self):
-        QMessageBox.about(
-            self, "About Serpentine3D",
-            "<b>Serpentine3D</b> — open-source NURBS surface modeller.<br>"
-            "OpenCASCADE geometry kernel · Qt · MCP-enabled.<br>"
-            "Named for the serpentine stone of Zimbabwean Shona sculpture.")
+        from .ui.about import AboutDialog
+        AboutDialog(self).exec()
 
     # -- update notifier -------------------------------------------------
     def start_update_check(self):
