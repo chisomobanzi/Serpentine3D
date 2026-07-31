@@ -202,6 +202,12 @@
 
 ### Fixed
 
+- The first right-click after a command finishes repeats it, instead of the
+  second. Right-click is Enter, and Enter on an idle prompt has always meant
+  repeat; the click that ends a command is taken by the command itself, so
+  the one after it was already a gesture made on an idle prompt. Swallowing
+  it meant the gesture did nothing the first time you made it.
+
 - A long filename in the welcome screen's recent list is shortened rather
   than scrolled to. The dialog is a fixed width, so the name could never be
   given room — it could only push a horizontal scrollbar into the bottom of

@@ -594,13 +594,15 @@ class MainWindow(QMainWindow):
     def _rmb_enter(self):
         """Right-click acts as Enter (Rhino-style): if a command is typed at
         the prompt it runs that; mid-command it commits the typed value; on an
-        empty prompt it repeats the last command -- except the single click
-        right after a command ends is the 'done' gesture and is absorbed."""
-        typed = bool(self.command_line.input.text().strip())
-        if not typed and not self.processor.busy \
-                and getattr(self, "_rmb_absorb", False):
-            self._rmb_absorb = False
-            return
+        empty prompt it repeats the last command.
+
+        Every click, including the first one after a command ends. That one
+        used to be swallowed on the grounds that it was the habitual click
+        that finishes a command rather than a request for anything — but the
+        click that finishes a command is taken by the command, and the one
+        after it is a gesture somebody made on an idle prompt, where it has
+        exactly one meaning.
+        """
         # Route through the command line so a typed name/value is submitted
         # exactly as Enter would (history, clear, then run/provide/repeat).
         self.command_line.submit_input()
@@ -633,11 +635,6 @@ class MainWindow(QMainWindow):
 
     def _sync_command_state(self):
         busy = self.processor.busy
-        if getattr(self, "_prev_busy", False) and not busy:
-            self._rmb_absorb = True          # one inert right-click
-        elif busy:
-            self._rmb_absorb = False
-        self._prev_busy = busy
         req = self.processor.request
         self.command_line.set_prompt(self.processor.prompt_text())
         self.command_line.set_options(self.processor.option_chips())
@@ -681,7 +678,6 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _on_object_clicked(self, obj_id: str, modifiers):
-        self._rmb_absorb = False             # fresh pick: next RMB repeats
         if isinstance(self.processor.request, SelectReq):
             self.processor.click_object(obj_id)
             return

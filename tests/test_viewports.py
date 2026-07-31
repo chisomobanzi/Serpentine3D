@@ -103,13 +103,14 @@ def test_right_click_finishes_selection(window):
 
 
 def test_right_click_repeats_last_command(window):
+    """The first one, not the second. A right-click on an idle prompt is
+    Enter, and Enter on an idle prompt has always repeated — asking for it
+    twice made the gesture mean nothing the first time it was made."""
     window.processor.run("circle")
     window.processor.provide_text("0,0,0")
     window.processor.provide_text("5")
     assert not window.processor.busy
-    _rmb_click(window.viewport)          # first click: the 'done' gesture
-    assert not window.processor.busy
-    _rmb_click(window.viewport)          # second click: repeat 'circle'
+    _rmb_click(window.viewport)          # repeat 'circle'
     assert window.processor.busy
     assert "circle" in window.processor.prompt_text().lower() \
         or "center" in window.processor.prompt_text().lower()
@@ -153,9 +154,7 @@ def test_command_terminates_cleanly_after_completion(window):
     assert not window.processor.busy     # terminated
     assert window.selection.ids == []    # selection released (Rhino-style)
 
-    _rmb_click(window.viewport)          # habit: RMB after finishing
-    assert not window.processor.busy     # inert 'done' gesture — no repeat
-    _rmb_click(window.viewport)          # deliberate second click repeats
+    _rmb_click(window.viewport)          # RMB after finishing repeats
     assert window.processor.busy
     from serpentine3d.commands.base import SelectReq
     assert isinstance(window.processor.request, SelectReq)
@@ -165,7 +164,7 @@ def test_command_terminates_cleanly_after_completion(window):
 
 
 def test_select_then_right_click_repeats_immediately(window):
-    """A fresh pick disarms the inert click: select + RMB = repeat now."""
+    """Picking an object and right-clicking repeats on what was picked."""
     from serpentine3d.core import geometry as g
     a = window.scene.add(g.make_box((0, 0, 0), 2, 2, 2))
     window.selection.set([a.id])
