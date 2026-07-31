@@ -319,6 +319,50 @@ def test_a_split_mesh_is_still_the_object_it_was(tmp_path, monkeypatch):
     assert names[1:] == ["box 0", "box 1", "box 2"]
 
 
+def test_a_brep_too_big_for_one_worker_is_shared_out(tmp_path, monkeypatch):
+    """A 19105-face unioned polysurface took ~2 minutes on a single worker
+    while the rest of the pool sat idle — the mesh treatment (share the one
+    object nobody else can help with), but for faces (GitHub #5)."""
+    path = _boxes_3dm(str(tmp_path / "boxes.3dm"), 3)
+    serial = rhino.import_3dm(path)
+    # A box brep has 6 faces; a threshold of 2 forces every box to split.
+    monkeypatch.setenv("SERP3D_IMPORT_SPLIT_FACES", "2")
+    parallel = rp.import_3dm_parallel(path, workers=3)
+
+    assert [n for n, _, _ in parallel] == [n for n, _, _ in serial]
+    assert [m for _, _, m in parallel] == [m for _, _, m in serial]
+    # Volume equality means the faces were not just collected but sewn back
+    # into the closed solid the serial path builds.
+    assert [geometry.volume(s) for _, s, _ in parallel] \
+        == pytest.approx([geometry.volume(s) for _, s, _ in serial], rel=1e-6)
+
+
+def test_the_bar_keeps_moving_while_a_brep_is_being_shared(tmp_path,
+                                                           monkeypatch):
+    path = _boxes_3dm(str(tmp_path / "boxes.3dm"), 3)
+    monkeypatch.setenv("SERP3D_IMPORT_SPLIT_FACES", "2")
+    seen = []
+    rp.import_3dm_parallel(path, progress=Progress(
+        lambda f, m: seen.append((f, m))), workers=3)
+    during = [f for f, m in seen if "piece" in m]
+    assert len(set(during)) > 1, seen
+    assert during == sorted(during), "progress went backwards"
+
+
+def test_face_split_thresholds_reuse_the_mesh_piece_policy():
+    """The cab's 19105-face brep against the default threshold: enough
+    pieces that sixteen workers all get some, not thousands of round trips."""
+    assert 16 <= rp._piece_count(19_105, 16, rp.split_faces()) <= 64
+    assert rp._piece_count(100, 16, rp.split_faces()) == 1
+
+
+def test_face_split_threshold_travels_in_the_environment(monkeypatch):
+    monkeypatch.setenv("SERP3D_IMPORT_SPLIT_FACES", "17")
+    assert rp.split_faces() == 17
+    monkeypatch.delenv("SERP3D_IMPORT_SPLIT_FACES")
+    assert rp.split_faces() == rp.SPLIT_FACES
+
+
 # ---------------------------------------- keeping the window alive meanwhile
 
 class _Idle:

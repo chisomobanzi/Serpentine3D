@@ -314,7 +314,52 @@ def _shape_box(shape, tol: float = 0.0):
             np.array([xx + tol, yx + tol, zx + tol]))
 
 
-def _edge_boxes(edges: list):
+class _EdgeBoxes:
+    """Bounding boxes of a brep's edges, with a sorted view for containment.
+
+    Unpacks like the `(los, his)` pair it used to be. The extra machinery
+    exists because even the vectorised sweep is paid once per face: on a
+    19105-face cab the compare over 48k boxes plus rebuilding the survivor
+    list cost ~2 ms per face, 40% of converting one. `contained` instead
+    binary-searches boxes sorted by their least x — a contained box starts
+    inside the target's x-span, so only that slice is compared — and hands
+    back original-order indices so the caller's edge list stays aligned.
+    """
+
+    def __init__(self, los, his):
+        self.los = los
+        self.his = his
+        self._order = None      # built on first containment query
+
+    def __iter__(self):
+        return iter((self.los, self.his))
+
+    def __getitem__(self, i):
+        return (self.los, self.his)[i]
+
+    def contained(self, lo, hi) -> np.ndarray:
+        """Indices of boxes lying wholly inside [lo, hi], ascending.
+
+        An unmeasurable (infinite) box is never contained — same answer the
+        full sweep gave, since -inf sits below any target corner.
+        """
+        if self._order is None:
+            self._order = np.argsort(self.los[:, 0], kind="stable")
+            self._slos = self.los[self._order]
+            self._shis = self.his[self._order]
+        # A contained box has lo[0] <= slos_x and shis_x <= hi[0], and
+        # slos_x <= shis_x ties both to the target's x-span.
+        i0 = np.searchsorted(self._slos[:, 0], lo[0], "left")
+        i1 = np.searchsorted(self._slos[:, 0], hi[0], "right")
+        sub = slice(i0, i1)
+        keep = (np.all(self._slos[sub] >= lo, axis=1)
+                & np.all(self._shis[sub] <= hi, axis=1))
+        found = self._order[sub][keep]
+        found.sort()
+        return found
+
+
+def _edge_boxes(edges: list) -> _EdgeBoxes:
     """Bounding boxes of `edges` as one (min, max) pair of (N, 3) arrays.
 
     Arrays rather than N small boxes because the prune below runs once per
@@ -332,8 +377,8 @@ def _edge_boxes(edges: list):
         else:
             los.append(box[0])
             his.append(box[1])
-    return (np.array(los, float).reshape(-1, 3),
-            np.array(his, float).reshape(-1, 3))
+    return _EdgeBoxes(np.array(los, float).reshape(-1, 3),
+                      np.array(his, float).reshape(-1, 3))
 
 
 def _edges_near(face, edges: list, boxes, tol: float) -> list:
@@ -356,7 +401,8 @@ def _edges_near(face, edges: list, boxes, tol: float) -> list:
     lo, hi = target
     los, his = boxes
     keep = np.all((los <= hi) & (his >= lo), axis=1)
-    return [e for e, k in zip(edges, keep) if k]
+    # Indexing the few survivors beats walking all N edges in a zip.
+    return [edges[i] for i in np.flatnonzero(keep)]
 
 
 def _edges_bounding(face, edges: list, boxes, tol: float) -> list:
@@ -371,9 +417,7 @@ def _edges_bounding(face, edges: list, boxes, tol: float) -> list:
     if target is None or not edges:
         return edges
     lo, hi = target
-    los, his = boxes
-    keep = np.all((los >= lo) & (his <= hi), axis=1)
-    return [e for e, k in zip(edges, keep) if k]
+    return [edges[i] for i in boxes.contained(lo, hi)]
 
 
 def _edges_cutting(face, surf, edges: list, boxes, tol: float) -> list:
@@ -480,9 +524,61 @@ def _trimmed_face(surf, edges: list):
         return None
 
 
+def _face_shapes(brep, fi: int, occ_edges: list, edge_boxes) -> list:
+    """One face of a Rhino brep as [shapes] — exactly trimmed when the trim
+    can be rebuilt, its render mesh when it cannot.
+
+    The loop body of `_import_brep`, split out so the parallel importer can
+    convert a face range with a shared edge table: a 19105-face unioned
+    polysurface is otherwise one worker's problem for two minutes while the
+    rest of the pool watches (GitHub #5).
+    """
+    from OCP.BRep import BRep_Tool
+    rface = brep.Faces[fi]
+    try:
+        face = _r3_surface_to_face(rface.ToNurbsSurface())
+    except Exception:
+        face = None
+    if face is None:
+        mesh = _face_mesh_shape(rface)
+        return [mesh] if mesh is not None else []
+
+    (mn, mx) = geometry.bbox(face)
+    span = float(np.linalg.norm(np.subtract(mx, mn)))
+    tol = max(span * 0.02, 1e-4)
+
+    # Only edges that can reach this face can bound or cut it, and both
+    # ways of trimming below cost time per edge. Prune once, use twice.
+    etol = max(span * 1e-4, 1e-6)
+
+    # Preferred path: rebuild the exact trim from the brep's 3D edges
+    # that lie on this face's surface. Works with no render mesh and
+    # for any face count, unlike the split-and-classify fallback.
+    surf = BRep_Tool.Surface_s(geometry.occ.to_face(face))
+    boundary = _edges_on_surface(
+        surf, _edges_bounding(face, occ_edges, edge_boxes, etol), etol)
+    exact = _trimmed_face(surf, boundary) if boundary else None
+    if exact is not None:
+        return [exact]
+
+    pieces = _split_face_by_edges(
+        face, _edges_cutting(face, surf, occ_edges, edge_boxes, etol))
+    if not pieces:
+        return [face]
+    # trimmed face: resolve which pieces are real
+    resolved = None
+    mesh = _face_mesh_shape(rface)
+    if mesh is not None:
+        kept = _classify_by_mesh(pieces, mesh, tol)
+        if kept:
+            resolved = kept
+    if resolved is None:
+        resolved = [mesh] if mesh is not None else [face]
+    return resolved
+
+
 def _import_brep(brep, report=None) -> list:
     """Faces of a Rhino brep as OCC faces, recovering trims when possible."""
-    from OCP.BRep import BRep_Tool
     report = report or Progress()
     occ_edges = _brep_edges_to_occ(brep)
     edge_boxes = _edge_boxes(occ_edges)
@@ -496,52 +592,7 @@ def _import_brep(brep, report=None) -> list:
         # per face, not per object: one polysurface can be the whole import
         report(fi / total,
                f"{report.label} — face {fi + 1} of {total}" if detail else "")
-        rface = brep.Faces[fi]
-        try:
-            face = _r3_surface_to_face(rface.ToNurbsSurface())
-        except Exception:
-            face = None
-        if face is None:
-            mesh = _face_mesh_shape(rface)
-            if mesh is not None:
-                faces.append(mesh)
-            continue
-
-        (mn, mx) = geometry.bbox(face)
-        import numpy as np
-        span = float(np.linalg.norm(np.subtract(mx, mn)))
-        tol = max(span * 0.02, 1e-4)
-
-        # Only edges that can reach this face can bound or cut it, and both
-        # ways of trimming below cost time per edge. Prune once, use twice.
-        etol = max(span * 1e-4, 1e-6)
-
-        # Preferred path: rebuild the exact trim from the brep's 3D edges
-        # that lie on this face's surface. Works with no render mesh and
-        # for any face count, unlike the split-and-classify fallback.
-        surf = BRep_Tool.Surface_s(geometry.occ.to_face(face))
-        boundary = _edges_on_surface(
-            surf, _edges_bounding(face, occ_edges, edge_boxes, etol), etol)
-        exact = _trimmed_face(surf, boundary) if boundary else None
-        if exact is not None:
-            faces.append(exact)
-            continue
-
-        pieces = _split_face_by_edges(
-            face, _edges_cutting(face, surf, occ_edges, edge_boxes, etol))
-        if pieces:
-            # trimmed face: resolve which pieces are real
-            resolved = None
-            mesh = _face_mesh_shape(rface)
-            if mesh is not None:
-                kept = _classify_by_mesh(pieces, mesh, tol)
-                if kept:
-                    resolved = kept
-            if resolved is None:
-                resolved = [mesh] if mesh is not None else [face]
-            faces.extend(resolved)
-        else:
-            faces.append(face)
+        faces.extend(_face_shapes(brep, fi, occ_edges, edge_boxes))
 
     return _assemble_faces(faces)
 

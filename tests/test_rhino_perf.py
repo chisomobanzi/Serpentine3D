@@ -156,6 +156,34 @@ def test_reusing_the_projector_gives_the_same_answer():
     assert len(on) == 16                    # every coplanar edge in the grid
 
 
+def test_containment_query_matches_brute_force():
+    """The sorted view behind `_edges_bounding` must agree exactly with the
+    plain sweep it replaces, unmeasurable boxes included: at cab scale the
+    per-face sweep of 48k edge boxes was ~2 ms, 40% of the face's whole
+    conversion, so the prune itself needed pruning."""
+    rng = np.random.default_rng(7)
+    los = rng.uniform(0, 100, (500, 3))
+    his = los + rng.uniform(0, 10, (500, 3))
+    los[13] = [-np.inf] * 3     # an edge nobody could measure
+    his[13] = [np.inf] * 3
+    boxes = rhino._EdgeBoxes(los, his)
+    for _ in range(50):
+        lo = rng.uniform(0, 90, 3)
+        hi = lo + rng.uniform(5, 40, 3)
+        want = np.flatnonzero(np.all(los >= lo, axis=1)
+                              & np.all(his <= hi, axis=1))
+        got = boxes.contained(lo, hi)
+        assert np.array_equal(np.sort(got), want)
+
+
+def test_edge_boxes_still_unpacks_like_the_pair_it_was():
+    _, edges = _grid(2)
+    boxes = rhino._edge_boxes(edges)
+    los, his = boxes
+    assert los.shape == (8, 3) and his.shape == (8, 3)
+    assert np.array_equal(boxes[0], los)
+
+
 def test_an_unmeasurable_box_prunes_nothing():
     """A prefilter may only ever discard what it is sure about, so an edge
     whose box can't be measured has to survive."""

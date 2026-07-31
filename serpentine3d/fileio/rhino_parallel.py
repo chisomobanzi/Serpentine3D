@@ -86,6 +86,13 @@ MAX_WORKERS_WITHOUT_FORK = 4
 # through the pool costs more than the reading.
 SPLIT_VERTICES = 200_000
 
+# Faces past which one brep is converted by several workers instead of one.
+# Same reasoning at cab scale: a 19105-face unioned polysurface is about two
+# minutes of trim recovery, and nobody else can touch it while one worker
+# grinds. Below the threshold each worker rebuilding the brep's edge table
+# for itself costs more than the sharing saves.
+SPLIT_FACES = 512
+
 
 def _available_cores() -> int:
     """Cores this process may actually run on, not the ones the box has.
@@ -126,6 +133,22 @@ def split_vertices(requested: int | None = None) -> int:
         except (TypeError, ValueError):
             pass
     return SPLIT_VERTICES
+
+
+def split_faces(requested: int | None = None) -> int:
+    """Faces past which a brep is worth more than one worker.
+
+    SERP3D_IMPORT_SPLIT_FACES overrides it, the same way the vertex
+    threshold travels.
+    """
+    if requested is None:
+        requested = os.environ.get("SERP3D_IMPORT_SPLIT_FACES")
+    if requested:
+        try:
+            return max(1, int(requested))
+        except (TypeError, ValueError):
+            pass
+    return SPLIT_FACES
 
 
 def _piece_count(vertices: int, workers: int, limit: int) -> int:
@@ -242,13 +265,15 @@ def _convert(indices: list[int]):
     An object that brings nothing at all, which is what a definition's own
     content is, answers with an empty one.
 
-    A mesh too big for one worker is not converted here. Its vertex and face
-    counts come back instead, as `size`, and the reader shares the reading of
-    it out; everything else answers with `size` None and its shapes.
+    An object too big for one worker is not converted here. Its size comes
+    back instead — ("mesh", vertices, faces) or ("brep", faces) — and the
+    reader shares the work out; everything else answers with `size` None and
+    its shapes.
     """
     from . import rhino
 
     limit = split_vertices()
+    flimit = split_faces()
     out = []
     for i in indices:
         obj = _MODEL.Objects[i]
@@ -262,7 +287,11 @@ def _convert(indices: list[int]):
         meta = rhino.object_appearance(attrs, _LAYERS, _MATERIALS)
         if isinstance(geo, r3.Mesh) and len(geo.Vertices) > limit:
             out.append((i, [(attrs.Name or "", meta, [])],
-                        (len(geo.Vertices), len(geo.Faces))))
+                        ("mesh", len(geo.Vertices), len(geo.Faces))))
+            continue
+        if isinstance(geo, r3.Brep) and len(geo.Faces) > flimit:
+            out.append((i, [(attrs.Name or "", meta, [])],
+                        ("brep", len(geo.Faces))))
             continue
         if isinstance(geo, r3.InstanceReference):
             # Expanded whole, however big its members are: sharing one out
@@ -316,6 +345,42 @@ def _read_piece(job):
             np.array(tris, np.uint32).reshape(-1, 3))
 
 
+# One brep's edge table per worker: pieces of the same brep land on the same
+# worker more than once, and rebuilding 48k edges per piece would eat what
+# the sharing saves. Kept to the brep in hand — two giants rarely interleave,
+# and the table is most of a gigabyte-file's edges.
+_BREP_CACHE: dict = {}
+
+
+def _brep_piece(job):
+    """One run of faces of one brep: (object index, piece number, [encoded]).
+
+    The faces convert independently; only sewing them back together needs
+    them all, and the reader does that when the last piece lands.
+    """
+    index, part, flo, fhi = job
+    from . import rhino
+    brep = _MODEL.Objects[index].Geometry
+    cached = _BREP_CACHE.get(index)
+    if cached is None:
+        edges = rhino._brep_edges_to_occ(brep)
+        cached = (edges, rhino._edge_boxes(edges))
+        _BREP_CACHE.clear()
+        _BREP_CACHE[index] = cached
+    shapes = []
+    for fi in range(flo, fhi):
+        shapes.extend(rhino._face_shapes(brep, fi, *cached))
+    return (index, part, [_encode(s) for s in shapes
+                          if s is not None and not s.IsNull()])
+
+
+def _convert_piece(job):
+    """One slice of one deferred object, whichever kind it is."""
+    if job[0] == "mesh":
+        return ("mesh", *_read_piece(job[1:]))
+    return ("brep", *_brep_piece(job[1:]))
+
+
 def _convert_in_pool(path: str, workers: int, cancel=None):
     """Read the file, convert it across `workers` processes, yield as it goes.
 
@@ -367,40 +432,59 @@ def _share_out(pool, deferred, done, total, workers, cancel):
     They are left till last because nothing knows an object's size until a
     worker has looked at it, and asking beforehand means the reader walking
     the file alone. By the time they come round the pool is otherwise idle,
-    so the pieces of every deferred mesh go in together and the last object
+    so the pieces of every deferred object go in together and the last one
     finishes in about the time one worker would have needed for a sixteenth
-    of it.
+    of it. Meshes split into vertex ranges and breps into face ranges, and
+    both kinds ride one queue so neither waits on the other.
     """
     limit = split_vertices()
+    flimit = split_faces()
     jobs, held = [], {}
-    for index, (_, _meta, (vertices, faces)) in deferred.items():
-        parts = _piece_count(vertices, workers, limit)
-        spans = zip(_pieces(vertices, parts), _pieces(faces, parts))
-        held[index] = [None] * parts
-        for part, ((vlo, vhi), (flo, fhi)) in enumerate(spans):
-            jobs.append((index, part, vlo, vhi, flo, fhi))
+    for index, (_, _meta, size) in deferred.items():
+        if size[0] == "mesh":
+            _, vertices, faces = size
+            parts = _piece_count(vertices, workers, limit)
+            spans = zip(_pieces(vertices, parts), _pieces(faces, parts))
+            held[index] = [None] * parts
+            for part, ((vlo, vhi), (flo, fhi)) in enumerate(spans):
+                jobs.append(("mesh", index, part, vlo, vhi, flo, fhi))
+        else:
+            parts = _piece_count(size[1], workers, flimit)
+            held[index] = [None] * parts
+            for part, (flo, fhi) in enumerate(_pieces(size[1], parts)):
+                jobs.append(("brep", index, part, flo, fhi))
 
     # The object count cannot move while a single object is in hand, so the
     # pieces report instead — a bar that stops is a bar that has hung.
     lo, span = done / (total or 1), len(deferred) / (total or 1)
-    for k, (index, part, verts, tris) in enumerate(
-            pool.imap_unordered(_read_piece, jobs), 1):
+    for k, result in enumerate(
+            pool.imap_unordered(_convert_piece, jobs), 1):
         if cancel is not None and cancel.is_set():
             pool.terminate()
             return
+        kind, index, part = result[0], result[1], result[2]
         pieces = held[index]
-        pieces[part] = (verts, tris)
+        pieces[part] = result[3:] if kind == "mesh" else result[3]
         yield ("status", lo + span * k / len(jobs),
-               f"Reading a large mesh, {k} of {len(jobs)} pieces")
+               f"Converting large objects, {k} of {len(jobs)} pieces")
         if all(piece is not None for piece in pieces):
-            shape = MeshShape(
-                np.concatenate([piece[0] for piece in pieces]),
-                np.concatenate([piece[1] for piece in pieces]))
-            del held[index]
             name, meta, _ = deferred[index]
+            if kind == "mesh":
+                encoded = [_encode(MeshShape(
+                    np.concatenate([piece[0] for piece in pieces]),
+                    np.concatenate([piece[1] for piece in pieces])))]
+            else:
+                # Sewing wants every face at once, and it is cheap next to
+                # converting them — about a second for 19k faces — so the
+                # reader does it here rather than holding the pool hostage.
+                from . import rhino
+                shapes = [_decode(p) for piece in pieces for p in piece]
+                encoded = [_encode(s) for s in rhino._assemble_faces(shapes)
+                           if s is not None and not s.IsNull()]
+            del held[index]
             done += 1
             yield ("batch", done, total,
-                   [(index, [(name, meta, [_encode(shape)])])])
+                   [(index, [(name, meta, encoded)])])
 
 
 def _read_file(path: str, workers: int, conn, cancel):
