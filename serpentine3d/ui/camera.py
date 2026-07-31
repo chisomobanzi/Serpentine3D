@@ -59,6 +59,7 @@ class Camera:
         self.fov = 45.0
         self.sensor_name = "Super35"
         self.projection = "perspective"        # or "parallel" (orthographic)
+        self.scene_bounds = None               # ((x,y,z),(x,y,z)); clip_planes
         self._vp_cache = None                  # see _view_proj
 
     @property
@@ -97,18 +98,63 @@ class Camera:
             up = Z_UP
         return look_at(self.position, self.target, up)
 
+    def clip_planes(self) -> tuple[float, float]:
+        """Near and far planes wrapped around the scene, not the zoom.
+
+        They were derived from `distance` alone — near floored at an absolute
+        0.01 and far at `distance * 100 + 1000` — which reads as sensible
+        until someone zooms in on a small detail of a big model: `distance`
+        shrinks, the far plane collapses to a bubble around the detail, and
+        the rest of the model vanishes (GitHub #5, "exclusion" through the
+        translator). The viewport keeps `scene_bounds` current; with it the
+        far plane reaches the farthest corner wherever the camera stands,
+        and the near plane scales with the zoom instead of stopping at a
+        floor a millimetre-scale detail can never fit inside. The old
+        arithmetic stays as the fallback for a camera no one told about a
+        scene.
+        """
+        d = self.distance
+        if self.scene_bounds is None:
+            if self.projection == "parallel":
+                depth = d * 100.0 + 1000.0
+                return d - depth, d + depth
+            return max(d * 0.001, 0.01), d * 100.0 + 1000.0
+
+        mn, mx = (np.asarray(self.scene_bounds[0], float),
+                  np.asarray(self.scene_bounds[1], float))
+        corners = np.array([(x, y, z)
+                            for x in (mn[0], mx[0])
+                            for y in (mn[1], mx[1])
+                            for z in (mn[2], mx[2])])
+        eye = self.position
+
+        if self.projection == "parallel":
+            # Depth along the view direction; negative is fine in ortho, a
+            # corner behind the eye plane still projects.
+            fwd = normalize(self.target - eye)
+            depths = (corners - eye) @ fwd
+            span = float(depths.max() - depths.min())
+            pad = max(span * 0.05, d * 0.05, 1.0)
+            return float(depths.min()) - pad, float(depths.max()) + pad
+
+        # Euclidean distance bounds depth along any forward, so the plane
+        # holds however the camera turns about its target.
+        farthest = float(np.linalg.norm(corners - eye, axis=1).max())
+        far = max(farthest * 1.05, d * 1.05, 1e-3)
+        # Proportional to the zoom, but never so deep a ratio that the
+        # depth buffer runs out of teeth across the scene.
+        near = max(d * 0.001, far * 1e-6)
+        return near, far
+
     def proj_matrix(self, width: int, height: int) -> np.ndarray:
         aspect = width / max(height, 1)
+        near, far = self.clip_planes()
         if self.projection == "parallel":
             # match the perspective scale at the target plane, so switching
             # projection and zooming (distance) stay visually consistent
             half_h = self.distance * math.tan(math.radians(self.fov) / 2)
             half_w = half_h * aspect
-            depth = self.distance * 100.0 + 1000.0   # slab centred on target
-            return ortho(-half_w, half_w, -half_h, half_h,
-                         self.distance - depth, self.distance + depth)
-        near = max(self.distance * 0.001, 0.01)
-        far = self.distance * 100.0 + 1000.0
+            return ortho(-half_w, half_w, -half_h, half_h, near, far)
         return perspective(self.fov, aspect, near, far)
 
     def right_up(self) -> tuple[np.ndarray, np.ndarray]:
@@ -139,7 +185,9 @@ class Camera:
 
     def zoom(self, steps: float):
         self.distance *= math.pow(0.88, steps)
-        self.distance = max(0.01, min(self.distance, 1e6))
+        # The floor is numerical, not ergonomic: 0.01 stopped a
+        # millimetre-scale detail from ever filling the frame (GitHub #5).
+        self.distance = max(1e-6, min(self.distance, 1e9))
 
     def zoom_extents(self, bbox: tuple | None, aspect: float = 1.0):
         """Pull back until the box just fills the frame.
@@ -241,8 +289,11 @@ class Camera:
         setter, so it cannot outlive a move it did not hear about: every
         field here is public and callers do assign to them directly.
         """
+        bounds = self.scene_bounds
         key = (width, height, self.projection, self.fov, self.distance,
-               self.azimuth, self.elevation, tuple(self.target))
+               self.azimuth, self.elevation, tuple(self.target),
+               None if bounds is None else (tuple(bounds[0]),
+                                            tuple(bounds[1])))
         cached = self._vp_cache
         if cached is None or cached[0] != key:
             pos = self.position

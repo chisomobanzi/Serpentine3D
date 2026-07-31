@@ -519,6 +519,12 @@ class Viewport(QOpenGLWidget):
         self._box_active = False
         self._gpu: dict[str, _GpuObject] = {}
         self._grid = None
+        self._grid_params = (
+            int(config.get("display", "grid_extent", default=100))
+            if config else 100,
+            int(config.get("display", "grid_major", default=10))
+            if config else 10)
+        self._cam_bounds_key = None         # see _refresh_camera_bounds
         # heavy shapes tessellate off the UI thread; bbox shown meanwhile
         self._tess_pool = None                     # created on first use
         # id -> (the shape being meshed, its bbox segments)
@@ -607,11 +613,8 @@ class Viewport(QOpenGLWidget):
         GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, False, 0,
                                  ctypes.c_void_p(0))
         GL.glBindVertexArray(0)
-        extent = (int(self.config.get("display", "grid_extent", default=100))
-                  if self.config else 100)
-        major = (int(self.config.get("display", "grid_major", default=10))
-                 if self.config else 10)
-        self._build_grid(extent=extent, major=major)
+        self._build_grid(extent=self._grid_params[0],
+                         major=self._grid_params[1])
         self._preview = _LineBatch(np.zeros((0, 3), np.float32), dynamic=True)
         # forward-compatible core contexts reject widths > 1.0 regardless of
         # the advertised range, so probe rather than trust the query
@@ -713,6 +716,7 @@ class Viewport(QOpenGLWidget):
             self._update_draw_readout()  # follow the paper when the view moves
             return
 
+        self._refresh_camera_bounds()
         view = self.camera.view_matrix()
         mvp = (self.camera.proj_matrix(w, h) @ view).astype(np.float32)
 
@@ -1322,6 +1326,31 @@ class Viewport(QOpenGLWidget):
 
     def _on_tess_done(self):
         self.update()
+
+    def _refresh_camera_bounds(self):
+        """Tell the camera what the drawing spans, so the clip planes wrap
+        the model instead of the zoom (GitHub #5).
+
+        Recomputed only when something changed: the bbox sweep is a Python
+        loop over every visible object, which at cave-file scale is too dear
+        to pay per frame. The grid rides along because it is drawn with the
+        same projection — a far plane snug around a small model would
+        otherwise crop the grid it sits on.
+        """
+        key = (self.scene.revision, self._grid_params, self.grid_visible)
+        if self._cam_bounds_key == key:
+            return
+        self._cam_bounds_key = key
+        box = self.scene.bbox()
+        if self.grid_visible:
+            extent = float(self._grid_params[0])
+            grid = ((-extent, -extent, 0.0), (extent, extent, 0.0))
+            if box is None:
+                box = grid
+            else:
+                box = (tuple(min(a, b) for a, b in zip(box[0], grid[0])),
+                       tuple(max(a, b) for a, b in zip(box[1], grid[1])))
+        self.camera.scene_bounds = box
 
     def _curvature_range(self) -> float:
         """95th percentile of |curvature| across visible meshes (cached)."""
