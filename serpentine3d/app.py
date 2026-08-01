@@ -530,7 +530,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ UI assembly
 
     def _build_toolbar(self):
-        from .ui.icons import command_icon
+        from .ui.tool_palette import ToolPalette
         bar = QToolBar("Tools")
         bar.setObjectName("toolPalette")
         bar.setOrientation(Qt.Orientation.Vertical)
@@ -553,18 +553,10 @@ class MainWindow(QMainWindow):
             [("Join", "join"), ("Explode", "explode"),
              ("Control points", "pointson"), ("Delete", "delete")],
         ]
-        for gi, group in enumerate(groups):
-            if gi:
-                bar.addSeparator()
-            for label, command in group:
-                icon = command_icon(command)
-                act = QAction(label, self)
-                if icon is not None:
-                    act.setIcon(icon)
-                act.setToolTip(f"{label}  ({command})")
-                act.triggered.connect(
-                    lambda checked=False, c=command: self.run_command(c))
-                bar.addAction(act)
+        # One widget rather than thirty-two actions: a toolbar hides the
+        # actions it has no room for behind a chevron, where the palette
+        # takes a second column and keeps every tool in sight.
+        bar.addWidget(ToolPalette(groups, self.run_command, bar))
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, bar)
 
     def _build_menus(self):
