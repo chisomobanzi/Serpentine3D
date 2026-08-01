@@ -29,6 +29,8 @@ from .ui.layers_panel import LayersPanel
 from .ui.properties import PropertiesPanel
 from .ui.viewport import Viewport, set_default_gl_format
 
+_UNLIMITED = 16777215        # Qt's QWIDGETSIZE_MAX: "no maximum"
+
 APP_TITLE = "Serpentine3D"
 
 
@@ -67,6 +69,10 @@ class MainWindow(QMainWindow):
             "QTabBar::tab:selected { background: #4a3f28; color: #f0d9a8; }")
         self._tabs_updating = False
         self.space_tabs.currentChanged.connect(self._space_tab_changed)
+        # None until _balance_docks has run: a resize before then has no
+        # settled panel width to hold, and holding one would fight it.
+        self._panel_width = None
+        self._last_size = None
         self.aux_viewports: list = []           # Top/Front/Right in quad mode
         self.aux_docks: list = []               # their dock wrappers
         self.dock_viewports: list = []          # user-created dockable panes
@@ -122,6 +128,8 @@ class MainWindow(QMainWindow):
         self._layer_dock.setWidget(self.layers_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
                            self._layer_dock)
+        for dock in (self._prop_dock, self._layer_dock):
+            dock.installEventFilter(self)   # to notice a splitter drag
         # proportions are set post-show in _balance_docks (a pre-show
         # resizeDocks gets redistributed once the layout is realised)
         QTimer.singleShot(0, self._balance_docks)
@@ -233,13 +241,79 @@ class MainWindow(QMainWindow):
         dock layout is realised — unless last session's layout was restored,
         in which case the user already chose their widths and re-imposing
         280 px would undo them every launch (GitHub #5)."""
-        if getattr(self, "_docks_restored", False):
+        if not getattr(self, "_docks_restored", False):
+            # the command strip spans the bottom full-width: resize it alone
+            self.resizeDocks([self._cmd_dock], [96], Qt.Orientation.Vertical)
+            self._set_panel_width(280)
+        else:
+            self._panel_width = self._keep_panel_width()
+
+    # -------------------------------------------------- keeping the panels put
+
+    def _panel_column(self) -> list:
+        """The docks making up the right-hand column, if it is there at all.
+        A floating panel is its own window and says nothing about how much of
+        this one the column should hold."""
+        return [d for d in (self._prop_dock, self._layer_dock)
+                if d.isVisibleTo(self) and not d.isFloating()]
+
+    def _keep_panel_width(self):
+        column = self._panel_column()
+        return column[0].width() if column else None
+
+    def _set_panel_width(self, width):
+        """Make the right-hand column this wide, then let go of it again.
+
+        resizeDocks is a request the dock layout may round or ignore: asking
+        for 280 here landed on 237, and asking again after a window resize
+        did nothing at all. A momentary fixed width is not a request — the
+        layout has to honour it, and the column keeps it once released, so
+        the splitter still drags afterwards.
+        """
+        column = self._panel_column()
+        if not column or not width:
             return
-        w = max(self.width(), 800)
-        self.resizeDocks([self._primary_dock, self._prop_dock],
-                         [w - 300, 280], Qt.Orientation.Horizontal)
-        # the command strip spans the bottom full-width, so resize it alone
-        self.resizeDocks([self._cmd_dock], [96], Qt.Orientation.Vertical)
+        for dock in column:
+            dock.setFixedWidth(width)
+        self.layout().activate()
+        for dock in column:
+            dock.setMinimumWidth(0)
+            dock.setMaximumWidth(_UNLIMITED)
+        self._panel_width = width
+
+    def resizeEvent(self, event):
+        """Hand a resized window's new width to the viewports, not the panel.
+
+        Properties and Layers are fixed-content columns — the fields are no
+        better for being 900 px wide — but Qt handed them every pixel a
+        maximise gained, so the drawing came out no bigger at all. By the
+        time this runs the layout has already done that, which is why the
+        width to keep is the one recorded before the resize rather than one
+        read here.
+        """
+        super().resizeEvent(event)
+        if self._panel_width:
+            QTimer.singleShot(0, self._hold_panel_width)
+        self._last_size = self.size()
+
+    def _hold_panel_width(self):
+        if self._panel_width:
+            self._set_panel_width(self._panel_width)
+
+    def eventFilter(self, obj, event):
+        """Notice the user dragging the panel splitter, so the width held
+        across the next window resize is the one they chose.
+
+        A drag resizes the dock while the window stays put; a window resize
+        reaches the dock first and only then this window, so comparing
+        against the last size seen there tells the two apart.
+        """
+        if (event.type() == QEvent.Type.Resize
+                and obj in (self._prop_dock, self._layer_dock)
+                and self.size() == getattr(self, "_last_size", None)
+                and not obj.isFloating() and obj.isVisibleTo(self)):
+            self._panel_width = event.size().width()
+        return super().eventFilter(obj, event)
 
     def new_viewport_dock(self, area: str = "Right", space: str = "model"):
         """A fully live extra viewport in a dockable/floatable panel."""
@@ -449,6 +523,9 @@ class MainWindow(QMainWindow):
         self.resizeDocks([front, right], [1000, 1000], h)
         self.resizeDocks([self._primary_dock, front], [1000, 1000], v)  # rows
         self.resizeDocks([top, right], [1000, 1000], v)
+        # Asking four panes for 1000 px each in a smaller window squeezes
+        # the side panel down to its minimum on the way past, so put it back.
+        self._set_panel_width(self._panel_width)
 
     # ------------------------------------------------------------ UI assembly
 
