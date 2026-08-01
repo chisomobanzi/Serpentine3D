@@ -165,16 +165,30 @@ def test_forget_gives_up_the_share_claim_without_deleting_arrays():
     assert gpu_share.count() == 1
 
 
-def test_a_lost_context_forgets_rather_than_drops_its_objects():
-    """initializeGL runs again after a dock or undock. Clearing the cache
-    outright used to be free; now every entry holds a claim on shared buffers,
-    and dropping one silently pins that mesh in GPU memory for good."""
-    import inspect
+def test_a_lost_context_hands_back_its_share_claims(_qapp):
+    """initializeGL runs again after a dock or undock and drops the cache.
+    Clearing it used to be free; now every entry holds a claim on shared
+    buffers, and dropping one silently pins that mesh in GPU memory for good.
+    """
+    from serpentine3d.core.scene import Scene
+    from serpentine3d.core.selection import SelectionManager
+    from serpentine3d.ui.viewport import Viewport, _GpuObject
 
-    from serpentine3d.ui.viewport import Viewport
+    scene = Scene()
+    vp = Viewport(scene, SelectionManager(scene))
 
-    src = inspect.getsource(Viewport.initializeGL)
-    assert "forget()" in src, "lost-context path drops its share claims"
+    buf = FakeBuffers()
+    gpu_share.acquire(("mesh-1", None), lambda: buf)
+    gpu = object.__new__(_GpuObject)
+    gpu._share_key = ("mesh-1", None)
+    gpu.tri_vao = gpu.line_vao = gpu.iso_vao = gpu.thick_vao = 7
+    vp._gpu["obj-1"] = gpu
+
+    vp._drop_gpu_cache()
+
+    assert vp._gpu == {}
+    assert gpu_share.count() == 0, "the mesh is pinned on the GPU for good"
+    assert buf.released == 1
 
 
 # --- pure geometry: the wide-line quads ------------------------------------

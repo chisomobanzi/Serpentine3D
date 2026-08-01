@@ -578,6 +578,9 @@ class Viewport(QOpenGLWidget):
         self._tess_pool = None                     # created on first use
         # id -> (the shape being meshed, its bbox segments)
         self._tess_pending: dict[str, tuple] = {}
+        # what the GPU cache was last reconciled against; see _sync_gpu
+        self._gpu_synced = None
+        self._tess_epoch = 0
         self._tessDone.connect(self._on_tess_done,
                                Qt.ConnectionType.QueuedConnection)
         self._preview: _LineBatch | None = None
@@ -629,13 +632,8 @@ class Viewport(QOpenGLWidget):
             # mid event delivery — exit hard instead, message delivered
             os._exit(1)
         # runs again after reparenting (dock/undock) destroys the context:
-        # every GPU-side cache from the old context is stale, drop it all.
-        # forget() rather than plain clear: the vertex arrays went with the
-        # context, but the buffers under them are shared, and their claims
-        # have to be handed back or those meshes are never freed.
-        for gpu in self._gpu.values():
-            gpu.forget()
-        self._gpu = {}
+        # every GPU-side cache from the old context is stale, drop it all
+        self._drop_gpu_cache()
         self._grid = None
         self._mesh_prog = _compile(MESH_VERT, MESH_FRAG)
         self._line_prog = _compile(LINE_VERT, LINE_FRAG)
@@ -1268,9 +1266,41 @@ class Viewport(QOpenGLWidget):
         return _lt.resolve(getattr(obj, "linetype", "ByLayer"),
                            layer_types.get(obj.layer_id) or "Continuous")
 
+    def _drop_gpu_cache(self):
+        """Throw away every vertex array, as after the context is destroyed.
+
+        The arrays went with the context and must not be deleted by name, but
+        the shared buffers under them are reference counted and their claims
+        have to be handed back. The next reconcile rebuilds from nothing,
+        which is why it must not be skipped as unchanged.
+        """
+        for gpu in self._gpu.values():
+            gpu.forget()
+        self._gpu = {}
+        self._gpu_synced = None
+
     def _sync_gpu(self):
+        """Reconcile the GPU cache against the scene: buffers for what is new,
+        rebuilt for what changed linetype, freed for what has gone.
+
+        This is thousands of objects of Python bookkeeping on a real drawing,
+        and paintGL calls it every frame — four times over in the quad layout.
+        So it is skipped when nothing it reads has moved. Three things can
+        move it, and only the first is obvious:
+
+        - the scene itself, which is what `revision` is for;
+        - a layer's linetype, edited without notifying the scene, so the
+          revision stays put while every object on it needs new dashes;
+        - a background tessellation finishing, which makes an object drawable
+          with no change to the scene at all.
+        """
+        key = (self.scene.revision, self._tess_epoch,
+               self._layer_linetypes())
+        if self._gpu_synced == key:
+            return
+        self._gpu_synced = key
         live = set()
-        layer_types = self._layer_linetypes()
+        layer_types = key[2]
         for obj in self.scene.all():
             live.add(obj.id)
             gpu = self._gpu.get(obj.id)
@@ -1379,6 +1409,9 @@ class Viewport(QOpenGLWidget):
         return True
 
     def _on_tess_done(self):
+        # A mesh arriving is invisible to scene.revision, so say so plainly
+        # or the next reconcile is skipped and the object stays a box.
+        self._tess_epoch += 1
         self.update()
 
     def _refresh_camera_bounds(self):
