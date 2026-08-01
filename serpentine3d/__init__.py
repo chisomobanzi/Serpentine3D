@@ -1,6 +1,6 @@
 """Serpentine3D — an open-source NURBS modeller for Linux."""
 
-__version__ = "0.5.7"
+__version__ = "0.5.8"
 
 
 def version_line() -> str:

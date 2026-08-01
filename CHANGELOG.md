@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.5.8 — 2026-08-02
+
+### Fixed
+
+- A Make2D curve no longer takes the program with it. `make2d` builds its
+  curves on the projection plane, so they carry a 2D curve and the plane it
+  lies on rather than a 3D curve of their own, and OCCT answers a request for
+  the 3D one with nothing at all. Both places that asked took the answer at
+  face value: writing a drawing out to `.3dm` to send to a Rhino seat, and
+  reading a curve's control points, which is a button on the tool strip and so
+  needs no export to reach. Neither raised — the process died where it stood,
+  with whatever was unsaved. Nothing else was affected: lines, arcs, circles,
+  interpolated curves and a solid's own edges all carry real 3D curves and all
+  wrote correctly. The missing curve is now computed from the 2D one and the
+  plane before either operation runs.
+
+- The title block and the scale bar are readable on the sheet. Both drew their
+  own text through their own linework. The project name and the drawing title
+  were positioned from the top of the whole block instead of from the rule
+  under each row, so the project name sat across the frame and the title had
+  the rule below it struck through the middle. The scale bar stands above its
+  baseline and its labels were drawn on that same baseline, which put the
+  leading digit of "1000 mm" inside the last black segment and hid the "0" at
+  the left end under the first; the labels go below the bar now.
+
+- The tool palette can be measured before it has been laid out. Its size hint
+  read a height that is only worked out once every button exists, and a hint
+  asked for any earlier raised inside a Qt override — where it surfaces not as
+  itself but as a bare `SystemError` naming whichever widget Qt happened to be
+  laying out at the time.
+
 ## 0.5.7 — 2026-08-01
 
 ### Added
