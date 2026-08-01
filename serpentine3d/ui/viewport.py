@@ -295,6 +295,25 @@ _POINT_ATTRS = ((0, 3, 0, 0),)
 _WIDE_ATTRS = ((0, 3, 28, 0), (1, 3, 28, 12), (2, 1, 28, 24))
 
 
+def _back_to_front(centres, valid, eye):
+    """Indices ordering objects farthest from `eye` first.
+
+    Translucency composites correctly only back to front. One subtraction
+    over the whole frame rather than a norm per object: on a large drawing
+    this ran thousands of times a frame, in every viewport, to reorder
+    objects that had not moved.
+
+    Objects whose bounds are not known yet score zero, which puts them last,
+    where they sorted when the key was worked out per object. The sort is
+    stable, so the draw_order the list arrives in survives a tie — an
+    unstable one would let coincident faces swap places between frames.
+    """
+    keys = np.zeros(len(centres))
+    if len(centres) and valid.any():
+        keys[valid] = -np.linalg.norm(centres[valid] - eye, axis=1)
+    return np.argsort(keys, kind="stable")
+
+
 def _thick_arrays(segments):
     """Per-segment quads for the screen-space wide-line shader.
 
@@ -581,6 +600,8 @@ class Viewport(QOpenGLWidget):
         # what the GPU cache was last reconciled against; see _sync_gpu
         self._gpu_synced = None
         self._tess_epoch = 0
+        # mesh uid -> centre of its bounds, for the translucency sort
+        self._centre_cache: dict[str, np.ndarray] = {}
         self._tessDone.connect(self._on_tess_done,
                                Qt.ConnectionType.QueuedConnection)
         self._preview: _LineBatch | None = None
@@ -1266,6 +1287,33 @@ class Viewport(QOpenGLWidget):
         return _lt.resolve(getattr(obj, "linetype", "ByLayer"),
                            layer_types.get(obj.layer_id) or "Continuous")
 
+    def _centres_for(self, objects):
+        """(centres, valid) for `objects`, a row each and in their order.
+
+        Cached against the mesh the centre was read from, so an orbit reuses
+        it and a remesh cannot: a new mesh is a new uid. Objects with nothing
+        meshed yet keep a row, zeroed and marked invalid, so the rows still
+        line up with the list that was asked about.
+        """
+        cache = self._centre_cache
+        centres = np.zeros((len(objects), 3))
+        valid = np.zeros(len(objects), bool)
+        for i, obj in enumerate(objects):
+            if not obj.mesh_ready:
+                continue
+            mesh = obj.mesh
+            centre = cache.get(mesh.uid)
+            if centre is None:
+                b = mesh.bounds()
+                if b is None:
+                    continue
+                centre = (np.asarray(b[0], float)
+                          + np.asarray(b[1], float)) / 2
+                cache[mesh.uid] = centre
+            centres[i] = centre
+            valid[i] = True
+        return centres, valid
+
     def _drop_gpu_cache(self):
         """Throw away every vertex array, as after the context is destroyed.
 
@@ -1300,6 +1348,7 @@ class Viewport(QOpenGLWidget):
             return
         self._gpu_synced = key
         live = set()
+        live_meshes = set()
         layer_types = key[2]
         for obj in self.scene.all():
             live.add(obj.id)
@@ -1310,6 +1359,7 @@ class Viewport(QOpenGLWidget):
                     del self._gpu[obj.id]
                 continue
             self._tess_pending.pop(obj.id, None)
+            live_meshes.add(obj.mesh.uid)
             lt_name = self._effective_linetype(obj, layer_types)
             if gpu is not None and (gpu.mesh_key != obj.mesh.uid
                                     or gpu.dash_key != lt_name):
@@ -1327,6 +1377,12 @@ class Viewport(QOpenGLWidget):
             del self._gpu[dead]
         for dead in set(self._tess_pending) - live:
             del self._tess_pending[dead]
+        # Every remesh mints a uid, so the centres of the meshes that went
+        # are dropped here rather than accumulating for the session.
+        if len(self._centre_cache) != len(live_meshes):
+            self._centre_cache = {uid: c for uid, c
+                                  in self._centre_cache.items()
+                                  if uid in live_meshes}
 
     def _worker_pool(self):
         if self._tess_pool is None:
@@ -1481,14 +1537,9 @@ class Viewport(QOpenGLWidget):
         if translucent:
             # translucency composits correctly back-to-front
             eye = np.asarray(self.camera.position, float)
-
-            def _depth(o):
-                b = o.mesh.bounds() if o.mesh_ready else None
-                if b is None:
-                    return 0.0
-                centre = (np.asarray(b[0]) + np.asarray(b[1])) / 2
-                return -float(np.linalg.norm(centre - eye))
-            objects = sorted(objects, key=_depth)
+            centres, valid = self._centres_for(objects)
+            order = _back_to_front(centres, valid, eye)
+            objects = [objects[i] for i in order]
         if mode == "rendered":
             # before culling: an object above the frustum can still stamp a
             # shadow that is inside it
