@@ -31,6 +31,25 @@ from .ui.viewport import Viewport, set_default_gl_format
 
 _UNLIMITED = 16777215        # Qt's QWIDGETSIZE_MAX: "no maximum"
 
+PANEL_WIDTH = 280            # what a fresh window gives Properties/Layers
+PANEL_SHARE = 0.3            # ... and the most a restored one may hold
+
+
+def clamp_panel_width(width, window_width):
+    """The right-hand column's width, restored within reason.
+
+    A panel dragged wide in a maximised window is saved at that width and
+    comes back into a window that is not maximised, where the same number
+    is half the screen. The width someone chose is still honoured; it just
+    may not outgrow a share of the window it is being restored into, and
+    never shrinks below what a fresh window would have given it.
+    """
+    if not width:
+        return width
+    floor = min(PANEL_WIDTH, window_width // 2)
+    return min(width, max(int(window_width * PANEL_SHARE), floor))
+
+
 APP_TITLE = "Serpentine3D"
 
 
@@ -244,9 +263,14 @@ class MainWindow(QMainWindow):
         if not getattr(self, "_docks_restored", False):
             # the command strip spans the bottom full-width: resize it alone
             self.resizeDocks([self._cmd_dock], [96], Qt.Orientation.Vertical)
-            self._set_panel_width(280)
+            self._set_panel_width(PANEL_WIDTH)
         else:
-            self._panel_width = self._keep_panel_width()
+            saved = self._keep_panel_width()
+            kept = clamp_panel_width(saved, self.width())
+            if kept != saved:
+                self._set_panel_width(kept)
+            else:
+                self._panel_width = saved
 
     # -------------------------------------------------- keeping the panels put
 

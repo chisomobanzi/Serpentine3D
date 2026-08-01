@@ -16,7 +16,7 @@ import pytest
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QResizeEvent
 
-from serpentine3d.app import MainWindow
+from serpentine3d.app import MainWindow, PANEL_WIDTH, clamp_panel_width
 
 
 @pytest.fixture
@@ -110,6 +110,59 @@ def test_a_torn_off_panel_is_not_a_choice_about_this_window(win):
     win._prop_dock.setFloating(True)
     _dock_resized(win, win._prop_dock, 900)
     assert win._panel_width != 900
+
+
+# ------------------------------------------------ what comes back on restore
+
+def test_a_modest_saved_width_comes_back_untouched():
+    """Someone who chose 340 px meant 340 px."""
+    assert clamp_panel_width(340, 1444) == 340
+
+
+def test_a_saved_half_the_window_does_not_come_back():
+    """A panel dragged to half of a maximised window was saved at that
+    width, and is restored into a window that is not maximised — where the
+    same number is now most of the screen."""
+    assert clamp_panel_width(924, 1444) < 924
+
+
+def test_the_clamp_leaves_the_panel_usable_on_a_small_window():
+    """A share of a narrow window is narrower than the fields in it. The
+    floor is what a fresh window opens at, not a fraction."""
+    assert clamp_panel_width(900, 800) >= min(PANEL_WIDTH, 400)
+
+
+def test_no_saved_width_is_nothing_to_clamp():
+    assert clamp_panel_width(None, 1444) is None
+
+
+def test_restoring_a_fat_panel_puts_it_back_to_a_share(_qapp):
+    w = MainWindow()
+    try:
+        w.resize(1444, 900)
+        asked = _record(w)
+        w._docks_restored = True
+        w._keep_panel_width = lambda: 924
+        w._balance_docks()
+        assert asked == [clamp_panel_width(924, w.width())]
+    finally:
+        w.close()
+
+
+def test_restoring_a_reasonable_panel_leaves_the_layout_alone(_qapp):
+    """Nothing to correct, so nothing is touched — the restored layout is
+    the user's and re-imposing a width on it is the bug in GitHub #5."""
+    w = MainWindow()
+    try:
+        w.resize(1444, 900)
+        asked = _record(w)
+        w._docks_restored = True
+        w._keep_panel_width = lambda: 300
+        w._balance_docks()
+        assert asked == []
+        assert w._panel_width == 300
+    finally:
+        w.close()
 
 
 def test_nothing_is_held_before_the_docks_are_balanced(_qapp):
