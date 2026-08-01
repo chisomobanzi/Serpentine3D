@@ -1,5 +1,135 @@
 # Changelog
 
+## 0.5.7 — 2026-08-01
+
+### Added
+
+- `.3dm` files for Rhino 5 through 8, written from Save as well as Export.
+  Everything went out as Rhino 8, so a file sent to a colleague on an older
+  seat would not open at all, and `.3dm` was reachable only through Export —
+  `save out.3dm` wrote `out.3dm.serp`. The export dialog now lists Rhino 8,
+  7, 6 and 5 as separate filters and writes whichever was chosen; Save and
+  Save As offer the same four beside the native format, noting that layouts
+  and history live only in `.serp`, and the save command keeps any writable
+  extension you type. The docs called `.3dm` an exact round trip, which it is
+  not: curves stay NURBS, surfaces write as meshes, and STEP is the exact one.
+
+- The window comes back the way you left it. Geometry, dock sizes and the
+  viewport layout all reset on every launch, and the side panel was re-imposed
+  at 280 px however wide you had dragged it — which reads as a program with no
+  standard arrangement to set. All three are saved on close and restored next
+  launch. Only a window somebody actually saw writes them, so a headless run
+  closing cannot overwrite a real layout with a default-constructed one. The
+  drag separator goes to 6 px with a gold hover so it can be found, and
+  Settings → Display gains the display mode new viewports open in, instead of
+  always shaded.
+
+### Changed
+
+- A new drawing opens in four viewports, and each pane's title bar is its own
+  menu. Both the quad layout and the per-viewport display menu had shipped
+  already; this is about where they are rather than what they do. Four
+  Viewports and Single Viewport move out of View → Viewports up into View
+  itself, leaving behind the rarer business of adding panes. A pane's title
+  now carries the view, all eight display modes, zoom extents and the layout,
+  acting on that pane rather than on whichever one was last clicked, and it
+  says what the pane is showing. The translucent chips that floated inside
+  each viewport did half the same job a thumb's width away, so they are gone —
+  the title menu has everything they had, Back, Left and Bottom included. The
+  four-viewport start is a default only: the layout you leave in is still the
+  one you come back to.
+
+### Performance
+
+- Opening a large mechanical `.3dm`: 194.6 s to 51.3 s on a 230 MB cab file.
+  Such a file is one or two enormous unioned polysurfaces, and only meshes
+  were ever split across the worker pool, so a 19105-face solid was a single
+  worker's problem for two and a half minutes while the rest of the pool sat
+  idle — every core busy, one of them doing the work. Breps past 512 faces
+  (`SERP3D_IMPORT_SPLIT_FACES`) now go out as face ranges the way big meshes
+  do, each worker caching the brep's edge table once, and the pieces are sewn
+  back into a solid when the last one lands. The per-face edge prune, paid
+  19105 times, was also sweeping all 48k edge boxes; it binary-searches boxes
+  sorted by least x instead, so only the candidates in the face's span are
+  compared. Same 1601 objects out.
+
+- Four viewports cost one copy of the model rather than four. Every viewport
+  uploaded its own vertex data for every object: on the cave file 2485 MB of
+  GPU buffers where 621 MB would do, and about 2 GB of resident memory for
+  the three extra views. Buffers are shareable between contexts in a share
+  group, so they are uploaded once and handed out through a reference-counted
+  registry; vertex arrays are not shareable and stay per viewport, which costs
+  nothing worth counting. Switching to quad on that file went from +2029 MB of
+  resident memory to +39 MB.
+
+- Translucent objects are sorted once a frame, not once per object. A single
+  object with opacity below 1 puts the whole scene through a back-to-front
+  sort, and the sort key was two arrays and a norm worked out per object per
+  frame — 6583 times a frame on the cave file, in every viewport, about a
+  fifth of a full redraw. The distance is one vectorised subtraction now, over
+  centres cached against the mesh they were read from, so an orbit reuses them
+  while a remesh cannot. Five frames profiled on that file: quad 7.52M calls
+  in 3.24 s to 6.07M in 2.63 s, single 0.91M in 0.63 s to 0.55M in 0.27 s. The
+  drawing order is unchanged, ties and objects without bounds included.
+
+- The GPU cache is reconciled when the scene moves rather than on every paint.
+  Deciding what needs buffers, what changed linetype and what has gone was
+  7064 objects of bookkeeping a frame on the cave file, four times over in the
+  quad layout, to reach the same answer as the frame before. It now runs only
+  when something it reads has changed — the scene revision, plus a layer's
+  linetype and a finished background tessellation, neither of which notifies
+  the scene. A full redraw in quad walks the scene 0 times in 40 reconciles.
+
+### Fixed
+
+- Zooming into a detail no longer erases the model around it. The near and far
+  clip planes came from the camera distance alone, so closing in on a small
+  part collapsed the far plane to a few hundred units and clipped away
+  everything behind it. The near floor of 0.01, shared with the zoom clamp,
+  put a millimetre detail out of reach besides. The camera now takes the scene
+  bounds and derives its planes from them: far reaches the farthest corner of
+  the model, near scales with how close you are. The viewport feeds it those
+  bounds — the grid included, since it is drawn with the same projection —
+  when the scene or the grid changes rather than per frame.
+
+- Hidden layers and objects stay hidden through a `.3dm` round trip. A working
+  Rhino file keeps its reference and construction layers switched off; the
+  layer table was read but not its visible and locked flags, so opening one put
+  everything on show at once. Layer visibility and lock now ride through into
+  the scene, per-object hide state with them — a hidden block instance hides
+  its members, whose own flags are read inside the definition — and all three
+  are written back out.
+
+- A right-click never repeats delete. Right-clicking an idle prompt is Enter
+  and Enter repeats the last command, which is Rhino and worth keeping, but it
+  put delete one reflex away at all times: pick, delete, right-click to get on
+  with something, and whatever is picked now goes too. Commands carry a
+  repeatable flag now, and one that is never repeated does not disturb the
+  repeat target either, so Enter after a delete goes back to what you were
+  drawing.
+
+- New window width goes to the viewports, not the side panel. Maximising handed
+  every new pixel to the Properties / Layers column: a 400 px wider window meant
+  a 400 px wider panel and not one pixel more drawing, where the viewport is the
+  whole reason for the extra screen. The column holds its width across a window
+  resize now — maximise included, which lays the docks out half a millisecond
+  before the window is told it has resized and so looked exactly like somebody
+  dragging the splitter — and dragging the splitter still sets it. A panel
+  restored from a saved layout may keep up to three tenths of the window and no
+  less than the 280 px a fresh one opens at, so a width dragged out in a
+  maximised window does not come back as half of a small one. On a 1444 px
+  window that is 433 px rather than 924, and four viewports of 460 px rather
+  than 216.
+
+- Every tool stays on the tool strip. Thirty-two tools want 1076 px of column
+  and a restored 936 px window gives the strip 854, so Trim, Split, Offset,
+  Fillet, Join, Explode, Control points and Delete went into an extension
+  chevron at the bottom that nobody finds — eight tools, Delete among them,
+  gone from the palette because the screen was not tall enough. The strip is
+  one widget now rather than thirty-two toolbar actions: one column of
+  full-size tools, and the few that do not fit scroll into view instead of
+  being hidden. A maximised window shows all thirty-two at once.
+
 ## 0.5.6 — 2026-07-31
 
 ### Added
