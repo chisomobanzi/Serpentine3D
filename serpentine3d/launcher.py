@@ -61,7 +61,13 @@ def main() -> int:
     fmt.setDepthBufferSize(24)
     QSurfaceFormat.setDefaultFormat(fmt)
 
+    # Every viewport's context in one share group, so a mesh is uploaded once
+    # however many views show it. Only read when the QApplication is built, so
+    # it has to be set here — set it late and a second viewport draws nothing,
+    # silently.
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication.instance() or QApplication(sys.argv)
 
     splash = None

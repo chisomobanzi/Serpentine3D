@@ -19,7 +19,7 @@ from ..core import spatial
 from ..utils import config as _cfg
 from ..utils import units as _units
 from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
-from . import theme
+from . import gpu_share, theme
 from .camera import Camera
 
 PICK_RADIUS_PX = 7.0
@@ -231,12 +231,20 @@ void main() { frag = vec4(mix(uBottom, uTop, vY), 1.0); }
 
 
 def set_default_gl_format():
+    """GL settings that are only read when the QApplication is built.
+
+    Call this before constructing one. The launcher repeats it inline rather
+    than importing this module early, so the two have to agree.
+    """
     fmt = QSurfaceFormat()
     fmt.setVersion(3, 3)
     fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
     fmt.setSamples(4)
     fmt.setDepthBufferSize(24)
     QSurfaceFormat.setDefaultFormat(fmt)
+    # One share group for every viewport's context: a mesh is then uploaded
+    # once however many views show it. See ui.gpu_share.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
 
 def _compile(vert_src: str, frag_src: str) -> int:
@@ -280,18 +288,57 @@ def _dashed_edge_segments(mesh, pattern, scale):
     return np.asarray(out, np.float32)
 
 
-class _GpuObject:
-    """GPU buffers for one scene object."""
+# Vertex attribute layouts, as (location, floats, stride, byte offset).
+# Two shapes cover everything drawn: bare positions, and the seven-float
+# vertex the shaded and wide-line shaders both read.
+_POINT_ATTRS = ((0, 3, 0, 0),)
+_WIDE_ATTRS = ((0, 3, 28, 0), (1, 3, 28, 12), (2, 1, 28, 24))
 
-    def __init__(self, mesh, dash=None, dash_key=None):
-        # The mesh's own serial, not id(mesh): the question "are these
-        # buffers still current?" is asked after the mesh they came from may
-        # have been freed, and an address gets recycled. See DisplayMesh.uid.
-        self.mesh_key = mesh.uid
-        self.dash_key = dash_key                  # linetype identity for cache
-        self.tri_vao = self.tri_count = 0
-        self.line_vao = self.line_count = 0
-        self.iso_vao = self.iso_count = 0
+
+def _thick_arrays(segments):
+    """Per-segment quads for the screen-space wide-line shader.
+
+    Vertex layout: pos(3) other(3) side(1) — each corner carries its own end
+    of the segment, the far end, and which side to be offset to. The shader
+    does the widening, which is why the width can be in pixels.
+    """
+    segs = segments.astype(np.float32)
+    n = len(segs)
+    a, b = segs[:, 0], segs[:, 1]
+    # quad = A+n, A-n, B-n, B+n
+    verts = np.empty((n, 4, 7), np.float32)
+    verts[:, 0, :3] = a
+    verts[:, 0, 3:6] = b
+    verts[:, 0, 6] = 1.0
+    verts[:, 1, :3] = a
+    verts[:, 1, 3:6] = b
+    verts[:, 1, 6] = -1.0
+    verts[:, 2, :3] = b
+    verts[:, 2, 3:6] = a
+    verts[:, 2, 6] = 1.0
+    verts[:, 3, :3] = b
+    verts[:, 3, 3:6] = a
+    verts[:, 3, 6] = -1.0
+    idx = (np.arange(n, dtype=np.uint32)[:, None] * 4
+           + np.array([0, 1, 2, 0, 2, 3], np.uint32)[None, :]).ravel()
+    return verts.reshape(-1, 7), idx
+
+
+class _MeshBuffers:
+    """One mesh's vertex data on the GPU, shared by every viewport.
+
+    Uploaded once and handed out through ui.gpu_share. Buffers are valid in
+    every context of a share group, which is what AA_ShareOpenGLContexts
+    arranges; the vertex arrays that point at them are not shareable and
+    live in _GpuObject, one set per viewport.
+    """
+
+    def __init__(self, mesh, dash=None):
+        self.tri_vbo = self.tri_ebo = self.tri_count = 0
+        self.line_vbo = self.line_count = 0
+        self.thick_vbo = self.thick_ebo = self.thick_count = 0
+        self.iso_vbo = self.iso_count = 0
+        self.nbytes = 0                  # what this mesh costs on the GPU
         self._buffers = []
         if mesh.has_faces:
             curv = mesh.curvature
@@ -299,111 +346,108 @@ class _GpuObject:
                 curv = np.zeros(len(mesh.vertices), np.float32)
             inter = np.hstack([mesh.vertices, mesh.normals,
                                curv[:, None]]).astype(np.float32)
-            self.tri_vao = GL.glGenVertexArrays(1)
-            GL.glBindVertexArray(self.tri_vao)
-            vbo = GL.glGenBuffers(1)
-            self._buffers.append(vbo)
-            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
-            GL.glBufferData(GL.GL_ARRAY_BUFFER, inter.nbytes, inter,
-                            GL.GL_STATIC_DRAW)
-            GL.glEnableVertexAttribArray(0)
-            GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, 28,
-                                     ctypes.c_void_p(0))
-            GL.glEnableVertexAttribArray(1)
-            GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, False, 28,
-                                     ctypes.c_void_p(12))
-            GL.glEnableVertexAttribArray(2)
-            GL.glVertexAttribPointer(2, 1, GL.GL_FLOAT, False, 28,
-                                     ctypes.c_void_p(24))
-            ebo = GL.glGenBuffers(1)
-            self._buffers.append(ebo)
+            self.tri_vbo = self._upload(GL.GL_ARRAY_BUFFER, inter)
             idx = mesh.triangles.astype(np.uint32)
-            GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, ebo)
-            GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, idx.nbytes, idx,
-                            GL.GL_STATIC_DRAW)
+            self.tri_ebo = self._upload(GL.GL_ELEMENT_ARRAY_BUFFER, idx)
             self.tri_count = idx.size
-        self.thick_vao = self.thick_count = 0
         edge_segments = mesh.edge_segments
         if dash and dash[0]:                          # (pattern, scale)
             edge_segments = _dashed_edge_segments(mesh, dash[0], dash[1])
         if len(edge_segments):
-            self.line_vao, self.line_count = self._make_line_vao(
-                edge_segments)
-            self.thick_vao, self.thick_count = self._make_thick_vao(
-                edge_segments)
+            pts = edge_segments.reshape(-1, 3).astype(np.float32)
+            self.line_vbo = self._upload(GL.GL_ARRAY_BUFFER, pts)
+            self.line_count = len(pts)
+            flat, idx = _thick_arrays(edge_segments)
+            self.thick_vbo = self._upload(GL.GL_ARRAY_BUFFER, flat)
+            self.thick_ebo = self._upload(GL.GL_ELEMENT_ARRAY_BUFFER, idx)
+            self.thick_count = len(idx)
         if len(mesh.iso_segments):
-            self.iso_vao, self.iso_count = self._make_line_vao(
-                mesh.iso_segments)
+            pts = mesh.iso_segments.reshape(-1, 3).astype(np.float32)
+            self.iso_vbo = self._upload(GL.GL_ARRAY_BUFFER, pts)
+            self.iso_count = len(pts)
+
+    def _upload(self, target, data) -> int:
+        buf = GL.glGenBuffers(1)
+        self._buffers.append(buf)
+        self.nbytes += data.nbytes
+        GL.glBindBuffer(target, buf)
+        GL.glBufferData(target, data.nbytes, data, GL.GL_STATIC_DRAW)
+        return buf
+
+    def release(self):
+        if self._buffers:
+            GL.glDeleteBuffers(len(self._buffers), self._buffers)
+        self._buffers = []
+        self.nbytes = 0
+
+
+class _GpuObject:
+    """One viewport's vertex arrays over the shared buffers for a mesh."""
+
+    def __init__(self, mesh, dash=None, dash_key=None):
+        # The mesh's own serial, not id(mesh): the question "are these
+        # buffers still current?" is asked after the mesh they came from may
+        # have been freed, and an address gets recycled. See DisplayMesh.uid.
+        self.mesh_key = mesh.uid
+        self.dash_key = dash_key                  # linetype identity for cache
+        self._share_key = (mesh.uid, dash_key)
+        self.buffers = gpu_share.acquire(
+            self._share_key, lambda: _MeshBuffers(mesh, dash))
+        buf = self.buffers
+        self.tri_vao = self.tri_count = 0
+        self.line_vao = self.line_count = 0
+        self.thick_vao = self.thick_count = 0
+        self.iso_vao = self.iso_count = 0
+        if buf.tri_count:
+            self.tri_vao = self._vertex_array(buf.tri_vbo, _WIDE_ATTRS,
+                                              ebo=buf.tri_ebo)
+            self.tri_count = buf.tri_count
+        if buf.line_count:
+            self.line_vao = self._vertex_array(buf.line_vbo, _POINT_ATTRS)
+            self.line_count = buf.line_count
+            self.thick_vao = self._vertex_array(buf.thick_vbo, _WIDE_ATTRS,
+                                                ebo=buf.thick_ebo)
+            self.thick_count = buf.thick_count
+        if buf.iso_count:
+            self.iso_vao = self._vertex_array(buf.iso_vbo, _POINT_ATTRS)
+            self.iso_count = buf.iso_count
         GL.glBindVertexArray(0)
 
-    def _make_line_vao(self, segments) -> tuple[int, int]:
-        pts = segments.reshape(-1, 3).astype(np.float32)
-        vao = GL.glGenVertexArrays(1)
-        GL.glBindVertexArray(vao)
-        vbo = GL.glGenBuffers(1)
-        self._buffers.append(vbo)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
-        GL.glBufferData(GL.GL_ARRAY_BUFFER, pts.nbytes, pts,
-                        GL.GL_STATIC_DRAW)
-        GL.glEnableVertexAttribArray(0)
-        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, 0,
-                                 ctypes.c_void_p(0))
-        return vao, len(pts)
+    @staticmethod
+    def _vertex_array(vbo, attrs, ebo=0) -> int:
+        """A vertex array of this viewport's own over shared buffers.
 
-    def _make_thick_vao(self, segments) -> tuple[int, int]:
-        """Per-segment quads for the screen-space wide-line shader."""
-        segs = segments.astype(np.float32)
-        n = len(segs)
-        a, b = segs[:, 0], segs[:, 1]
-        # vertex layout: pos(3) other(3) side(1); quad = A+n, A-n, B-n, B+n
-        verts = np.empty((n, 4, 7), np.float32)
-        verts[:, 0, :3] = a
-        verts[:, 0, 3:6] = b
-        verts[:, 0, 6] = 1.0
-        verts[:, 1, :3] = a
-        verts[:, 1, 3:6] = b
-        verts[:, 1, 6] = -1.0
-        verts[:, 2, :3] = b
-        verts[:, 2, 3:6] = a
-        verts[:, 2, 6] = 1.0
-        verts[:, 3, :3] = b
-        verts[:, 3, 3:6] = a
-        verts[:, 3, 6] = -1.0
-        idx = (np.arange(n, dtype=np.uint32)[:, None] * 4
-               + np.array([0, 1, 2, 0, 2, 3], np.uint32)[None, :]).ravel()
-        flat = verts.reshape(-1, 7)
+        The array records the bindings, not the data, so every viewport
+        needs one even though they all point at the same vertices.
+        """
         vao = GL.glGenVertexArrays(1)
         GL.glBindVertexArray(vao)
-        vbo = GL.glGenBuffers(1)
-        self._buffers.append(vbo)
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
-        GL.glBufferData(GL.GL_ARRAY_BUFFER, flat.nbytes, flat,
-                        GL.GL_STATIC_DRAW)
-        GL.glEnableVertexAttribArray(0)
-        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, 28,
-                                 ctypes.c_void_p(0))
-        GL.glEnableVertexAttribArray(1)
-        GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, False, 28,
-                                 ctypes.c_void_p(12))
-        GL.glEnableVertexAttribArray(2)
-        GL.glVertexAttribPointer(2, 1, GL.GL_FLOAT, False, 28,
-                                 ctypes.c_void_p(24))
-        ebo = GL.glGenBuffers(1)
-        self._buffers.append(ebo)
-        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, ebo)
-        GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, idx.nbytes, idx,
-                        GL.GL_STATIC_DRAW)
-        return vao, len(idx)
+        for loc, size, stride, offset in attrs:
+            GL.glEnableVertexAttribArray(loc)
+            GL.glVertexAttribPointer(loc, size, GL.GL_FLOAT, False, stride,
+                                     ctypes.c_void_p(offset))
+        if ebo:
+            GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, ebo)
+        return vao
 
     def release(self):
         for vao in (self.tri_vao, self.line_vao, self.iso_vao,
                     getattr(self, "thick_vao", 0)):
             if vao:
                 GL.glDeleteVertexArrays(1, [vao])
-        if self._buffers:
-            GL.glDeleteBuffers(len(self._buffers), self._buffers)
-        self._buffers = []
-        self.tri_vao = self.line_vao = 0
+        self.forget()
+
+    def forget(self):
+        """Give up the arrays without deleting them, as after a lost context.
+
+        The names died with the context that made them and mean nothing in
+        the new one. The claim on the shared buffers is a different matter:
+        those live in the share group, and the mesh stays resident until the
+        last viewport drawing it lets go.
+        """
+        self.tri_vao = self.line_vao = self.iso_vao = self.thick_vao = 0
+        gpu_share.release(self._share_key)
 
 
 class _LineBatch:
@@ -585,7 +629,12 @@ class Viewport(QOpenGLWidget):
             # mid event delivery — exit hard instead, message delivered
             os._exit(1)
         # runs again after reparenting (dock/undock) destroys the context:
-        # every GPU-side cache from the old context is stale, drop it all
+        # every GPU-side cache from the old context is stale, drop it all.
+        # forget() rather than plain clear: the vertex arrays went with the
+        # context, but the buffers under them are shared, and their claims
+        # have to be handed back or those meshes are never freed.
+        for gpu in self._gpu.values():
+            gpu.forget()
         self._gpu = {}
         self._grid = None
         self._mesh_prog = _compile(MESH_VERT, MESH_FRAG)
