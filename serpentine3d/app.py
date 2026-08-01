@@ -568,7 +568,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ UI assembly
 
     def _build_toolbar(self):
-        from .ui.tool_palette import ToolPalette
+        from .ui.tool_palette import tool_strip
         bar = QToolBar("Tools")
         bar.setObjectName("toolPalette")
         bar.setOrientation(Qt.Orientation.Vertical)
@@ -593,8 +593,8 @@ class MainWindow(QMainWindow):
         ]
         # One widget rather than thirty-two actions: a toolbar hides the
         # actions it has no room for behind a chevron, where the palette
-        # takes a second column and keeps every tool in sight.
-        bar.addWidget(ToolPalette(groups, self.run_command, bar))
+        # sizes the tools to the height it has and keeps them all in sight.
+        bar.addWidget(tool_strip(groups, self.run_command, bar))
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, bar)
 
     def _build_menus(self):
