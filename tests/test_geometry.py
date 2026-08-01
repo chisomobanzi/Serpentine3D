@@ -622,3 +622,28 @@ def test_offset_faces_rejects_empty():
     box, _, _, _ = _box_faces_by_z()
     with pytest.raises(g.GeometryError):
         g.offset_faces(box, {})
+
+
+def _make2d_edge():
+    """One edge as Make2D leaves it: projected, with no 3D curve of its own."""
+    from serpentine3d.core import hlr
+    res = hlr.hlr_project_safe([g.make_box((0, 0, 0), 100, 100, 100)],
+                               origin=(0, 0, 0), view_dir=(0, 1, 0),
+                               x_dir=(1, 0, 0))
+    edges = res["visible"] + res["outline"]
+    assert edges, "HLR produced nothing to test with"
+    return edges[0]
+
+
+def test_projected_edge_has_a_bspline():
+    """A Make2D curve carries its geometry as a pcurve on the projection
+    plane, so BRep_Tool.Curve hands back nothing.  Reading it as a B-spline
+    has to cope: OCCT segfaults on a null curve handle rather than raising."""
+    bs = g._edge_bspline(_make2d_edge())
+    assert bs.NbPoles() >= 2
+
+
+def test_control_points_of_a_projected_edge():
+    pts = g.get_control_points(_make2d_edge())
+    assert len(pts) >= 2
+    assert all(len(p) == 3 for p in pts)

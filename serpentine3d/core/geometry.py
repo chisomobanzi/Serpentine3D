@@ -1044,6 +1044,28 @@ def split_shape(target, cutters: list) -> list:
 
 # --- control points ---------------------------------------------------------
 
+def _adaptor_with_a_3d_curve(edge):
+    """An adaptor whose Curve() is safe to read.
+
+    Make2D leaves its curves as pcurves on the projection plane with no 3D
+    curve of their own, and OCCT answers `Curve()` on one of those with a
+    null handle that segfaults the moment anything trims or copies it.
+    BuildCurve3d computes the missing curve from the pcurve, in place.
+    """
+    from OCP.BRepLib import BRepLib
+    from OCP.GeomAbs import GeomAbs_CurveType
+    ad = occ.edge_adaptor(edge)
+    if ad.GetType() == GeomAbs_CurveType.GeomAbs_BSplineCurve:
+        return ad
+    if ad.Curve().Curve() is None:
+        BRepLib.BuildCurve3d_s(edge)
+        ad = occ.edge_adaptor(edge)
+        if (ad.GetType() != GeomAbs_CurveType.GeomAbs_BSplineCurve
+                and ad.Curve().Curve() is None):
+            raise GeometryError("This curve has no 3D geometry to read.")
+    return ad
+
+
 def _edge_bspline(shape):
     """The (single) edge's curve as a fresh Geom_BSplineCurve in world frame."""
     from .occ import GeomConvert
@@ -1054,7 +1076,7 @@ def _edge_bspline(shape):
         raise GeometryError("Control points work on single curves "
                             "(explode polylines first)")
     edge = edges[0]
-    ad = occ.edge_adaptor(edge)
+    ad = _adaptor_with_a_3d_curve(edges[0])
     if ad.GetType() == GeomAbs_CurveType.GeomAbs_BSplineCurve:
         bs = ad.BSpline().Copy()      # OCP returns the derived type directly
     else:
