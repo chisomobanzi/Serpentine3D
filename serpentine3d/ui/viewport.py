@@ -557,8 +557,8 @@ class Viewport(QOpenGLWidget):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._draw_span = None              # (from, to) of the open leg
         self._draw_frame = None             # (sides, corner) when it is a box
-        from .viewport_hud import ViewportHud
-        self._hud = ViewportHud(self)       # top-left view/display chips
+        # The view/display chips that used to float here have moved to the
+        # pane's title bar, where they no longer sit on top of the drawing.
         self.history = None                 # set by the main window
         from ..core.snaps import SnapIndex
         self.snaps = SnapIndex(scene, config)

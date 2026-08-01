@@ -31,7 +31,9 @@ def test_dock_viewport_model_and_paper_side_by_side(window):
     vp2 = window.dock_viewports[0]
     dock = vp2.parentWidget()
     assert isinstance(dock, QDockWidget)
-    assert dock.windowTitle() == "Sheet 1 viewport"
+    # A pane on a sheet says which sheet, where a model pane says its view.
+    assert dock.windowTitle().startswith("Sheet 1")
+    assert "Sheet 1" in dock.titleBarWidget().button.text()
     # the star feature: 3D model and the paper sheet coexist
     assert window.viewport.space == "model"
     assert vp2.space == lay.id

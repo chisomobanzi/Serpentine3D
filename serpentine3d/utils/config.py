@@ -62,7 +62,11 @@ DEFAULTS = {
     "window": {
         "geometry": "",
         "state": "",
-        "layout": "single",
+        # Four viewports on a first launch. The layout was there all along
+        # and went unfound — GitHub #5 asked for a feature that had already
+        # shipped — which opening in a single view did nothing to help.
+        # A default only: anyone who leaves in a single view gets one back.
+        "layout": "quad",
     },
 }
 

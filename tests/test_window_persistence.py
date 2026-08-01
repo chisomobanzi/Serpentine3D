@@ -68,12 +68,16 @@ def test_quad_layout_survives_a_restart(tmp_path, monkeypatch):
 
 
 def test_single_stays_single(tmp_path, monkeypatch):
+    """A first launch opens in quad now, so choosing single is a choice —
+    and it has to outlast the session that made it, or the new default
+    would simply overrule anyone who does not want four panes."""
     w = _window(tmp_path, monkeypatch)
+    w.set_view_layout("single")
     w.isVisible = lambda: True
     w.close()
     assert os.path.exists(tmp_path / "settings.json")
     again = _window(tmp_path, monkeypatch)
-    assert again.aux_viewports == []
+    assert not any(d.isVisibleTo(again) for d in again.aux_docks)
     again.close()
 
 

@@ -11,7 +11,7 @@ from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
-    QMessageBox, QProgressDialog, QToolBar, QVBoxLayout, QWidget,
+    QMenu, QMessageBox, QProgressDialog, QToolBar, QVBoxLayout, QWidget,
 )
 
 from . import commands as cmd_pkg
@@ -216,6 +216,10 @@ class MainWindow(QMainWindow):
         if closable:
             feats |= QDockWidget.DockWidgetFeature.DockWidgetClosable
         dock.setFeatures(feats)
+        # The title is the pane's menu: what it is showing, and the way to
+        # change it. A custom title bar takes Qt's own close button with it,
+        # so the bar puts one back when the dock is closable.
+        dock.setTitleBarWidget(_ViewportTitleBar(self, vp, dock, closable))
         from PySide6.QtWidgets import QSizePolicy
         vp.setSizePolicy(QSizePolicy.Policy.Expanding,   # claim the leftover
                          QSizePolicy.Policy.Expanding)   # space, not the panels
@@ -283,17 +287,72 @@ class MainWindow(QMainWindow):
             panel.input.setFocus()
         return panel
 
+    def _viewport_title(self, vp) -> str:
+        """What a pane is showing, in the order you would say it: the view,
+        then how it is drawn. A layout says which sheet instead of the view,
+        since a sheet has no camera to name."""
+        if vp.space == "model":
+            place = vp._view_name.capitalize()
+        else:
+            lay = next((l for l in self.scene.layouts if l.id == vp.space),
+                       None)
+            place = lay.name if lay else "Layout"
+        return f"{place} · {vp.display_mode.capitalize()}"
+
     def _update_viewport_dock_title(self, vp):
         dock = vp.parentWidget()
         if not isinstance(dock, QDockWidget):
             return
-        if vp.space == "model":
-            label = "Model"
-        else:
-            lay = next((l for l in self.scene.layouts if l.id == vp.space),
-                       None)
-            label = lay.name if lay else "Layout"
-        dock.setWindowTitle(f"{label} viewport")
+        # The window title still matters: it is what a floated pane's own
+        # window frame shows, and what tabbed docks label their tabs with.
+        dock.setWindowTitle(self._viewport_title(vp))
+        bar = dock.titleBarWidget()
+        if isinstance(bar, _ViewportTitleBar):
+            bar.refresh()
+
+    def _viewport_menu(self, vp, into=None):
+        """The menu on a viewport's title bar.
+
+        Every entry acts on `vp`, not on the active viewport — a menu you
+        opened on a pane that then changed a different one would be worse
+        than no menu. The checkmarks make it a readout as well: this is the
+        only place that says which of the eight display modes a given pane
+        is in.
+        """
+        menu = QMenu(self) if into is None else into
+
+        def toggle(label, checked, fn):
+            act = menu.addAction(label)
+            # Only the current one is checkable, so the menu shows two ticks
+            # rather than sixteen empty boxes. Qt still reserves the check
+            # column, so the labels stay in line.
+            if checked:
+                act.setCheckable(True)
+                act.setChecked(True)
+            act.triggered.connect(lambda _checked=False: fn())
+            return act
+
+        # All eight, in opposing pairs. Back, Left and Bottom have no
+        # function key and are not in the View menu; this is where they live.
+        for label, name in (("Perspective", "perspective"),
+                            ("Isometric", "isometric"),
+                            ("Top", "top"), ("Bottom", "bottom"),
+                            ("Front", "front"), ("Back", "back"),
+                            ("Right", "right"), ("Left", "left")):
+            toggle(label, vp._view_name == name,
+                   lambda n=name: vp.set_view(n))
+        menu.addSeparator()
+        for mode in vp.DISPLAY_MODES:
+            toggle(mode.capitalize(), vp.display_mode == mode,
+                   lambda m=mode: vp.set_display_mode(m))
+        menu.addSeparator()
+        self._action(menu, "Zoom Extents", None, vp.zoom_extents)
+        menu.addSeparator()
+        self._action(menu, "Four Viewports", None,
+                     lambda: self.run_command("4view"))
+        self._action(menu, "Single Viewport", None,
+                     lambda: self.run_command("1view"))
+        return menu
 
     def _wire_viewport(self, vp):
         vp.installEventFilter(self)
@@ -495,15 +554,18 @@ class MainWindow(QMainWindow):
         self._action(m_view, "AI Assistant", "Ctrl+Shift+A",
                      self.show_ai_panel)
         m_view.addSeparator()
-        m_ports = m_view.addMenu("Viewports")
+        # Four Viewports was two levels down and went unfound (GitHub #5
+        # asked for a layout that had shipped), so it sits in View itself.
+        # What stays in the submenu is the rarer business of adding panes.
+        self._action(m_view, "Four Viewports", None,
+                     lambda: self.run_command("4view"))
+        self._action(m_view, "Single Viewport", None,
+                     lambda: self.run_command("1view"))
+        m_ports = m_view.addMenu("More Viewports")
         self._action(m_ports, "New Viewport...", None,
                      lambda: self.run_command("newviewport"))
         self._action(m_ports, "Floating Viewport", None,
                      lambda: self.run_command("floatviewport"))
-        self._action(m_ports, "Four Viewports", None,
-                     lambda: self.run_command("4view"))
-        self._action(m_ports, "Single Viewport", None,
-                     lambda: self.run_command("1view"))
         m_view.addSeparator()
         self._action(m_view, "Toggle Grid", "F7",
                      lambda: self.run_command("grid"))
@@ -1141,7 +1203,9 @@ class MainWindow(QMainWindow):
         geometry = self.cfg.get("window", "geometry", default="")
         if geometry:
             self.restoreGeometry(QByteArray.fromBase64(geometry.encode()))
-        if self.cfg.get("window", "layout", default="single") == "quad":
+        # Quad unless last session ended in a single view; see the config
+        # defaults for why that is the way round it is.
+        if self.cfg.get("window", "layout", default="quad") == "quad":
             # Before restoreState, so the aux docks exist to restore onto.
             self.set_view_layout("quad")
         state = self.cfg.get("window", "state", default="")
@@ -1546,6 +1610,65 @@ class _EmptyTitleBar(QWidget):
     def __init__(self):
         super().__init__()
         self.setFixedHeight(0)
+
+
+class _ViewportTitleBar(QWidget):
+    """A viewport's title, which is also its menu.
+
+    Four viewports and a display-mode menu had both shipped when GitHub #5
+    asked for them, which says where they were: down the View menu, acting
+    on whichever pane was last clicked. Here the title names what this pane
+    is showing and clicking it changes this pane.
+    """
+
+    def __init__(self, win, vp, dock, closable: bool):
+        super().__init__()
+        from PySide6.QtWidgets import QHBoxLayout, QToolButton
+        self._win = win
+        self._vp = vp
+        row = QHBoxLayout(self)
+        row.setContentsMargins(4, 1, 4, 1)
+        row.setSpacing(2)
+
+        self.button = QToolButton(self)
+        self.button.setAutoRaise(True)
+        self.button.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.button.setToolTip("View, display mode and layout for this pane")
+        # Qt's own menu indicator lands as a speck on the text baseline; a
+        # caret in the label reads as something to click.
+        self.button.setStyleSheet(
+            "QToolButton::menu-indicator { image: none; width: 0 }"
+            "QToolButton { padding: 1px 6px; border-radius: 4px }")
+        # Built on the way open, so the checkmarks are current rather than
+        # whatever was true when the dock was made.
+        self._menu = QMenu(self)
+        self._menu.aboutToShow.connect(self._rebuild)
+        self.button.setMenu(self._menu)
+        row.addWidget(self.button)
+        # The stretch is the drag handle: a bare QWidget ignores a press, so
+        # it reaches the dock underneath and the pane still tears off.
+        row.addStretch(1)
+
+        if closable:
+            close = QToolButton(self)
+            close.setAutoRaise(True)
+            close.setText("✕")
+            close.setToolTip("Close this viewport")
+            close.clicked.connect(dock.close)
+            row.addWidget(close)
+
+        vp.viewChanged.connect(lambda _name: self.refresh())
+        vp.displayModeChanged.connect(self.refresh)
+        self.refresh()
+
+    def _rebuild(self):
+        self._menu.clear()
+        self._win._viewport_menu(self._vp, into=self._menu)
+
+    def refresh(self):
+        self.button.setText(self._win._viewport_title(self._vp) + "  ▾")
 
 
 def _selftest() -> int:
