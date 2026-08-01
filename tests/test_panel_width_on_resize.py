@@ -85,28 +85,48 @@ def _dock_resized(win, dock, width):
 
 
 def test_a_width_chosen_by_dragging_is_the_one_held(win):
-    """The splitter is how you say you want a wider panel. A drag resizes
-    the dock while the window stays put, which is how it is told apart from
-    a window resize — that reaches the dock first and the window after."""
-    win._last_size = win.size()                    # settled: no resize afoot
+    """The splitter is how you say you want a wider panel: a dock resized
+    while no window resize is in flight is somebody dragging it."""
+    win._settled()                                 # nothing in flight
     _dock_resized(win, win._prop_dock, 517)
     assert win._panel_width == 517
 
 
-def test_the_panel_swelling_during_a_window_resize_is_not_a_choice(win):
-    """The bug itself, seen from the other side: Qt widens the dock as part
-    of laying the window out, before the window hears about the resize at
-    all. Mistaking that for a drag would record the swollen width and leave
-    nothing to put back."""
-    win._last_size = QSize(1400, 900)              # what the window last was
-    win.resize(2400, 900)                          # ... and now it is not
+def test_a_dock_laid_out_before_the_window_hears_of_it_is_not_a_choice(win):
+    """Maximising is not resize(): the window manager sets the size, Qt
+    lays the docks out, and only half a millisecond later does the window
+    get its resize event. So the swollen width arrives while nothing looks
+    to be in flight, and the panel came back at 48% of a maximised window.
+
+    What gives it away is the window itself — already a different size
+    from the one the panel last came to rest at."""
+    win._settled()                                 # at rest, at this size
+    win.resize(2400, 900)                          # already bigger ...
+    before = win._panel_width
+    _dock_resized(win, win._prop_dock, 1200)       # ... when the dock follows
+    assert win._panel_width == before
+
+
+def test_the_rearranging_after_a_resize_is_not_a_choice_either(win):
+    """And the window keeps shuffling docks for a couple of hundred
+    milliseconds after it has stopped moving."""
+    win._settled()
+    win.resizeEvent(QResizeEvent(win.size(), QSize(1400, 900)))
     before = win._panel_width
     _dock_resized(win, win._prop_dock, 1200)
     assert win._panel_width == before
 
 
+def test_the_window_lets_go_once_it_has_settled(win):
+    """... and a drag after that is a drag again."""
+    win.resizeEvent(QResizeEvent(QSize(2400, 900), QSize(1400, 900)))
+    win._settled()
+    _dock_resized(win, win._prop_dock, 517)
+    assert win._panel_width == 517
+
+
 def test_a_torn_off_panel_is_not_a_choice_about_this_window(win):
-    win._last_size = win.size()
+    win._settled()
     win._prop_dock.setFloating(True)
     _dock_resized(win, win._prop_dock, 900)
     assert win._panel_width != 900

@@ -33,6 +33,7 @@ _UNLIMITED = 16777215        # Qt's QWIDGETSIZE_MAX: "no maximum"
 
 PANEL_WIDTH = 280            # what a fresh window gives Properties/Layers
 PANEL_SHARE = 0.3            # ... and the most a restored one may hold
+_SETTLE_MS = 200             # how long a window resize keeps rearranging
 
 
 def clamp_panel_width(width, window_width):
@@ -91,7 +92,8 @@ class MainWindow(QMainWindow):
         # None until _balance_docks has run: a resize before then has no
         # settled panel width to hold, and holding one would fight it.
         self._panel_width = None
-        self._last_size = None
+        self._settling = False
+        self._settled_width = None
         self.aux_viewports: list = []           # Top/Front/Right in quad mode
         self.aux_docks: list = []               # their dock wrappers
         self.dock_viewports: list = []          # user-created dockable panes
@@ -316,9 +318,16 @@ class MainWindow(QMainWindow):
         read here.
         """
         super().resizeEvent(event)
+        self._settling = True
         if self._panel_width:
             QTimer.singleShot(0, self._hold_panel_width)
-        self._last_size = self.size()
+        QTimer.singleShot(_SETTLE_MS, self._settled)
+
+    def _settled(self):
+        """The window has stopped moving: the docks are the user's again."""
+        self._settling = False
+        self._settled_width = self.width()
+        self._hold_panel_width()
 
     def _hold_panel_width(self):
         if self._panel_width:
@@ -328,13 +337,18 @@ class MainWindow(QMainWindow):
         """Notice the user dragging the panel splitter, so the width held
         across the next window resize is the one they chose.
 
-        A drag resizes the dock while the window stays put; a window resize
-        reaches the dock first and only then this window, so comparing
-        against the last size seen there tells the two apart.
+        Only a dock resized with the window at the size it last came to
+        rest at counts. Neither half of that is spare. A maximise lays the
+        docks out half a millisecond *before* the window is told it has
+        resized, so waiting to be told is too late — but the window is
+        already its new size by then, which is what gives it away. The
+        rearranging afterwards takes a couple of hundred milliseconds more,
+        and only the flag covers that.
         """
         if (event.type() == QEvent.Type.Resize
                 and obj in (self._prop_dock, self._layer_dock)
-                and self.size() == getattr(self, "_last_size", None)
+                and not getattr(self, "_settling", False)
+                and self.width() == self._settled_width
                 and not obj.isFloating() and obj.isVisibleTo(self)):
             self._panel_width = event.size().width()
         return super().eventFilter(obj, event)
