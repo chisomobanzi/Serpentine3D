@@ -94,3 +94,20 @@ def test_the_toolbar_carries_the_palette(_qapp):
             "happened to fit")
     finally:
         win.close()
+
+
+def test_it_can_be_measured_while_it_is_still_being_built(_qapp):
+    """A size hint is answerable the moment the widget exists, and the
+    buttons are parented on well before reflow works out a height.  An
+    AttributeError raised inside a Qt override does not surface as itself:
+    it comes back as a bare SystemError from wherever Qt happened to ask."""
+    seen = []
+
+    class Watched(ToolPalette):
+        def _button(self, label, command, invoke):
+            seen.append(self.sizeHint().height())     # mid-construction
+            return super()._button(label, command, invoke)
+
+    palette = Watched(GROUPS, lambda command: None)
+    assert seen and all(h >= 0 for h in seen)
+    assert palette.sizeHint().height() > 0

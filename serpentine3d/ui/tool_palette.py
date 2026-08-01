@@ -37,6 +37,12 @@ class ToolPalette(QWidget):
     def __init__(self, groups, invoke, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        # An empty column's worth, so that the size hint is answerable from
+        # the moment the widget exists: reflow only works out the real
+        # height once every button has been parented on, and a hint asked
+        # for before then came back as an AttributeError from inside a Qt
+        # override, which surfaces as a bare SystemError somewhere else.
+        self._height = MARGIN * 2
         self._buttons: list[QToolButton] = []
         self._rules: list[QFrame] = []
         self._items: list[tuple[QWidget, bool]] = []   # (widget, is_rule)
