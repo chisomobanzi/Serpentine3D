@@ -202,14 +202,18 @@ def draw_title_block(painter, to_dev, k, layout, sheet_index=1,
     _line(painter, to_dev, (x0, y0 + h - 8), (x0 + w, y0 + h - 8))
     _line(painter, to_dev, (x0, y0 + h - 15), (x0 + w, y0 + h - 15))
     _line(painter, to_dev, (x0 + w / 2, y0), (x0 + w / 2, y0 + h - 15))
+    # Baselines sit a fixed lift above the rule under each row, so the
+    # glyphs land inside their cell.  Measured from the row's own bottom
+    # rather than the block's top, which put the project name through the
+    # frame and struck the title through with the rule below it.
     painter.setFont(_font(k, 4.2))
     painter.setPen(QPen(INK))
-    painter.drawText(int(to_dev(x0 + 2, y0 + h - 2.2)[0]),
-                     int(to_dev(x0 + 2, y0 + h - 2.2)[1]),
+    painter.drawText(int(to_dev(x0 + 2, y0 + h - 8 + 2.2)[0]),
+                     int(to_dev(x0 + 2, y0 + h - 8 + 2.2)[1]),
                      fields.get("project", ""))
     painter.setFont(_font(k, 3.4))
-    painter.drawText(int(to_dev(x0 + 2, y0 + h - 9.7)[0]),
-                     int(to_dev(x0 + 2, y0 + h - 9.7)[1]),
+    painter.drawText(int(to_dev(x0 + 2, y0 + h - 15 + 2.0)[0]),
+                     int(to_dev(x0 + 2, y0 + h - 15 + 2.0)[1]),
                      fields.get("title", ""))
     painter.setFont(_font(k, 2.6))
     cells = [
@@ -247,9 +251,13 @@ def draw_scale_bar(painter, to_dev, k, x, y, scale_denom, scene=None):
                          int(seg_mm * k), int(1.8 * k))
     painter.setBrush(QColor(0, 0, 0, 0))
     painter.setFont(_font(k, 2.4))
-    label0 = to_dev(x, y)
+    # The bar occupies y..y+1.8, so a baseline at y draws the labels through
+    # it: the leading digit of the total disappeared into the last black
+    # segment and the "0" vanished under the first.  They go below the bar.
+    label_y = y - 1.0
+    label0 = to_dev(x, label_y)
     painter.drawText(int(label0[0]), int(label0[1]), "0")
-    end = to_dev(x + 5 * seg_mm, y)
+    end = to_dev(x + 5 * seg_mm, label_y)
     total = 5 * seg_model
     text = scene.format_length(total) if scene else f"{total:g}"
     painter.drawText(int(end[0]), int(end[1]), text)
