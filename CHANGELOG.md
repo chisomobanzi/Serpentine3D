@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A locked direction takes a typed length. Tab freezes the direction the
+  cursor is pointing in, and the prompt has said "type a length" since it
+  landed, but nothing carried the lock as far as the parser: only a command
+  with an axis of its own, like the height of an extrusion, accepted a bare
+  number. `line` after Tab still wanted a mouse move and a click, or polar
+  coordinates typed out in full. A command that names its own direction
+  still keeps it, and typed coordinates still override both.
+
 ## 0.5.8 — 2026-08-02
 
 ### Fixed
