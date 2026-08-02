@@ -65,11 +65,13 @@ Nothing is bound out of the box.
 |---|---|
 | ++f10++ / ++f11++ | Show / hide control points (curves *and* surfaces) |
 | ++ctrl+shift++ + click | Pick a **face** (push/pull) or **edge** (fillet) of a solid |
+| ++tab++ | While a command wants a point: lock the direction you're aiming in, then type the distance. ++tab++ again releases it |
 | Arrow keys | Nudge the selection along the construction plane (++shift++ ×10, ++ctrl++ ×0.1) |
 
 ## Command line
 
-- **Tab** completes command names; **↑ / ↓** recall history.
+- **Tab** completes command names, except while a command is waiting for a
+  point, when it locks the direction instead; **↑ / ↓** recall history.
 - **Enter** on an empty line repeats the last command; a **right-click** in
   the viewport is Enter — it runs what you've typed or repeats the last
   command. `delete` is never repeated, so a right-click after deleting

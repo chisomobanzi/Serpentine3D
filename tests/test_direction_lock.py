@@ -101,6 +101,79 @@ def test_a_command_that_owns_the_direction_keeps_it():
     assert vp.dir_lock is None
 
 
+# -- and then you type the distance --
+
+def _ctx(vp):
+    from serpentine3d.commands.base import CommandContext
+    scene = vp.scene
+    return CommandContext(scene, SelectionManager(scene), None, viewport=vp)
+
+
+def test_a_typed_length_runs_along_the_locked_direction():
+    """Which is the point of locking one: aim once, then type 3400."""
+    from serpentine3d.commands.base import PointReq, parse_value
+    vp = _viewport()
+    assert vp.toggle_direction_lock(550, 220)
+    base, direction = vp.dir_lock
+    ok, pt = parse_value(PointReq("End of line"), "3400", _ctx(vp))
+    assert ok, pt
+    assert np.allclose(pt, np.asarray(base, float)
+                       + 3400 * np.asarray(direction, float))
+
+
+def test_a_bare_length_with_no_lock_is_still_not_a_point():
+    """Nothing says where it would go."""
+    from serpentine3d.commands.base import PointReq, parse_value
+    vp = _viewport()
+    ok, _ = parse_value(PointReq("End of line"), "3400", _ctx(vp))
+    assert not ok
+
+
+def test_the_commands_own_direction_beats_the_lock():
+    """Extrude asks for its height along its own axis. A lock taken while
+    some earlier point was being picked has no business bending that."""
+    from serpentine3d.commands.base import PointReq, parse_value
+    vp = _viewport()
+    assert vp.toggle_direction_lock(550, 220)
+    req = PointReq("Height", number_from=((0.0, 0.0, 0.0), (0.0, 0.0, 1.0)))
+    ok, pt = parse_value(req, "10", _ctx(vp))
+    assert ok and np.allclose(pt, (0.0, 0.0, 10.0))
+
+
+def test_coordinates_still_mean_coordinates_under_a_lock():
+    """A lock constrains the cursor. Typing an actual point overrides it,
+    the same way it overrides ortho."""
+    from serpentine3d.commands.base import PointReq, parse_value
+    vp = _viewport()
+    assert vp.toggle_direction_lock(550, 220)
+    ok, pt = parse_value(PointReq("End of line"), "5,6,7", _ctx(vp))
+    assert ok and np.allclose(pt, (5.0, 6.0, 7.0))
+
+
+def test_a_length_typed_at_the_prompt_finishes_the_line():
+    """End to end: pick a start, Tab, type the length, get a line."""
+    _qapp()
+    from serpentine3d.app import MainWindow
+    w = MainWindow()
+    w.resize(900, 700)
+    w.command_line.run_command("line")
+    w.processor.provide((0.0, 0.0, 0.0))
+    vp = w.active_viewport
+    assert vp.snap_base is not None, "the second point has no base to run from"
+    assert vp.toggle_direction_lock(550, 220)
+    direction = np.asarray(vp.dir_lock[1], float)
+
+    w.command_line.input.setText("3400")
+    w.command_line.submit_input()
+
+    try:
+        assert len(w.scene.all()) == 1, "the typed length made no point"
+        assert np.allclose(w.ctx.last_point, 3400 * direction, atol=1e-6)
+    finally:
+        w.mark_saved()         # or closing asks to save and waits forever
+        w.close()
+
+
 def _tab_event():
     from PySide6.QtCore import QEvent
     from PySide6.QtGui import QKeyEvent

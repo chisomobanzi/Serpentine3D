@@ -14,6 +14,9 @@ page maps your habits over and is honest about the gaps.
   expect, and you can import your own (below).
 - **Object snaps** — end, mid, cen, quad, int, perp, near — on a persistent
   osnap bar, plus a construction plane (`cplane`).
+- **++tab++ direction lock.** Aim, press ++tab++ to freeze that direction,
+  type the distance. The lock releases on ++tab++ again or at the next
+  point.
 - **The gumball** for move / rotate / scale, with numeric entry and Alt-drag
   copy; ++ctrl+shift++-click faces and edges for push/pull and fillets.
 - **Layers**, display modes (`wireframe` / `shaded` / `ghosted` / `rendered`

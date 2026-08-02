@@ -211,6 +211,17 @@ class CommandContext:
         from ..core.cplane import CPlane
         return CPlane()
 
+    def locked_direction(self):
+        """The Tab direction lock, if one is being held for this point.
+
+        Typing a length is how you use a lock, so the parser has to know
+        about it, and only the viewport can say whether the lock still
+        belongs to the point being picked rather than an earlier one.
+        """
+        vp = self.viewport
+        fn = getattr(vp, "locked_direction", None) if vp is not None else None
+        return fn() if fn is not None else None
+
     def on_bare_paper(self) -> bool:
         """True when a pick can only name paper, and not the model.
 
@@ -332,14 +343,20 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
             if text and opt.lower().startswith(text.lower()):
                 return True, opt
         pt = parse_point(text, ctx.last_point, ctx.scene.units, ctx.cplane)
-        if pt is None and (req.number_from is not None or req.allow_number):
+        # A command that runs along an axis of its own says so; failing
+        # that, Tab lets you aim one by hand, and a number means the same
+        # thing in both cases.
+        along = req.number_from
+        if along is None and not req.allow_number:
+            along = ctx.locked_direction()
+        if pt is None and (along is not None or req.allow_number):
             from ..utils.units import parse_length
             v = parse_length(text, ctx.scene.units)
             if v is not None:
-                if callable(req.number_from):
-                    pt = tuple(req.number_from(v))
-                elif req.number_from is not None:
-                    base, direction = req.number_from
+                if callable(along):
+                    pt = tuple(along(v))
+                elif along is not None:
+                    base, direction = along
                     pt = tuple(b + v * d for b, d in zip(base, direction))
                 else:
                     return True, float(v)     # allow_number: the raw value

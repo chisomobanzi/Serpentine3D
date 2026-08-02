@@ -2254,6 +2254,13 @@ class Viewport(QOpenGLWidget):
             return None
         return self.dir_lock
 
+    def locked_direction(self):
+        """The Tab lock, for whoever is not the viewport.
+
+        The command line needs it to turn a typed length into a point.
+        """
+        return self._locked_axis()
+
     def toggle_direction_lock(self, px: float | None = None,
                               py: float | None = None) -> bool:
         """Freeze (or release) the direction from the base to the cursor.
