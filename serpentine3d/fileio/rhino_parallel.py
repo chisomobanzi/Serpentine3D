@@ -74,6 +74,12 @@ BATCH = 64
 # Past about sixteen the pipe, not the conversion, is the limit.
 MAX_WORKERS = 16
 
+# Where a worker would put an encoded shape for an object it deliberately
+# did not convert. What follows it is the object's index in the file and
+# the kind the file claims, which is all the parent needs to come back for
+# it later. See `rhino.worth_deferring`.
+DEFERRED = "deferred"
+
 # Without fork every worker holds its own copy of the model, so the ceiling
 # is memory rather than cores.
 MAX_WORKERS_WITHOUT_FORK = 4
@@ -285,6 +291,15 @@ def _convert(indices: list[int]):
             out.append((i, [], None))
             continue
         meta = rhino.object_appearance(attrs, _LAYERS, _MATERIALS)
+        if rhino.worth_deferring(geo, meta):
+            # Nothing to convert and so nothing to send back: the object
+            # index and the kind the file claims are enough for the parent
+            # to come back for it if anything ever asks (GitHub #5). Ahead
+            # of the size checks below on purpose — a survey mesh switched
+            # off is exactly the object worth not converting.
+            out.append((i, [(attrs.Name or "", meta,
+                             [(DEFERRED, i, rhino.file_kind(geo))])], None))
+            continue
         if isinstance(geo, r3.Mesh) and len(geo.Vertices) > limit:
             out.append((i, [(attrs.Name or "", meta, [])],
                         ("mesh", len(geo.Vertices), len(geo.Faces))))
@@ -528,13 +543,23 @@ def _messages(conn, interval: float = 0.05):
             return
 
 
-def _assemble(messages, report, opening: str = "") -> list[tuple[str, object,
-                                                                dict]]:
+def _is_deferred(payload) -> bool:
+    """Whether a worker sent a promise of geometry instead of geometry."""
+    return (isinstance(payload, tuple) and len(payload) == 3
+            and payload[0] == DEFERRED)
+
+
+def _assemble(messages, report, opening: str = "",
+              path: str = "") -> list[tuple[str, object, dict]]:
     """Turn the reader's message stream into what import_3dm returns.
 
     Shapes are decoded as they land rather than at the end, so the bytes are
     freed while the workers are still busy and the parent is not left holding
     the whole file twice over.
+
+    What a worker chose not to convert comes back as a marker instead of
+    bytes, and is turned into a `DeferredShape` at the end, once the count
+    of them is known and they can share one reopening of the file.
     """
     total, rows = None, []
     # What to repaint between messages. The bar must not creep while the
@@ -548,7 +573,8 @@ def _assemble(messages, report, opening: str = "") -> list[tuple[str, object,
         if kind == "batch":
             _, done, total, results = message
             rows.extend((index, [(name, meta,
-                                  [_decode(p) for p in encoded])
+                                  [p if _is_deferred(p) else _decode(p)
+                                   for p in encoded])
                                  for name, meta, encoded in parts])
                         for index, parts in results)
             latest = (done / (total or 1),
@@ -576,13 +602,29 @@ def _assemble(messages, report, opening: str = "") -> list[tuple[str, object,
     # Batches finish out of order; the scene should not depend on which
     # worker was quickest, and the fallback names count in file order.
     rows.sort(key=lambda row: row[0])
+    # One reader for all of them, so that ticking a hidden layer back on
+    # opens the file once rather than once an object.
+    owed = sum(1 for _, parts in rows
+               for _, _, shapes in parts for s in shapes if _is_deferred(s))
+    pending = rhino_module().PendingFile(path, owed) if owed else None
+
     out, counter = [], 0
     for _, parts in rows:
         for name, meta, shapes in parts:
             for shape in shapes:
                 counter += 1
+                if _is_deferred(shape):
+                    shape = rhino_module()._deferred_from_file(
+                        pending, shape[1], shape[2])
                 out.append((name or f"3dm object {counter:02d}", shape, meta))
     return out
+
+
+def rhino_module():
+    """The sibling importer, imported late: it imports this one at module
+    level, and the two cannot both come first."""
+    from . import rhino
+    return rhino
 
 
 def import_3dm_parallel(path: str, progress=None,
@@ -614,7 +656,7 @@ def import_3dm_parallel(path: str, progress=None,
         # _assemble returns only once the message stream ends, which is the
         # reader closing the pipe — so a normal return means it got to the end.
         items = _assemble(_messages(receiver), report,
-                          f"Reading {os.path.basename(path)}…")
+                          f"Reading {os.path.basename(path)}…", path)
         finished = True
         return items
     finally:

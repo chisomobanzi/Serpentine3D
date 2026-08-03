@@ -14,6 +14,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 from . import geometry
+from .deferred import DeferredShape
 from .layers import LayerManager
 from .tessellate import DisplayMesh, tessellate
 
@@ -53,7 +54,10 @@ def _tess_lock(shape) -> threading.Lock:
 class SceneObject:
     id: str
     name: str
-    shape: object                      # TopoDS_Shape
+    # A TopoDS_Shape, or a DeferredShape standing in for one that has been
+    # read but not converted. Read it through `shape`, which converts what
+    # it finds; the underscore is here so that property can exist at all.
+    _shape: object
     kind: str                          # curve | surface | solid | point | compound
     layer_id: str
     visible: bool = True
@@ -70,6 +74,42 @@ class SceneObject:
     draw_order: int = 0                # higher draws on top (breaks depth ties)
     _mesh: DisplayMesh | None = field(default=None, repr=False, compare=False)
     _bounds: tuple | None = field(default=None, repr=False, compare=False)
+    # The scene holding this object, so a bare `.shape` read on something
+    # deferred can go through `Scene.realise` and get the whole job — an
+    # object that converts to nothing removed, one that converts to two
+    # given its sibling — rather than only the shape.
+    _scene: object = field(default=None, repr=False, compare=False)
+
+    @property
+    def shape(self):
+        """This object's geometry, converting it first if it has not been.
+
+        Every reader goes through here, which is the point: there is no
+        call site left that can be handed a placeholder by mistake.
+        """
+        held = self._shape
+        if isinstance(held, DeferredShape):
+            scene = self._scene
+            if scene is not None:
+                scene.realise(self.id)
+            else:
+                shapes = held.shapes()
+                self._shape = shapes[0] if shapes else None
+            held = self._shape
+        return held
+
+    @shape.setter
+    def shape(self, value):
+        self._shape = value
+
+    @property
+    def shape_ready(self) -> bool:
+        """Whether the geometry exists, as opposed to a promise of it.
+
+        Asking does not convert anything, which is what makes it usable in
+        the places that must not: the sync key, the tests above it.
+        """
+        return not isinstance(self._shape, DeferredShape)
 
     def bbox(self) -> tuple[tuple, tuple]:
         """This object's world bounding box, worked out at most once.
@@ -85,19 +125,29 @@ class SceneObject:
         the answer expires by itself and there is no invalidation to
         forget at a call site.
         """
+        shape = self.shape
+        if shape is None:
+            return ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
         cached = self._bounds
-        if cached is not None and cached[0] is self.shape:
+        if cached is not None and cached[0] is shape:
             return cached[1]
-        box = geometry.bbox(self.shape)
-        self._bounds = (self.shape, box)
+        box = geometry.bbox(shape)
+        self._bounds = (shape, box)
         return box
 
     @property
     def mesh(self) -> DisplayMesh:
+        # None is what a deferred object that converted to nothing is left
+        # holding. The scene drops it, but whoever was already iterating
+        # still has it and will ask; an empty mesh draws nothing, which is
+        # the right picture, where the kernel would raise on the way there.
+        shape = self.shape
+        if shape is None:
+            return DisplayMesh()
         if self._mesh is None:
-            with _tess_lock(self.shape):
+            with _tess_lock(shape):
                 if self._mesh is None:
-                    self._mesh = tessellate(self.shape)
+                    self._mesh = tessellate(shape)
         return self._mesh
 
     @property
@@ -113,6 +163,7 @@ class Scene:
         self.objects: dict[str, SceneObject] = {}
         self._order: list[str] = []
         self.layers = LayerManager()
+        self.layers.on_shown = self.realise_layer
         self._counters = {}
         self._listeners: list = []
         self._batch_depth = 0           # see batched()
@@ -187,13 +238,18 @@ class Scene:
 
     def add(self, shape, name: str | None = None,
             layer_id: str | None = None) -> SceneObject:
-        kind = geometry.shape_kind(shape)
+        # A DeferredShape is geometry the file described and nothing has
+        # converted. It answers for its own kind, because working the kind
+        # out from the shape is exactly the conversion being put off.
+        kind = (shape.kind if isinstance(shape, DeferredShape)
+                else geometry.shape_kind(shape))
         obj = SceneObject(
             id=uuid.uuid4().hex[:8],
             name=name or self._auto_name(kind),
-            shape=shape,
+            _shape=shape,
             kind=kind,
             layer_id=layer_id or self.layers.current_id,
+            _scene=self,
         )
         self.objects[obj.id] = obj
         self._order.append(obj.id)
@@ -217,6 +273,61 @@ class Scene:
             obj = self.update(obj.id, **fields)
         return obj
 
+    # -- converting what was only read (see core/deferred.py) --
+
+    def realise(self, obj_id: str) -> SceneObject | None:
+        """Convert an object's deferred geometry, now.
+
+        One Rhino object is usually one shape, but not always, and the two
+        exceptions are why this is the scene's job rather than the object's.
+        Roughly a sixth of the hidden objects in a real survey file convert
+        to nothing at all, and an eager import made no object for those, so
+        neither can this one. A few convert to two — a sewn brep and the
+        mesh fallback for the faces that would not sew — and eager import
+        made two objects, so this adds the sibling.
+
+        Returns the object, or None if the geometry turned out to be
+        nothing and it has been dropped.
+        """
+        obj = self.objects.get(obj_id)
+        if obj is None or obj.shape_ready:
+            return obj
+
+        held = obj._shape
+        shapes = held.shapes()
+        if not shapes:
+            # Emptied as well as dropped: something may still be holding
+            # this object, and a placeholder that has already been asked
+            # and answered nothing is worse to hand back than nothing.
+            obj._shape = None
+            self.remove(obj_id)
+            return None
+
+        obj._shape = shapes[0]
+        obj._mesh = None
+        # The file's word on the kind was a guess made without the geometry.
+        obj.kind = geometry.shape_kind(shapes[0])
+        for extra in shapes[1:]:
+            self.add(extra, layer_id=obj.layer_id)
+        self.notify("objects")
+        return obj
+
+    def realise_layer(self, layer_id: str) -> int:
+        """Convert everything still deferred on a layer. Returns how many.
+
+        This is what a layer being switched back on calls: doing the whole
+        layer in one pass means the file behind it is opened once, and it
+        keeps the cost where the user can see they asked for it.
+        """
+        pending = [o.id for o in self.all()
+                   if o.layer_id == layer_id and not o.shape_ready]
+        if not pending:
+            return 0
+        with self.batched():
+            for obj_id in pending:
+                self.realise(obj_id)
+        return len(pending)
+
     def remove(self, obj_id: str):
         if obj_id in self.objects:
             del self.objects[obj_id]
@@ -226,7 +337,7 @@ class Scene:
     def replace_shape(self, obj_id: str, shape) -> SceneObject:
         """Swap an object's geometry (transform, boolean result, ...)."""
         old = self.objects[obj_id]
-        new = replace(old, shape=shape, kind=geometry.shape_kind(shape),
+        new = replace(old, _shape=shape, kind=geometry.shape_kind(shape),
                       _mesh=None)
         self.objects[obj_id] = new
         self._regenerate_dependents(obj_id)
@@ -262,15 +373,24 @@ class Scene:
                     except Exception:              # noqa: BLE001
                         continue                   # keep the stale child
                     self.objects[rec["output"]] = replace(
-                        old, shape=shape, kind=geometry.shape_kind(shape),
+                        old, _shape=shape, kind=geometry.shape_kind(shape),
                         _mesh=None)
                     queue.append(rec["output"])
         finally:
             self._regen_active = False
 
     def update(self, obj_id: str, **fields) -> SceneObject:
+        was_visible = self.objects[obj_id].visible
         new = replace(self.objects[obj_id], **fields)
         self.objects[obj_id] = new
+        # Most of what a real drawing defers is hidden object by object on a
+        # layer that is switched on, so this is the trigger that does the
+        # work, not the layer one. Here rather than when the viewport gets
+        # round to it: converting can leave nothing and remove the object,
+        # and the middle of a draw is no place to discover that.
+        if new.visible and not was_visible and not new.shape_ready:
+            if self.realise(obj_id) is None:
+                return new
         self.notify("objects")
         return new
 
@@ -332,6 +452,7 @@ class Scene:
         self._order.clear()
         self._counters.clear()
         self.layers = LayerManager()
+        self.layers.on_shown = self.realise_layer
         self.named_views = {}
         self.layouts = []
         self.block_defs = {}

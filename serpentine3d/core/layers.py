@@ -38,6 +38,11 @@ class LayerManager:
         self._counter = itertools.count(1)
         self.current_id = DEFAULT_LAYER_ID
         self._add(Layer(DEFAULT_LAYER_ID, "Default", _PALETTE[0]))
+        # Called with a layer id when that layer is switched on, whoever
+        # switched it. The scene sets it, to convert the geometry it read
+        # from the file and put off converting (see core/deferred.py). A
+        # table on its own has nothing to convert and leaves it None.
+        self.on_shown = None
 
     def _add(self, layer: Layer):
         self._layers[layer.id] = layer
@@ -80,7 +85,10 @@ class LayerManager:
         self._layers[layer_id] = replace(self._layers[layer_id], name=name)
 
     def set_visible(self, layer_id: str, visible: bool):
+        was = self._layers[layer_id].visible
         self._layers[layer_id] = replace(self._layers[layer_id], visible=visible)
+        if visible and not was and self.on_shown is not None:
+            self.on_shown(layer_id)
 
     def set_color(self, layer_id: str, color: tuple[float, float, float]):
         self._layers[layer_id] = replace(self._layers[layer_id], color=color)

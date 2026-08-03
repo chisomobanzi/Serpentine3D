@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 
 import numpy as np
 import rhino3dm as r3
 from OCP.GeomAPI import GeomAPI_ProjectPointOnSurf
 
 from ..core import geometry, occ
+from ..core.deferred import DeferredShape
 from ..core.occ import (
     BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace, Geom_BSplineCurve,
     TColStd_Array1OfInteger, TColStd_Array1OfReal, TColgp_Array1OfPnt,
@@ -931,8 +933,97 @@ def object_to_shapes(geo, report=None) -> list:
     return shapes
 
 
+# --------------------------------------------------- what to put off doing
+
+def worth_deferring(geo, meta: dict) -> bool:
+    """Whether this object can be read now and converted later (#5).
+
+    A working drawing keeps its reference and survey layers switched off,
+    and converting them costs a quarter of the import while drawing none
+    of it. So anything the file says is out of sight is left as a promise.
+
+    Block instances are not, however hidden they are. One instance is as
+    many objects as its definition has members, and a placeholder that
+    turns into an unknown number of objects is a harder thing to own than
+    the saving is worth.
+    """
+    if isinstance(geo, r3.InstanceReference):
+        return False
+    return not meta.get("layer_visible", True) or not meta.get("visible", True)
+
+
+def file_kind(geo) -> str:
+    """What the file says this object is, in the scene's vocabulary.
+
+    A guess, and knowingly so: whether a brep closes into a solid is a
+    question the geometry answers and this is the answer that avoids
+    asking it. `Scene.realise` corrects it once the shape exists.
+    """
+    if isinstance(geo, (r3.Brep, r3.Extrusion)):
+        try:
+            return "solid" if geo.IsSolid else "surface"
+        except Exception:                                       # noqa: BLE001
+            return "surface"
+    if isinstance(geo, r3.Mesh):
+        return "mesh"
+    if isinstance(geo, r3.Point):
+        return "point"
+    return "curve"
+
+
+class PendingFile:
+    """A .3dm reopened for the objects an import chose not to convert.
+
+    The pool converts in other processes and cannot send back geometry it
+    never converted, so its placeholders hold an object index and this,
+    which reads the file the first time one of them is asked.
+
+    The model is dropped as soon as the last object it owed has been
+    converted, so ticking a hidden layer on costs the file being read once
+    and then nothing. An object deferred and then deleted never asks, so a
+    drawing that is closed with some of it still owed holds the model until
+    the scene goes; that is the same memory the eager import held all along.
+    """
+
+    def __init__(self, path: str, owed: int):
+        self.path = path
+        self._owed = owed
+        self._model = None
+        self._lock = threading.Lock()
+
+    def geometry(self, index: int):
+        """The object at `index`, reading the file if this is the first ask.
+
+        The geometry outlives the model it came from, so it is taken under
+        the lock and converted outside it: two layers switched on together
+        should not queue behind each other's conversion.
+        """
+        with self._lock:
+            if self._model is None:
+                self._model = r3.File3dm.Read(self.path)
+                if self._model is None:
+                    return None
+            geo = self._model.Objects[index].Geometry
+            self._owed -= 1
+            if self._owed <= 0:
+                self._model = None      # the last one; let the file go
+        return geo
+
+
+def _deferred_from_file(pending: PendingFile, index: int, kind: str):
+    def build():
+        geo = pending.geometry(index)
+        return [] if geo is None else object_to_shapes(geo)
+
+    return DeferredShape(build, kind=kind)
+
+
 def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
-    """Returns [(name, shape, {layer, color})]."""
+    """Returns [(name, shape, {layer, color})].
+
+    A shape is either geometry or, for an object the file keeps out of
+    sight, a `DeferredShape` that will convert it if anything asks.
+    """
     report = progress or Progress()
     if _worth_parallelising(path):
         try:
@@ -977,7 +1068,17 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
                 counter += 1
                 out.append(part)
             continue
-        for shape in object_to_shapes(obj.Geometry, step):
+        geo = obj.Geometry
+        if worth_deferring(geo, meta):
+            # Held by the geometry rather than the model: rhino3dm hands
+            # out an object that outlives the file it was read from, so
+            # putting one aside does not keep the whole drawing open.
+            counter += 1
+            name = attrs.Name or f"3dm object {counter:02d}"
+            out.append((name, DeferredShape(
+                lambda g=geo: object_to_shapes(g), kind=file_kind(geo)), meta))
+            continue
+        for shape in object_to_shapes(geo, step):
             if shape is None or shape.IsNull():
                 continue
             counter += 1
