@@ -185,11 +185,19 @@ def _import_file(scene, path: str, ext: str, report) -> int:
             if lname:
                 if lname not in layer_map:
                     existing = scene.layers.find_by_name(lname)
+                    fresh = existing is None or not any(
+                        o.layer_id == existing.id for o in scene.all())
                     if existing is None:
                         existing = scene.layers.create(
                             lname, meta.get("layer_color"))
-                        # A reference layer arrives switched off, the way
-                        # the file keeps it (GitHub #5).
+                    # A reference layer arrives switched off, the way the
+                    # file keeps it (GitHub #5). Also when the layer is one
+                    # the scene already had: every scene starts with an
+                    # empty Default, and a file whose own Default is off
+                    # would otherwise have it drawn. Only while that layer
+                    # is empty, though — importing into a drawing must not
+                    # hide work that is already on it.
+                    if fresh:
                         if not meta.get("layer_visible", True):
                             scene.layers.set_visible(existing.id, False)
                         if meta.get("layer_locked"):

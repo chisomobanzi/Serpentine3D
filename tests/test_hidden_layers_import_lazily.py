@@ -146,6 +146,72 @@ def test_the_layer_comes_in_switched_off(tmp_path):
     assert not scene.layers.find_by_name("Reference").visible
 
 
+def test_nothing_on_show_is_left_waiting(tmp_path):
+    """A scene starts with a Default layer and the importer reuses a layer
+    it already has by name, visibility and all. So a file whose own Default
+    is switched off puts its objects on a layer that is switched on, and
+    they would be deferred and then drawn on the very next frame. The
+    conversion has to happen while the file is open, where the workers can
+    share it, not one at a time inside a zoom extents."""
+    model = rhino3dm.File3dm()
+    off = rhino3dm.Layer()
+    off.Name = "Default"
+    off.Visible = False
+    off_i = model.Layers.Add(off)
+    for i in range(3):
+        lo = rhino3dm.Point3d(i * 20.0, 0.0, 0.0)
+        hi = rhino3dm.Point3d(i * 20.0 + 10, 10.0, 10.0)
+        attrs = rhino3dm.ObjectAttributes()
+        attrs.LayerIndex = off_i
+        attrs.Name = f"box{i}"
+        model.Objects.AddBrep(
+            rhino3dm.Brep.CreateFromBox(
+                rhino3dm.Box(rhino3dm.BoundingBox(lo, hi))), attrs)
+    path = str(tmp_path / "default_off.3dm")
+    model.Write(path, 8)
+
+    scene = Scene()
+    import_file(scene, path)
+
+    assert [o.name for o in scene.visible_objects() if not o.shape_ready] == []
+
+
+def _default_off(tmp_path, name="default_off.3dm"):
+    """A file whose own Default layer is switched off, holding three boxes."""
+    model = rhino3dm.File3dm()
+    off = rhino3dm.Layer()
+    off.Name = "Default"
+    off.Visible = False
+    off_i = model.Layers.Add(off)
+    for i in range(3):
+        lo = rhino3dm.Point3d(i * 20.0, 0.0, 0.0)
+        hi = rhino3dm.Point3d(i * 20.0 + 10, 10.0, 10.0)
+        attrs = rhino3dm.ObjectAttributes()
+        attrs.LayerIndex = off_i
+        attrs.Name = f"box{i}"
+        model.Objects.AddBrep(
+            rhino3dm.Brep.CreateFromBox(
+                rhino3dm.Box(rhino3dm.BoundingBox(lo, hi))), attrs)
+    path = str(tmp_path / name)
+    model.Write(path, 8)
+    return path
+
+
+def test_importing_does_not_hide_work_already_on_the_layer(tmp_path):
+    """The rule above is only safe while the layer is empty. Import a file
+    whose Default is switched off into a drawing that has something on its
+    own Default, and that something has to stay on show."""
+    from serpentine3d.core import geometry as g
+
+    scene = Scene()
+    mine = scene.add(g.make_box((0, 0, 0), 5, 5, 5), name="Mine")
+
+    import_file(scene, _default_off(tmp_path, "into.3dm"))
+
+    assert scene.layers.find_by_name("Default").visible
+    assert mine in scene.visible_objects()
+
+
 # -- and the pool, which is what a real drawing goes through --
 
 def test_the_parallel_path_defers_too(tmp_path):

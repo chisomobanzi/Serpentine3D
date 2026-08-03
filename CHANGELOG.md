@@ -27,8 +27,8 @@
   marks hidden now arrives as a promise of geometry rather than the
   geometry itself, and is converted when you tick its layer back on,
   unhide it, export, or otherwise ask for it. On a 61 MB survey drawing
-  with three layers ticked, opening goes from 10.73s to 9.10s on four
-  cores and 6.63s to 5.84s on eight (GitHub #5).
+  with three layers ticked, opening goes from 10.73s to 8.79s on four
+  cores and 6.63s to 5.71s on eight (GitHub #5).
 
   One consequence worth knowing about: objects the file did not name take
   their `3dm object NN` numbers from the object order now rather than the
