@@ -337,6 +337,44 @@ def cmd_maxviewport(ctx):
     yield from ()
 
 
+@command("isocurves", aliases=("iso", "showisocurves"), mutates=False)
+def cmd_isocurves(ctx):
+    """Show or hide the wires across surfaces in this viewport.
+
+    Rendered leaves them off by default; this overrules whatever the mode
+    wanted, in this pane only, until 'default' hands it back.
+    """
+    from .base import OptionReq
+    vp = _vp(ctx)
+    now = vp.shows_isocurves()
+    choice = yield OptionReq(
+        f"Surface isocurves (currently {'on' if now else 'off'})",
+        options=["On", "Off", "Toggle", "Default"],
+        default="Off" if now else "On")
+    if choice == "Default":
+        vp.set_isocurves(None)
+        ctx.echo("Surface isocurves follow the display mode again "
+                 f"({'on' if vp.shows_isocurves() else 'off'} in "
+                 f"{vp.display_mode}).")
+        return
+    vp.set_isocurves(not now if choice == "Toggle" else choice == "On")
+    ctx.echo(f"Surface isocurves {'on' if vp.shows_isocurves() else 'off'}.")
+
+
+@command("surfaceedges", aliases=("showedges",), mutates=False)
+def cmd_surfaceedges(ctx):
+    """Show or hide the outlines of faces. Curves and text are unaffected."""
+    from .base import OptionReq
+    vp = _vp(ctx)
+    now = vp.shows_edges()
+    choice = yield OptionReq(
+        f"Surface edges (currently {'on' if now else 'off'})",
+        options=["On", "Off", "Toggle"],
+        default="Off" if now else "On")
+    vp.set_edges(not now if choice == "Toggle" else choice == "On")
+    ctx.echo(f"Surface edges {'on' if vp.shows_edges() else 'off'}.")
+
+
 @command("rendered", aliases=("render",), mutates=False)
 def cmd_rendered(ctx):
     """Environment-lit display with materials and a ground shadow."""

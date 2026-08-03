@@ -25,6 +25,7 @@ from .core.selection import SelectionManager
 from .ui import theme
 from .ui.command_line import CommandLine
 from .ui.dialogs import untether
+from .ui.display_panel import DisplayPanel
 from .ui.layers_panel import LayersPanel
 from .ui.properties import PropertiesPanel
 from .ui.viewport import Viewport, set_default_gl_format
@@ -154,6 +155,18 @@ class MainWindow(QMainWindow):
         self._layer_dock.setWidget(self.layers_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
                            self._layer_dock)
+
+        # Under Properties and Layers, which is the edge someone coming from
+        # Rhino looks along for it (GitHub #5). It stays short — a mode and
+        # two checkboxes — so it costs the other two almost nothing.
+        self.display_panel = DisplayPanel(
+            viewport_source=lambda: self.active_viewport)
+        self._display_dock = QDockWidget("Display", self)
+        self._display_dock.setObjectName("displayDock")
+        self._display_dock.setWidget(self.display_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
+                           self._display_dock)
+
         for dock in (self._prop_dock, self._layer_dock):
             dock.installEventFilter(self)   # to notice a splitter drag
         # proportions are set post-show in _balance_docks (a pre-show
@@ -232,6 +245,7 @@ class MainWindow(QMainWindow):
         self.ctx.viewport = vp                   # commands act on this pane
         self._refresh_space_tabs()
         self.properties.refresh()                # and so does the panel
+        self.display_panel.refresh()             # which pane's settings
 
     def eventFilter(self, obj, ev):
         if ev.type() == QEvent.Type.MouseButtonPress \
@@ -476,6 +490,13 @@ class MainWindow(QMainWindow):
     def _wire_viewport(self, vp):
         vp.installEventFilter(self)
         vp.displayModeChanged.connect(self._update_status)
+        # The mode is also reachable from the menu, the viewport title and
+        # the command line, none of which come through the panel. Only the
+        # active pane speaks for it; a background one changing mode is not
+        # the panel's business.
+        vp.displayModeChanged.connect(
+            lambda v=vp: v is self.active_viewport
+            and self.display_panel.refresh())
         vp.layoutSelectionChanged.connect(self._update_status)
         vp.layoutSelectionChanged.connect(self.properties.refresh)
         vp.history = self.history

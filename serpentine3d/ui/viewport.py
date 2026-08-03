@@ -528,6 +528,12 @@ class Viewport(QOpenGLWidget):
         mode = (config.get("display", "default_mode", default="shaded")
                 if config else "shaded")
         self.display_mode = mode if mode in self.DISPLAY_MODES else "shaded"
+        # Isocurves and surface edges: None follows the mode, True/False is
+        # the user overruling it. Kept as an override rather than a plain
+        # bool so that switching mode still moves the default under someone
+        # who never expressed a preference. See `shows_isocurves`.
+        self._iso_override = None
+        self._edge_override = None
         self._view_name = "perspective"     # last-picked named view (for HUD)
         self.grid_visible = True
         self.point_mode = False             # command wants a point click
@@ -1555,6 +1561,8 @@ class Viewport(QOpenGLWidget):
                       "zebra": 1.0, "curvature": 1.0, "draft": 1.0,
                       "rendered": 1.0}[mode]
         curv_range = self._curvature_range() if mode == "curvature" else 0.0
+        show_isos = self.shows_isocurves(mode)
+        show_edges = self.shows_edges(mode)
         # Higher draw_order on top: with GL_LESS the first-drawn wins coincident
         # depth ties, so draw front-most first. Stable, so equal-order objects
         # keep insertion order (unchanged default behaviour).
@@ -1664,7 +1672,11 @@ class Viewport(QOpenGLWidget):
                 GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
                 GL.glDepthMask(True)
 
-            if gpu.line_count:
+            # `not gpu.tri_count` is a curve, a point cloud, an annotation:
+            # something whose lines are the object rather than the outline
+            # of a face. Those are never what "show edges" is asking about,
+            # and switching them off would empty the drawing.
+            if gpu.line_count and (show_edges or not gpu.tri_count):
                 if selected:
                     edge_color = (*theme.SELECTION_COLOR, 1.0)
                 elif obj.kind == "curve":
@@ -1707,7 +1719,7 @@ class Viewport(QOpenGLWidget):
                 for prog in (self._mesh_prog, self._line_prog,
                              self._thick_prog):
                     self._set_clip_uniforms(prog, clips)
-            if gpu.iso_count:
+            if gpu.iso_count and show_isos:
                 if selected:
                     iso_color = (*theme.SELECTION_COLOR, 0.55)
                 elif mode == "wireframe":
@@ -2394,6 +2406,40 @@ class Viewport(QOpenGLWidget):
                 if m is not None and m.has_faces and not m.has_curvature:
                     obj._mesh = None
         self.display_mode = mode
+        self.displayModeChanged.emit()
+        self.update()
+
+    # -- what the mode draws, and what the user says instead --
+
+    #: Modes that leave surface isocurves off unless asked. Only rendered:
+    #: a render showing the wire cage of every surface is not a render, and
+    #: it is what GitHub #5 was looking at.
+    _ISO_OFF_MODES = ("rendered",)
+
+    def shows_isocurves(self, mode: str | None = None) -> bool:
+        """Whether surface isocurves are drawn in this pane.
+
+        The mode decides until somebody says otherwise, and then they do.
+        `mode` is for a detail on a sheet, which draws in its own mode
+        rather than the pane's; the override is still the pane's own.
+        """
+        if self._iso_override is not None:
+            return self._iso_override
+        return (mode or self.display_mode) not in self._ISO_OFF_MODES
+
+    def shows_edges(self, mode: str | None = None) -> bool:
+        """Whether surface and mesh edges are drawn in this pane. Every mode
+        wants them; the override is there for the odd render that doesn't."""
+        return True if self._edge_override is None else self._edge_override
+
+    def set_isocurves(self, on: bool | None):
+        """True or False to overrule the mode, None to follow it again."""
+        self._iso_override = None if on is None else bool(on)
+        self.displayModeChanged.emit()
+        self.update()
+
+    def set_edges(self, on: bool | None):
+        self._edge_override = None if on is None else bool(on)
         self.displayModeChanged.emit()
         self.update()
 
