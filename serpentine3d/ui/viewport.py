@@ -1331,30 +1331,59 @@ class Viewport(QOpenGLWidget):
         self._gpu = {}
         self._gpu_synced = None
 
+    def _visible_layers(self) -> tuple:
+        """The ids of the layers that are switched on.
+
+        Part of the sync key for the same reason `_layer_linetypes` is:
+        `LayerTable.set_visible` replaces the layer without telling the
+        scene, so `scene.revision` does not move. Drawing could live with
+        that, because it re-reads visibility every frame anyway. Uploading
+        cannot — buffers are released when a layer goes off, and a key that
+        sat still when it came back on would leave it blank.
+        """
+        return tuple(lay.id for lay in self.scene.layers.all() if lay.visible)
+
+    def _gpu_candidates(self) -> list:
+        """The objects worth building buffers for: the ones that get drawn.
+
+        Not `scene.all()`. A drawing is opened with most of it switched off
+        — 65,000 objects over three ticked layers in the report — and
+        meshing and uploading the rest is work for geometry that no draw
+        loop will ever reach (GitHub #5).
+        """
+        return self.scene.visible_objects()
+
+    def _gpu_sync_key(self) -> tuple:
+        """Everything the reconcile below reads, so it can be skipped when
+        none of it has moved. See `_sync_gpu`."""
+        return (self.scene.revision, self._tess_epoch,
+                self._layer_linetypes(), self._visible_layers())
+
     def _sync_gpu(self):
         """Reconcile the GPU cache against the scene: buffers for what is new,
         rebuilt for what changed linetype, freed for what has gone.
 
         This is thousands of objects of Python bookkeeping on a real drawing,
         and paintGL calls it every frame — four times over in the quad layout.
-        So it is skipped when nothing it reads has moved. Three things can
+        So it is skipped when nothing it reads has moved. Four things can
         move it, and only the first is obvious:
 
         - the scene itself, which is what `revision` is for;
         - a layer's linetype, edited without notifying the scene, so the
           revision stays put while every object on it needs new dashes;
+        - a layer being switched on or off, edited the same silent way, which
+          changes which objects deserve buffers at all;
         - a background tessellation finishing, which makes an object drawable
           with no change to the scene at all.
         """
-        key = (self.scene.revision, self._tess_epoch,
-               self._layer_linetypes())
+        key = self._gpu_sync_key()
         if self._gpu_synced == key:
             return
         self._gpu_synced = key
         live = set()
         live_meshes = set()
         layer_types = key[2]
-        for obj in self.scene.all():
+        for obj in self._gpu_candidates():
             live.add(obj.id)
             gpu = self._gpu.get(obj.id)
             if not obj.mesh_ready and self._schedule_tess(obj):

@@ -40,15 +40,26 @@ class _Recorder:
 
 def check_drawn_matches_scene(view):
     """The invariant. Raises with what diverged, so a failure names the
-    object and the distance rather than just saying False."""
+    object and the distance rather than just saying False.
+
+    Measured against what the scene shows, not everything it holds. Hidden
+    geometry used to be uploaded too, and asking for it back is asking for
+    the 93%-wasted meshing that GitHub #5 hit. So "not drawn" is the right
+    answer for a hidden object, and the check below insists on it.
+    """
     view._sync_gpu()
     scene = view.scene
-    live = {o.id for o in scene.all()}
+    shown = scene.visible_objects()
+    live = {o.id for o in shown}
 
-    orphans = (set(view._gpu) | set(view._tess_pending)) - live
+    held = set(view._gpu) | set(view._tess_pending)
+    orphans = held - {o.id for o in scene.all()}
     assert not orphans, f"drawing {len(orphans)} object(s) the scene has lost"
+    hidden = held & {o.id for o in scene.all() if o.id not in live}
+    assert not hidden, (
+        f"holding buffers for {len(hidden)} object(s) nothing will draw")
 
-    for obj in scene.all():
+    for obj in shown:
         gpu = view._gpu.get(obj.id)
         if gpu is None:
             entry = view._tess_pending.get(obj.id)
