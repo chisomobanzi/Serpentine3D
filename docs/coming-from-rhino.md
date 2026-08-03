@@ -15,8 +15,11 @@ page maps your habits over and is honest about the gaps.
 - **Object snaps** — end, mid, cen, quad, int, perp, near — on a persistent
   osnap bar, plus a construction plane (`cplane`).
 - **++tab++ direction lock.** Aim, press ++tab++ to freeze that direction,
-  type the distance. The lock releases on ++tab++ again or at the next
-  point.
+  type the distance. Object snaps keep working while it's held. The lock
+  releases on ++tab++ again or at the next point.
+- **++ctrl++-click elevator.** Click a point on the construction plane with
+  ++ctrl++ held to stand a vertical up from it, then set the height with the
+  mouse or by typing it — the way you place a point off the CPlane in Rhino.
 - **The gumball** for move / rotate / scale, with numeric entry and Alt-drag
   copy; ++ctrl+shift++-click faces and edges for push/pull and fillets.
 - **Layers**, display modes (`wireframe` / `shaded` / `ghosted` / `rendered`

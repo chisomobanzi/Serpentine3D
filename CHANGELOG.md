@@ -2,8 +2,23 @@
 
 ## Unreleased
 
+### Added
+
+- **++ctrl++-click stands a vertical up from the construction plane** —
+  Rhino's elevator mode. Click a point on the CPlane with ++ctrl++ held and
+  the pick runs up the axis through it, so the height can come from the
+  mouse or be typed at the prompt. It is the same lock Tab takes, which is
+  why everything the lock already does comes with it: the readout, the typed
+  distance, the release at the next point. A command that picks along an
+  axis of its own, like the height of an extrusion, keeps it.
+
 ### Fixed
 
+- Object snaps stopped working while a direction was held. Locking one took
+  the point over completely and never consulted them, which left no way to
+  run a line out to the height of something already drawn. A snap can't pull
+  the point off the locked line, but it now says where along it the thing it
+  found sits.
 - A locked direction takes a typed length. Tab freezes the direction the
   cursor is pointing in, and the prompt has said "type a length" since it
   landed, but nothing carried the lock as far as the parser: only a command

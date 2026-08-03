@@ -174,6 +174,193 @@ def test_a_length_typed_at_the_prompt_finishes_the_line():
         w.close()
 
 
+# -- snapping still works while a direction is held --
+
+def _normal(vp):
+    return np.asarray(vp.cplane.normal, float)
+
+
+def test_a_snap_lands_on_the_locked_line_instead_of_being_ignored():
+    """Holding a direction used to switch the object snaps off altogether,
+    so drawing to the height of something already built meant guessing at
+    it. The snap belongs on the line, beside whatever it found."""
+    vp = _viewport()
+    assert vp.toggle_direction_lock(550, 220)
+    base, direction = (np.asarray(v, float) for v in vp.dir_lock)
+    aside = np.cross(direction, _normal(vp))
+    found = base + 37.0 * direction + 12.0 * aside
+    vp.snaps.find = lambda *a, **k: (tuple(found), "end")
+
+    pt = np.asarray(vp.world_point_at(300, 400), float)
+    assert np.allclose(pt, base + 37.0 * direction, atol=1e-6)
+    assert vp._active_snap is not None, "the snap marker still has to show"
+
+
+def test_the_locked_line_is_still_free_when_nothing_snaps():
+    vp = _viewport()
+    assert vp.toggle_direction_lock(550, 220)
+    vp.snaps.find = lambda *a, **k: None
+    base, direction = (np.asarray(v, float) for v in vp.dir_lock)
+    pt = np.asarray(vp.world_point_at(300, 400), float)
+    assert np.allclose(np.cross(pt - base, direction), 0, atol=1e-6)
+    assert vp._active_snap is None
+
+
+# -- Ctrl stands an axis up from the CPlane (Rhino's elevator) --
+
+def test_ctrl_locks_a_vertical_through_the_point_under_the_cursor():
+    vp = _viewport()
+    ground = np.asarray(vp.world_point_at(550, 220), float)
+    assert vp.lock_elevation(550, 220)
+    base, direction = vp.dir_lock
+    assert np.allclose(base, ground)
+    assert np.isclose(abs(float(np.dot(direction, _normal(vp)))), 1.0)
+
+
+def test_the_elevator_works_before_any_point_has_been_picked():
+    """Which is its whole purpose: putting the *first* point off the CPlane,
+    where there is no base to have aimed from and Tab has nothing to do."""
+    vp = _viewport()
+    vp.snap_base = None
+    assert not vp.toggle_direction_lock(550, 220)
+    assert vp.lock_elevation(550, 220)
+    assert vp.locked_direction() is not None
+
+
+def test_the_elevator_holds_the_cursor_on_the_vertical():
+    vp = _viewport()
+    vp.snap_base = None
+    assert vp.lock_elevation(550, 220)
+    base, direction = (np.asarray(v, float) for v in vp.dir_lock)
+    for px, py in ((300, 120), (700, 500)):
+        pt = np.asarray(vp.world_point_at(px, py), float)
+        assert np.allclose(np.cross(pt - base, direction), 0, atol=1e-6)
+
+
+def test_a_typed_height_runs_up_the_elevator():
+    """The same sentence the Tab lock understands, because it is the same
+    lock underneath."""
+    from serpentine3d.commands.base import PointReq, parse_value
+    vp = _viewport()
+    vp.snap_base = None
+    assert vp.lock_elevation(550, 220)
+    base, direction = vp.dir_lock
+    ok, pt = parse_value(PointReq("Start of line"), "50", _ctx(vp))
+    assert ok, pt
+    assert np.allclose(pt, np.asarray(base, float)
+                       + 50 * np.asarray(direction, float))
+
+
+def test_the_elevator_lapses_when_the_command_moves_on():
+    """It is anchored to a point of its own, not to the command's base, so
+    it needs its own reason to expire."""
+    vp = _viewport()
+    assert vp.lock_elevation(550, 220)
+    vp.snap_base = (10.0, 4.0, 0.0)          # the command took its point
+    assert vp.locked_direction() is None
+    assert vp.dir_lock is None
+
+
+def test_a_command_that_owns_its_axis_keeps_it_from_the_elevator():
+    vp = _viewport()
+    vp.point_axis = ((0, 0, 0), (0, 0, 1))
+    assert not vp.lock_elevation(550, 220)
+    assert vp.dir_lock is None
+
+
+def _press(vp, px, py, ctrl=False):
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    vp.mousePressEvent(QMouseEvent(
+        QEvent.Type.MouseButtonPress, QPointF(px, py),
+        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ControlModifier if ctrl
+        else Qt.KeyboardModifier.NoModifier))
+
+
+def test_ctrl_click_sets_the_elevation_rather_than_picking_the_point():
+    vp = _viewport()
+    picked = []
+    vp.pointPicked.connect(picked.append)
+    _press(vp, 550, 220, ctrl=True)
+    assert picked == [], "that click chose the base, not the point"
+    assert vp.locked_direction() is not None
+
+
+def test_the_click_after_it_takes_the_point_up_the_axis():
+    vp = _viewport()
+    _press(vp, 550, 220, ctrl=True)
+    base, direction = (np.asarray(v, float) for v in vp.dir_lock)
+    picked = []
+    vp.pointPicked.connect(picked.append)
+    _press(vp, 560, 120)
+    assert len(picked) == 1
+    assert np.allclose(np.cross(np.asarray(picked[0], float) - base,
+                                direction), 0, atol=1e-6)
+
+
+def test_a_plain_click_still_just_picks_the_point():
+    vp = _viewport()
+    picked = []
+    vp.pointPicked.connect(picked.append)
+    _press(vp, 550, 220)
+    assert len(picked) == 1
+    assert vp.dir_lock is None
+
+
+def _move(vp, px, py):
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QMouseEvent
+    vp.mouseMoveEvent(QMouseEvent(
+        QEvent.Type.MouseMove, QPointF(px, py),
+        Qt.MouseButton.NoButton, Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier))
+
+
+def test_the_elevator_reads_out_the_height_as_you_move():
+    """Without the readout you are dragging a point up an invisible axis
+    with nothing to aim at."""
+    vp = _viewport()
+    vp.snap_base = None
+    assert vp.lock_elevation(550, 220)
+    base = np.asarray(vp.dir_lock[0], float)
+    _move(vp, 550, 140)
+    assert vp._draw_span is not None, "no height shown"
+    a, b = (np.asarray(v, float) for v in vp._draw_span)
+    assert np.allclose(a, base, atol=1e-6)
+    assert np.linalg.norm(b - a) > 1e-6
+
+
+def test_the_commands_own_leg_still_wins_the_readout():
+    """A command drawing a rubber band is already measuring the thing you
+    care about; the elevator must not talk over it."""
+    vp = _viewport()
+    assert vp.lock_elevation(550, 220)
+    leg = np.array([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]])
+    vp.set_preview(leg)
+    _move(vp, 550, 140)
+    a, b = (np.asarray(v, float) for v in vp._draw_span)
+    assert np.allclose(a, (0.0, 0.0, 0.0)) and np.allclose(b, (1.0, 0.0, 0.0))
+
+
+def test_the_held_axis_is_drawn_long_enough_to_leave_the_view():
+    """Both ways from the base, because the lock holds the whole line."""
+    from serpentine3d.ui.viewport import _axis_guide
+    seg = _axis_guide((1.0, 2.0, 3.0), (0.0, 0.0, 2.0), 50.0)
+    assert np.allclose(seg[0], (1.0, 2.0, -47.0))
+    assert np.allclose(seg[1], (1.0, 2.0, 53.0))
+
+
+def test_the_viewport_draws_that_guide_while_a_direction_is_held():
+    """The draw path cannot run headless, so the seam is what gets checked:
+    an elevator with no rubber band against it needs the axis on screen or
+    Ctrl looks like it did nothing."""
+    import inspect
+    from serpentine3d.ui.viewport import Viewport
+    src = inspect.getsource(Viewport._draw_preview)
+    assert "_axis_guide" in src and "_locked_axis" in src
+
+
 def _tab_event():
     from PySide6.QtCore import QEvent
     from PySide6.QtGui import QKeyEvent

@@ -51,7 +51,9 @@ Nothing is bound out of the box.
 - **Box selection**: drag **left→right** for a *window* (fully enclosed, gold
   box); **right→left** for a *crossing* (anything touched, white box).
 - **Object snaps** — end, mid, center, quadrant, intersection, perpendicular,
-  nearest — toggle on the **osnap bar** under the command line.
+  nearest — toggle on the **osnap bar** under the command line. They keep
+  working while a direction is held: the point lands on the locked line
+  beside whatever the snap found.
 
 ## Control points & sub-objects
 
@@ -66,6 +68,7 @@ Nothing is bound out of the box.
 | ++f10++ / ++f11++ | Show / hide control points (curves *and* surfaces) |
 | ++ctrl+shift++ + click | Pick a **face** (push/pull) or **edge** (fillet) of a solid |
 | ++tab++ | While a command wants a point: lock the direction you're aiming in, then type the distance. ++tab++ again releases it |
+| ++ctrl++ + click | While a command wants a point: stand a vertical up from the point you clicked, then type the height (Rhino's elevator mode) |
 | Arrow keys | Nudge the selection along the construction plane (++shift++ ×10, ++ctrl++ ×0.1) |
 
 ## Command line

@@ -565,7 +565,11 @@ class Viewport(QOpenGLWidget):
         self._active_snap = None            # (point, kind) under cursor
         self.snap_base = None               # reference point for perp snap
         self.point_axis = None              # (base, axis) while axis-locked
-        self.dir_lock = None                # (base, dir) frozen by Tab
+        self.dir_lock = None                # (base, dir) frozen by Tab/Ctrl
+        # which point the lock was taken for. Tab's base *is* that point, but
+        # the elevator stands its axis up somewhere else entirely, so the
+        # expiry rule cannot read it off `dir_lock`.
+        self._lock_owner = None
         self.pending_points = []            # the run being drawn, if any
         self.picked_points = []             # every point picked this command
         # what the running command's points mean: "model" coordinates or
@@ -1846,7 +1850,12 @@ class Viewport(QOpenGLWidget):
             pts = self._on_paper(pts) if len(pts) else pts
             markers = [self._on_paper([m])[0] for m in markers]
         snap = self._active_snap if self.point_mode else None
-        if len(pts) == 0 and not markers and snap is None:
+        # An elevator standing before the first point has no leg drawn
+        # against it, so without the axis itself on screen Ctrl looks like
+        # it did nothing at all.
+        held = (self._locked_axis()
+                if self.point_mode and self.space == "model" else None)
+        if len(pts) == 0 and not markers and snap is None and held is None:
             return
         segs = [pts] if len(pts) else []
         # screen-scaled cross markers at picked points
@@ -1859,6 +1868,13 @@ class Viewport(QOpenGLWidget):
             for axis in np.eye(3, dtype=np.float32) * size:
                 segs.append(np.stack([m - axis, m + axis]))
         GL.glDisable(GL.GL_DEPTH_TEST)
+        if held is not None:
+            # under everything else, and faint: it is the rule being drawn
+            # against, not a thing being drawn
+            self._preview.update(
+                _axis_guide(held[0], held[1], self.camera.distance * 4.0))
+            self._draw_lines(self._preview, mvp,
+                             (*theme.SELECTION_COLOR, 0.35), 1.0)
         if segs:
             allpts = np.concatenate(segs).astype(np.float32)
             self._preview.update(allpts)
@@ -2236,30 +2252,69 @@ class Viewport(QOpenGLWidget):
         if not on:
             self.set_preview(None)
             self.dir_lock = None
+            self._lock_owner = None
+
+    @staticmethod
+    def _same_point(a, b) -> bool:
+        if a is None or b is None:
+            return a is None and b is None
+        return bool(np.allclose(np.asarray(a, float),
+                                np.asarray(b, float), atol=1e-9))
 
     def _locked_axis(self):
-        """The Tab lock, if it still belongs to the point being picked.
+        """The held direction, if it still belongs to the point being picked.
 
-        The lock is stored with the base it was taken from rather than
-        being cleared by whoever moves on, so a command that picks a run of
-        points does not have to know the lock exists: the moment it sets a
-        new base the old direction stops applying.
+        The lock remembers which point it was taken for rather than being
+        cleared by whoever moves on, so a command that picks a run of points
+        does not have to know the lock exists: the moment it sets a new base
+        the old direction stops applying. An elevator taken before the first
+        point remembers having had no base at all, which is a state the
+        command leaves as soon as it takes one.
         """
         if self.dir_lock is None:
             return None
-        if self.snap_base is None or not np.allclose(
-                np.asarray(self.dir_lock[0], float),
-                np.asarray(self.snap_base, float), atol=1e-9):
+        if not self._same_point(self._lock_owner, self.snap_base):
             self.dir_lock = None
+            self._lock_owner = None
             return None
         return self.dir_lock
 
     def locked_direction(self):
-        """The Tab lock, for whoever is not the viewport.
+        """The held direction, for whoever is not the viewport.
 
         The command line needs it to turn a typed length into a point.
         """
         return self._locked_axis()
+
+    def lock_elevation(self, px: float | None = None,
+                       py: float | None = None) -> bool:
+        """Stand an axis up from the CPlane point under the cursor.
+
+        Tab locks the direction you are already aiming in. This locks the one
+        you cannot aim in at all, because a point above the CPlane has no
+        cursor position that means it — which is why Rhino gives the job its
+        own modifier. What it leaves behind is an ordinary lock, so the
+        height comes from the mouse, or from a typed number, exactly as the
+        distance along a Tab lock does.
+        """
+        if self.point_axis is not None:
+            return False                    # the command owns its direction
+        if px is None:
+            if self._last_mouse is None:
+                return False
+            px, py = self._last_mouse.x(), self._last_mouse.y()
+        # take the base off the CPlane, not off whatever is already held:
+        # standing a second axis up from a point on the first one is a way
+        # to get lost, and Rhino does not offer it either
+        held, self.dir_lock = self.dir_lock, None
+        base = self.world_point_at(px, py)
+        if base is None:
+            self.dir_lock = held
+            return False
+        self.dir_lock = (tuple(base), tuple(normalize(self.cplane.normal)))
+        self._lock_owner = self.snap_base
+        self.update()
+        return True
 
     def toggle_direction_lock(self, px: float | None = None,
                               py: float | None = None) -> bool:
@@ -2271,6 +2326,7 @@ class Viewport(QOpenGLWidget):
         """
         if self._locked_axis() is not None:
             self.dir_lock = None
+            self._lock_owner = None
             self.update()
             return False
         # a command that picks along its own axis already owns the
@@ -2289,6 +2345,7 @@ class Viewport(QOpenGLWidget):
         if np.linalg.norm(d) < 1e-9:
             return False                    # cursor is on the base point
         self.dir_lock = (tuple(base), tuple(normalize(d)))
+        self._lock_owner = self.snap_base
         self.update()
         return True
 
@@ -2474,6 +2531,19 @@ class Viewport(QOpenGLWidget):
         locked = self._locked_axis() or self.point_axis
         if locked is not None:
             base, axis = (np.asarray(v, float) for v in locked)
+            unit = normalize(axis)
+            # A held direction used to switch the object snaps off, which
+            # left no way to run a line out to the height of something
+            # already drawn. The snap cannot pull the point off the line,
+            # but it can say where along it the thing it found sits.
+            snap = self.snaps.find(self.camera, px, py, self.width(),
+                                   self.height(), base_point=self.snap_base,
+                                   pending_points=self.pending_points,
+                                   picked_points=self.picked_points)
+            if snap is not None:
+                self._active_snap = snap
+                t = float(np.dot(np.asarray(snap[0], float) - base, unit))
+                return tuple(float(c) for c in base + t * unit)
             self._active_snap = None
             origin, direction = self.camera.ray_through(
                 px, py, self.width(), self.height())
@@ -2482,7 +2552,7 @@ class Viewport(QOpenGLWidget):
                 return None
             if self.grid_snap:
                 t = round(t / self.grid_snap_step) * self.grid_snap_step
-            return tuple(float(c) for c in base + t * normalize(axis))
+            return tuple(float(c) for c in base + t * unit)
         snap = self.snaps.find(self.camera, px, py, self.width(),
                                self.height(), base_point=self.snap_base,
                                pending_points=self.pending_points,
@@ -2781,6 +2851,13 @@ class Viewport(QOpenGLWidget):
                         self.detailEntered.emit(detail)
                         self.update()
                         return
+                # Ctrl stands an axis up from the CPlane rather than taking
+                # the point: this click says where, the height comes after.
+                if (ev.modifiers() & Qt.KeyboardModifier.ControlModifier
+                        and self.space == "model"
+                        and self._locked_axis() is None
+                        and self.lock_elevation(pos.x(), pos.y())):
+                    return
                 pt = self.world_point_at(pos.x(), pos.y())
                 if pt is not None:
                     self.pointPicked.emit(pt)
@@ -2893,7 +2970,28 @@ class Viewport(QOpenGLWidget):
             pt = self.world_point_at(pos.x(), pos.y())
             if pt is not None:
                 self.mouseWorldMoved.emit(pt)
+                self._show_lock_readout(pt)
         self._last_mouse = pos
+
+    def _show_lock_readout(self, pt):
+        """How far up the held axis the cursor has got, when nothing else says.
+
+        A command drawing a rubber band is already measuring the leg that
+        matters, and the elevator must not talk over it. But the first point
+        of a command has no leg to measure, and that is exactly where the
+        elevator is used.
+        """
+        if len(self._preview_data):
+            return
+        held = self._locked_axis()
+        if held is None:
+            if self._draw_span is None:
+                return
+            self._draw_span = None
+        else:
+            self._draw_span = (np.asarray(held[0], float),
+                               np.asarray(pt, float))
+        self._update_draw_readout()
 
     def _take_gumball(self, pos, ev) -> bool:
         """Whether this press took hold of a gumball handle.
@@ -3290,6 +3388,19 @@ def _bbox_segments(mn, mx) -> np.ndarray:
         out.append(c[a])
         out.append(c[b])
     return np.asarray(out, np.float32)
+
+
+def _axis_guide(base, direction, reach: float) -> np.ndarray:
+    """The held axis, as a segment long enough to run out of the view.
+
+    Both ways from the base, because the lock holds the whole line rather
+    than a half-ray: the cursor is allowed back past the point it was
+    taken from.
+    """
+    b = np.asarray(base, np.float32)
+    d = np.asarray(direction, np.float32)
+    d = d / max(float(np.linalg.norm(d)), 1e-12)
+    return np.stack([b - reach * d, b + reach * d]).astype(np.float32)
 
 
 def _snap_marker(kind: str, c: np.ndarray, right: np.ndarray,
