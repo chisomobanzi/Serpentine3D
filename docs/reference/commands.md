@@ -70,9 +70,11 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `grid` | Grid |
 | `gridsnap` | Gridsnap |
 | `gumball` | Gumball |
+| `isocurves` (`showisocurves`) | Show or hide the wires across surfaces in this viewport. |
 | `isometric` (`iso`) | Isometric |
 | `left` | Left |
 | `length` (`len`) | Length |
+| `maxviewport` (`max`, `maximizeviewport`) | Give the pane you are in the whole window; again puts it back. |
 | `namedview` (`nv`) | Namedview |
 | `newviewport` (`newvp`, `splitview`) | Open an extra live viewport in a dockable panel — drag its title |
 | `ortho` | Toggle ortho: picked points lock to CPlane axes from the last |
@@ -89,6 +91,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `shaded` (`sh`) | Shaded |
 | `snap` | Snap |
 | `spacemouse` (`3dmouse`) | SpaceMouse status, on/off toggle, and a live axis readout for |
+| `surfaceedges` (`showedges`) | Show or hide the outlines of faces. Curves and text are unaffected. |
 | `technical` (`tech`) | Hidden-line technical display (parallel projection linework). |
 | `tolerance` | Show or set the document's absolute modelling tolerance. |
 | `top` | Top |
@@ -128,7 +131,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `layout` | Layout |
 | `leader` | Leader |
 | `make2d` | Make2d |
-| `revision` (`rev`) | Add a row to this sheet's revision table (drawn by the title block). |
+| `revision` | Add a row to this sheet's revision table (drawn by the title block). |
 | `scalebar` | Scalebar |
 | `sheetindex` | Place an index of all sheets as a note on the current layout. |
 | `text` (`note`) | Text |
@@ -289,6 +292,6 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `scale` (`sc`) | Scale about a base point: type a factor, or grab a reference |
 | `scale1d` | Stretch along one direction only (base + reference define the |
 | `scale2d` | Scale in the CPlane only (thickness along the CPlane normal is |
-| `scalenu` | Scalenu |
+| `scalenu` | Scale by a different amount along each axis: type the three |
 | `setpt` (`setpoints`) | Force chosen coordinates of every control point to one value — |
 

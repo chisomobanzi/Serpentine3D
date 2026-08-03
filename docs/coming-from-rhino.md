@@ -27,6 +27,11 @@ page maps your habits over and is honest about the gaps.
   copy; ++ctrl+shift++-click faces and edges for push/pull and fillets.
 - **Layers**, display modes (`wireframe` / `shaded` / `ghosted` / `rendered`
   / `technical`), and **linetypes** per layer or object.
+- **Surface isocurves and edges are yours to switch off**, as they are in
+  Rhino's display mode settings. Each mode starts where you'd expect
+  (rendered has isocurves off), and the **Display** panel, beside Properties
+  and Layers, overrides that for the pane you're in. `isocurves` and
+  `surfaceedges` do the same from the command line.
 - **Two-space drafting** — model space plus paper-space **layouts** with
   detail views, associative dimensions and hidden-line output. See
   [Make a drawing sheet](howto/drawings.md).

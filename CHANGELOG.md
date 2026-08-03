@@ -4,13 +4,47 @@
 
 ### Added
 
-- **A viewport can fill the window** — ++ctrl+m++, a double-click on a
+- **A viewport can fill the window.** ++ctrl+m++, a double-click on a
   viewport's title, or `max`. `1view` looked like this and is not: it hides
   the three aux panes and leaves the *primary* one, so working in Top and
   asking for a single view lost Top. There was no way to make an aux pane
   full-size at all (GitHub #5). Maximise takes the pane you are in, and the
   second press puts back the layout you had, splitter positions included,
   rather than rebuilding the even 2x2.
+
+- **Surface isocurves and edges can be switched off.** There is a Display
+  panel beside Properties and Layers, and `isocurves` and `surfaceedges`
+  commands. Rendered used to draw the wire cage over every surface just as
+  shaded does, and on a surveyed model that is what you see instead of the
+  model (GitHub #5). Each display mode now has its own default, rendered's
+  being off, and the panel sets a per-viewport override on top that
+  survives a mode change. It is the pane's own setting, so four panes stay
+  four panes.
+
+### Changed
+
+- **Hidden geometry is read but not converted.** An object the file
+  marks hidden now arrives as a promise of geometry rather than the
+  geometry itself, and is converted when you tick its layer back on,
+  unhide it, export, or otherwise ask for it. On a 61 MB survey drawing
+  with three layers ticked, opening goes from 10.73s to 9.10s on four
+  cores and 6.63s to 5.84s on eight (GitHub #5).
+
+  One consequence worth knowing about: objects the file did not name take
+  their `3dm object NN` numbers from the object order now rather than the
+  order shapes came out of the converter, so those numbers differ from
+  what an older build gave the same file. Objects the file does name are
+  untouched.
+
+### Fixed
+
+- Every object in a file got a display mesh and vertex buffers whether or
+  not its layer was switched on, because the viewport drew
+  `visible_objects()` but reconciled its GPU cache over `all()`. The
+  510 MB file in GitHub #5 has roughly 65,000 objects and three ticked
+  layers, so about 93% of that work was for geometry no draw loop would
+  reach. Buffers are released when a layer goes off now, and rebuilt when
+  it comes back on.
 
 ## 0.5.9 — 2026-08-03
 
