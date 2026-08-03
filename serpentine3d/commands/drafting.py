@@ -741,7 +741,9 @@ def cmd_sheetindex(ctx):
     ctx.echo(f"Sheet index placed ({len(ctx.scene.layouts)} sheets).")
 
 
-@command("revision", aliases=("rev",))
+# `rev` belongs to revolve, in Rhino and here. It resolved that way anyway,
+# but only because surfaces.py happens to be imported after this.
+@command("revision")
 def cmd_revision(ctx):
     """Add a row to this sheet's revision table (drawn by the title block)."""
     lay = _active_layout(ctx)

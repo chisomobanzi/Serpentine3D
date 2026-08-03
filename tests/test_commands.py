@@ -1025,3 +1025,34 @@ def test_array_previews(env):
     proc.provide_text("6")
     assert proc.preview_for(180.0) is not None  # fill-angle ghost
     proc.cancel()
+
+
+# -- aliases, which are first come first served nowhere --
+
+def test_no_two_commands_claim_the_same_alias():
+    """Registration is last one wins, silently. `isocurves` taking `iso`
+    is how `isometric` stopped setting an isometric view, and nothing said
+    so until someone typed it."""
+    from collections import defaultdict
+
+    from serpentine3d.commands.base import _REGISTRY
+
+    claimed = defaultdict(list)
+    for cd in _REGISTRY.values():
+        for alias in cd.aliases:
+            claimed[alias.lower()].append(cd.name)
+
+    clashes = {a: names for a, names in claimed.items() if len(names) > 1}
+    assert clashes == {}, f"aliases claimed twice: {clashes}"
+
+
+def test_an_alias_is_not_also_a_command_name():
+    from serpentine3d.commands.base import _ALIASES, _REGISTRY
+
+    shadowed = {a: t for a, t in _ALIASES.items()
+                if a in _REGISTRY and _REGISTRY[a].name != t}
+    assert shadowed == {}, f"aliases hiding real commands: {shadowed}"
+
+
+def test_iso_still_sets_an_isometric_view():
+    assert resolve("iso").name == "isometric"

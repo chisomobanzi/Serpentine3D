@@ -337,7 +337,9 @@ def cmd_maxviewport(ctx):
     yield from ()
 
 
-@command("isocurves", aliases=("iso", "showisocurves"), mutates=False)
+# Not `iso`: that has meant an isometric view since long before this
+# command existed, and registration is last one wins without saying so.
+@command("isocurves", aliases=("showisocurves",), mutates=False)
 def cmd_isocurves(ctx):
     """Show or hide the wires across surfaces in this viewport.
 
