@@ -98,6 +98,11 @@ class MainWindow(QMainWindow):
         self.aux_docks: list = []               # their dock wrappers
         self.dock_viewports: list = []          # user-created dockable panes
         self._active_vp = self.viewport
+        # Which pane is filling the window, and the dock layout to put back
+        # when it stops. The layout is held as saveState bytes rather than a
+        # list of sizes because splitters the user dragged are part of it.
+        self._maximized_vp = None
+        self._maximized_state = None
         # Every viewport lives in a dock, so any of them — the main one
         # included — can be dragged out to float or re-docked. The central
         # widget collapses to nothing so the docks fill the whole window.
@@ -460,6 +465,8 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         self._action(menu, "Zoom Extents", None, vp.zoom_extents)
         menu.addSeparator()
+        self._action(menu, "Maximize Viewport", None,
+                     lambda: self.toggle_maximized_viewport(vp))
         self._action(menu, "Four Viewports", None,
                      lambda: self.run_command("4view"))
         self._action(menu, "Single Viewport", None,
@@ -519,6 +526,10 @@ class MainWindow(QMainWindow):
         With every viewport a dock, quad just shows three aux viewport docks
         tiled beside the primary — and you can drag them anywhere from there.
         """
+        # Asking for a layout outright settles the question a maximise was
+        # holding open. Keeping the old one would make the next Ctrl+M put
+        # back a layout from before this call.
+        self._maximized_vp = self._maximized_state = None
         if mode == "quad" and not self.aux_docks:
             for title, view in (("Top", "top"), ("Front", "front"),
                                 ("Right", "right")):
@@ -549,6 +560,58 @@ class MainWindow(QMainWindow):
             for dock in self.aux_docks:
                 dock.hide()
         self.viewport.update()
+
+    @property
+    def maximized_viewport(self):
+        """The pane filling the window on its own, or None."""
+        return self._maximized_vp
+
+    def _viewport_docks(self) -> list:
+        """Every dock holding a viewport, hidden ones included.
+
+        Not built from `all_viewports`, which drops hidden panes — the whole
+        job here is to find the panes that were put away so they can be
+        brought back.
+        """
+        docks = [self._primary_dock] + list(self.aux_docks)
+        for vp in self.dock_viewports:
+            dock = vp.parentWidget()
+            if isinstance(dock, QDockWidget) and dock not in docks:
+                docks.append(dock)
+        return docks
+
+    def toggle_maximized_viewport(self, vp=None) -> bool:
+        """Give one pane the whole window, or hand the layout back.
+
+        `vp` is the pane a title bar or menu is speaking for; the keyboard
+        and the command have no such pane in mind and mean the active one.
+        Returns whether a pane ended up maximised.
+        """
+        if self._maximized_vp is not None:
+            state, self._maximized_state = self._maximized_state, None
+            self._maximized_vp = None
+            if state is not None:
+                self.restoreState(state)
+            return False
+
+        vp = vp if vp is not None else self.active_viewport
+        dock = vp.parentWidget()
+        if not isinstance(dock, QDockWidget):
+            return False
+        others = [d for d in self._viewport_docks()
+                  if d is not dock and not d.isHidden()]
+        if not others:
+            # Already the only pane on show. Taking the state anyway would
+            # leave a maximise that the next press "restores" into the
+            # layout that is on screen already.
+            return False
+
+        self._maximized_state = self.saveState()
+        self._maximized_vp = vp
+        for other in others:
+            other.hide()
+        self._set_active_viewport(vp)
+        return True
 
     def _equalize_quad(self):
         """Make the quad an even 2x2 — equal columns and equal rows."""
@@ -664,6 +727,8 @@ class MainWindow(QMainWindow):
         # Four Viewports was two levels down and went unfound (GitHub #5
         # asked for a layout that had shipped), so it sits in View itself.
         # What stays in the submenu is the rarer business of adding panes.
+        self._action(m_view, "Maximize Viewport", "Ctrl+M",
+                     self.toggle_maximized_viewport)
         self._action(m_view, "Four Viewports", None,
                      lambda: self.run_command("4view"))
         self._action(m_view, "Single Viewport", None,
@@ -1769,6 +1834,13 @@ class _ViewportTitleBar(QWidget):
         vp.viewChanged.connect(lambda _name: self.refresh())
         vp.displayModeChanged.connect(self.refresh)
         self.refresh()
+
+    def mouseDoubleClickEvent(self, ev):
+        """Rhino maximises a pane on a double-click of its title, and a
+        custom title bar is the only reason Qt is not floating the dock
+        instead."""
+        self._win.toggle_maximized_viewport(self._vp)
+        ev.accept()
 
     def _rebuild(self):
         self._menu.clear()

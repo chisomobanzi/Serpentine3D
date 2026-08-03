@@ -69,6 +69,7 @@ Nothing is bound out of the box.
 | ++ctrl+shift++ + click | Pick a **face** (push/pull) or **edge** (fillet) of a solid |
 | ++tab++ | While a command wants a point: lock the direction you're aiming in, then type the distance. ++tab++ again releases it |
 | ++ctrl++ + click | While a command wants a point: stand a vertical up from the point you clicked, then type the height (Rhino's elevator mode) |
+| ++ctrl+m++ | Give the viewport you're in the whole window; again puts the layout back. Double-clicking a viewport's title does the same |
 | Arrow keys | Nudge the selection along the construction plane (++shift++ ×10, ++ctrl++ ×0.1) |
 
 ## Command line

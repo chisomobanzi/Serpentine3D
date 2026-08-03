@@ -20,6 +20,9 @@ page maps your habits over and is honest about the gaps.
 - **++ctrl++-click elevator.** Click a point on the construction plane with
   ++ctrl++ held to stand a vertical up from it, then set the height with the
   mouse or by typing it — the way you place a point off the CPlane in Rhino.
+- **Maximised viewports.** ++ctrl+m++, or a double-click on a viewport's
+  title, gives the pane you're in the whole window and puts your layout back
+  on the second press. `max` does it from the command line.
 - **The gumball** for move / rotate / scale, with numeric entry and Alt-drag
   copy; ++ctrl+shift++-click faces and edges for push/pull and fillets.
 - **Layers**, display modes (`wireframe` / `shaded` / `ghosted` / `rendered`

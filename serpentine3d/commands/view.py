@@ -319,6 +319,24 @@ def cmd_1view(ctx):
     yield from ()
 
 
+@command("maxviewport", aliases=("max", "maximizeviewport"), mutates=False)
+def cmd_maxviewport(ctx):
+    """Give the pane you are in the whole window; again puts it back."""
+    win = ctx.window
+    if win is None:
+        ctx.echo("Viewport layouts need the GUI.")
+        yield from ()
+        return
+    was = win.maximized_viewport is not None
+    if win.toggle_maximized_viewport():
+        ctx.echo("Viewport maximised. 'max' again restores the layout.")
+    elif was:
+        ctx.echo("Layout restored.")
+    else:
+        ctx.echo("Only one viewport is open; it already fills the window.")
+    yield from ()
+
+
 @command("rendered", aliases=("render",), mutates=False)
 def cmd_rendered(ctx):
     """Environment-lit display with materials and a ground shadow."""

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A viewport can fill the window** — ++ctrl+m++, a double-click on a
+  viewport's title, or `max`. `1view` looked like this and is not: it hides
+  the three aux panes and leaves the *primary* one, so working in Top and
+  asking for a single view lost Top. There was no way to make an aux pane
+  full-size at all (GitHub #5). Maximise takes the pane you are in, and the
+  second press puts back the layout you had, splitter positions included,
+  rather than rebuilding the even 2x2.
+
 ## 0.5.9 — 2026-08-03
 
 ### Added
