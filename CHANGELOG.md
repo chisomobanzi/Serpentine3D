@@ -1,8 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.5.10 — 2026-08-05
 
 ### Added
+
+- **A control point you have clicked is a picked thing.** Points on for a
+  curve used to draw them and let you fling one about with the mouse, and
+  that was all: clicking a point selected nothing, so the gumball had
+  nothing to anchor to and stayed on the whole curve. Now it comes to the
+  point, ++shift++ adds a second, and the arrows, ring and knobs move the
+  points they are holding and leave the rest of the curve alone. A held
+  point is drawn gold. A point is asked for before a gumball handle,
+  because both can be under the cursor at once and the point is the more
+  particular thing to be pointing at.
+
+- **`selpt` selects every point object**, the way `selcrv`, `selsrf` and
+  `selsolid` already do for the rest.
 
 - **A viewport can fill the window.** ++ctrl+m++, a double-click on a
   viewport's title, or `max`. `1view` looked like this and is not: it hides
@@ -38,6 +51,49 @@
 
 ### Fixed
 
+- A typed length is now a point at every point prompt. It only became one
+  where the command named an axis of its own, or where ++tab++ had frozen a
+  direction. At the end of a line, the next vertex of a polyline, the far
+  corner of a box, the number came back as coordinates and the prompt sat
+  there, so a shape begun with the mouse could not be finished from the
+  keyboard. The direction is read off the point the cursor is making, so
+  object snap, grid and ortho all have their say before the number is
+  applied, and ++tab++ still wins where it is held.
+- A number at the far corner of a box or a rectangle is a side, not the
+  diagonal, and which quadrant the sides run into is read off where the
+  cursor is aiming.
+- With four panes up, a typed length is aimed by the pane the mouse is in
+  rather than the pane the command happens to be acting on.
+- Scale1D would not take a factor. Every other scale offers one the moment
+  it has a base point; Scale1D wanted a reference point, so clicking the
+  base and typing 0.5 scaled nothing.
+- Clicking a pane never made it the active one. The window had two
+  `eventFilter` methods and Python kept the second, so every pane but
+  Perspective was live to draw in and dead to everything that asks which
+  pane you are in.
+- Dragging a box round a point object selected nothing: the box pick looked
+  for edges to cross and triangle vertices to fall inside, and a point is
+  neither.
+- Points on did nothing for a polyline. Every route to a control point went
+  through one edge's b-spline and gave up the moment it was handed more than
+  one, so the commonest thing anybody draws was told to explode itself
+  first. A corner is two poles underneath but one point to the hand, so
+  dragging it moves both its segments together.
+- The rubber band, the frame readout and the ghost of a typed number went to
+  the Perspective pane wherever you were drawing. They belong in every pane;
+  the distance itself is written beside the cursor, in the one pane it is in.
+- A line begun in one pane could not be finished in another, and Front and
+  Right could not produce a point at all. Every pane drew on the world XY
+  plane, and a pane looking along that plane sends its pick ray straight
+  down it, never meeting it. A pane set to a named standard view now draws
+  on the plane that view faces, so half a four-pane layout is somewhere you
+  can draw as well as look, and those panes get a grid of their own instead
+  of the world grid seen edge-on.
+- The toolbar and the panes came up torn on some launches. The toolbar and
+  menu bar were built after the saved layout was restored, so last session's
+  dock sizes were laid into a window one toolbar narrower than the one
+  anybody sees, and the two passes that settle the layout afterwards never
+  asked the panes to draw again at the size they had just been given.
 - Every object in a file got a display mesh and vertex buffers whether or
   not its layer was switched on, because the viewport drew
   `visible_objects()` but reconciled its GPU cache over `all()`. The
