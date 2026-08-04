@@ -584,13 +584,32 @@ def cmd_projecttocplane(ctx):
 
 @command("scale1d")
 def cmd_scale1d(ctx):
-    """Stretch along one direction only (base + reference define the
-    axis; drag the reference to its new position or type a factor)."""
+    """Stretch along one direction only: type a factor and it stretches
+    the way the cursor is pointing, or set the axis with a reference point
+    and drag that to where it should end up."""
     import math
     objs = yield SelectReq("Select objects to scale in one direction")
     base = yield PointReq("Base point")
-    ref = yield PointReq("Reference point (sets the axis)",
-                         rubber_from=base)
+
+    def _stretch(axis, factor):
+        for o in objs:
+            ctx.scene.replace_shape(
+                o.id, g.scale_along_axis(o.shape, base, axis, factor))
+        ctx.echo(f"Scaled {len(objs)} object(s) by {factor:g} "
+                 f"along the axis.")
+
+    ref = yield PointReq("Scale factor, or first reference point",
+                         rubber_from=base, allow_number=True)
+    if isinstance(ref, float):
+        # The number says how much, never which way. The cursor has been
+        # saying which way all along, and where there is no cursor to ask
+        # — a batch, or the bridge — the CPlane's own x direction does.
+        if abs(ref) < 1e-9:
+            ctx.echo("Zero scale factor — cancelled.")
+            return
+        aim = ctx.aim_direction()
+        _stretch(aim[1] if aim is not None else tuple(ctx.cplane.xdir), ref)
+        return
     axis = tuple(b - a for a, b in zip(base, ref))
     d0 = math.dist(base, ref)
     if d0 < 1e-12:
@@ -618,10 +637,7 @@ def cmd_scale1d(ctx):
     if abs(factor) < 1e-9:
         ctx.echo("Zero scale factor — cancelled.")
         return
-    for o in objs:
-        ctx.scene.replace_shape(
-            o.id, g.scale_along_axis(o.shape, base, axis, factor))
-    ctx.echo(f"Scaled {len(objs)} object(s) by {factor:g} along the axis.")
+    _stretch(axis, factor)
 
 
 @command("scale2d")
