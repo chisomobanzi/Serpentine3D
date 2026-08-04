@@ -1979,14 +1979,29 @@ class Viewport(QOpenGLWidget):
             poly = np.concatenate(segs).reshape(-1, 3)
             self._preview.update(poly.astype(np.float32))
             self._draw_lines(self._preview, mvp, (0.6, 0.62, 0.66, 0.5), 1.0)
-            # CV markers as crosses
-            segs = []
-            for p in pts:
-                p = p.astype(np.float32)
-                for axis in np.eye(3, dtype=np.float32)[:2] * size:
-                    segs.append(np.stack([p - axis, p + axis]))
-            self._preview.update(np.concatenate(segs).astype(np.float32))
-            self._draw_lines(self._preview, mvp, (1.0, 1.0, 1.0, 0.95), 2.0)
+            # CV markers as crosses, the picked ones in the selection colour
+            # so you can see which of them the gumball is holding
+            picked = set(self.selection.subobjects_of(obj_id, "cv"))
+            for held in (False, True):
+                # a held one is drawn bigger as well as gold: the gumball
+                # stands on top of it, and a marker the size of the others
+                # disappears under the middle of it
+                arms = np.eye(3, dtype=np.float32)[:2] * size * (
+                    1.8 if held else 1.0)
+                segs = []
+                for i, p in enumerate(pts):
+                    if (i in picked) != held:
+                        continue
+                    p = p.astype(np.float32)
+                    for axis in arms:
+                        segs.append(np.stack([p - axis, p + axis]))
+                if not segs:
+                    continue
+                self._preview.update(np.concatenate(segs).astype(np.float32))
+                self._draw_lines(
+                    self._preview, mvp,
+                    theme.SELECTION_COLOR + (1.0,) if held
+                    else (1.0, 1.0, 1.0, 0.95), 3.0 if held else 2.0)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _draw_combs(self, mvp):
@@ -3038,11 +3053,22 @@ class Viewport(QOpenGLWidget):
                     self.layoutSelectionChanged.emit()
                     self.update()
                 return
-            if self._take_gumball(pos, ev):
-                return
+            # A control point is asked for before a gumball handle. Both can
+            # be under the cursor at once — the handles reach a long way out
+            # from an object's centre and land on its own points on the way —
+            # and of the two the point is the far more particular thing to be
+            # pointing at: a handle is 78 pixels of arrow to aim anywhere
+            # along, a point is the 8 pixels it is drawn in.
             cv = self._cv_hit(pos.x(), pos.y())
-            if cv is not None:
+            if cv is None:
+                if self._take_gumball(pos, ev):
+                    return
+            else:
                 obj_id, index, world = cv
+                held = self._pick_control_point(obj_id, index, ev.modifiers())
+                self.update()
+                if not held:               # shift-clicked it off again
+                    return
                 fwd = (self.camera.target - self.camera.position)
                 fwd = fwd / max(np.linalg.norm(fwd), 1e-12)
                 self._cv_drag = (obj_id, index, np.asarray(world), fwd)
@@ -3408,6 +3434,29 @@ class Viewport(QOpenGLWidget):
                 best_d2 = d2[i]
                 best = (obj_id, i, tuple(pts[i]))
         return best
+
+    def _pick_control_point(self, obj_id, index, modifiers) -> bool:
+        """Take hold of a clicked control point. True if it is now held.
+
+        A control point you have clicked is a picked thing like an edge or a
+        face, and until it went into the selection there was nothing for the
+        gumball to anchor to: the only way to move a corner was to fling it
+        about in the plane of the screen, with no axis and no typed distance.
+
+        Picking one lets go of the curve, because a gumball holding the point
+        and the polyline it belongs to would move both at once. Shift and
+        Ctrl add a point to the ones already held, or put one back.
+        """
+        sel = self.selection
+        entry = (obj_id, "cv", index)
+        if modifiers & (Qt.KeyboardModifier.ShiftModifier
+                        | Qt.KeyboardModifier.ControlModifier):
+            sel.toggle_subobject(*entry)
+            return entry in sel.subobjects
+        if sel.ids or sel.subobjects != [entry]:
+            sel.set([])                    # clears the sub-objects with them
+            sel.toggle_subobject(*entry)
+        return True
 
     def _nav_button(self) -> Qt.MouseButton:
         """The mouse button used for orbit/pan (configurable)."""

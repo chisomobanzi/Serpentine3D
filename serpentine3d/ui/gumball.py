@@ -34,6 +34,16 @@ SHAFT0, SHAFT1 = 0.18, 1.0
 CONE1 = 1.22
 
 
+def _turned(p, anchor, axis, degrees):
+    """`p` turned about the line through `anchor` along `axis`."""
+    k = np.asarray(axis, float)
+    k = k / (np.linalg.norm(k) or 1.0)
+    v = np.asarray(p, float) - anchor
+    a = math.radians(degrees)
+    return (anchor + v * math.cos(a) + np.cross(k, v) * math.sin(a)
+            + k * float(np.dot(k, v)) * (1.0 - math.cos(a)))
+
+
 def _alt_held(modifiers) -> bool:
     """Alt state, robust to a Qt KeyboardModifiers flag or a plain int."""
     m = getattr(modifiers, "value", modifiers)          # Qt flag -> int
@@ -69,9 +79,35 @@ class Gumball:
         if self.drag is not None:            # a drag stays live to its end
             return True
         return (bool(vp.selection.ids)
+                or self._cv_target() is not None
                 or self._pushpull_target() is not None
                 or self._multiface_target() is not None
                 or self._fillet_target() is not None)
+
+    def _cv_target(self):
+        """({obj_id: [index]}, mean position) for the held control points.
+
+        Only points a pane is showing count. PointsOff leaves the selection
+        as it found it, and a handle standing on a point nobody can see is
+        not something anybody is still holding.
+        """
+        subs = getattr(self.vp.selection, "subobjects", None)
+        if not subs:
+            return None
+        held: dict = {}
+        at = []
+        for oid, kind, idx in subs:
+            if kind != "cv" or oid not in self.vp.cv_enabled:
+                continue
+            obj = self.vp.scene.get(oid)
+            pts = None if obj is None else self.vp._cv_points(obj)
+            if pts is None or not (0 <= idx < len(pts)):
+                continue
+            held.setdefault(oid, []).append(int(idx))
+            at.append(np.asarray(pts[idx], float))
+        if not at:
+            return None
+        return held, np.mean(at, axis=0)
 
     def _pushpull_target(self):
         """For a single selected planar face, return
@@ -232,6 +268,11 @@ class Gumball:
 
     def anchor_and_axes(self):
         if self.drag is None:
+            cv = self._cv_target()
+            if cv is not None:               # a held control point comes first
+                cp = self._plane()
+                return cv[1], (np.asarray(cp.xdir), np.asarray(cp.ydir),
+                               np.asarray(cp.normal))
             pp = self._pushpull_target()
             if pp is not None:               # face push/pull takes priority
                 _, _, centroid, basis, _ = pp
@@ -634,11 +675,22 @@ class Gumball:
             return False
         anchor, axes = state
         vp = self.vp
-        pp = self._pushpull_target()
-        mf = None if pp is not None else self._multiface_target()
-        ft = (None if (pp is not None or mf is not None)
+        cv = self._cv_target()
+        pp = None if cv is not None else self._pushpull_target()
+        mf = (None if (cv is not None or pp is not None)
+              else self._multiface_target())
+        ft = (None if (cv is not None or pp is not None or mf is not None)
               else self._fillet_target())
-        if pp is not None:                    # face push/pull mode
+        if cv is not None:                    # held control points
+            originals = {}
+            for oid in cv[0]:
+                obj = vp.scene.get(oid)
+                if obj is not None:
+                    originals[oid] = obj.shape
+            if not originals:
+                return False
+            self.vp.window_checkpoint("gumball " + handle[0])
+        elif pp is not None:                  # face push/pull mode
             if handle != ("move", 2):
                 return False
             obj = vp.scene.get(pp[0])
@@ -702,6 +754,7 @@ class Gumball:
         self.drag = {
             "handle": handle, "anchor": anchor, "axes": axes,
             "originals": originals,
+            "cvs": dict(cv[0]) if cv is not None else None,
             "pp": (pp[0], pp[1]) if pp is not None else None,
             "pp_planar": bool(pp[4]) if pp is not None else True,
             "multiface": (mf[0], list(mf[1])) if mf is not None else None,
@@ -731,7 +784,7 @@ class Gumball:
                 return d["last_label"]
             delta = hit - d["ref"]
             d["offset"] = np.asarray(delta, float)
-            self._apply(lambda s: g.translate(s, tuple(delta)))
+            self._move_by(delta)
             d["last_label"] = ("move "
                                + vp.scene.format_length(float(
                                    np.linalg.norm(delta))))
@@ -828,21 +881,19 @@ class Gumball:
             else:
                 delta = axes[i] * value
                 d["offset"] = np.asarray(delta, float)
-                self._apply(lambda s: g.translate(s, tuple(delta)))
+                self._move_by(delta)
                 label = "move " + vp.scene.format_length(float(value))
         elif kind == "rot":
-            self._apply(lambda s: g.rotate(s, tuple(anchor),
-                                           tuple(axes[i]), value))
+            self._turn_by(anchor, axes[i], value)
             label = f"rotate {value:.1f}°"
         elif kind == "scale":
             if abs(value) < 1e-4:
                 return d["last_label"]
             if uniform:
-                self._apply(lambda s: g.scale(s, tuple(anchor), value))
+                self._scale_by(anchor, None, value)
                 label = f"scale {value:.3f} (uniform)"
             else:
-                self._apply(lambda s: g.scale_along_axis(
-                    s, tuple(anchor), tuple(axes[i]), value))
+                self._scale_by(anchor, axes[i], value)
                 label = f"scale {value:.3f}"
         else:
             return d["last_label"]
@@ -902,6 +953,69 @@ class Gumball:
         """Keep an un-dragged handle click alive so a value can be typed."""
         if self.drag is not None and self.drag["handle"][0] in _ONE_DOF:
             self.drag["armed"] = True
+
+    # What is being held is either whole objects or some of one object's
+    # control points, and every handle has to do the same thing to both. A
+    # shape transform says nothing about where a single pole should end up,
+    # so each of these says it once, in the two ways it has to be said.
+
+    def _move_by(self, delta):
+        if self.drag.get("cvs"):
+            self._apply_cvs(lambda p: p + delta)
+        else:
+            self._apply(lambda s: g.translate(s, tuple(delta)))
+
+    def _turn_by(self, anchor, axis, degrees):
+        if self.drag.get("cvs"):
+            self._apply_cvs(lambda p: _turned(p, anchor, axis, degrees))
+        else:
+            self._apply(lambda s: g.rotate(s, tuple(anchor), tuple(axis),
+                                           degrees))
+
+    def _scale_by(self, anchor, axis, value):
+        """About `anchor`, along `axis`, or every way if `axis` is None."""
+        cvs = self.drag.get("cvs")
+        if axis is None:
+            if cvs:
+                self._apply_cvs(lambda p: anchor + (p - anchor) * value)
+            else:
+                self._apply(lambda s: g.scale(s, tuple(anchor), value))
+        elif cvs:
+            self._apply_cvs(
+                lambda p: p + axis * float(np.dot(p - anchor, axis))
+                * (value - 1.0))
+        else:
+            self._apply(lambda s: g.scale_along_axis(
+                s, tuple(anchor), tuple(axis), value))
+
+    def _apply_cvs(self, at):
+        """Put each held control point where `at` says it goes.
+
+        Measured from the shape the drag began with every time, so what the
+        curve looks like depends on the drag so far and not on how many mouse
+        moves it took to get here: run the point out and back and the curve is
+        the one you started with.
+        """
+        d = self.drag
+        vp = self.vp
+        for obj_id, idxs in d["cvs"].items():
+            original = d["originals"].get(obj_id)
+            obj = vp.scene.get(obj_id)
+            if original is None or obj is None:
+                continue
+            surface = obj.kind == "surface"
+            try:
+                was = (g.surface_control_points(original)[0] if surface
+                       else g.get_control_points(original))
+                shape = original
+                for i in idxs:
+                    to = tuple(float(v) for v in at(np.asarray(was[i], float)))
+                    shape = (g.move_surface_control_point(shape, i, to)
+                             if surface
+                             else g.move_control_point(shape, i, to))
+                vp.scene.replace_shape(obj_id, shape)
+            except (g.GeometryError, IndexError):
+                pass
 
     def _apply(self, fn):
         d = self.drag
