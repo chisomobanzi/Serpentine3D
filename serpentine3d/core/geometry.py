@@ -1068,15 +1068,19 @@ def _adaptor_with_a_3d_curve(edge):
 
 def _edge_bspline(shape):
     """The (single) edge's curve as a fresh Geom_BSplineCurve in world frame."""
+    edges = edges_of(shape)
+    if shape_kind(shape) != "curve" or len(edges) != 1:
+        raise GeometryError("This works on single curves "
+                            "(explode polylines first)")
+    return _bspline_of_edge(edges[0])
+
+
+def _bspline_of_edge(edge):
+    """One edge's curve as a fresh Geom_BSplineCurve in the world frame."""
     from .occ import GeomConvert
     from OCP.Geom import Geom_TrimmedCurve
     from OCP.GeomAbs import GeomAbs_CurveType
-    edges = edges_of(shape)
-    if shape_kind(shape) != "curve" or len(edges) != 1:
-        raise GeometryError("Control points work on single curves "
-                            "(explode polylines first)")
-    edge = edges[0]
-    ad = _adaptor_with_a_3d_curve(edges[0])
+    ad = _adaptor_with_a_3d_curve(edge)
     if ad.GetType() == GeomAbs_CurveType.GeomAbs_BSplineCurve:
         bs = ad.BSpline().Copy()      # OCP returns the derived type directly
     else:
@@ -1090,9 +1094,63 @@ def _edge_bspline(shape):
     return bs
 
 
+def _wire_bsplines(shape) -> list:
+    """The wire's edges as b-splines, in the order and the direction you
+    walk the wire. An edge stored back to front is reversed, so every one of
+    them starts where the one before it finished and the poles read along
+    the curve rather than in whatever order the file happened to hold."""
+    from OCP.BRepTools import BRepTools_WireExplorer
+    out = []
+    exp = BRepTools_WireExplorer(occ.to_wire(shape))
+    while exp.More():
+        edge = occ.to_edge(exp.Current())
+        bs = _bspline_of_edge(edge)
+        here = pnt_tuple(occ.point_of_vertex(exp.CurrentVertex()))
+        if (_d3(pnt_tuple(bs.StartPoint()), here)
+                > _d3(pnt_tuple(bs.EndPoint()), here)):
+            bs.Reverse()
+        out.append(bs)
+        exp.Next()
+    if not out:
+        raise GeometryError("Not a curve")
+    return out
+
+
+def _control_point_map(shape) -> tuple:
+    """(splines, points, owners) — every control point on the curve, and the
+    (spline, pole) places each one lives in.
+
+    A polyline is a segment per corner, so the corner between two of them is
+    one point to the eye and to the hand but two poles underneath. It is
+    listed once and owns both, because dragging half a corner would pull the
+    curve apart at the seam.
+    """
+    if shape_kind(shape) != "curve":
+        raise GeometryError("Not a curve")
+    edges = edges_of(shape)
+    if len(edges) == 1:
+        bs = _bspline_of_edge(edges[0])
+        pts = [pnt_tuple(bs.Pole(i)) for i in range(1, bs.NbPoles() + 1)]
+        return [bs], pts, [[(0, i)] for i in range(1, len(pts) + 1)]
+    splines = _wire_bsplines(shape)
+    pts: list = []
+    owners: list = []
+    for k, bs in enumerate(splines):
+        for i in range(1, bs.NbPoles() + 1):
+            p = pnt_tuple(bs.Pole(i))
+            if i == 1 and pts and _d3(p, pts[-1]) < 1e-7:
+                owners[-1].append((k, i))           # the joint, shared
+            else:
+                pts.append(p)
+                owners.append([(k, i)])
+    if len(pts) > 1 and _d3(pts[0], pts[-1]) < 1e-7:
+        owners[0].extend(owners.pop())              # closed: one start point
+        pts.pop()
+    return splines, pts, owners
+
+
 def get_control_points(shape) -> list[Point]:
-    bs = _edge_bspline(shape)
-    return [pnt_tuple(bs.Pole(i)) for i in range(1, bs.NbPoles() + 1)]
+    return _control_point_map(shape)[1]
 
 
 def _face_bspline_surface(shape):
@@ -1155,11 +1213,19 @@ def move_surface_control_point(shape, flat_index: int,
 
 def move_control_point(shape, index: int, new_point: Point) -> TopoDS_Shape:
     """Return a new curve with control point `index` (0-based) moved."""
-    bs = _edge_bspline(shape)
-    if not (0 <= index < bs.NbPoles()):
+    splines, pts, owners = _control_point_map(shape)
+    if not (0 <= index < len(pts)):
         raise GeometryError(f"Control point index {index} out of range")
-    bs.SetPole(index + 1, _pnt(new_point))
-    return BRepBuilderAPI_MakeEdge(bs).Edge()
+    for k, i in owners[index]:
+        splines[k].SetPole(i, _pnt(new_point))
+    if len(splines) == 1:
+        return BRepBuilderAPI_MakeEdge(splines[0]).Edge()
+    mk = BRepBuilderAPI_MakeWire()
+    for bs in splines:
+        mk.Add(BRepBuilderAPI_MakeEdge(bs).Edge())
+    if not mk.IsDone():
+        raise GeometryError("Could not put the curve back together")
+    return mk.Wire()
 
 
 def sample_curve(shape, count: int) -> list[Point]:
