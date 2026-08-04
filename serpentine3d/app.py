@@ -247,12 +247,6 @@ class MainWindow(QMainWindow):
         self.properties.refresh()                # and so does the panel
         self.display_panel.refresh()             # which pane's settings
 
-    def eventFilter(self, obj, ev):
-        if ev.type() == QEvent.Type.MouseButtonPress \
-                and isinstance(obj, Viewport):
-            self._set_active_viewport(obj)
-        return super().eventFilter(obj, ev)
-
     def _dock_viewport(self, vp, title: str, closable: bool = True):
         """Wrap a viewport in a floatable/movable QDockWidget so it can be
         torn off. Not closable for the primary — there's always one view."""
@@ -353,17 +347,26 @@ class MainWindow(QMainWindow):
             self._set_panel_width(self._panel_width)
 
     def eventFilter(self, obj, event):
-        """Notice the user dragging the panel splitter, so the width held
-        across the next window resize is the one they chose.
+        """The two things watched from outside the widget they happen in.
 
-        Only a dock resized with the window at the size it last came to
-        rest at counts. Neither half of that is spare. A maximise lays the
-        docks out half a millisecond *before* the window is told it has
-        resized, so waiting to be told is too late — but the window is
-        already its new size by then, which is what gives it away. The
-        rearranging afterwards takes a couple of hundred milliseconds more,
-        and only the flag covers that.
+        A click in a pane makes it the active one — the pane commands act
+        on, and the pane the panels are showing. There is one filter and
+        not two because a class only keeps the last method of a name, and
+        two `eventFilter`s meant one of these had never run.
+
+        The other is the user dragging the panel splitter, so the width
+        held across the next window resize is the one they chose. Only a
+        dock resized with the window at the size it last came to rest at
+        counts. Neither half of that is spare. A maximise lays the docks
+        out half a millisecond *before* the window is told it has resized,
+        so waiting to be told is too late — but the window is already its
+        new size by then, which is what gives it away. The rearranging
+        afterwards takes a couple of hundred milliseconds more, and only
+        the flag covers that.
         """
+        if event.type() == QEvent.Type.MouseButtonPress \
+                and isinstance(obj, Viewport):
+            self._set_active_viewport(obj)
         if (event.type() == QEvent.Type.Resize
                 and obj in (self._prop_dock, self._layer_dock)
                 and not getattr(self, "_settling", False)
