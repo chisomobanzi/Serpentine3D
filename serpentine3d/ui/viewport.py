@@ -563,6 +563,7 @@ class Viewport(QOpenGLWidget):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._draw_span = None              # (from, to) of the open leg
         self._draw_frame = None             # (sides, corner) when it is a box
+        self._readout_wanted = True         # only the pane under the cursor
         # The view/display chips that used to float here have moved to the
         # pane's title bar, where they no longer sit on top of the drawing.
         self.history = None                 # set by the main window
@@ -927,6 +928,15 @@ class Viewport(QOpenGLWidget):
                  else None)
         frame = self._draw_frame
         length = float(np.linalg.norm(span[1] - span[0])) if span else 0.0
+        # The band is the same line seen four ways and belongs in every pane.
+        # The number is how far the cursor has got, written beside it, and the
+        # cursor is in one pane — printed in the others it is the same figure
+        # again with nothing near it to explain what it is measuring. A sheet's
+        # own ghost is not about the cursor and stays.
+        if not self._readout_wanted and ghost is None:
+            if not self._draw_readout.isHidden():
+                self._draw_readout.setVisible(False)
+            return
         if not length and ghost is None and frame is None:
             if not self._draw_readout.isHidden():
                 self._draw_readout.setVisible(False)
@@ -2285,6 +2295,17 @@ class Viewport(QOpenGLWidget):
                             if sides and at is not None
                             and all(s > 1e-9 for s in sides) else None)
         self._update_draw_readout()
+
+    def set_readout_visible(self, on: bool):
+        """Whether this pane writes the number, as against drawing the band.
+
+        The pane the cursor is in. See `_update_draw_readout` for why the
+        other three are better off without it.
+        """
+        on = bool(on)
+        if on != self._readout_wanted:
+            self._readout_wanted = on
+            self._update_draw_readout()
 
     def set_point_mode(self, on: bool):
         self.point_mode = on

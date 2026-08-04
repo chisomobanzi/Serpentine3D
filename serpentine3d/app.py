@@ -913,9 +913,15 @@ class MainWindow(QMainWindow):
         req = self.processor.request
         if req is not None and getattr(req, "preview_fn", None) and \
                 text.strip():
-            self.viewport.set_ghost(self.processor.preview_shape(text))
+            shape = self.processor.preview_shape(text)
         else:
-            self.viewport.set_ghost(None)
+            shape = None
+        # every pane. A ghost is a shape in the world, not a picture belonging
+        # to one view, and the pane you are drawing in is whichever one the
+        # cursor is over — so put it on the primary alone and the shape a
+        # typed number would make appears in Perspective while you work in Top.
+        for vp in self.all_viewports():
+            vp.set_ghost(shape)
 
     def _sync_command_state(self):
         busy = self.processor.busy
@@ -1050,10 +1056,16 @@ class MainWindow(QMainWindow):
             if len(chain) >= 2 and sides is None:
                 arr = np.asarray(chain, np.float32)
                 segs = np.stack([arr[:-1], arr[1:]], axis=1)
-        self.viewport.set_preview(segs if len(segs) else None, markers)
-        if sides is not None:
-            self.viewport.set_frame_readout(
-                sides(cursor) if cursor is not None else None, cursor)
+        # in every pane, for the same reason the picked points already are:
+        # world points with a line between them, and each pane knows how to
+        # look at those from where it stands. Named on the primary alone, the
+        # band ran in Perspective however far from it you were drawing.
+        for vp in self.all_viewports():
+            vp.set_readout_visible(vp is self._active_vp)
+            vp.set_preview(segs if len(segs) else None, markers)
+            if sides is not None:
+                vp.set_frame_readout(
+                    sides(cursor) if cursor is not None else None, cursor)
 
     def _delete_selected(self):
         if self.viewport.space != "model":
