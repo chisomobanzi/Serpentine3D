@@ -3291,6 +3291,11 @@ class Viewport(QOpenGLWidget):
                     if not len(segs):
                         continue
                 pts = segs.reshape(-1, 3)
+            elif len(mesh.points):
+                # A point has no edge to cross and no triangle to fall
+                # inside. All of it is where it is, which answers both
+                # kinds of box at once.
+                pts = mesh.points
             elif len(mesh.vertices):
                 pts = mesh.vertices
             else:

@@ -21,6 +21,12 @@ def cmd_selsrf(ctx):
     yield from ()
 
 
+@command("selpt", aliases=("selpoints",), mutates=False)
+def cmd_selpt(ctx):
+    _select_kind(ctx, "point", "point(s)")
+    yield from ()
+
+
 @command("selsolid", aliases=("selsolids",), mutates=False)
 def cmd_selsolid(ctx):
     _select_kind(ctx, "solid", "solid(s)")
