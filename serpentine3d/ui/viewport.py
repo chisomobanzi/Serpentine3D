@@ -2327,6 +2327,35 @@ class Viewport(QOpenGLWidget):
         """
         return self._locked_axis()
 
+    def aim_direction(self, px: float | None = None,
+                      py: float | None = None):
+        """Where the rubber band is pointing, for a typed length to run along.
+
+        Rhino's distance constraint. The base point and the cursor between
+        them already say which way, so a number only has to say how far —
+        which is how you draw a line 3400 long after clicking its start.
+        Unlike Tab this freezes nothing: it answers for the number being
+        typed now, and the next cursor move gives a different answer.
+
+        Taken off `world_point_at` rather than the raw pixel, so the aim is
+        the direction on screen: an object snap, the grid, and ortho have
+        all had their say by then.
+        """
+        if self.snap_base is None:
+            return None
+        if px is None:
+            if self._last_mouse is None:
+                return None
+            px, py = self._last_mouse.x(), self._last_mouse.y()
+        aim = self.world_point_at(px, py)
+        if aim is None:
+            return None
+        base = np.asarray(self.snap_base, float)
+        d = np.asarray(aim, float) - base
+        if np.linalg.norm(d) < 1e-9:
+            return None                     # cursor is on the base point
+        return (tuple(base), tuple(normalize(d)))
+
     def lock_elevation(self, px: float | None = None,
                        py: float | None = None) -> bool:
         """Stand an axis up from the CPlane point under the cursor.

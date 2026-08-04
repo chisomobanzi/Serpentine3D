@@ -222,6 +222,18 @@ class CommandContext:
         fn = getattr(vp, "locked_direction", None) if vp is not None else None
         return fn() if fn is not None else None
 
+    def aim_direction(self):
+        """The direction the cursor is pointing from the point before it.
+
+        What makes a bare number a point at a prompt no command named an
+        axis for: the rubber band on screen says which way, the number says
+        how far. Only the viewport knows where the cursor is, and only it
+        knows that ortho or a snap has already moved the answer.
+        """
+        vp = self.viewport
+        fn = getattr(vp, "aim_direction", None) if vp is not None else None
+        return fn() if fn is not None else None
+
     def on_bare_paper(self) -> bool:
         """True when a pick can only name paper, and not the model.
 
@@ -344,11 +356,14 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
                 return True, opt
         pt = parse_point(text, ctx.last_point, ctx.scene.units, ctx.cplane)
         # A command that runs along an axis of its own says so; failing
-        # that, Tab lets you aim one by hand, and a number means the same
-        # thing in both cases.
+        # that, Tab lets you aim one by hand, and failing that the cursor is
+        # aiming one anyway. A number means the same thing in all three: how
+        # far along it. Tab beats the cursor because a frozen direction is a
+        # decision already made, and moving the mouse afterwards must not
+        # quietly undo it.
         along = req.number_from
         if along is None and not req.allow_number:
-            along = ctx.locked_direction()
+            along = ctx.locked_direction() or ctx.aim_direction()
         if pt is None and (along is not None or req.allow_number):
             from ..utils.units import parse_length
             v = parse_length(text, ctx.scene.units)
