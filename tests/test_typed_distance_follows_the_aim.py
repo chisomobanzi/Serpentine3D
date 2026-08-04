@@ -164,22 +164,35 @@ def test_the_tab_lock_beats_the_aim():
 
 # -- the bug as it was reported --
 
-def test_a_box_corner_clicked_with_the_mouse_finishes_from_the_keyboard():
-    """Click the first corner, aim, type the distance. It answered
-    "Expected coordinates like 3,4,0" and stayed on the same prompt."""
+def _typed_after_a_click(name, text="100"):
+    """The reported workflow: click the first point, aim, type the distance."""
     vp = _cursor_at(_viewport(base=None))
     ctx = _ctx(vp)
     proc = CommandProcessor(ctx)
     said = []
     ctx.add_echo_listener(said.append)
     import serpentine3d.commands                        # noqa: F401
-    proc.run("box")
-
+    proc.run(name)
     proc.provide((0.0, 0.0, 0.0))
     vp.snap_base = (0.0, 0.0, 0.0)                      # what the app sets
-    proc.provide_text("100")
+    proc.provide_text(text)
+    return proc, ctx, said
 
-    assert proc.prompt_text().startswith("Height"), \
+
+def test_a_line_started_with_the_mouse_finishes_from_the_keyboard():
+    """It answered "Expected coordinates like 3,4,0" and stayed on the same
+    prompt, so a line of a known length could not be drawn at all."""
+    _proc, ctx, said = _typed_after_a_click("line", "3400")
+    assert len(ctx.scene.all()) == 1, said
+    lo, hi = ctx.scene.all()[0].bbox()
+    length = np.linalg.norm(np.asarray(hi, float) - np.asarray(lo, float))
+    assert length == pytest.approx(3400.0, abs=1e-4)
+
+
+def test_a_box_corner_clicked_with_the_mouse_takes_a_typed_number_too():
+    """Box reads its number as a side rather than a distance to the corner,
+    so it asks for the width next — see test_typed_side_is_not_a_diagonal.
+    What matters here is that the number is taken at all."""
+    proc, _ctx, said = _typed_after_a_click("box")
+    assert proc.prompt_text().startswith("Width"), \
         f"still stuck on the corner: {said[-1]}"
-    corner = np.asarray(proc.picked_points[-1], float)
-    assert np.linalg.norm(corner) == pytest.approx(100.0, abs=1e-6)

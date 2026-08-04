@@ -7,7 +7,7 @@ def _dist(a, b) -> float:
     return math.dist(a, b)
 
 from ..core import geometry as g
-from .base import PointReq, command
+from .base import PointReq, command, quadrant
 
 
 @command("box")
@@ -22,8 +22,32 @@ def cmd_box(ctx):
     def _base_sides(p):                 # the base is world-axis, as _rect is
         return (abs(p[0] - c1[0]), abs(p[1] - c1[1]))
 
-    c2 = yield PointReq("Opposite corner of base", rubber_from=c1,
-                        preview_fn=_rect, rubber_sides=_base_sides)
+    # "or length" the way Rhino's box reads it: one number is a side and the
+    # width is asked for next. The general rule for a point prompt — a number
+    # is how far along the way you are pointing — would make it the diagonal,
+    # and under ortho the cursor is square to the CPlane, so the base would
+    # come out a line and the complaint would be about a height nobody had
+    # been asked for.
+    c2 = yield PointReq("Opposite corner of base, or length", rubber_from=c1,
+                        preview_fn=_rect, rubber_sides=_base_sides,
+                        allow_number=True)
+    if isinstance(c2, float):
+        if abs(c2) < 1e-9:
+            ctx.echo("Zero length — no box created.")
+            return
+        sx, sy = quadrant(ctx)
+        edge = (c1[0] + sx * c2, c1[1], c1[2])
+
+        def _wide_to(p):
+            return _rect((edge[0], p[1], c1[2]))
+
+        wp = yield PointReq("Width (click, or type a number)",
+                            axis_lock=(edge, (0.0, sy, 0.0)),
+                            number_from=(edge, (0.0, sy, 0.0)),
+                            rubber_from=edge, preview_fn=_wide_to,
+                            rubber_sides=lambda p: (abs(c2),
+                                                    abs(p[1] - c1[1])))
+        c2 = (edge[0], wp[1], c1[2])
     dx, dy = c2[0] - c1[0], c2[1] - c1[1]
     up = (0.0, 0.0, 1.0)
 
@@ -34,6 +58,9 @@ def cmd_box(ctx):
         base = (c1[0], c1[1], min(c1[2], c1[2] + h))
         return g.make_box(base, dx, dy, abs(h))
 
+    if abs(dx) < 1e-9 or abs(dy) < 1e-9:
+        ctx.echo("Zero width — no box created.")
+        return
     hp = yield PointReq("Height (click, or type a number)",
                         axis_lock=(c2, up), number_from=(c2, up),
                         rubber_from=c2, preview_fn=_box_to)

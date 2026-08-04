@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..core import geometry as g
-from .base import PointReq, SelectReq, command, frame_sides
+from .base import PointReq, SelectReq, command, frame_sides, quadrant
 
 
 def _rubber(pts):
@@ -146,8 +146,36 @@ def cmd_rectangle(ctx):
             [cp.to_world(u1, v1), cp.to_world(u2, v1),
              cp.to_world(u2, v2), cp.to_world(u1, v2)], closed=True)
 
-    c2 = yield PointReq("Opposite corner", rubber_from=c1,
-                        preview_fn=_rect_to, rubber_sides=frame_sides(c1, cp))
+    # "or length" the way Rhino's rectangle reads it: one number is a side and
+    # the width is asked for next. The general rule for a point prompt — a
+    # number is how far along the way you are pointing — would make it the
+    # diagonal, and under ortho the cursor is square to the plane, so the
+    # rectangle would come out a line.
+    c2 = yield PointReq("Opposite corner, or length", rubber_from=c1,
+                        preview_fn=_rect_to, rubber_sides=frame_sides(c1, cp),
+                        allow_number=True)
+    if isinstance(c2, float):
+        if abs(c2) < 1e-9:
+            ctx.echo("Zero length — no rectangle created.")
+            return
+        # measured on the plane it is drawn on: a tilted rectangle has sides
+        # of its own, and the world's idea of them is a pair of shadows
+        su, sv = quadrant(ctx, cp)
+        u1, v1, w1 = cp.from_world(c1)
+        far_u = u1 + su * c2
+        edge = cp.to_world(far_u, v1, w1)
+        vdir = tuple(float(sv * a) for a in cp.ydir)
+
+        def _wide_to(p):
+            _u, pv, _w = cp.from_world(p)
+            return _rect_to(cp.to_world(far_u, pv, w1))
+
+        wp = yield PointReq("Width (click, or type a number)",
+                            axis_lock=(edge, vdir), number_from=(edge, vdir),
+                            rubber_from=edge, preview_fn=_wide_to,
+                            rubber_sides=frame_sides(c1, cp))
+        _u, wv, _w = cp.from_world(wp)
+        c2 = cp.to_world(far_u, wv, w1)
     if cp.is_world_xy():
         obj = ctx.add(g.make_rectangle(c1, c2))
     else:

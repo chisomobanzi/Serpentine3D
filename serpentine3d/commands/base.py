@@ -64,6 +64,27 @@ def frame_sides(corner, cplane):
     return sides
 
 
+def quadrant(ctx, cplane=None):
+    """Which way the sides run when only their lengths were given.
+
+    A typed length says how big, never which way, and the cursor has been
+    saying which way all along. Measured on the plane the shape is drawn on
+    when it has one, the world axes when it does not. Positive where there
+    is no cursor to ask — a batch, or the bridge — because something has to
+    be drawn.
+    """
+    aim = ctx.aim_direction()
+    if aim is None:
+        return 1.0, 1.0
+    _base, d = aim
+    if cplane is None:
+        u, v = d[0], d[1]
+    else:
+        u = sum(a * b for a, b in zip(d, cplane.xdir))
+        v = sum(a * b for a, b in zip(d, cplane.ydir))
+    return (-1.0 if u < 0 else 1.0), (-1.0 if v < 0 else 1.0)
+
+
 @dataclass
 class NumberReq(Req):
     prompt: str
