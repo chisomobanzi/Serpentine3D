@@ -162,6 +162,74 @@ def test_the_tab_lock_beats_the_aim():
                        + 100 * np.asarray(locked_dir, float), atol=1e-6)
 
 
+# -- with more than one pane open --
+
+class _Panes:
+    """Stand-in for the window: the one thing the aim wants from it."""
+
+    def __init__(self, *viewports):
+        self._viewports = list(viewports)
+
+    def all_viewports(self):
+        return list(self._viewports)
+
+
+def _under_mouse(vp, yes=True):
+    """What Qt marks a widget with when the cursor is over it."""
+    from PySide6.QtCore import Qt
+    vp.setAttribute(Qt.WidgetAttribute.WA_UnderMouse, yes)
+    return vp
+
+
+def test_the_aim_comes_from_the_pane_the_cursor_is_in():
+    """Four panes share one command line, and the pane commands act on is
+    whichever was made active last. Drawing in Top with Perspective still
+    active, the aim was read off Perspective — a pane the cursor had never
+    been over, so there was nothing to read — and the typed number came
+    back as the coordinates hint. It has to come from the pane the mouse
+    is in, because that is the rubber band you are aiming."""
+    aiming = _under_mouse(_cursor_at(_viewport()))
+    aiming.set_view("top")
+    idle = _viewport()                       # never entered by the cursor
+    assert idle.aim_direction() is None, "the test proves nothing otherwise"
+    ctx = _ctx(idle)                         # the active pane is the idle one
+    ctx.window = _Panes(idle, aiming)
+    ok, pt = parse_value(PointReq("End of line"), "3400", ctx)
+    assert ok, pt
+    assert np.allclose(pt, np.asarray(aiming.snap_base, float)
+                       + 3400 * _unit_to(aiming, *AIM), atol=1e-6)
+
+
+def test_the_active_pane_still_answers_for_itself():
+    """Both panes can say which way; the cursor is in neither. Nothing has
+    changed for the single-pane case, which is every other test here."""
+    active = _cursor_at(_viewport())
+    other = _cursor_at(_viewport())
+    other.set_view("top")
+    ctx = _ctx(active)
+    ctx.window = _Panes(other, active)
+    ok, pt = parse_value(PointReq("End of line"), "3400", ctx)
+    assert ok, pt
+    assert np.allclose(pt, np.asarray(active.snap_base, float)
+                       + 3400 * _unit_to(active, *AIM), atol=1e-6)
+
+
+def test_the_pane_under_the_cursor_beats_the_active_one():
+    """Aiming in one pane while another is active is the whole point: the
+    band you can see is the one the number runs along."""
+    active = _cursor_at(_viewport())
+    hovered = _under_mouse(_cursor_at(_viewport()))
+    hovered.set_view("top")
+    assert not np.allclose(_unit_to(active, *AIM), _unit_to(hovered, *AIM),
+                           atol=1e-3), "the two panes must disagree"
+    ctx = _ctx(active)
+    ctx.window = _Panes(active, hovered)
+    ok, pt = parse_value(PointReq("End of line"), "100", ctx)
+    assert ok, pt
+    assert np.allclose(pt, np.asarray(hovered.snap_base, float)
+                       + 100 * _unit_to(hovered, *AIM), atol=1e-6)
+
+
 # -- the bug as it was reported --
 
 def _typed_after_a_click(name, text="100"):

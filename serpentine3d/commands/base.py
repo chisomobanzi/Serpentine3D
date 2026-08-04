@@ -251,9 +251,31 @@ class CommandContext:
         how far. Only the viewport knows where the cursor is, and only it
         knows that ortho or a snap has already moved the answer.
         """
-        vp = self.viewport
-        fn = getattr(vp, "aim_direction", None) if vp is not None else None
-        return fn() if fn is not None else None
+        for vp in self._aiming_panes():
+            fn = getattr(vp, "aim_direction", None)
+            aim = fn() if fn is not None else None
+            if aim is not None:
+                return aim
+        return None
+
+    def _aiming_panes(self):
+        """The panes to ask which way, the cursor's own first.
+
+        Four panes share one command line. The number is typed at the
+        keyboard but it is aimed with the mouse, and the mouse is not
+        always in the pane the last click made active — draw in Top with
+        Perspective still active and the pane commands act on has never
+        had the cursor over it, so it has nothing to say.
+        """
+        panes = []
+        listing = getattr(self.window, "all_viewports", None)
+        if listing is not None:
+            panes = [v for v in listing()
+                     if getattr(v, "underMouse", None) is not None
+                     and v.underMouse()]
+        if self.viewport is not None and self.viewport not in panes:
+            panes.append(self.viewport)
+        return panes
 
     def on_bare_paper(self) -> bool:
         """True when a pick can only name paper, and not the model.
