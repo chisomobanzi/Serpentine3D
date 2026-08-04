@@ -578,8 +578,10 @@ class MainWindow(QMainWindow):
             for title, view in (("Top", "top"), ("Front", "front"),
                                 ("Right", "right")):
                 aux = Viewport(self.scene, self.selection, self.cfg)
+                # the view names its own drawing plane; handing it the
+                # primary's world XY back is what left Front and Right
+                # looking straight down the plane they had to pick on
                 aux.set_view(view)                 # named orthographic view
-                aux.cplane = self.viewport.cplane
                 aux.camera.target = self.viewport.camera.target.copy()
                 aux.camera.distance = self.viewport.camera.distance
                 self._wire_viewport(aux)
@@ -1020,7 +1022,10 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _on_mouse_world(self, point):
-        self._refresh_rubber(point)
+        # whichever pane the cursor is in, which is not the same as the one
+        # last clicked in: the whole point of picking across panes is that
+        # you can leave the one you started in without clicking on the way
+        self._refresh_rubber(point, source=self.sender())
         req = self.processor.request
         if isinstance(req, PointReq) and getattr(req, "preview_fn", None):
             # ghost of the pending result under the cursor, ~30Hz cap
@@ -1035,7 +1040,8 @@ class MainWindow(QMainWindow):
                 for vp in self.all_viewports():
                     vp.set_ghost(ghost)
 
-    def _refresh_rubber(self, cursor):
+    def _refresh_rubber(self, cursor, source=None):
+        """`source` is the pane the cursor is in, and gets the number."""
         req = self.processor.request
         if not isinstance(req, PointReq):
             return
@@ -1060,8 +1066,9 @@ class MainWindow(QMainWindow):
         # world points with a line between them, and each pane knows how to
         # look at those from where it stands. Named on the primary alone, the
         # band ran in Perspective however far from it you were drawing.
+        reading = source if source in self.all_viewports() else self._active_vp
         for vp in self.all_viewports():
-            vp.set_readout_visible(vp is self._active_vp)
+            vp.set_readout_visible(vp is reading)
             vp.set_preview(segs if len(segs) else None, markers)
             if sides is not None:
                 vp.set_frame_readout(

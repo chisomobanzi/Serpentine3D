@@ -539,6 +539,7 @@ class Viewport(QOpenGLWidget):
         self.point_mode = False             # command wants a point click
         from ..core.cplane import CPlane
         self.cplane = CPlane()
+        self._own_cplane = False            # until `cplane` says otherwise
         from .layout_view import LayoutView
         self.space = "model"                # "model" | layout id
         self.layout_view = LayoutView(self)
@@ -1270,6 +1271,10 @@ class Viewport(QOpenGLWidget):
 
     def set_cplane(self, cplane):
         self.cplane = cplane
+        # World is how the choice is handed back: a pane asked to draw on the
+        # world plane has no plane of its own to protect, so the next named
+        # view it is put into names one for it again.
+        self._own_cplane = not cplane.is_world_xy()
         self.update()
 
     # shapes with at least this many faces mesh in the background
@@ -2564,8 +2569,30 @@ class Viewport(QOpenGLWidget):
     def set_view(self, name: str):
         self.camera.set_standard_view(name)
         self._view_name = name
+        self._take_the_views_plane(name)
         self.viewChanged.emit(name)
         self.update()
+
+    def _take_the_views_plane(self, name: str):
+        """Draw on the plane this view faces.
+
+        A pane looking along the world XY plane sends its pick ray straight
+        down it, parallel, never meeting it, so a Front or a Right pane could
+        not name a point at all: the cursor moved and nothing was emitted, the
+        click landed and there was nothing to place. Half a four-pane layout
+        was somewhere you could look but not draw. Facing the plane you are
+        drawing on is also what gives a line begun in Top and finished in
+        Front its height, and what puts a grid in those panes instead of the
+        world grid seen edge-on as a line.
+
+        A plane set by hand is a decision already made and is left alone; the
+        `cplane` command's World is how you hand the choice back to the view.
+        """
+        from ..core.cplane import PRESETS
+        if self._own_cplane:
+            return
+        make = PRESETS.get(name)
+        self.cplane = make() if make is not None else PRESETS["world"]()
 
     def screenshot(self, path: str) -> bool:
         img = self.grabFramebuffer()

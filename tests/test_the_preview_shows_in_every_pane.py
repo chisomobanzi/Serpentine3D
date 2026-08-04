@@ -101,6 +101,16 @@ def test_the_number_follows_the_pane_you_move_to(window):
     assert [vp for vp in _panes(window) if vp._readout_wanted] == [other]
 
 
+def test_the_number_goes_to_the_pane_the_cursor_is_moving_in(window):
+    """A pane only becomes the active one when it is clicked, but the band
+    now tracks whichever pane the cursor is over. The number has to follow
+    the cursor, not the last click, or it sits in the pane you have left."""
+    _drawing_a_line(window)
+    hovered = [vp for vp in _panes(window) if vp is not window._active_vp][0]
+    window._refresh_rubber((10.0, 5.0, 0.0), source=hovered)
+    assert [vp for vp in _panes(window) if vp._readout_wanted] == [hovered]
+
+
 def test_the_band_is_still_in_the_panes_without_the_number(window):
     _drawing_a_line(window)
     window._refresh_rubber((10.0, 5.0, 0.0))
