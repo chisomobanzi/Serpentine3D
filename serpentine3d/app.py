@@ -173,6 +173,14 @@ class MainWindow(QMainWindow):
         # resizeDocks gets redistributed once the layout is realised)
         QTimer.singleShot(0, self._balance_docks)
         self._ai_dock = None                # created on first use
+        # The chrome first, then the layout. The toolbar takes its width off
+        # the left of the panes and the menu bar its height off the top, so
+        # sizes restored into a window still missing them are laid out for a
+        # window nobody will see — and every pane moves again the moment they
+        # arrive. The toolbar is also in the saved state by name, and
+        # restoreState can only put back a toolbar that already exists.
+        self._build_toolbar()
+        self._build_menus()
         self._restore_window()              # last session's layout, if any
 
         # command engine
@@ -195,8 +203,6 @@ class MainWindow(QMainWindow):
         self.scene.add_listener(self._refresh_space_tabs)
         self._refresh_space_tabs()
 
-        self._build_toolbar()
-        self._build_menus()
         self._user_shortcuts: list = []
         self.apply_user_aliases()
         self.apply_user_shortcuts()
@@ -286,6 +292,20 @@ class MainWindow(QMainWindow):
                 self._set_panel_width(kept)
             else:
                 self._panel_width = saved
+        self._repaint_panes()
+
+    def _repaint_panes(self):
+        """Every pane draws itself again, at the size it has just been given.
+
+        A viewport keeps its last frame in a buffer of its own and the window
+        pastes that in wherever the pane now is. Both of the layout passes
+        that matter run off a zero-timer, after the window is already up, so
+        a pane that is moved and not asked to redraw is pasted in torn — the
+        old picture at the new rectangle, spilling over its edges and under
+        the toolbar. Asking costs one frame each, once, at startup.
+        """
+        for vp in self.all_viewports():
+            vp.update()
 
     # -------------------------------------------------- keeping the panels put
 
@@ -651,6 +671,7 @@ class MainWindow(QMainWindow):
         # Asking four panes for 1000 px each in a smaller window squeezes
         # the side panel down to its minimum on the way past, so put it back.
         self._set_panel_width(self._panel_width)
+        self._repaint_panes()
 
     # ------------------------------------------------------------ UI assembly
 
