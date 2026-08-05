@@ -567,8 +567,14 @@ class MainWindow(QMainWindow):
 
     def set_view_layout(self, mode: str):
         """'single' or 'quad' (Top / Front / Right alongside Perspective).
-        With every viewport a dock, quad just shows three aux viewport docks
-        tiled beside the primary — and you can drag them anywhere from there.
+
+        Every viewport is a dock you can close, float or drag onto another
+        into a tab stack, so asking for a layout has to be able to undo all
+        three. It lays the 2x2 out from scratch every time rather than only
+        the first time: a pane you shut with the x on its title bar came
+        back no other way, and the arrangement is saved between sessions, so
+        a window left in a state you did not want came back into it on every
+        launch.
         """
         # Asking for a layout outright settles the question a maximise was
         # holding open. Keeping the old one would make the next Ctrl+M put
@@ -587,16 +593,24 @@ class MainWindow(QMainWindow):
                 self._wire_viewport(aux)
                 self.aux_viewports.append(aux)
                 self.aux_docks.append(self._dock_viewport(aux, title))
-            top, front, right = self.aux_docks           # initial 2x2 tiling
+        if mode == "quad":
+            top, front, right = self.aux_docks
+            for dock in (self._primary_dock, top, front, right):
+                # only where it is needed: re-docking or re-showing a pane
+                # that is already in place resets the sizes around it
+                if dock.isFloating():
+                    dock.setFloating(False)   # back into the window it left
+                if not dock.isVisibleTo(self):
+                    dock.show()
+            # Splitting is what takes a pane out of a tab stack, so these run
+            # whether or not the panes were built just now.
             self.splitDockWidget(self._primary_dock, top,
                                  Qt.Orientation.Horizontal)   # persp | top
             self.splitDockWidget(self._primary_dock, front,
                                  Qt.Orientation.Vertical)     # persp / front
             self.splitDockWidget(top, right,
                                  Qt.Orientation.Vertical)     # top   / right
-        if mode == "quad":
-            for aux, dock in zip(self.aux_viewports, self.aux_docks):
-                dock.show()
+            for aux in self.aux_viewports:
                 aux.show()
                 aux.zoom_extents()
             # split builds the 2x2 structure but leaves lopsided sizes;
@@ -605,6 +619,11 @@ class MainWindow(QMainWindow):
         else:
             for dock in self.aux_docks:
                 dock.hide()
+            # the one pane a single view is has to be one you can see
+            if self._primary_dock.isFloating():
+                self._primary_dock.setFloating(False)
+            if not self._primary_dock.isVisibleTo(self):
+                self._primary_dock.show()
         self.viewport.update()
 
     @property
@@ -1447,6 +1466,11 @@ class MainWindow(QMainWindow):
         state = self.cfg.get("window", "state", default="")
         if state and self.restoreState(QByteArray.fromBase64(state.encode())):
             self._docks_restored = True
+        if not any(d.isVisibleTo(self) for d in self._viewport_docks()):
+            # A session that ended with every pane shut is restored exactly,
+            # and a window that opens with nowhere to draw is no use at all.
+            self.set_view_layout(
+                self.cfg.get("window", "layout", default="quad"))
 
     def _remember_window(self):
         self.cfg.set("window", "geometry",

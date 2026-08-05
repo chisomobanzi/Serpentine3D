@@ -57,6 +57,17 @@
 
 ### Fixed
 
+- **`4view` lays the four panes out again, whatever state they were left
+  in.** It built the 2x2 the first time it was asked and after that only
+  un-hid the three side panes, which made every way of disturbing the layout
+  a one-way door: close the Perspective pane with the x on its title bar and
+  nothing brought it back, drag two panes onto each other into a tab stack
+  and they stayed stacked, float one off and it stayed floating. The
+  arrangement is saved between sessions too, so a window that got into that
+  state came back into it on every launch. Asking for four viewports now
+  means four viewports, in a 2x2, every time, and `1view` gives you back the
+  one pane whether or not it is the one you closed.
+
 - **Solid primitives are built on the plane you draw them on.** `box`,
   `cylinder`, `cone`, `torus` and `helix` all read their base off the world X
   and Y axes and stood up the world Z axis, whichever pane you were working
