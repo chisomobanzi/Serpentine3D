@@ -810,15 +810,15 @@ def pull_curve(curve, target) -> list:
 
 
 def make_helix(center: Point, radius: float, pitch: float, turns: float,
-               ccw: bool = True) -> TopoDS_Shape:
-    """Helical curve around the Z axis through `center`."""
+               ccw: bool = True, axis: Point = (0, 0, 1)) -> TopoDS_Shape:
+    """Helical curve winding up `axis` through `center`."""
     if radius <= 0 or pitch <= 0 or turns <= 0:
         raise GeometryError("Helix needs positive radius, pitch and turns")
     from OCP.Geom import Geom_CylindricalSurface
     from OCP.Geom2d import Geom2d_Line
     from OCP.gp import gp_Ax3, gp_Dir2d, gp_Pnt2d
     from OCP.BRepLib import BRepLib
-    ax = gp_Ax3(_pnt(center), _dir((0, 0, 1)))
+    ax = gp_Ax3(_pnt(center), _dir(axis))
     surf = Geom_CylindricalSurface(ax, float(radius))
     sign = 1.0 if ccw else -1.0
     line2d = Geom2d_Line(gp_Pnt2d(0, 0), gp_Dir2d(sign * 2 * math.pi,

@@ -71,15 +71,19 @@ def cmd_helix(ctx):
     import math
     DEFAULT_TURNS = 5.0
     center = yield PointReq("Center of helix base")
+    cp = ctx.cplane
+    # it winds up out of the plane you drew the base circle on
+    up = tuple(float(a) for a in cp.normal)
+    w0 = cp.from_world(center)[2]
 
     def _base_to(p):
         # a helix needs a pitch as well, so the first drag shows the circle
         # it will wind around
         r = math.dist(center, p)
-        return g.make_circle(center, r) if r > 1e-9 else None
+        return g.make_circle(center, r, up) if r > 1e-9 else None
 
     rp = yield PointReq("Radius (click, or type a number)",
-                        number_from=(center, (1.0, 0.0, 0.0)),
+                        number_from=(center, tuple(cp.xdir)),
                         rubber_from=center, preview_fn=_base_to)
     radius = math.dist(center, rp)
     if radius < 1e-9:
@@ -90,17 +94,16 @@ def cmd_helix(ctx):
         if pitch < 1e-9 or turns < 0.01:
             return None
         try:
-            return g.make_helix(center, radius, pitch, turns)
+            return g.make_helix(center, radius, pitch, turns, axis=up)
         except g.GeometryError:
             return None
 
-    up = (0.0, 0.0, 1.0)
     pp = yield PointReq("Pitch, the rise per turn (click, or type a number)",
                         number_from=(center, up), axis_lock=(center, up),
                         rubber_from=center,
-                        preview_fn=lambda p: _helix(abs(p[2] - center[2]),
-                                                    DEFAULT_TURNS))
-    pitch = abs(pp[2] - center[2])
+                        preview_fn=lambda p: _helix(
+                            abs(cp.from_world(p)[2] - w0), DEFAULT_TURNS))
+    pitch = abs(cp.from_world(pp)[2] - w0)
     if pitch < 1e-9:
         ctx.echo("Zero pitch — no helix created.")
         return

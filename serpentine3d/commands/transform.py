@@ -310,11 +310,14 @@ def cmd_mirror(ctx):
 def cmd_array_polar(ctx):
     objs = yield SelectReq("Select objects to array")
     center = yield PointReq("Center of polar array")
+    # the ring lies on the plane you are working on, so an array laid out in
+    # a Front pane stays in that pane instead of swinging away behind it
+    axis = tuple(float(a) for a in ctx.cplane.normal)
 
     def _ring(count, total):
         step = total / (count if abs(total - 360.0) < 1e-9 else count - 1)
         return g.make_compound(
-            [g.rotate(o.shape, center, (0, 0, 1), step * i)
+            [g.rotate(o.shape, center, axis, step * i)
              for i in range(1, count) for o in objs])
 
     count = yield IntReq("Number of items", default=6, minimum=2,
@@ -327,7 +330,7 @@ def cmd_array_polar(ctx):
         for i in range(1, count):
             for o in objs:
                 ctx.scene.add_from(
-                    g.rotate(o.shape, center, (0, 0, 1), step * i), o)
+                    g.rotate(o.shape, center, axis, step * i), o)
                 n += 1
     ctx.echo(f"Created {n} arrayed object(s) around {center}.")
 

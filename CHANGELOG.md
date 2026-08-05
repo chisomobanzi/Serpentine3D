@@ -57,6 +57,16 @@
 
 ### Fixed
 
+- **Solid primitives are built on the plane you draw them on.** `box`,
+  `cylinder`, `cone`, `torus` and `helix` all read their base off the world X
+  and Y axes and stood up the world Z axis, whichever pane you were working
+  in. A box started in the Front pane got nowhere at all: its two base
+  corners differ in X and Z there, the command saw no Y between them, and all
+  you got was a rubber line and a complaint about a zero width. They ask the
+  construction plane now, so a cylinder drawn in Front comes at you and a box
+  drawn in Right stands up out of that pane. `arraypolar` turns its ring
+  around the same plane instead of always around world Z.
+
 - **The gumball only offers to grow a thing where growing it makes
   something.** The filled box turned up on all three axes at once, so a flat
   surface offered to be swept sideways within its own plane and a straight
