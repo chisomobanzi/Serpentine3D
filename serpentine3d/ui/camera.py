@@ -11,12 +11,16 @@ from ..utils.math3d import look_at, normalize, ortho, perspective
 Z_UP = np.array([0.0, 0.0, 1.0])
 
 
-def drag_pans(projection: str, shift: bool) -> bool:
+def drag_pans(projection: str, shift: bool, ctrl: bool = False) -> bool:
     """Which navigation a nav-button drag performs. A plain drag orbits in
-    perspective and pans in a parallel (orthographic) view; Shift inverts
-    it. So a Top view drags-to-pan like a drawing, and you can still orbit
-    it into an axonometric view with Shift held."""
-    return (projection == "parallel") != bool(shift)
+    perspective and pans in a parallel (orthographic) view, so a Top view
+    drags-to-pan like a drawing. Ctrl orbits from anywhere, and is the only
+    way to swing an ortho view round: Shift used to do it, but Shift is held
+    for so much else while you draw that Top kept turning into an
+    axonometric view by accident. Shift pans, wherever you are."""
+    if ctrl:
+        return False
+    return projection == "parallel" or bool(shift)
 
 
 # cinema sensor presets: (width, height) in millimetres

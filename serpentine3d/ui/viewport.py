@@ -3165,7 +3165,9 @@ class Viewport(QOpenGLWidget):
                      if self.config else 1.0)
             from .camera import drag_pans
             shift = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-            if drag_pans(self.camera.projection, shift):
+            ctrl = bool(ev.modifiers()
+                        & Qt.KeyboardModifier.ControlModifier)
+            if drag_pans(self.camera.projection, shift, ctrl):
                 self.camera.pan(dx, dy, self.height())
             else:
                 self.camera.orbit(dx * speed, dy * speed)

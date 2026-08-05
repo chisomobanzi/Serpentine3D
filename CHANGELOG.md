@@ -47,6 +47,14 @@
   the next nudge does not start with picking them again. Surfaces as well as
   curves.
 
+### Changed
+
+- **Ctrl and the orbit button is now what orbits an ortho view.** Shift used
+  to do it, and Shift is held for so much else while you draw that Top kept
+  swinging round into an axonometric view when nobody asked. Shift now pans
+  wherever you are, ++ctrl++ orbits wherever you are, and a plain drag still
+  orbits in perspective and pans in Top, Front and Right.
+
 ### Fixed
 
 - **Right-click no longer repeats undo or redo.** They join delete on the

@@ -80,9 +80,26 @@ def test_ortho_projection_depth_sign_marks_front_and_back():
 
 @pytest.mark.parametrize("projection,shift,pans", [
     ("parallel", False, True),      # ortho view: a plain drag pans
-    ("parallel", True, False),      # ...Shift inverts to orbit
+    ("parallel", True, True),       # ...and Shift does not take that away
     ("perspective", False, False),  # perspective: a plain drag orbits
-    ("perspective", True, True),    # ...Shift inverts to pan
+    ("perspective", True, True),    # ...Shift pans
 ])
 def test_drag_pans_decides_pan_vs_orbit(projection, shift, pans):
     assert drag_pans(projection, shift) is pans
+
+
+def test_shift_never_orbits_an_ortho_view():
+    """Shift is held for so many other things while you draw that an ortho
+    view kept swinging round when nobody asked it to. A Top view that will
+    not leave Top unless you say so is worth more than a shortcut into an
+    axonometric one."""
+    assert drag_pans("parallel", shift=True) is True
+
+
+@pytest.mark.parametrize("projection", ["parallel", "perspective"])
+@pytest.mark.parametrize("shift", [False, True])
+def test_ctrl_is_the_key_that_orbits(projection, shift):
+    """Whatever the view and whatever else is held, Ctrl and the orbit
+    button orbit. It is the only way out of an ortho view now, so it has to
+    work from wherever you are."""
+    assert drag_pans(projection, shift, ctrl=True) is False

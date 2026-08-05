@@ -121,7 +121,8 @@ nudge the selection along the CPlane (Shift ×10, Ctrl ×0.1).
 
 ### Navigation & shortcuts
 
-- **Middle mouse** orbit · **Shift+Middle** pan · **Scroll** zoom
+- **Middle mouse** orbit in perspective, pan in Top/Front/Right ·
+  **Shift+Middle** pan · **Ctrl+Middle** orbit anywhere · **Scroll** zoom
 - **F1–F4** top/front/right/perspective · **Ctrl+E** zoom extents · **F7** grid
 - **Ctrl+Z / Ctrl+Y** undo/redo · **Ctrl+A** select all · **Delete** delete selection
 - **Ctrl+S / Ctrl+O / Ctrl+N** save/open/new

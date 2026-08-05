@@ -55,7 +55,9 @@ The block rebuilds with 5 mm rounded edges. (Prefer dragging? Hold
 
 ## 4. Look around
 
-- **Middle-mouse drag** orbits · **Shift + middle-drag** pans · **scroll** zooms
+- **Middle-mouse drag** orbits the perspective view and pans Top, Front and
+  Right · **Shift + middle-drag** pans · **Ctrl + middle-drag** orbits
+  whichever view you are in · **scroll** zooms
 - ++f1++–++f4++ snap to Top / Front / Right / Perspective
 - ++ctrl+e++ zooms to fit everything
 
