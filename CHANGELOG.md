@@ -4,16 +4,25 @@
 
 ### Added
 
-- **Hold ++ctrl++ and drag a gumball arrow to extrude.** The gumball is
-  already standing on the line you want a surface off, with an arrow pointing
-  the way, so the only thing between you and the surface was having to leave
-  it, type `extrude` and pick the line again. Ctrl is the whole difference
-  now: a curve grows a surface along the arrow and stays where it is, a
-  closed curve gives you the solid it encloses rather than the four walls of
-  it, and a surface becomes the solid it sweeps out. A selected edge grows a
-  surface of its own and leaves the object it came off alone. Type a distance
-  instead of dragging if you want an exact one, and drag back to nothing if
-  you change your mind, which leaves the drawing as it was.
+- **The gumball extrudes.** It is already standing on the line you want a
+  surface off, with an arrow pointing the way, so the only thing between you
+  and the surface was having to leave it, type `extrude` and pick the line
+  again. Drag the filled box on any axis and a curve grows a surface along
+  that axis and stays where it is, a closed curve gives you the solid it
+  encloses rather than the four walls of it, and a surface becomes the solid
+  it sweeps out. A selected edge grows a surface of its own and leaves the
+  object it came off alone. Type a distance instead of dragging if you want
+  an exact one, and drag back to nothing if you change your mind, which
+  leaves the drawing as it was. ++ctrl++ and a translate arrow does the same
+  thing, for the hand that arrived from Rhino knowing it.
+
+- **The two boxes on each gumball axis now say what they do.** Scale has
+  moved out past the arrowhead, drawn hollow on a dashed leader, which leaves
+  the filled box on the shaft to be the extrude handle, the way Rhino has it.
+  So the two are told apart by their look and their distance rather than by
+  something you have to be holding down, and the filled box appears only
+  where there is something to grow: a solid does not offer one, and neither
+  does a gumball standing on control points.
 
 - **A rubber band round some vertices now takes the vertices.** Points on gave
   you one way to pick a control point, which was to click it one at a time.

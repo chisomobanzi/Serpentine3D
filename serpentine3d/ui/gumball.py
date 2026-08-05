@@ -56,12 +56,18 @@ def _ctrl_held(modifiers) -> bool:
     return bool(int(m) & int(Qt.KeyboardModifier.ControlModifier.value))
 
 
-SCALE_POS = 0.6
+# The filled box on the shaft grows the thing; scale is the hollow box out
+# past the arrowhead on a dashed leader. Two boxes that look different and
+# sit at different distances is how Rhino tells them apart, and it means
+# neither one asks you to hold a key down while you drag.
+EXT_POS = 0.6
+DASH0, SCALE_POS = 1.34, 1.66
 ARC_R = 0.82
 PAD0, PAD1 = 0.28, 0.5
 
 # handle ids: ("move",axis) ("pad",axis) ("rot",axis) ("scale",axis)
-_ONE_DOF = ("move", "rot", "scale")     # take a single typed value
+#             ("ext",axis) — the filled box, where there is something to grow
+_ONE_DOF = ("move", "rot", "scale", "ext")   # take a single typed value
 
 
 class Gumball:
@@ -276,7 +282,8 @@ class Gumball:
         held control point, a face already push/pulling — has nothing to grow,
         so Ctrl leaves it to move as it always did.
         """
-        if handle[0] != "move" or not _ctrl_held(modifiers):
+        if handle[0] != "ext" and not (handle[0] == "move"
+                                       and _ctrl_held(modifiers)):
             return None
         sel = self.vp.selection
         edges = [(oid, idx) for (oid, kind, idx)
@@ -306,6 +313,22 @@ class Gumball:
                 sources.append({"src": obj.shape, "cap": False,
                                 "into": obj.id, "layer": obj.layer_id})
         return sources or None
+
+    def _can_extrude(self) -> bool:
+        """Is there anything here a filled box could grow?
+
+        Cheap on purpose: it is asked once a frame and again on every mouse
+        move, so it reads kinds rather than geometry. _extrude_target does the
+        real work, and only once a box has actually been taken hold of.
+        """
+        subs = getattr(self.vp.selection, "subobjects", [])
+        kinds = {k for (_o, k, _i) in subs}
+        if "cv" in kinds:
+            return False                 # the gumball is on the points
+        if "edge" in kinds:
+            return True
+        return any(o.kind in ("curve", "surface")
+                   for o in self.vp.selection.objects())
 
     def _face_mode(self) -> bool:
         """Is the gumball acting as a face push/pull or offset handle now?"""
@@ -401,21 +424,22 @@ class Gumball:
         if vdir is None:
             return True
         along = abs(float(np.dot(np.asarray(axes[axis], float), vdir)))
-        if kind in ("move", "scale"):
+        if kind in ("move", "scale", "ext"):
             return along < 1.0 - 1e-6       # the line is not the line of sight
         return along > 1e-6                 # the plane faces you at all
 
     def _draw_anchor(self):
         """Where the gumball is drawn this frame. During a move/pad drag
         it tracks the geometry (frozen anchor + applied offset); rotate
-        and scale keep the anchor as the fixed pivot.
+        and scale keep the anchor as the fixed pivot. An extrude stays put
+        too: the curve it is growing from has not gone anywhere.
         """
         if self.drag is None:
             state = self.anchor_and_axes()
             return None if state is None else (state[0], state[1])
         d = self.drag
         anchor = np.asarray(d["anchor"], float)
-        if d["handle"][0] in ("move", "pad"):
+        if d["handle"][0] in ("move", "pad") and not d.get("extrude"):
             anchor = anchor + d["offset"]
         return anchor, d["axes"]
 
@@ -481,7 +505,8 @@ class Gumball:
             self._tris(mvp, tris, (*color_for(("pad", i), AXIS_COLORS[i]),
                                    PAD_ALPHA))
 
-        # shafts + cones + scale knobs
+        # shafts + cones + the two boxes
+        grows = self._can_extrude()
         for i in range(3):
             if not self._usable("move", i, axes, vdir):
                 continue
@@ -494,8 +519,12 @@ class Gumball:
             self._cone(mvp, anchor, axis, axes[(i + 1) % 3],
                        axes[(i + 2) % 3], s, (*color, 1.0))
             kc = color_for(("scale", i), AXIS_COLORS[i])
+            self._leader(mvp, anchor, axis, s, (*kc, 0.85))
             self._knob(mvp, anchor + axis * SCALE_POS * s, s,
-                       (*kc, 1.0))
+                       (*kc, 1.0), fill=False)
+            if grows:
+                self._knob(mvp, anchor + axis * EXT_POS * s, s,
+                           (*color_for(("ext", i), AXIS_COLORS[i]), 1.0))
         GL.glEnable(GL.GL_DEPTH_TEST)
         self.vp._line_width(1.0)
 
@@ -553,6 +582,11 @@ class Gumball:
         arr = np.asarray(pts, np.float32)
         segs = np.stack([arr[:-1], arr[1:]], axis=1).reshape(-1, 3)
         self._lines(mvp, segs, (*col, 0.7), 1.6)
+        # The edge gets the same filled box as everything else, so it is not
+        # the one case left needing the keyboard: the arrow rounds the edge
+        # off, the box pulls a surface out of it.
+        ext = (HOVER_COLOR if self.hover == ("ext", 2) else PP_COLOR)
+        self._knob(mvp, anchor + n * EXT_POS * s, s, (*ext, 1.0))
         GL.glEnable(GL.GL_DEPTH_TEST)
         self.vp._line_width(1.0)
 
@@ -570,7 +604,8 @@ class Gumball:
             tris.extend([tip, p0, p1])
         self._tris(mvp, np.asarray(tris, np.float32), color)
 
-    def _knob(self, mvp, center, s, color):
+    def _knob(self, mvp, center, s, color, fill: bool = True):
+        """A box facing you: filled to grow the thing, hollow to scale it."""
         cam = self.vp._eye()
         right, up = cam.right_up()
         r = 0.06 * s
@@ -578,8 +613,26 @@ class Gumball:
         c1 = center + right * r - up * r
         c2 = center + right * r + up * r
         c3 = center - right * r + up * r
-        self._tris(mvp, np.asarray([c0, c1, c2, c0, c2, c3], np.float32),
-                   color)
+        if fill:
+            self._tris(mvp, np.asarray([c0, c1, c2, c0, c2, c3], np.float32),
+                       color)
+            return
+        self._lines(mvp, np.asarray([c0, c1, c1, c2, c2, c3, c3, c0],
+                                    np.float32), color, 1.8)
+
+    def _leader(self, mvp, anchor, axis, s, color):
+        """The dashed run out to the scale box.
+
+        Without it the hollow box is a stray mark floating past the end of
+        the arrow; the dashes say which axis it belongs to and that it is the
+        far end of the same handle.
+        """
+        pts = []
+        for k in range(4):
+            t0 = DASH0 + (SCALE_POS - DASH0 - 0.06) * (k / 4)
+            t1 = t0 + (SCALE_POS - DASH0 - 0.06) * 0.55 / 4
+            pts.extend([anchor + axis * t0 * s, anchor + axis * t1 * s])
+        self._lines(mvp, np.asarray(pts, np.float32), color, 1.4)
 
     def _paper(self, pts):
         """The points to upload: as they are, or where they appear on a sheet.
@@ -663,21 +716,29 @@ class Gumball:
                 return ("move", 2)
             return None
 
-        if self._fillet_mode():               # only the outward radius arrow
+        if self._fillet_mode():               # radius arrow, and the box on it
             n = axes[2]
+            p = scr(anchor + n * EXT_POS * s)
+            if p is not None and np.linalg.norm(p - cursor) < 6.5:
+                return ("ext", 2)
             a = scr(anchor)
             b = scr(anchor + n * CONE1 * s)
             if a is not None and b is not None and _seg_dist(cursor, a, b) < 8:
                 return ("move", 2)
             return None
 
-        # scale knobs (smallest targets first)
-        for i in range(3):
-            if not self._usable("scale", i, axes, vdir):
+        # the boxes (smallest targets first, and the filled one sits on the
+        # shaft, so it has to be asked about before the arrow it lies along)
+        grows = self._can_extrude()
+        for kind, along in (("ext", EXT_POS), ("scale", SCALE_POS)):
+            if kind == "ext" and not grows:
                 continue
-            p = scr(anchor + axes[i] * SCALE_POS * s)
-            if p is not None and np.linalg.norm(p - cursor) < 6.5:
-                return ("scale", i)
+            for i in range(3):
+                if not self._usable(kind, i, axes, vdir):
+                    continue
+                p = scr(anchor + axes[i] * along * s)
+                if p is not None and np.linalg.norm(p - cursor) < 6.5:
+                    return (kind, i)
         # pads
         for i in range(3):
             if not self._usable("pad", i, axes, vdir):
@@ -738,6 +799,10 @@ class Gumball:
               else self._extrude_target(handle, modifiers))
         ft = (None if (cv is not None or pp is not None or mf is not None
                        or ex is not None) else self._fillet_target())
+        if handle[0] == "ext" and ex is None:
+            # Nothing here grows. Doing nothing beats quietly moving the
+            # thing you were trying to grow.
+            return False
         if cv is not None:                    # held control points
             originals = {}
             for oid in cv[0]:
@@ -797,7 +862,7 @@ class Gumball:
                                                   vp.height())
         kind, i = handle
         ref = None
-        if kind == "move" or kind == "scale":
+        if kind in ("move", "scale", "ext"):
             t = ray_line_parameter(origin, direction, anchor, axes[i])
             if t is None:
                 return False
@@ -854,7 +919,7 @@ class Gumball:
                                + vp.scene.format_length(float(
                                    np.linalg.norm(delta))))
             return d["last_label"]
-        if kind == "move":
+        if kind in ("move", "ext"):
             t = ray_line_parameter(origin, direction, anchor, axes[i])
             if t is None:
                 return d["last_label"]
@@ -893,8 +958,8 @@ class Gumball:
         vp = self.vp
         kind, i = d["handle"]
         anchor, axes = d["anchor"], d["axes"]
-        if kind == "move":
-            if d.get("extrude"):              # Ctrl: grow it, do not move it
+        if kind in ("move", "ext"):
+            if d.get("extrude"):              # the box, or Ctrl and an arrow
                 self._extrude_by(axes[i], float(value))
                 d["offset"] = np.asarray(axes[i] * value, float)
                 label = "extrude " + vp.scene.format_length(float(value))
