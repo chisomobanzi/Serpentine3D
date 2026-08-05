@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A boolean now leaves what it made selected, so the gumball is on it. Every
+  command let go of the selection when it was done, which is right for most of
+  them: you picked those objects to say which ones, and the pick has been
+  spent. A boolean is the other sort. It eats what you picked and puts
+  something else in its place, so letting go left you holding nothing at all,
+  and the gumball that had been sitting on the solid you were working on
+  simply went away rather than moving to the pieces that replaced it. Split
+  hands you its pieces, union and intersection the result, and difference the
+  objects it cut into.
+
 ## 0.5.10 — 2026-08-05
 
 ### Added

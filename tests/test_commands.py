@@ -189,6 +189,9 @@ def test_boolean_union_difference(env):
 
     proc.run("undo")
     assert len(scene.all()) == 2
+    # the union left its result selected, and undo does not put a selection
+    # back; picking the objects below means picking them, not adding to it
+    sel.clear()
 
     proc.run("booleandifference")
     proc.click_object(scene.all()[0].id)

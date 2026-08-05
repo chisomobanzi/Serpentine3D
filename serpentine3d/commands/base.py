@@ -215,6 +215,19 @@ class CommandContext:
         self.window = window
         self.last_point: Point | None = None
         self._echo_fns: list = []
+        self.result_ids: list[str] = []
+
+    def select_result(self, objs):
+        """Say what this command made, to be left selected when it ends.
+
+        Most commands let go of the selection on the way out, because you
+        picked those objects to say which ones and the pick has been spent.
+        A boolean is the other sort: it eats what you picked and puts
+        something else there, so letting go leaves you holding nothing and
+        the gumball, which was on the solid you were working on, with
+        nowhere to be.
+        """
+        self.result_ids = [o if isinstance(o, str) else o.id for o in objs]
 
     def opt(self, name: str, default: str) -> str:
         return getattr(self, "options", {}).get(name, default)
@@ -546,6 +559,7 @@ class CommandProcessor:
             self._start_revision = self.ctx.scene.revision
             self.ctx.history.checkpoint(cd.name)
         self.gen = cd.fn(self.ctx)
+        self.ctx.result_ids = []
         self._select_buffer = []
         self.command_options = {}
         self.ctx.options = self.command_options
@@ -616,10 +630,17 @@ class CommandProcessor:
         self.gen = None
         self.request = None
         self.active = None
+        made = [i for i in self.ctx.result_ids if i in self.ctx.scene.objects]
+        self.ctx.result_ids = []
         if was and was.mutates and success:
             # command is over: release the selection (Rhino-style);
-            # 'sellast' / 'selprev' habits bring it back
-            self.ctx.selection.clear()
+            # 'sellast' / 'selprev' habits bring it back. Unless it said what
+            # it made, in which case that is what you are holding — see
+            # CommandContext.select_result.
+            if made:
+                self.ctx.selection.set(made)
+            else:
+                self.ctx.selection.clear()
         if was and was.mutates and not success:
             # nothing changed -> no undo entry; partial work stays undoable
             if self.ctx.scene.revision == self._start_revision:

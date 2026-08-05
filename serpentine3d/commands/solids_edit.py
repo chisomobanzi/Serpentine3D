@@ -256,7 +256,7 @@ def cmd_booleansplit(ctx):
     targets = yield SelectReq("Select solids to split", kinds=("solid",))
     cutters = yield SelectReq("Select cutting objects",
                               allow_preselected=False)
-    total = 0
+    made = []
     for t in targets:
         try:
             pieces = g.split_shape(t.shape, [c.shape for c in cutters])
@@ -264,10 +264,12 @@ def cmd_booleansplit(ctx):
             ctx.echo(f"{t.name}: {exc}")
             continue
         for p in pieces:
-            ctx.scene.add(p, layer_id=t.layer_id)
-            total += 1
+            made.append(ctx.scene.add(p, layer_id=t.layer_id))
         ctx.scene.remove(t.id)
-    ctx.echo(f"Split into {total} piece(s).")
+    # the pieces stand in for the solid you were holding, so they are what
+    # you are holding now and the gumball comes to them
+    ctx.select_result(made)
+    ctx.echo(f"Split into {len(made)} piece(s).")
 
 
 @command("pushpull", aliases=("pp", "moveface"))

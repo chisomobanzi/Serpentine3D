@@ -17,6 +17,7 @@ def cmd_union(ctx):
     for o in objs[1:]:
         ctx.scene.remove(o.id)
     new = ctx.scene.replace_shape(objs[0].id, result)
+    ctx.select_result([new])
     ctx.echo(f"Union of {len(objs)} objects -> {new.name}.")
 
 
@@ -33,6 +34,7 @@ def cmd_difference(ctx):
                                                            cut_union))
     for o in cut:
         ctx.scene.remove(o.id)
+    ctx.select_result(keep)
     ctx.echo(f"Subtracted {len(cut)} object(s) from {len(keep)}.")
 
 
@@ -45,4 +47,5 @@ def cmd_intersection(ctx):
     for o in objs[1:]:
         ctx.scene.remove(o.id)
     new = ctx.scene.replace_shape(objs[0].id, result)
+    ctx.select_result([new])
     ctx.echo(f"Intersection -> {new.name}.")
