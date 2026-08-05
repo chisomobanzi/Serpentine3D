@@ -94,7 +94,8 @@ def _take(vp, handle):
     """Take hold of a gumball handle where it is drawn."""
     gb = vp.gumball
     anchor, axes = gb.anchor_and_axes()
-    reach = {"move": (SHAFT0 + CONE1) / 2, "scale": SCALE_POS}[handle[0]]
+    # scale is drawn back the other way from the pivot, so its reach is signed
+    reach = {"move": (SHAFT0 + CONE1) / 2, "scale": -SCALE_POS}[handle[0]]
     at = anchor + axes[handle[1]] * reach * gb._size_world(anchor)
     px, py = _screen(vp, at)
     assert gb.begin_drag(handle, px, py, NONE), "the handle refused the drag"

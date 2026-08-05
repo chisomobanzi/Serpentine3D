@@ -56,12 +56,14 @@ def _ctrl_held(modifiers) -> bool:
     return bool(int(m) & int(Qt.KeyboardModifier.ControlModifier.value))
 
 
-# The filled box on the shaft grows the thing; scale is the hollow box out
-# past the arrowhead on a dashed leader. Two boxes that look different and
-# sit at different distances is how Rhino tells them apart, and it means
-# neither one asks you to hold a key down while you drag.
+# The filled box on the shaft grows the thing; scale is the hollow box on the
+# far side of the pivot, on a dashed leader that mirrors the shaft. Each axis
+# then reads as one handle with an end of its own either way, and two boxes
+# that look different and sit at opposite ends are never mistaken for each
+# other, so neither asks you to hold a key down while you drag.
+# DASH0 and SCALE_POS are distances back along -axis: see _leader.
 EXT_POS = 0.6
-DASH0, SCALE_POS = 1.34, 1.66
+DASH0, SCALE_POS = 0.18, 1.66
 ARC_R = 0.82
 PAD0, PAD1 = 0.28, 0.5
 
@@ -520,7 +522,7 @@ class Gumball:
                        axes[(i + 2) % 3], s, (*color, 1.0))
             kc = color_for(("scale", i), AXIS_COLORS[i])
             self._leader(mvp, anchor, axis, s, (*kc, 0.85))
-            self._knob(mvp, anchor + axis * SCALE_POS * s, s,
+            self._knob(mvp, anchor - axis * SCALE_POS * s, s,
                        (*kc, 1.0), fill=False)
             if grows:
                 self._knob(mvp, anchor + axis * EXT_POS * s, s,
@@ -621,17 +623,19 @@ class Gumball:
                                     np.float32), color, 1.8)
 
     def _leader(self, mvp, anchor, axis, s, color):
-        """The dashed run out to the scale box.
+        """The dashed run back from the pivot to the scale box.
 
-        Without it the hollow box is a stray mark floating past the end of
-        the arrow; the dashes say which axis it belongs to and that it is the
-        far end of the same handle.
+        It leaves the anchor where the shaft does and goes the other way, so
+        the hollow box is not a stray mark floating behind the gumball: the
+        dashes say which axis it belongs to and that it is the other end of
+        the same handle the arrow is one end of.
         """
+        n, run = 6, SCALE_POS - DASH0 - 0.06
         pts = []
-        for k in range(4):
-            t0 = DASH0 + (SCALE_POS - DASH0 - 0.06) * (k / 4)
-            t1 = t0 + (SCALE_POS - DASH0 - 0.06) * 0.55 / 4
-            pts.extend([anchor + axis * t0 * s, anchor + axis * t1 * s])
+        for k in range(n):
+            t0 = DASH0 + run * (k / n)
+            t1 = t0 + run * 0.55 / n
+            pts.extend([anchor - axis * t0 * s, anchor - axis * t1 * s])
         self._lines(mvp, np.asarray(pts, np.float32), color, 1.4)
 
     def _paper(self, pts):
@@ -730,7 +734,7 @@ class Gumball:
         # the boxes (smallest targets first, and the filled one sits on the
         # shaft, so it has to be asked about before the arrow it lies along)
         grows = self._can_extrude()
-        for kind, along in (("ext", EXT_POS), ("scale", SCALE_POS)):
+        for kind, along in (("ext", EXT_POS), ("scale", -SCALE_POS)):
             if kind == "ext" and not grows:
                 continue
             for i in range(3):

@@ -7,10 +7,11 @@ out of a line meant leaving the gumball, typing extrude and picking the line
 again.
 
 The handle for it is the filled box on each axis, which is where Rhino puts
-it and where scale used to be. Scale moves out past the arrowhead as a hollow
-box on the end of a dashed leader, so the two are told apart by their look
-rather than by a key you have to be holding, and neither of them asks you to
-combine a drag with the keyboard. The filled box only appears where there is
+it and where scale used to be. Scale moves to the far side of the pivot as a
+hollow box on the end of a dashed leader that mirrors the arrow, so the two
+are told apart by their look and by which end of the axis they sit on rather
+than by a key you have to be holding, and neither of them asks you to combine
+a drag with the keyboard. The filled box only appears where there is
 something to grow, so it says as much by being there.
 
 Ctrl and a translate arrow does the same thing, for the hand that already
@@ -93,13 +94,18 @@ def test_the_filled_box_on_each_axis_is_the_extrude_handle(pane):
     assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS)) == Z_BOX
 
 
-def test_scale_is_the_hollow_box_out_past_the_arrowhead(pane):
-    """The two are told apart by their look and their distance, which is
-    what saves you having to hold anything down."""
+def test_scale_is_the_hollow_box_on_the_far_side_of_the_pivot(pane):
+    """Behind the gumball rather than past the arrowhead, so the axis reads
+    as one handle with an end of its own at each side and the two boxes are
+    never mistaken for each other."""
     _line(pane)
-    assert gb.SCALE_POS > gb.CONE1 > gb.EXT_POS
-    assert pane.gumball.hit_test(*_handle_at(pane, gb.SCALE_POS)) \
+    assert pane.gumball.hit_test(*_handle_at(pane, -gb.SCALE_POS)) \
         == ("scale", 2)
+
+
+def test_nothing_is_left_out_past_the_arrowhead(pane):
+    _line(pane)
+    assert pane.gumball.hit_test(*_handle_at(pane, gb.SCALE_POS)) is None
 
 
 def test_a_solid_has_nothing_to_grow_so_it_shows_no_filled_box(pane):

@@ -17,12 +17,14 @@
   thing, for the hand that arrived from Rhino knowing it.
 
 - **The two boxes on each gumball axis now say what they do.** Scale has
-  moved out past the arrowhead, drawn hollow on a dashed leader, which leaves
-  the filled box on the shaft to be the extrude handle, the way Rhino has it.
-  So the two are told apart by their look and their distance rather than by
-  something you have to be holding down, and the filled box appears only
-  where there is something to grow: a solid does not offer one, and neither
-  does a gumball standing on control points.
+  moved to the far side of the pivot, drawn hollow on a dashed leader that
+  mirrors the arrow, which leaves the filled box on the shaft to be the
+  extrude handle, the way Rhino has it. Each axis now reads as one handle
+  with an end of its own either way, the two boxes are told apart by their
+  look and by which end they sit on rather than by something you have to be
+  holding down, and the filled box appears only where there is something to
+  grow: a solid does not offer one, and neither does a gumball standing on
+  control points.
 
 - **A rubber band round some vertices now takes the vertices.** Points on gave
   you one way to pick a control point, which was to click it one at a time.

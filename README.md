@@ -198,8 +198,9 @@ came off alone. The filled box only appears where there is something to
 grow, so a solid does not offer one. Ctrl and a translate arrow does the
 same thing if that is the habit you arrived with.
 
-The **hollow** box out past the arrowhead, on the dashed leader, is
-**scale**. Type a distance for either instead of dragging.
+The **hollow** box on the far side of the pivot, at the end of the dashed
+leader that mirrors the arrow, is **scale**. Type a distance for either
+instead of dragging.
 
 Ctrl+Shift-click one or more **edges** and the gumball becomes a fillet
 handle — drag it outward, or type a radius, to round the edges; every
