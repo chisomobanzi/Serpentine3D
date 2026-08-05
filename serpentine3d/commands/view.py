@@ -8,6 +8,20 @@ def _vp(ctx):
     return ctx.viewport
 
 
+def _redraw_all(ctx):
+    """Repaint every pane, for the settings all of them share.
+
+    Points on is one of those: it lives on the drawing, so turning it on in
+    one pane changes what the other three are meant to be showing, and only
+    the one the command ran in would have been told to paint again.
+    """
+    listing = getattr(ctx.window, "all_viewports", None)
+    for pane in (listing() if listing is not None else []):
+        pane.update()
+    if ctx.viewport is not None:
+        ctx.viewport.update()
+
+
 @command("top", mutates=False)
 def cmd_top(ctx):
     _vp(ctx).set_view("top")
@@ -471,7 +485,7 @@ def cmd_pointson(ctx):
             shown += 1
         except gm.GeometryError as exc:
             ctx.echo(f"{o.name}: {exc}")
-    vp.update()
+    _redraw_all(ctx)
     if shown:
         ctx.echo(f"Control points on for {shown} object(s) — drag to edit, "
                  "F11 to hide.")
@@ -482,7 +496,7 @@ def cmd_pointsoff(ctx):
     vp = _vp(ctx)
     n = len(vp.cv_enabled)
     vp.cv_enabled.clear()
-    vp.update()
+    _redraw_all(ctx)
     ctx.echo(f"Control points off ({n} curve(s)).")
     yield from ()
 

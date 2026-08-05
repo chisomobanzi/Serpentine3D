@@ -11,6 +11,39 @@ def _ghost(objs, fn):
     return g.make_compound([fn(o.shape) for o in objs])
 
 
+def _what_to_transform(ctx, prompt, **kw):
+    """(held control points, objects) — whichever of the two is being used.
+
+    Control points on are a way of working on part of an object, so when some
+    of them are held they are what the command is for and there is nothing
+    left to ask: putting the select prompt up anyway would throw them away,
+    since a select prompt clears the selection to take its answer.
+    """
+    held = ctx.held_control_points()
+    objs = [] if held else (yield SelectReq(prompt, **kw))
+    return held, objs
+
+
+def _preview_of(ctx, held, objs, fn):
+    """What the drawing would look like with `fn` applied to what is picked."""
+    return (ctx.control_point_ghost(held, fn) if held else _ghost(objs, fn))
+
+
+def _do(ctx, held, objs, fn, verb, tail=""):
+    """Apply `fn` to the held points or to the objects, and say what happened.
+
+    One transform for both, so a control point cannot be moved by a slightly
+    different rule from the curve it belongs to.
+    """
+    if held:
+        n = ctx.apply_to_control_points(held, fn)
+        ctx.echo(f"{verb} {n} control point(s){tail}.")
+        return
+    for o in objs:
+        ctx.scene.replace_shape(o.id, fn(o.shape))
+    ctx.echo(f"{verb} {len(objs)} object(s){tail}.")
+
+
 def _move_on_paper(ctx, lv):
     """Move what is picked on a sheet, in paper millimetres.
 
@@ -41,19 +74,17 @@ def cmd_move(ctx):
     if lv is not None:
         yield from _move_on_paper(ctx, lv)
         return
-    objs = yield SelectReq("Select objects to move")
+    held, objs = yield from _what_to_transform(ctx, "Select objects to move")
     p1 = yield PointReq("Point to move from")
 
     def _preview(p):
         off = tuple(b - a for a, b in zip(p1, p))
-        return _ghost(objs, lambda s: g.translate(s, off))
+        return _preview_of(ctx, held, objs, lambda s: g.translate(s, off))
 
     p2 = yield PointReq("Point to move to", rubber_from=p1,
                         preview_fn=_preview)
     offset = tuple(b - a for a, b in zip(p1, p2))
-    for o in objs:
-        ctx.scene.replace_shape(o.id, g.translate(o.shape, offset))
-    ctx.echo(f"Moved {len(objs)} object(s).")
+    _do(ctx, held, objs, lambda s: g.translate(s, offset), "Moved")
 
 
 def _copy_on_paper(ctx, lv):
@@ -115,7 +146,7 @@ def cmd_rotate(ctx):
     import math
 
     import numpy as np
-    objs = yield SelectReq("Select objects to rotate")
+    held, objs = yield from _what_to_transform(ctx, "Select objects to rotate")
     center = yield PointReq("Center of rotation")
     axis = tuple(ctx.cplane.normal)
     ref = yield PointReq("Angle in degrees, or first reference point",
@@ -136,16 +167,15 @@ def cmd_rotate(ctx):
 
         def _preview(p):
             a = p if isinstance(p, float) else _angle(p)
-            return _ghost(objs, lambda s: g.rotate(s, center, axis, a))
+            return _preview_of(ctx, held, objs,
+                               lambda s: g.rotate(s, center, axis, a))
 
         p2 = yield PointReq("Angle, or second reference point",
                             rubber_from=center, allow_number=True,
                             preview_fn=_preview)
         angle = p2 if isinstance(p2, float) else _angle(p2)
-    for o in objs:
-        ctx.scene.replace_shape(
-            o.id, g.rotate(o.shape, center, axis, angle))
-    ctx.echo(f"Rotated {len(objs)} object(s) by {angle:g} degrees.")
+    _do(ctx, held, objs, lambda s: g.rotate(s, center, axis, angle),
+        "Rotated", f" by {angle:g} degrees")
 
 
 @command("scale", aliases=("sc",))
@@ -153,7 +183,7 @@ def cmd_scale(ctx):
     """Scale about a base point: type a factor, or grab a reference
     point and drag it to its new position (live preview)."""
     import math
-    objs = yield SelectReq("Select objects to scale")
+    held, objs = yield from _what_to_transform(ctx, "Select objects to scale")
     center = yield PointReq("Base point")
     ref = yield PointReq("Scale factor, or first reference point",
                          rubber_from=center, allow_number=True)
@@ -172,7 +202,8 @@ def cmd_scale(ctx):
             f = _factor(p)
             if f < 1e-9:
                 return None
-            return _ghost(objs, lambda s: g.scale(s, center, f))
+            return _preview_of(ctx, held, objs,
+                               lambda s: g.scale(s, center, f))
 
         p2 = yield PointReq("Second reference point (drag to scale)",
                             rubber_from=center, allow_number=True,
@@ -181,9 +212,8 @@ def cmd_scale(ctx):
     if abs(factor) < 1e-9:
         ctx.echo("Zero scale factor — cancelled.")
         return
-    for o in objs:
-        ctx.scene.replace_shape(o.id, g.scale(o.shape, center, factor))
-    ctx.echo(f"Scaled {len(objs)} object(s) by {factor:g}.")
+    _do(ctx, held, objs, lambda s: g.scale(s, center, factor),
+        "Scaled", f" by {factor:g}")
 
 
 @command("scalenu")
@@ -191,7 +221,8 @@ def cmd_scale_nu(ctx):
     """Scale by a different amount along each axis: type the three
     factors, or grab a reference point and drag it to where it should end
     up (live preview either way)."""
-    objs = yield SelectReq("Select objects to scale (non-uniform)")
+    held, objs = yield from _what_to_transform(
+        ctx, "Select objects to scale (non-uniform)")
     center = yield PointReq("Base point")
 
     def _apply(s, factors):
@@ -200,7 +231,7 @@ def cmd_scale_nu(ctx):
     def _preview(factors):
         if not all(abs(f) > 1e-9 for f in factors):
             return None
-        return _ghost(objs, lambda s: _apply(s, factors))
+        return _preview_of(ctx, held, objs, lambda s: _apply(s, factors))
 
     ref = yield PointReq("X factor, or first reference point",
                          rubber_from=center, allow_number=True,
@@ -232,15 +263,13 @@ def cmd_scale_nu(ctx):
     if not all(abs(f) > 1e-9 for f in factors):
         ctx.echo("Zero scale factor — cancelled.")
         return
-    for o in objs:
-        ctx.scene.replace_shape(o.id, _apply(o.shape, factors))
-    ctx.echo("Scaled {} object(s) by {}.".format(
-        len(objs), " × ".join(f"{f:g}" for f in factors)))
+    _do(ctx, held, objs, lambda s: _apply(s, factors), "Scaled",
+        " by " + " × ".join(f"{f:g}" for f in factors))
 
 
 @command("mirror", aliases=("mi",))
 def cmd_mirror(ctx):
-    objs = yield SelectReq("Select objects to mirror")
+    held, objs = yield from _what_to_transform(ctx, "Select objects to mirror")
     p1 = yield PointReq("Start of mirror line")
 
     def _mirror_normal(p):
@@ -253,15 +282,21 @@ def cmd_mirror(ctx):
 
     def _preview(p):
         n = _mirror_normal(p)
-        return _ghost(objs, lambda s: g.mirror(s, p1, n))
+        return _preview_of(ctx, held, objs, lambda s: g.mirror(s, p1, n))
 
     p2 = yield PointReq("End of mirror line", rubber_from=p1,
                         preview_fn=_preview)
-    keep = yield OptionReq("Keep original?", options=["Yes", "No"],
-                           default="Yes")
     # mirror across the plane through the picked line, perpendicular to
     # the construction plane
     normal = _mirror_normal(p2)
+    if held:
+        # Nothing to ask about keeping the original: a control point is part
+        # of a curve, and a spare copy of a corner on its own is not
+        # something a curve can have.
+        _do(ctx, held, objs, lambda s: g.mirror(s, p1, normal), "Mirrored")
+        return
+    keep = yield OptionReq("Keep original?", options=["Yes", "No"],
+                           default="Yes")
     for o in objs:
         mirrored = g.mirror(o.shape, p1, normal)
         if keep == "Yes":
@@ -509,7 +544,7 @@ def cmd_rotate3d(ctx):
     import math
 
     import numpy as np
-    objs = yield SelectReq("Select objects to rotate")
+    held, objs = yield from _what_to_transform(ctx, "Select objects to rotate")
     p1 = yield PointReq("Start of rotation axis")
     p2 = yield PointReq("End of rotation axis", rubber_from=p1)
     axis = tuple(np.subtract(p2, p1))
@@ -520,12 +555,18 @@ def cmd_rotate3d(ctx):
     def _preview(a):
         if not isinstance(a, float):
             return None
-        return _ghost(objs, lambda s: g.rotate(s, p1, axis, a))
+        return _preview_of(ctx, held, objs,
+                           lambda s: g.rotate(s, p1, axis, a))
 
     angle = yield NumberReq("Angle in degrees",
                             choices={"Copy": ["No", "Yes"]},
                             preview_fn=_preview)
     copy = ctx.opt("Copy", "No") == "Yes"
+    if held:
+        # As with mirror, nothing to copy: a corner belongs to its curve.
+        _do(ctx, held, objs, lambda s: g.rotate(s, p1, axis, angle),
+            "Rotated", f" by {angle:g} degrees around the picked axis")
+        return
     for o in objs:
         rotated = g.rotate(o.shape, p1, axis, angle)
         if copy:
@@ -588,15 +629,14 @@ def cmd_scale1d(ctx):
     the way the cursor is pointing, or set the axis with a reference point
     and drag that to where it should end up."""
     import math
-    objs = yield SelectReq("Select objects to scale in one direction")
+    held, objs = yield from _what_to_transform(
+        ctx, "Select objects to scale in one direction")
     base = yield PointReq("Base point")
 
     def _stretch(axis, factor):
-        for o in objs:
-            ctx.scene.replace_shape(
-                o.id, g.scale_along_axis(o.shape, base, axis, factor))
-        ctx.echo(f"Scaled {len(objs)} object(s) by {factor:g} "
-                 f"along the axis.")
+        _do(ctx, held, objs,
+            lambda s: g.scale_along_axis(s, base, axis, factor),
+            "Scaled", f" by {factor:g} along the axis")
 
     ref = yield PointReq("Scale factor, or first reference point",
                          rubber_from=base, allow_number=True)
@@ -628,7 +668,8 @@ def cmd_scale1d(ctx):
         f = _factor(p)
         if abs(f) < 1e-9:
             return None
-        return _ghost(objs, lambda s: g.scale_along_axis(s, base, axis, f))
+        return _preview_of(ctx, held, objs,
+                           lambda s: g.scale_along_axis(s, base, axis, f))
 
     p2 = yield PointReq("New reference point (or type factor)",
                         rubber_from=base, allow_number=True,
@@ -645,7 +686,8 @@ def cmd_scale2d(ctx):
     """Scale in the CPlane only (thickness along the CPlane normal is
     kept)."""
     import math
-    objs = yield SelectReq("Select objects to scale in the CPlane")
+    held, objs = yield from _what_to_transform(
+        ctx, "Select objects to scale in the CPlane")
     base = yield PointReq("Base point")
     normal = tuple(ctx.cplane.normal)
 
@@ -668,7 +710,7 @@ def cmd_scale2d(ctx):
         def _preview(p):
             f = _factor(p)
             return None if abs(f) < 1e-9 \
-                else _ghost(objs, lambda s: _apply(s, f))
+                else _preview_of(ctx, held, objs, lambda s: _apply(s, f))
 
         p2 = yield PointReq("Second reference point (drag to scale)",
                             rubber_from=base, allow_number=True,
@@ -677,6 +719,5 @@ def cmd_scale2d(ctx):
     if abs(factor) < 1e-9:
         ctx.echo("Zero scale factor — cancelled.")
         return
-    for o in objs:
-        ctx.scene.replace_shape(o.id, _apply(o.shape, factor))
-    ctx.echo(f"Scaled {len(objs)} object(s) by {factor:g} in the CPlane.")
+    _do(ctx, held, objs, lambda s: _apply(s, factor), "Scaled",
+        f" by {factor:g} in the CPlane")

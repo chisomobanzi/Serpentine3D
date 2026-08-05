@@ -216,6 +216,71 @@ class CommandContext:
         self.last_point: Point | None = None
         self._echo_fns: list = []
         self.result_ids: list[str] = []
+        self.result_subobjects: list = []
+
+    def held_control_points(self) -> dict:
+        """{obj_id: [index, ...]} — the control points the selection holds.
+
+        Empty in the ordinary case, which is what tells a command it is
+        working on whole objects as it always has. Must be read before the
+        command asks anything, since a select prompt clears the selection to
+        take its answer and the held points would go with it.
+        """
+        held: dict = {}
+        for entry in getattr(self.selection, "subobjects", []):
+            obj_id, kind, index = entry
+            if kind != "cv" or self.scene.get(obj_id) is None:
+                continue
+            held.setdefault(obj_id, []).append(int(index))
+        return held
+
+    def control_point_ghost(self, held, fn):
+        """Preview of those objects with their held points put through `fn`."""
+        shapes = [s for _id, s in self._moved_control_points(held, fn)]
+        return geometry.make_compound(shapes) if shapes else None
+
+    def apply_to_control_points(self, held, fn) -> int:
+        """Put every held control point through `fn`; how many moved.
+
+        The points stay held afterwards. A command that ends by letting go of
+        them would be a command you have to pick your way back into before
+        you can nudge the same corner again, and nudging the same corner
+        again is most of what control point editing is.
+        """
+        moved = 0
+        for obj_id, shape in self._moved_control_points(held, fn):
+            self.scene.replace_shape(obj_id, shape)
+            moved += len(held[obj_id])
+        self.result_subobjects = [(oid, "cv", i)
+                                  for oid, idxs in held.items() for i in idxs]
+        return moved
+
+    def _moved_control_points(self, held, fn):
+        """(obj_id, shape) for each object, its held points through `fn`.
+
+        Every point is measured from the shape as it stands and put back one
+        at a time, the same way the gumball edits them, so a command and a
+        drag of the gumball cannot disagree about what a moved corner does to
+        the curve. An object whose points cannot be read is skipped rather
+        than half-transformed.
+        """
+        for obj_id, idxs in held.items():
+            obj = self.scene.get(obj_id)
+            if obj is None:
+                continue
+            surface = obj.kind == "surface"
+            try:
+                was = (geometry.surface_control_points(obj.shape)[0]
+                       if surface else geometry.get_control_points(obj.shape))
+                to = geometry.transform_points([was[i] for i in idxs], fn)
+                shape = obj.shape
+                for i, p in zip(idxs, to):
+                    shape = (geometry.move_surface_control_point(shape, i, p)
+                             if surface
+                             else geometry.move_control_point(shape, i, p))
+            except (geometry.GeometryError, IndexError):
+                continue
+            yield obj_id, shape
 
     def select_result(self, objs):
         """Say what this command made, to be left selected when it ends.
@@ -560,6 +625,7 @@ class CommandProcessor:
             self.ctx.history.checkpoint(cd.name)
         self.gen = cd.fn(self.ctx)
         self.ctx.result_ids = []
+        self.ctx.result_subobjects = []
         self._select_buffer = []
         self.command_options = {}
         self.ctx.options = self.command_options
@@ -631,7 +697,10 @@ class CommandProcessor:
         self.request = None
         self.active = None
         made = [i for i in self.ctx.result_ids if i in self.ctx.scene.objects]
+        held = [e for e in self.ctx.result_subobjects
+                if e[0] in self.ctx.scene.objects]
         self.ctx.result_ids = []
+        self.ctx.result_subobjects = []
         if was and was.mutates and success:
             # command is over: release the selection (Rhino-style);
             # 'sellast' / 'selprev' habits bring it back. Unless it said what
@@ -641,6 +710,11 @@ class CommandProcessor:
                 self.ctx.selection.set(made)
             else:
                 self.ctx.selection.clear()
+            # Control points are the exception again, and the other way about:
+            # a command that worked on them hands them back, because the next
+            # thing you do to a corner is nearly always move it again.
+            if held:
+                self.ctx.selection.set_subobjects(held)
         if was and was.mutates and not success:
             # nothing changed -> no undo entry; partial work stays undoable
             if self.ctx.scene.revision == self._start_revision:

@@ -14,7 +14,25 @@
   clicking them does. When the band catches no points it goes on to pick
   objects the way it always has.
 
+- **Move, rotate, scale and mirror work on the control points you are
+  holding.** They only ever asked which objects to work on, so a corner you
+  had picked was either ignored or moved along with the whole curve. When
+  some control points are held they are what the command is for, and it goes
+  straight to asking where to move them from: `move`, `rotate`, `scale`,
+  `scalenu`, `scale1d`, `scale2d`, `rotate3d` and `mirror` all put the held
+  points through the same transform they would have put the objects through,
+  live preview included. The points are still held when the command ends, so
+  the next nudge does not start with picking them again. Surfaces as well as
+  curves.
+
 ### Fixed
+
+- **Points on now shows in every pane.** It was kept per viewport, so turning
+  a curve's points on in the Top view left the Right view drawing a bare
+  line: no markers there to pick, and a corner picked in one pane showed as
+  picked in no other, gumball included, because a gumball will not stand on a
+  point its own pane is not showing. Points on belongs to the drawing, so all
+  four panes agree about it.
 
 - **Points on now looks like points on.** The markers were two arms along the
   world X and Y axes, which is a cross only when you happen to be looking

@@ -170,6 +170,11 @@ class Scene:
         self._batched_kinds: set[str] = set()
         self.revision = 0               # bumped on every change notification
         self.named_views: dict = {}     # name -> camera params
+        # Objects showing their control points. Kept here rather than on a
+        # viewport because points on is something the drawing is doing: turn
+        # a curve's points on in the Top view and its corners are there to
+        # pick in the Right view too. See Viewport.cv_enabled.
+        self.cv_enabled: set[str] = set()
         self.layouts: list = []         # drafting sheets (core/layout.py)
         self.units: str = "mm"          # document units (utils/units.py)
         self.block_defs: dict = {}      # id -> {"name", "shapes": [TopoDS]}

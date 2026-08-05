@@ -1676,6 +1676,19 @@ def point_coords(shape) -> Point:
     return (p.X(), p.Y(), p.Z())
 
 
+def transform_points(points, fn) -> list:
+    """Where `fn`, a transform written for shapes, leaves bare positions.
+
+    A control point is a position and nothing else, so there is no shape to
+    hand to a shape transform. Each one goes through as a vertex and comes
+    back as a position, which is what lets a command move the points it is
+    holding by the very rule it moves whole objects by: neither can be given
+    a scale, a mirror or an angle the other did not get.
+    """
+    return [point_coords(fn(make_point(tuple(float(v) for v in p))))
+            for p in points]
+
+
 def free_points(shape) -> list:
     """The vertices in a shape that no edge already draws.
 

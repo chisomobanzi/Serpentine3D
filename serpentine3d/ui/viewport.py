@@ -639,7 +639,6 @@ class Viewport(QOpenGLWidget):
                                                 default=1.0))
                                if config else 1.0)
         self.ortho = bool(config.get("ortho")) if config else False
-        self.cv_enabled: set[str] = set()   # objects showing control points
         self.comb_enabled: set[str] = set() # curvature combs on curves
         self.draft_angle = 3.0              # draft analysis threshold (deg)
         self._cv_cache: dict = {}
@@ -3506,6 +3505,18 @@ class Viewport(QOpenGLWidget):
         sel.set_subobjects(held + caught)
 
     # -------------------------------------------------------- control points
+
+    @property
+    def cv_enabled(self) -> set:
+        """The objects showing their control points — every pane, one set.
+
+        A pane used to keep its own, and points on in the Top view left the
+        Right view drawing a bare line: no markers to pick, and no gumball
+        either, since a gumball will not stand on a point its own pane is not
+        showing. A corner picked in one view was picked nowhere else. The
+        drawing owns this, so all of its panes agree about it.
+        """
+        return self.scene.cv_enabled
 
     def _cv_points(self, obj) -> np.ndarray | None:
         return self._cv_entry(obj)[0]
