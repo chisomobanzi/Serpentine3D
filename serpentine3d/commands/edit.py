@@ -201,14 +201,19 @@ def cmd_selnone(ctx):
     yield from ()
 
 
-@command("undo", mutates=False)
+# Not repeatable: both have a key and a button of their own, so a
+# right-click meant for something else should not walk the drawing
+# back a step, and undo must not become the repeat target either: after
+# undoing a bad circle you want another circle to get right, not the loss
+# of the one before it.
+@command("undo", mutates=False, repeatable=False)
 def cmd_undo(ctx):
     label = ctx.history.undo()
     ctx.echo(f"Undid {label}." if label else "Nothing to undo.")
     yield from ()
 
 
-@command("redo", mutates=False)
+@command("redo", mutates=False, repeatable=False)
 def cmd_redo(ctx):
     label = ctx.history.redo()
     ctx.echo(f"Redid {label}." if label else "Nothing to redo.")

@@ -38,6 +38,13 @@
 
 ### Fixed
 
+- **Right-click no longer repeats undo or redo.** They join delete on the
+  list of commands a reflex is not allowed to run again: both already have a
+  key and a button of their own, so a right-click meant for something else
+  should not walk the drawing back a step. They no longer become the repeat
+  target either, so after undoing a circle you got wrong, right-click hands
+  you another circle to get right.
+
 - **Points on now shows in every pane.** It was kept per viewport, so turning
   a curve's points on in the Top view left the Right view drawing a bare
   line: no markers there to pick, and a corner picked in one pane showed as
