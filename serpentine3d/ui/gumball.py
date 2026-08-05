@@ -48,6 +48,14 @@ def _alt_held(modifiers) -> bool:
     """Alt state, robust to a Qt KeyboardModifiers flag or a plain int."""
     m = getattr(modifiers, "value", modifiers)          # Qt flag -> int
     return bool(int(m) & int(Qt.KeyboardModifier.AltModifier.value))
+
+
+def _ctrl_held(modifiers) -> bool:
+    """Ctrl state, read the same way, for the arrow that extrudes."""
+    m = getattr(modifiers, "value", modifiers)          # Qt flag -> int
+    return bool(int(m) & int(Qt.KeyboardModifier.ControlModifier.value))
+
+
 SCALE_POS = 0.6
 ARC_R = 0.82
 PAD0, PAD1 = 0.28, 0.5
@@ -251,6 +259,53 @@ class Gumball:
         t1 = t1 / (np.linalg.norm(t1) or 1.0)
         t2 = np.cross(out, t1)
         return oid, idxs, anchor, (t1, t2, out)
+
+    def _extrude_target(self, handle, modifiers):
+        """What a translate arrow with Ctrl held would grow, or None.
+
+        A line pulled sideways is a plane, and the gumball is already standing
+        on the line with an arrow pointing the way; without this the only road
+        from a line to a surface is to leave the gumball, type extrude and
+        pick the line again. Ctrl is the whole difference.
+
+        Held edges grow a surface each and leave the object they came off
+        alone. A curve keeps itself and hands you a new surface, because a
+        curve is drawing you go on using. A surface is consumed by the solid
+        it becomes: a spare copy of it buried in that solid's own face is
+        clutter you cannot see or pick. Anything else — a solid, a mesh, a
+        held control point, a face already push/pulling — has nothing to grow,
+        so Ctrl leaves it to move as it always did.
+        """
+        if handle[0] != "move" or not _ctrl_held(modifiers):
+            return None
+        sel = self.vp.selection
+        edges = [(oid, idx) for (oid, kind, idx)
+                 in getattr(sel, "subobjects", []) if kind == "edge"]
+        sources: list = []
+        for oid, idx in edges:
+            obj = self.vp.scene.get(oid)
+            if obj is None:
+                continue
+            try:
+                elist = g.edges_of(obj.shape)
+            except g.GeometryError:
+                continue
+            if 0 <= idx < len(elist):
+                sources.append({"src": elist[idx], "cap": False,
+                                "into": None, "layer": obj.layer_id})
+        if edges:
+            return sources or None
+        for obj in sel.objects():
+            if obj.kind == "curve":
+                # cap so that a closed curve gives the box you were after and
+                # not the four walls of it; extrude ignores it when the curve
+                # is open.
+                sources.append({"src": obj.shape, "cap": True,
+                                "into": None, "layer": obj.layer_id})
+            elif obj.kind == "surface":
+                sources.append({"src": obj.shape, "cap": False,
+                                "into": obj.id, "layer": obj.layer_id})
+        return sources or None
 
     def _face_mode(self) -> bool:
         """Is the gumball acting as a face push/pull or offset handle now?"""
@@ -679,8 +734,10 @@ class Gumball:
         pp = None if cv is not None else self._pushpull_target()
         mf = (None if (cv is not None or pp is not None)
               else self._multiface_target())
-        ft = (None if (cv is not None or pp is not None or mf is not None)
-              else self._fillet_target())
+        ex = (None if (cv is not None or pp is not None or mf is not None)
+              else self._extrude_target(handle, modifiers))
+        ft = (None if (cv is not None or pp is not None or mf is not None
+                       or ex is not None) else self._fillet_target())
         if cv is not None:                    # held control points
             originals = {}
             for oid in cv[0]:
@@ -706,6 +763,13 @@ class Gumball:
                 return False
             originals = {mf[0]: obj.shape}
             self.vp.window_checkpoint("push faces")
+        elif ex is not None:                  # Ctrl: grow it, do not move it
+            # Nothing is built here. A drag that never leaves the anchor has
+            # grown nothing, and a surface of no height is not something the
+            # drawing should be asked to hold even for a frame.
+            originals = {s["into"]: vp.scene.get(s["into"]).shape
+                         for s in ex if s["into"] is not None}
+            self.vp.window_checkpoint("gumball extrude")
         elif ft is not None:                  # edge fillet mode
             if handle != ("move", 2):
                 return False
@@ -760,6 +824,7 @@ class Gumball:
             "multiface": (mf[0], list(mf[1])) if mf is not None else None,
             "fillet": (ft[0], list(ft[1])) if ft is not None else None,
             "chamfer": ft is not None and _alt_held(modifiers),
+            "extrude": ex, "made": {},
             "ref": ref, "last_label": "", "offset": np.zeros(3),
             "typed": "", "armed": False, "moved": False,
         }
@@ -829,7 +894,11 @@ class Gumball:
         kind, i = d["handle"]
         anchor, axes = d["anchor"], d["axes"]
         if kind == "move":
-            if d.get("pp"):                   # face push/pull or offset
+            if d.get("extrude"):              # Ctrl: grow it, do not move it
+                self._extrude_by(axes[i], float(value))
+                d["offset"] = np.asarray(axes[i] * value, float)
+                label = "extrude " + vp.scene.format_length(float(value))
+            elif d.get("pp"):                 # face push/pull or offset
                 oid, fidx = d["pp"]
                 orig = d["originals"].get(oid)
                 planar = d.get("pp_planar", True)
@@ -1028,6 +1097,47 @@ class Gumball:
             except g.GeometryError:
                 pass
 
+    def _extrude_by(self, axis, value):
+        """Rebuild what the drag is growing, at the distance it stands at now.
+
+        Back at nothing is back at nothing: whatever the drag made goes, so
+        that pulling out and changing your mind leaves the drawing as it was
+        rather than with a duplicate of the line lying on the line. That is
+        also what makes a drag that ends at zero cost nothing to undo.
+        """
+        d, vp = self.drag, self.vp
+        for k, s in enumerate(d["extrude"]):
+            oid = d["made"].get(k, s["into"])
+            if abs(value) < 1e-9:
+                if s["into"] is None and oid is not None:
+                    vp.scene.remove(oid)
+                    d["made"].pop(k, None)
+                elif s["into"] is not None:
+                    vp.scene.replace_shape(oid, s["src"])
+                continue
+            try:
+                grown = self._grown(s, axis, value)
+            except g.GeometryError:
+                continue                     # too far — keep the last good one
+            if oid is None:
+                d["made"][k] = vp.scene.add(grown, layer_id=s["layer"]).id
+            elif vp.scene.get(oid) is not None:
+                vp.scene.replace_shape(oid, grown)
+
+    def _grown(self, source, axis, value):
+        """One source at this distance, capped if it is a curve that closes.
+
+        A closed curve that does not lie flat has no face to cap with, and it
+        is still worth the open extrusion rather than nothing at all.
+        """
+        try:
+            return g.extrude(source["src"], tuple(axis), value,
+                             cap=source["cap"])
+        except g.GeometryError:
+            if not source["cap"]:
+                raise
+            return g.extrude(source["src"], tuple(axis), value, cap=False)
+
     def end_drag(self):
         d = self.drag
         if d is not None and float(np.linalg.norm(d["offset"])) > 1e-9:
@@ -1035,6 +1145,13 @@ class Gumball:
                 self._resync_face(d)         # curved offsets keep their index
             elif d.get("fillet"):
                 self._clear_filleted_edges(d)
+            elif d.get("made"):
+                # You are holding what you just grew, not the line you grew it
+                # from: the next thing anyone does is to the new surface.
+                made = [i for i in d["made"].values()
+                        if self.vp.scene.get(i) is not None]
+                if made:
+                    self.vp.selection.set(made)
         self.drag = None
 
     def _clear_filleted_edges(self, d):
@@ -1088,6 +1205,8 @@ class Gumball:
         if d is None:
             return
         vp = self.vp
+        for obj_id in (d.get("made") or {}).values():
+            vp.scene.remove(obj_id)          # nothing grew, so nothing stays
         for obj_id, original in d["originals"].items():
             if vp.scene.get(obj_id) is not None:
                 vp.scene.replace_shape(obj_id, original)

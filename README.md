@@ -190,6 +190,12 @@ radius, adjacent faces extending to meet it. Select **several faces** and
 one handle offsets them all together, each along its own normal — inflate a
 shape, or grow a slab from both sides at once.
 
+Hold **Ctrl** and drag an arrow to **extrude** rather than move: a curve
+grows a surface along the arrow and stays where it is, a closed curve gives
+you the solid it encloses, and a surface becomes the solid it sweeps out.
+A selected **edge** grows a surface of its own and leaves the object it
+came off alone. Type a distance instead of dragging, as with any arrow.
+
 Ctrl+Shift-click one or more **edges** and the gumball becomes a fillet
 handle — drag it outward, or type a radius, to round the edges; every
 selected edge fillets together at that radius, previewing live. Hold

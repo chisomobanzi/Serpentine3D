@@ -4,6 +4,17 @@
 
 ### Added
 
+- **Hold ++ctrl++ and drag a gumball arrow to extrude.** The gumball is
+  already standing on the line you want a surface off, with an arrow pointing
+  the way, so the only thing between you and the surface was having to leave
+  it, type `extrude` and pick the line again. Ctrl is the whole difference
+  now: a curve grows a surface along the arrow and stays where it is, a
+  closed curve gives you the solid it encloses rather than the four walls of
+  it, and a surface becomes the solid it sweeps out. A selected edge grows a
+  surface of its own and leaves the object it came off alone. Type a distance
+  instead of dragging if you want an exact one, and drag back to nothing if
+  you change your mind, which leaves the drawing as it was.
+
 - **A rubber band round some vertices now takes the vertices.** Points on gave
   you one way to pick a control point, which was to click it one at a time.
   Dragging a rectangle round a row of them selected the curve they belong to
