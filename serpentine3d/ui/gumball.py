@@ -81,6 +81,9 @@ class Gumball:
         self.hover = None
         self.drag = None          # dict with handle, originals, refs
         self._geom_cache = None
+        self._sweep_key = None    # what _sweep_sources was last asked about
+        self._sweep_cache: list = []
+        self._sweep_axes: dict = {}
 
     # ----------------------------------------------------------- state
 
@@ -268,69 +271,100 @@ class Gumball:
         t2 = np.cross(out, t1)
         return oid, idxs, anchor, (t1, t2, out)
 
-    def _extrude_target(self, handle, modifiers):
-        """What a translate arrow with Ctrl held would grow, or None.
-
-        A line pulled sideways is a plane, and the gumball is already standing
-        on the line with an arrow pointing the way; without this the only road
-        from a line to a surface is to leave the gumball, type extrude and
-        pick the line again. Ctrl is the whole difference.
+    def _sweep_sources(self) -> list:
+        """Everything held that a filled box could sweep, or an empty list.
 
         Held edges grow a surface each and leave the object they came off
-        alone. A curve keeps itself and hands you a new surface, because a
-        curve is drawing you go on using. A surface is consumed by the solid
-        it becomes: a spare copy of it buried in that solid's own face is
-        clutter you cannot see or pick. Anything else — a solid, a mesh, a
-        held control point, a face already push/pulling — has nothing to grow,
-        so Ctrl leaves it to move as it always did.
+        alone. A curve keeps itself and hands you a new surface, so the
+        curve you were drawing with is still there to go on using. A
+        surface is consumed by the solid it becomes: a spare copy of it
+        buried in the solid's own face is clutter you cannot see to pick.
+        Anything else — a solid, a mesh, a held control point — has
+        nothing here to grow.
+
+        The answer is kept from one call to the next, because it reads
+        geometry and is asked once a frame and again on every mouse move.
+        The selection and the scene revision together say when it can
+        have changed.
+        """
+        sel = self.vp.selection
+        subs = list(getattr(sel, "subobjects", []))
+        key = (getattr(self.vp.scene, "revision", 0), tuple(sel.ids),
+               tuple(subs))
+        if self._sweep_key == key:
+            return self._sweep_cache
+        sources: list = []
+        kinds = {k for (_o, k, _i) in subs}
+        edges = [(oid, idx) for (oid, kind, idx) in subs if kind == "edge"]
+        if "cv" in kinds:
+            pass                             # the gumball is on the points
+        elif edges:
+            for oid, idx in edges:
+                obj = self.vp.scene.get(oid)
+                if obj is None:
+                    continue
+                try:
+                    elist = g.edges_of(obj.shape)
+                except g.GeometryError:
+                    continue
+                if 0 <= idx < len(elist):
+                    sources.append({"src": elist[idx], "cap": False,
+                                    "into": None, "layer": obj.layer_id})
+        else:
+            for obj in sel.objects():
+                if obj.kind == "curve":
+                    # cap so that a closed curve gives the box you were
+                    # after and not the four walls of it; extrude ignores
+                    # it when the curve is open.
+                    sources.append({"src": obj.shape, "cap": True,
+                                    "into": None, "layer": obj.layer_id})
+                elif obj.kind == "surface":
+                    sources.append({"src": obj.shape, "cap": False,
+                                    "into": obj.id, "layer": obj.layer_id})
+        self._sweep_key, self._sweep_cache = key, sources
+        self._sweep_axes = {}
+        return sources
+
+    def _extrude_target(self, handle, modifiers, direction=None):
+        """What a translate arrow with Ctrl held would grow, or None.
+
+        A line pulled sideways is a plane, and the gumball is already
+        standing on the line with an arrow pointing the way; without this
+        the only road from a line to a surface is to leave the gumball,
+        type extrude and pick the line again. Ctrl is the whole
+        difference.
+
+        With a direction, only what that direction would actually add to
+        is given back, so a Ctrl-drag along a line's own length falls
+        through to moving it rather than leaving a flattened surface lying
+        on top of it.
         """
         if handle[0] != "ext" and not (handle[0] == "move"
                                        and _ctrl_held(modifiers)):
             return None
-        sel = self.vp.selection
-        edges = [(oid, idx) for (oid, kind, idx)
-                 in getattr(sel, "subobjects", []) if kind == "edge"]
-        sources: list = []
-        for oid, idx in edges:
-            obj = self.vp.scene.get(oid)
-            if obj is None:
-                continue
-            try:
-                elist = g.edges_of(obj.shape)
-            except g.GeometryError:
-                continue
-            if 0 <= idx < len(elist):
-                sources.append({"src": elist[idx], "cap": False,
-                                "into": None, "layer": obj.layer_id})
-        if edges:
-            return sources or None
-        for obj in sel.objects():
-            if obj.kind == "curve":
-                # cap so that a closed curve gives the box you were after and
-                # not the four walls of it; extrude ignores it when the curve
-                # is open.
-                sources.append({"src": obj.shape, "cap": True,
-                                "into": None, "layer": obj.layer_id})
-            elif obj.kind == "surface":
-                sources.append({"src": obj.shape, "cap": False,
-                                "into": obj.id, "layer": obj.layer_id})
+        sources = self._sweep_sources()
+        if direction is not None:
+            sources = [s for s in sources
+                       if not g.sweep_adds_nothing(s["src"], direction)]
         return sources or None
 
-    def _can_extrude(self) -> bool:
+    def _can_extrude(self, direction=None) -> bool:
         """Is there anything here a filled box could grow?
 
-        Cheap on purpose: it is asked once a frame and again on every mouse
-        move, so it reads kinds rather than geometry. _extrude_target does the
-        real work, and only once a box has actually been taken hold of.
+        Asked per axis, given a direction: a flat surface swept within its
+        own plane, or a straight line swept along its own length, comes
+        back as what it already was, so no box is drawn on that axis and
+        the arrow that moves it is all that is there.
         """
-        subs = getattr(self.vp.selection, "subobjects", [])
-        kinds = {k for (_o, k, _i) in subs}
-        if "cv" in kinds:
-            return False                 # the gumball is on the points
-        if "edge" in kinds:
-            return True
-        return any(o.kind in ("curve", "surface")
-                   for o in self.vp.selection.objects())
+        sources = self._sweep_sources()
+        if not sources or direction is None:
+            return bool(sources)
+        k = tuple(round(float(v), 6) for v in direction)
+        hit = self._sweep_axes.get(k)
+        if hit is None:
+            hit = any(not g.sweep_adds_nothing(s["src"], k) for s in sources)
+            self._sweep_axes[k] = hit
+        return hit
 
     def _face_mode(self) -> bool:
         """Is the gumball acting as a face push/pull or offset handle now?"""
@@ -508,7 +542,6 @@ class Gumball:
                                    PAD_ALPHA))
 
         # shafts + cones + the two boxes
-        grows = self._can_extrude()
         for i in range(3):
             if not self._usable("move", i, axes, vdir):
                 continue
@@ -524,7 +557,7 @@ class Gumball:
             self._leader(mvp, anchor, axis, s, (*kc, 0.85))
             self._knob(mvp, anchor - axis * SCALE_POS * s, s,
                        (*kc, 1.0), fill=False)
-            if grows:
+            if self._can_extrude(axis):
                 self._knob(mvp, anchor + axis * EXT_POS * s, s,
                            (*color_for(("ext", i), AXIS_COLORS[i]), 1.0))
         GL.glEnable(GL.GL_DEPTH_TEST)
@@ -733,12 +766,11 @@ class Gumball:
 
         # the boxes (smallest targets first, and the filled one sits on the
         # shaft, so it has to be asked about before the arrow it lies along)
-        grows = self._can_extrude()
         for kind, along in (("ext", EXT_POS), ("scale", -SCALE_POS)):
-            if kind == "ext" and not grows:
-                continue
             for i in range(3):
                 if not self._usable(kind, i, axes, vdir):
+                    continue
+                if kind == "ext" and not self._can_extrude(axes[i]):
                     continue
                 p = scr(anchor + axes[i] * along * s)
                 if p is not None and np.linalg.norm(p - cursor) < 6.5:
@@ -800,7 +832,8 @@ class Gumball:
         mf = (None if (cv is not None or pp is not None)
               else self._multiface_target())
         ex = (None if (cv is not None or pp is not None or mf is not None)
-              else self._extrude_target(handle, modifiers))
+              else self._extrude_target(handle, modifiers,
+                                       axes[handle[1]]))
         ft = (None if (cv is not None or pp is not None or mf is not None
                        or ex is not None) else self._fillet_target())
         if handle[0] == "ext" and ex is None:

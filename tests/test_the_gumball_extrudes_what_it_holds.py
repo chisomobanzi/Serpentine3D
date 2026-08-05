@@ -11,8 +11,8 @@ it and where scale used to be. Scale moves to the far side of the pivot as a
 hollow box on the end of a dashed leader that mirrors the arrow, so the two
 are told apart by their look and by which end of the axis they sit on rather
 than by a key you have to be holding, and neither of them asks you to combine
-a drag with the keyboard. The filled box only appears where there is
-something to grow, so it says as much by being there.
+a drag with the keyboard. The filled box only appears on an axis where
+there is something to grow, so it says as much by being there.
 
 Ctrl and a translate arrow does the same thing, for the hand that already
 knows it from Rhino.
@@ -35,6 +35,7 @@ CTRL = Qt.KeyboardModifier.ControlModifier
 NONE = Qt.KeyboardModifier.NoModifier
 Z_ARROW = ("move", 2)
 X_ARROW = ("move", 0)
+Y_ARROW = ("move", 1)
 Z_BOX = ("ext", 2)
 
 
@@ -106,6 +107,75 @@ def test_scale_is_the_hollow_box_on_the_far_side_of_the_pivot(pane):
 def test_nothing_is_left_out_past_the_arrowhead(pane):
     _line(pane)
     assert pane.gumball.hit_test(*_handle_at(pane, gb.SCALE_POS)) is None
+
+
+def _surface(vp, corner=(0.0, 0.0, 0.0), far=(10.0, 6.0, 0.0)):
+    """A flat surface lying in the world XY plane."""
+    obj = vp.scene.add(g.planar_face(g.make_rectangle(corner, far)))
+    vp.selection.set([obj.id])
+    return obj
+
+
+def test_a_surface_offers_no_box_where_the_sweep_lies_in_its_own_plane(pane):
+    """Sweeping a flat surface sideways within its own plane is the same
+    surface again: no thickness, no solid, nothing anyone dragged for. The
+    arrow that moves it is still there, only the box has gone."""
+    _surface(pane)
+    for axis in (0, 1):
+        assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, axis)) \
+            != ("ext", axis)
+
+
+def test_a_surface_still_grows_the_way_it_faces(pane):
+    _surface(pane)
+    assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, 2)) == Z_BOX
+
+
+def test_a_line_offers_no_box_along_its_own_length(pane):
+    """Same story a dimension down: a line swept along itself is a longer
+    line."""
+    _line(pane)
+    assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, 0)) \
+        == ("move", 0)
+
+
+def test_a_line_grows_along_both_of_the_ways_it_does_not_run(pane):
+    _line(pane)
+    for axis in (1, 2):
+        assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, axis)) \
+            == ("ext", axis)
+
+
+def test_the_surface_you_just_made_stops_offering_the_boxes_it_cannot_use(
+        pane):
+    """The bug as it was met: pull a surface off a line and you are left
+    holding the surface, with the gumball still offering to grow it along
+    the two axes it is already flat in."""
+    line = _line(pane)
+    _grab(pane, Z_ARROW)
+    pane.gumball.apply_scalar(4.0)
+    pane.gumball.end_drag()
+    assert [o.kind for o in _others(pane, line)] == ["surface"]
+    assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, 0)) \
+        == ("move", 0)
+    assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, 2)) \
+        == ("move", 2)
+    assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, 1)) \
+        == ("ext", 1)
+
+
+def test_ctrl_and_the_arrow_along_the_line_moves_it_rather_than_growing_it(
+        pane):
+    """Ctrl asks for a sweep, and along the line there is no sweep to be
+    had, so the drag falls back to what the arrow does on its own instead
+    of leaving a flattened surface lying on top of the line."""
+    line = _line(pane)
+    assert _grab(pane, X_ARROW) is True
+    pane.gumball.apply_scalar(6.0)
+    pane.gumball.end_drag()
+    assert _others(pane, line) == []
+    lo, _hi = g.bbox(pane.scene.get(line.id).shape)
+    assert lo[0] == pytest.approx(6.0, abs=1e-6)
 
 
 def test_a_solid_has_nothing_to_grow_so_it_shows_no_filled_box(pane):
@@ -197,11 +267,11 @@ def test_the_surface_stands_along_the_arrow_you_dragged(pane):
 
 def test_the_arrow_the_other_way_pulls_the_surface_the_other_way(pane):
     line = _line(pane)
-    _grab(pane, X_ARROW)
+    _grab(pane, Y_ARROW)
     pane.gumball.apply_scalar(6.0)
     pane.gumball.end_drag()
     lo, hi = g.bbox(_others(pane, line)[0].shape)
-    assert hi[0] - lo[0] == pytest.approx(16.0, abs=1e-6)
+    assert hi[1] - lo[1] == pytest.approx(6.0, abs=1e-6)
     assert hi[2] - lo[2] == pytest.approx(0.0, abs=1e-6)
 
 
@@ -333,3 +403,49 @@ def test_held_control_points_are_moved_and_never_extruded(pane):
     pts = np.asarray(g.get_control_points(pane.scene.get(line.id).shape),
                      float)
     assert pts[1][2] == pytest.approx(5.0, abs=1e-6)
+
+
+# -- what a sweep would add, asked of the geometry itself ---------------------
+
+def test_a_straight_line_swept_along_itself_adds_nothing():
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    assert g.sweep_adds_nothing(line, (1, 0, 0)) is True
+    assert g.sweep_adds_nothing(line, (-1, 0, 0)) is True
+
+
+def test_a_straight_line_swept_any_other_way_adds_a_surface():
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    assert g.sweep_adds_nothing(line, (0, 1, 0)) is False
+    assert g.sweep_adds_nothing(line, (0.2, 0.0, 1.0)) is False
+
+
+def test_a_curve_that_is_not_straight_has_no_length_to_hide_in():
+    """An arc swept along the chord between its ends is a ribbon, not a
+    longer arc, so there is something there to make."""
+    arc = g.make_arc_3pt((0, 0, 0), (5, 5, 0), (10, 0, 0))
+    assert g.sweep_adds_nothing(arc, (1, 0, 0)) is False
+
+
+def test_a_flat_surface_swept_in_its_own_plane_adds_nothing():
+    face = g.planar_face(g.make_rectangle((0, 0, 0), (10, 6, 0)))
+    assert g.sweep_adds_nothing(face, (1, 0, 0)) is True
+    assert g.sweep_adds_nothing(face, (0, 1, 0)) is True
+    assert g.sweep_adds_nothing(face, (1, 1, 0)) is True
+
+
+def test_a_flat_surface_swept_out_of_its_plane_adds_a_solid():
+    face = g.planar_face(g.make_rectangle((0, 0, 0), (10, 6, 0)))
+    assert g.sweep_adds_nothing(face, (0, 0, 1)) is False
+    assert g.sweep_adds_nothing(face, (0.0, 0.2, 1.0)) is False
+
+
+def test_a_solid_is_not_something_a_sweep_flattens():
+    """Nothing here is asked to sweep a solid, and the answer for one is no
+    rather than an exception, so a caller cannot be caught out by it."""
+    box = g.make_box((0, 0, 0), 4, 4, 4)
+    assert g.sweep_adds_nothing(box, (0, 0, 1)) is False
+
+
+def test_a_sweep_of_no_length_is_no_sweep_at_all():
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    assert g.sweep_adds_nothing(line, (0, 0, 0)) is True

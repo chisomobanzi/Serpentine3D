@@ -57,6 +57,15 @@
 
 ### Fixed
 
+- **The gumball only offers to grow a thing where growing it makes
+  something.** The filled box turned up on all three axes at once, so a flat
+  surface offered to be swept sideways within its own plane and a straight
+  line offered to be swept along its own length, both of which hand back what
+  you started with. Pull a surface off a line now and the surface is left
+  with one box, on the axis it faces. The other two axes keep their arrow, so
+  a Ctrl-drag along one of them moves the thing rather than laying a
+  flattened copy on top of it.
+
 - **A curve cutter now cuts the way the pane it was drawn in is facing.**
   `booleansplit`, `split` and `trim` all sweep an open curve into a cutting
   surface, and the sweep went straight up the world Z axis whichever pane you

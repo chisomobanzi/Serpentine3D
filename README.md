@@ -195,9 +195,11 @@ Each axis carries two boxes. The **filled** one on the shaft **extrudes**: a
 curve grows a surface along the axis and stays where it is, a closed curve
 gives you the solid it encloses, and a surface becomes the solid it sweeps
 out. A selected **edge** grows a surface of its own and leaves the object it
-came off alone. The filled box only appears where there is something to
-grow, so a solid does not offer one. Ctrl and a translate arrow does the
-same thing if that is the habit you arrived with.
+came off alone. The filled box only appears on an axis where there is
+something to grow, so a solid does not offer one at all, and a flat surface
+offers one only on the axis it faces: swept the other two ways it would
+come back as the surface it already is. Ctrl and a translate arrow does
+the same thing if that is the habit you arrived with.
 
 The **hollow** box on the far side of the pivot, at the end of the dashed
 leader that mirrors the arrow, is **scale**. Type a distance for either

@@ -301,6 +301,52 @@ def extrude(shape, direction: Point, distance: float,
     return result.Shape()
 
 
+def sweep_adds_nothing(shape, direction: Point) -> bool:
+    """Would extruding this shape that way leave it as flat as it started?
+
+    A straight line swept along its own length is a longer line, and a flat
+    surface swept within its own plane is that surface again: the prism is
+    in the file but there is nothing of it to see, and nobody dragged for
+    it. The gumball asks this once per axis so it only offers to grow a
+    thing where growing it makes something.
+
+    Anything bent or curved has somewhere to go whichever way it is
+    pushed, so the answer for it is always no, and so it is for a solid,
+    which is not something a sweep can flatten.
+    """
+    d = [float(v) for v in direction]
+    reach = math.sqrt(sum(v * v for v in d))
+    if reach < 1e-9:
+        return True                       # no sweep at all
+    d = [v / reach for v in d]
+    kind = shape_kind(shape)
+    if kind == "curve":
+        a, b = curve_endpoints(shape)
+        span = [b[i] - a[i] for i in range(3)]
+        chord = math.sqrt(sum(v * v for v in span))
+        if chord < 1e-9:
+            return False                  # closed, or a point: not straight
+        if abs(curve_length(shape) - chord) > 1e-6 * chord:
+            return False                  # bent, so the sweep is a surface
+        u = [v / chord for v in span]
+        cross = (u[1] * d[2] - u[2] * d[1], u[2] * d[0] - u[0] * d[2],
+                 u[0] * d[1] - u[1] * d[0])
+        return math.sqrt(sum(v * v for v in cross)) < 1e-9
+    if kind == "surface":
+        faces = faces_of(shape)
+        if not faces:
+            return False
+        for f in faces:
+            try:
+                n = face_normal(f)
+            except GeometryError:
+                return False              # not planar: it has somewhere to go
+            if abs(sum(n[i] * d[i] for i in range(3))) > 1e-9:
+                return False
+        return True
+    return False
+
+
 def revolve(shape, axis_point: Point, axis_dir: Point,
             angle_deg: float = 360.0) -> TopoDS_Shape:
     ax = gp_Ax1(_pnt(axis_point), _dir(axis_dir))
