@@ -66,6 +66,16 @@ class SelectionManager:
             self.subobjects.append(entry)
         self._notify()
 
+    def set_subobjects(self, entries):
+        """Hold exactly these sub-objects, in one go.
+
+        Toggling them in one at a time tells everyone listening once per
+        entry, and a band dragged round a dense curve catches hundreds of
+        control points.
+        """
+        self.subobjects = list(dict.fromkeys(entries))
+        self._notify()
+
     def subobjects_of(self, obj_id: str, kind: str) -> list[int]:
         return [i for (oid, k, i) in self.subobjects
                 if oid == obj_id and k == kind]

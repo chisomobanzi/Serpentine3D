@@ -36,6 +36,56 @@ _BOX_CORNERS = np.array([(x, y, z) for x in (False, True)
                          for y in (False, True)
                          for z in (False, True)])
 
+# Half-width of a control point marker, in pixels. A held one is drawn larger
+# because the gumball stands on top of it and a marker the size of the rest
+# vanishes under the middle of it.
+CV_MARK_PX = 4.0
+CV_HELD_PX = 5.5
+
+
+def cv_marker_size(points, eye, width, height, half_px):
+    """World half-widths that draw `half_px` pixels either side of each point.
+
+    A marker measured in world units changes size as you move: in perspective
+    the far end of a curve gets points you can barely see while the near end
+    gets ones the size of the model. What is wanted is a fixed size on the
+    glass, so it is worked out per point, from how many pixels one world unit
+    across the screen carries there.
+    """
+    right, _up = eye.right_up()
+    pts = np.asarray(points, float).reshape(-1, 3)
+    here = eye.project(pts, width, height)
+    over = eye.project(pts + right, width, height)
+    px = np.hypot(over[:, 0] - here[:, 0], over[:, 1] - here[:, 1])
+    return half_px / np.maximum(px, 1e-9)
+
+
+def _cv_corners(points, right, up, half):
+    """The four corners of a screen-facing square round each point."""
+    pts = np.asarray(points, float).reshape(-1, 3)
+    half = np.asarray(half, float).reshape(-1, 1)
+    dx = np.asarray(right, float) * half
+    dy = np.asarray(up, float) * half
+    return pts - dx - dy, pts + dx - dy, pts + dx + dy, pts - dx + dy
+
+
+def cv_marker_quads(points, right, up, half):
+    """Filled screen-facing squares round each point, as triangles (N*6, 3).
+
+    Built on the camera's own right and up rather than world X and Y. The
+    markers used to be two arms along the world axes, which is a cross only
+    when you happen to be looking down Z: from anywhere near the horizon both
+    arms lie edge-on and the marker collapses into the curve it sits on.
+    """
+    a, b, c, d = _cv_corners(points, right, up, half)
+    return np.stack([a, b, c, a, c, d], axis=1).reshape(-1, 3)
+
+
+def cv_marker_outline(points, right, up, half):
+    """The four sides of each square, as line segments (N*8, 3)."""
+    a, b, c, d = _cv_corners(points, right, up, half)
+    return np.stack([a, b, b, c, c, d, d, a], axis=1).reshape(-1, 3)
+
 MESH_VERT = """
 #version 330 core
 layout(location=0) in vec3 pos;
@@ -1955,7 +2005,8 @@ class Viewport(QOpenGLWidget):
     def _draw_control_points(self, mvp):
         if not self.cv_enabled:
             return
-        size = self.camera.distance * 0.006
+        w, h = self.width(), self.height()
+        right, up = self.camera.right_up()
         GL.glDisable(GL.GL_DEPTH_TEST)
         for obj_id in list(self.cv_enabled):
             obj = self.scene.get(obj_id)
@@ -1978,30 +2029,31 @@ class Viewport(QOpenGLWidget):
                     segs.append(np.stack([net[:-1, j], net[1:, j]], axis=1))
             poly = np.concatenate(segs).reshape(-1, 3)
             self._preview.update(poly.astype(np.float32))
-            self._draw_lines(self._preview, mvp, (0.6, 0.62, 0.66, 0.5), 1.0)
-            # CV markers as crosses, the picked ones in the selection colour
-            # so you can see which of them the gumball is holding
+            self._draw_lines(self._preview, mvp, theme.CONTROL_NET, 1.0)
+            # Each point is a small square facing the screen, at the same size
+            # on the glass wherever it is, with a dark border round it so it
+            # reads on a pale object as well as against the background. The
+            # held ones are gold and larger, so you can see which of them the
+            # gumball has hold of.
             picked = set(self.selection.subobjects_of(obj_id, "cv"))
             for held in (False, True):
-                # a held one is drawn bigger as well as gold: the gumball
-                # stands on top of it, and a marker the size of the others
-                # disappears under the middle of it
-                arms = np.eye(3, dtype=np.float32)[:2] * size * (
-                    1.8 if held else 1.0)
-                segs = []
-                for i, p in enumerate(pts):
-                    if (i in picked) != held:
-                        continue
-                    p = p.astype(np.float32)
-                    for axis in arms:
-                        segs.append(np.stack([p - axis, p + axis]))
-                if not segs:
+                keep = [i for i in range(len(pts)) if (i in picked) == held]
+                if not keep:
                     continue
-                self._preview.update(np.concatenate(segs).astype(np.float32))
-                self._draw_lines(
-                    self._preview, mvp,
-                    theme.SELECTION_COLOR + (1.0,) if held
-                    else (1.0, 1.0, 1.0, 0.95), 3.0 if held else 2.0)
+                at = pts[keep]
+                half = cv_marker_size(at, self.camera, w, h,
+                                      CV_HELD_PX if held else CV_MARK_PX)
+                fill = (theme.SELECTION_COLOR + (1.0,) if held
+                        else theme.CONTROL_POINT + (1.0,))
+                quads = cv_marker_quads(at, right, up, half)
+                self._preview.update(quads.astype(np.float32))
+                self._set_line_uniforms(mvp, fill)
+                GL.glBindVertexArray(self._preview.vao)
+                GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(quads))
+                edge = cv_marker_outline(at, right, up, half)
+                self._preview.update(edge.astype(np.float32))
+                self._draw_lines(self._preview, mvp,
+                                 theme.CONTROL_POINT_EDGE, 1.5)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _draw_combs(self, mvp):
@@ -3318,11 +3370,12 @@ class Viewport(QOpenGLWidget):
             x0, y0 = self._press_pos.x(), self._press_pos.y()
             x1, y1 = self._box_end.x(), self._box_end.y()
             crossing = x1 < x0            # drag right-to-left = crossing
-            ids = self._box_pick(x0, y0, x1, y1, crossing)
+            ids = self._band_pick(x0, y0, x1, y1, crossing, ev.modifiers())
             self._box_active = False
             self._press_pos = None
             self._box_end = None
-            self.boxSelected.emit(ids, ev.modifiers())
+            if ids is not None:
+                self.boxSelected.emit(ids, ev.modifiers())
             self.update()
             return
         if self._press_pos is not None:
@@ -3388,6 +3441,69 @@ class Viewport(QOpenGLWidget):
                 if valid.all() and inside.all():
                     picked.append(obj.id)
         return picked
+
+    def _band_pick(self, x0, y0, x1, y1, crossing, modifiers):
+        """What a rubber band caught: object ids, or None if it took points.
+
+        Control points win over objects, for the same reason a click on one
+        beats the gumball handle lying over it: the points are on because the
+        points are what you are working on, and the curve underneath them is
+        one drag of the band away in any case. So the band asks for points
+        first, and only when it caught none does it go on to ask what objects
+        are inside it.
+        """
+        hits = self._box_pick_cvs(x0, y0, x1, y1)
+        if hits:
+            self._pick_boxed_cvs(hits, modifiers)
+            return None
+        return self._box_pick(x0, y0, x1, y1, crossing)
+
+    def _box_pick_cvs(self, x0, y0, x1, y1) -> list[tuple[str, int]]:
+        """Control points inside the band, for objects showing their points.
+
+        A point has no extent, so window and crossing come to the same thing
+        here: either the band is round it or it is not.
+        """
+        if self.space != "model" or not self.cv_enabled:
+            return []
+        lo_x, hi_x = min(x0, x1), max(x0, x1)
+        lo_y, hi_y = min(y0, y1), max(y0, y1)
+        w, h = self.width(), self.height()
+        out = []
+        for obj_id in list(self.cv_enabled):
+            obj = self.scene.get(obj_id)
+            if obj is None:
+                self.cv_enabled.discard(obj_id)
+                continue
+            pts = self._cv_points(obj)
+            if pts is None or not len(pts):
+                continue
+            scr = self.camera.project(pts, w, h)
+            inside = ((scr[:, 0] >= lo_x) & (scr[:, 0] <= hi_x)
+                      & (scr[:, 1] >= lo_y) & (scr[:, 1] <= hi_y)
+                      & (scr[:, 2] > 0))
+            out.extend((obj_id, int(i)) for i in np.flatnonzero(inside))
+        return out
+
+    def _pick_boxed_cvs(self, hits, modifiers):
+        """Take hold of the control points a band caught.
+
+        The same rules as clicking one: a plain band replaces what is held,
+        Shift adds to it, Ctrl takes those points back out.
+        """
+        sel = self.selection
+        caught = [(obj_id, "cv", i) for obj_id, i in hits]
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            drop = set(caught)
+            sel.set_subobjects([e for e in sel.subobjects if e not in drop])
+            return
+        held = list(sel.subobjects) \
+            if modifiers & Qt.KeyboardModifier.ShiftModifier else []
+        if not held:
+            # letting go of the objects too: a gumball holding a point and
+            # the curve it belongs to would move both at once
+            sel.set([])
+        sel.set_subobjects(held + caught)
 
     # -------------------------------------------------------- control points
 

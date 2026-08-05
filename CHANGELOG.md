@@ -2,7 +2,31 @@
 
 ## Unreleased
 
+### Added
+
+- **A rubber band round some vertices now takes the vertices.** Points on gave
+  you one way to pick a control point, which was to click it one at a time.
+  Dragging a rectangle round a row of them selected the curve they belong to
+  instead, because the band only ever asked which objects it had caught and
+  knew nothing about the points. It asks for points first now: a window or a
+  crossing band takes every control point inside it, ++shift++ adds to what
+  you are already holding and ++ctrl++ takes some back out, exactly as
+  clicking them does. When the band catches no points it goes on to pick
+  objects the way it always has.
+
 ### Fixed
+
+- **Points on now looks like points on.** The markers were two arms along the
+  world X and Y axes, which is a cross only when you happen to be looking
+  down Z: from anywhere near the horizon both arms lie edge-on and the marker
+  flattens into the curve it is sitting on. They were also drawn white, on
+  curves that are usually white. Each point is a small square facing the
+  screen now, the same size on the glass wherever it sits, in a cool blue
+  that nothing else in the viewport uses, with a dark border round it so it
+  reads on a pale object as well as against the background. Held points stay
+  gold and are drawn larger, since the gumball stands on top of them. The
+  control polygon joining the points is quieter than it was, so the points
+  read louder than the lines between them.
 
 - A boolean now leaves what it made selected, so the gumball is on it. Every
   command let go of the selection when it was done, which is right for most of

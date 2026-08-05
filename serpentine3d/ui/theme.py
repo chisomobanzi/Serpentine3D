@@ -9,6 +9,18 @@ GRID_AXIS_X = (0.75, 0.33, 0.32, 0.85)
 GRID_AXIS_Y = (0.38, 0.65, 0.36, 0.85)
 SELECTION_COLOR = (1.0, 0.78, 0.25)          # warm gold
 ACCENT = "#d9a441"
+
+# Control points, when they are on. Cool, because everything else in the
+# viewport is not: curves are white or their layer colour and the selection is
+# gold, so a cool blue marker cannot be mistaken for a bit of the drawing.
+# White markers were the trouble to begin with — a control point drawn white
+# sits on a white curve and disappears into it. EDGE is the dark border drawn
+# round each marker, which is what keeps it legible on a pale object as well
+# as against the background; NET is the control polygon joining them, kept
+# quiet so the points read louder than the lines between them.
+CONTROL_POINT = (0.36, 0.80, 1.0)
+CONTROL_POINT_EDGE = (0.04, 0.06, 0.09, 0.95)
+CONTROL_NET = (0.34, 0.44, 0.56, 0.6)
 ACCENT_DIM = "#8a6a2f"
 
 # Shaded-mode lighting. SHADED_AMBIENT mirrors a constant hardcoded in
