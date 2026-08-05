@@ -129,7 +129,8 @@ def cmd_split(ctx):
     cutters = yield SelectReq("Select cutting objects",
                               allow_preselected=False)
     target = targets[0]
-    pieces = g.split_shape(target.shape, [c.shape for c in cutters])
+    pieces = g.split_shape(target.shape, [c.shape for c in cutters],
+                           direction=tuple(ctx.cplane.normal))
     for p in pieces:
         ctx.scene.add(p, layer_id=target.layer_id)
     ctx.scene.remove(target.id)
@@ -143,7 +144,8 @@ def cmd_trim(ctx):
                               kinds=("curve", "surface", "solid"),
                               max_count=1, allow_preselected=False)
     target = targets[0]
-    pieces = g.split_shape(target.shape, [c.shape for c in cutters])
+    pieces = g.split_shape(target.shape, [c.shape for c in cutters],
+                           direction=tuple(ctx.cplane.normal))
     added = [ctx.scene.add(p, layer_id=target.layer_id) for p in pieces]
     ctx.scene.remove(target.id)
     doomed = yield SelectReq(

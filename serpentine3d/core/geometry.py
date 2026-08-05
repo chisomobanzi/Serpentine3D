@@ -990,26 +990,49 @@ def _curve_pieces(edges: list, cutters: list) -> list:
     return out
 
 
-def split_shape(target, cutters: list) -> list:
+def _reach_along(shape, direction) -> tuple:
+    """How far a shape stretches along a direction: (nearest, furthest).
+
+    The bounding box is read rather than the geometry, so this is generous
+    on anything at an angle to the world axes. A cutter only has to reach
+    clear through what it is cutting, so generous is the safe way to be
+    wrong.
+    """
+    (mn, mx) = bbox(shape)
+    reach = [x * direction[0] + y * direction[1] + z * direction[2]
+             for x in (mn[0], mx[0])
+             for y in (mn[1], mx[1])
+             for z in (mn[2], mx[2])]
+    return min(reach), max(reach)
+
+
+def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
     """Split a curve or surface by cutting objects; returns the pieces.
 
-    Curves are cut by anything they intersect. Surfaces cut by curves use
-    the curve extruded vertically (CPlane normal) as the cutting tool.
+    Curves are cut by anything they intersect. Surfaces and solids cut by
+    an open curve use the curve swept into a surface as the cutting tool,
+    and `direction` is the way it sweeps: the normal of the plane the
+    command is drawing on, so that a line drawn across a box in a Front
+    pane cuts it the way it looked like it would. World Z, the plane a Top
+    pane draws on, is what you get if nobody says otherwise.
     """
     from .occ import BRepAlgoAPI_Splitter, TopTools_ListOfShape
     kind = shape_kind(target)
+    length = math.sqrt(sum(float(v) ** 2 for v in direction))
+    d = ((0.0, 0.0, 1.0) if length < 1e-9
+         else tuple(float(v) / length for v in direction))
 
     tools = TopTools_ListOfShape()
     for c in cutters:
         tool = c
         if kind in ("surface", "solid") and shape_kind(c) == "curve":
-            # extrude the cutter through the target's z-range
-            (mn, mx) = bbox(target)
-            (cmn, cmx) = bbox(c)
-            z0 = min(mn[2], cmn[2]) - 1.0
-            z1 = max(mx[2], cmx[2]) + 1.0
-            moved = translate(c, (0, 0, z0 - cmn[2]))
-            tool = extrude(moved, (0, 0, 1), (z1 - z0) + (cmx[2] - cmn[2]))
+            # sweep the cutter clear through the target, starting a little
+            # behind whichever of the two comes first along the sweep
+            tmn, tmx = _reach_along(target, d)
+            cmn, cmx = _reach_along(c, d)
+            t0, t1 = min(tmn, cmn) - 1.0, max(tmx, cmx) + 1.0
+            moved = translate(c, tuple((t0 - cmn) * v for v in d))
+            tool = extrude(moved, d, (t1 - t0) + (cmx - cmn))
         tools.Append(tool)
 
     args = TopTools_ListOfShape()

@@ -259,7 +259,8 @@ def cmd_booleansplit(ctx):
     made = []
     for t in targets:
         try:
-            pieces = g.split_shape(t.shape, [c.shape for c in cutters])
+            pieces = g.split_shape(t.shape, [c.shape for c in cutters],
+                                   direction=tuple(ctx.cplane.normal))
         except g.GeometryError as exc:
             ctx.echo(f"{t.name}: {exc}")
             continue

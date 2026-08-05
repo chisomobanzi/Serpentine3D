@@ -57,6 +57,15 @@
 
 ### Fixed
 
+- **A curve cutter now cuts the way the pane it was drawn in is facing.**
+  `booleansplit`, `split` and `trim` all sweep an open curve into a cutting
+  surface, and the sweep went straight up the world Z axis whichever pane you
+  were looking at. So a line drawn across a box in Front, which looked like a
+  cut through the middle, came back as a cut down the end. The sweep now
+  follows the normal of the plane the command is drawing on: front to back in
+  Front, side to side in Right, and still upward in Top and Perspective,
+  where it was already right.
+
 - **Right-click no longer repeats undo or redo.** They join delete on the
   list of commands a reflex is not allowed to run again: both already have a
   key and a button of their own, so a right-click meant for something else
