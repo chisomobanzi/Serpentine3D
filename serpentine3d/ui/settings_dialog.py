@@ -370,6 +370,7 @@ class SettingsDialog(QDialog):
             "end": "End points", "mid": "Midpoints",
             "center": "Circle/arc centers", "quad": "Quadrant points",
             "int": "Intersections",
+            "appint": "Apparent intersections (crossing on screen only)",
             "perp": "Perpendicular (from previous point)",
             "near": "Nearest point on curve",
         }

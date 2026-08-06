@@ -3780,6 +3780,11 @@ def _snap_marker(kind: str, c: np.ndarray, right: np.ndarray,
     elif kind == "int":                   # X
         segs = [np.stack([c - r - u, c + r + u]),
                 np.stack([c - r + u, c + r - u])]
+    elif kind == "appint":                # X with the middle missing
+        # the gap is the point: the two curves cross here on screen and
+        # nothing is joined, which is what separates this from `int`
+        segs = [np.stack([c + d * 0.4, c + d])
+                for d in (r + u, -(r + u), r - u, u - r)]
     elif kind == "perp":                  # perpendicular glyph
         segs = [np.stack([c - r - u, c + r - u]),
                 np.stack([c - u, c + u])]

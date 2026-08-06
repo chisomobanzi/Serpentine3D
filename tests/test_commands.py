@@ -767,6 +767,7 @@ def test_osnap_command_toggles_config(env):
 
             class snaps:
                 enabled = True
+                types = {"mid": True, "appint": False}
         ctx.viewport = VP()
         proc.run("osnap mid toggle")
         assert cfg.get("osnaps", "mid") is False      # default True -> off
@@ -777,6 +778,27 @@ def test_osnap_command_toggles_config(env):
     finally:
         del os.environ["SERP3D_CONFIG"]
         os.unlink(path)
+
+
+def test_osnap_command_moves_the_running_snaps(env):
+    """The bar redraws itself from the snap index, so a command that only
+    wrote the setting to disk looked like it had done nothing."""
+    scene, sel, hist, ctx, proc = env
+
+    class VP:
+        space = "model"
+        config = None
+
+        class snaps:
+            enabled = True
+            types = {"mid": True, "appint": False}
+    ctx.viewport = VP()
+    proc.run("osnap appint on")
+    assert VP.snaps.types["appint"] is True
+    proc.run("osnap appint toggle")
+    assert VP.snaps.types["appint"] is False
+    proc.run("osnap mid toggle")
+    assert VP.snaps.types["mid"] is False
 
 
 def test_rhino_macro_mapping():

@@ -9,7 +9,7 @@ from ..core.snaps import SNAP_TYPES
 
 _LABELS = {
     "end": "End", "mid": "Mid", "center": "Cen", "quad": "Quad",
-    "int": "Int", "perp": "Perp", "near": "Near",
+    "int": "Int", "appint": "AppInt", "perp": "Perp", "near": "Near",
 }
 _TIPS = {
     "end": "Snap to curve endpoints",
@@ -17,6 +17,7 @@ _TIPS = {
     "center": "Snap to circle/arc centers",
     "quad": "Snap to circle quadrant points",
     "int": "Snap to curve-curve intersections",
+    "appint": "Snap where two curves cross on screen without meeting",
     "perp": "Snap perpendicular from the previous point",
     "near": "Snap to the nearest point on a curve",
 }

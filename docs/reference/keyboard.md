@@ -50,10 +50,15 @@ Nothing is bound out of the box.
   empty space to deselect.
 - **Box selection**: drag **left→right** for a *window* (fully enclosed, gold
   box); **right→left** for a *crossing* (anything touched, white box).
-- **Object snaps** — end, mid, center, quadrant, intersection, perpendicular,
-  nearest — toggle on the **osnap bar** under the command line. They keep
-  working while a direction is held: the point lands on the locked line
-  beside whatever the snap found.
+- **Object snaps** — end, mid, center, quadrant, intersection, apparent
+  intersection, perpendicular, nearest — toggle on the **osnap bar** under
+  the command line. They keep working while a direction is held: the point
+  lands on the locked line beside whatever the snap found.
+- **AppInt** is the crossing you can see but cannot touch: where a rafter
+  passes over a wall in a Top view the two never meet, so **Int** has
+  nothing there, and **AppInt** gives you the point anyway, on whichever
+  curve is nearer the camera. It belongs to the view you are looking
+  through, so it moves when you orbit. Off until you switch it on.
 
 ## Control points & sub-objects
 

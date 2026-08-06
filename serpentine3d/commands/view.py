@@ -426,7 +426,8 @@ def cmd_snap(ctx):
     yield from ()
 
 
-_OSNAP_KINDS = ("End", "Mid", "Center", "Quad", "Int", "Perp", "Near")
+_OSNAP_KINDS = ("End", "Mid", "Center", "Quad", "Int", "AppInt", "Perp",
+                "Near")
 
 
 @command("osnap", mutates=False)
@@ -448,8 +449,14 @@ def cmd_osnap(ctx):
         ctx.echo(f"Object snaps {state}.")
     else:
         key = kind.lower()
-        cur = bool(cfg.get("osnaps", key, default=True)) if cfg else True
+        # what is running, not what is on disk: the config holds what the
+        # next launch starts with, so reading the answer out of it toggled
+        # against a setting this session may have moved on from, and writing
+        # only there left the bar to redraw itself from a snap index that
+        # never heard about it
+        cur = bool(vp.snaps.types.get(key, False))
         new = (not cur) if action == "Toggle" else action == "On"
+        vp.snaps.types[key] = new
         if cfg:
             cfg.set("osnaps", key, new)
         ctx.echo(f"{kind} snap {'on' if new else 'off'}.")

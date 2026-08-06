@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Apparent intersection snaps.** Two curves that pass one over the other
+  never meet, so `Int` has nothing to offer at the place they cross on
+  screen, and in a Top view that place is very often the one you are
+  pointing at: where a rafter runs over a wall, where a rail crosses the
+  edge of a solid. The new **AppInt** button on the osnap bar gives you
+  that point, on whichever of the two is nearer the camera, since that is
+  the one you can see there. Edges of solids count, and so does a curve
+  that passes over itself. Where the two really do touch you get `Int` as
+  before rather than the same point twice under two names. This snap
+  belongs to the view you are looking through instead of to the drawing,
+  so it moves when you orbit and it is worked out fresh every time the
+  cursor moves. It starts switched off.
+
+### Fixed
+
+- **`osnap mid toggle` and its relatives now change the snap you are
+  using.** They wrote the setting to the config file and stopped there, so
+  the osnap bar redrew itself from a snap index that had never heard about
+  it and the button flipped back. The setting only took hold next launch.
+
 ## 0.5.11 — 2026-08-06
 
 ### Added

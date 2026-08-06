@@ -11,11 +11,23 @@ import numpy as np
 
 from . import geometry, occ
 
-SNAP_TYPES = ("end", "mid", "center", "quad", "int", "perp", "near")
+SNAP_TYPES = ("end", "mid", "center", "quad", "int", "appint", "perp",
+              "near")
 
 # priority when several candidates fall inside the pick radius
-_PRIORITY = {"end": 0, "int": 1, "quad": 2, "mid": 3, "center": 4,
-             "perp": 5, "near": 6}
+_PRIORITY = {"end": 0, "int": 1, "appint": 2, "quad": 3, "mid": 4,
+             "center": 5, "perp": 6, "near": 7}
+
+# How many screen segments near the cursor get paired up. Every pair is
+# tried, so the cost is square, and a drawing dense enough to put more than
+# this many edges under one pick radius is one where the answer would be a
+# guess anyway.
+_APPARENT_LIMIT = 160
+
+# Two crossing segments this close along the line of sight are the same
+# point in space, which means they really meet: that is `int`'s answer, and
+# it is also what every corner of a polyline looks like from here.
+_APPARENT_GAP = 1e-6
 
 
 def _static_snap_points(shape) -> list[tuple[tuple, str]]:
@@ -109,6 +121,147 @@ def _intersections(objects) -> list[tuple]:
     return pts
 
 
+def _world_param(s, da, db, parallel):
+    """Where along a segment in space the screen fraction `s` landed.
+
+    Under a parallel projection the two are the same number. A perspective
+    one packs the far half of a segment into fewer pixels, so halfway across
+    the screen is not halfway along the line, and reading the 3D point off
+    `s` would put the snap somewhere the curve does not go.
+    """
+    if parallel:
+        return s
+    den = da * s + db * (1.0 - s)
+    flat = np.abs(den) < 1e-12
+    return np.where(flat, s, s * da / np.where(flat, 1.0, den))
+
+
+def _misses_the_cursor(mesh, camera, cursor, width, height, pad) -> bool:
+    """True if nothing in this mesh can reach the cursor, cheaply.
+
+    Eight corners answered instead of every segment in the object. The
+    projection of a box contains the projection of everything inside it, so
+    a cursor outside the corners' screen bounds is outside the object. It
+    reads the mesh's own cached bounds and never the B-rep, because a
+    drawing read from a file holds its shapes unconverted and asking one
+    for a bounding box on every mouse move would convert the lot.
+    """
+    bounds = mesh.bounds() if hasattr(mesh, "bounds") else None
+    if bounds is None:
+        return False
+    lo, hi = np.asarray(bounds[0], float), np.asarray(bounds[1], float)
+    corners = np.array([[x, y, z] for x in (lo[0], hi[0])
+                        for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+    scr = camera.project(corners, width, height)
+    if not (scr[:, 2] > 0).all():
+        # part of it is behind the eye, where a corner's pixel means
+        # nothing; let the segments speak for themselves
+        return False
+    return bool(scr[:, 0].min() > cursor[0] + pad
+                or scr[:, 0].max() < cursor[0] - pad
+                or scr[:, 1].min() > cursor[1] + pad
+                or scr[:, 1].max() < cursor[1] - pad)
+
+
+def _cursor_segments(objects, camera, px, py, width, height, radius_px):
+    """Edges of visible objects passing within the pick radius, on screen.
+
+    Solids come too. The edge of a box is not a curve object and it is still
+    a line you can see, so a rail passing over one crosses something.
+    """
+    cursor = np.array([float(px), float(py)])
+    r2 = float(radius_px) ** 2
+    segs = []
+    for obj in objects:
+        mesh = getattr(obj, "mesh", None)
+        edges = getattr(mesh, "edge_segments", None)
+        if edges is None or not len(edges):
+            continue
+        # eight corners to save projecting the segments is only a saving
+        # when there are more than eight of them, and a drawing made of
+        # single lines has one each
+        if len(edges) > 32 and _misses_the_cursor(mesh, camera, cursor,
+                                                  width, height, radius_px):
+            continue
+        e = np.asarray(edges, float)
+        a3, b3 = e[:, 0, :], e[:, 1, :]
+        sa = camera.project(a3, width, height)
+        sb = camera.project(b3, width, height)
+        ab = sb[:, :2] - sa[:, :2]
+        ap = cursor[None, :] - sa[:, :2]
+        den = np.einsum("ij,ij->i", ab, ab)
+        t = np.clip(np.einsum("ij,ij->i", ap, ab)
+                    / np.where(den < 1e-12, 1e-12, den), 0.0, 1.0)
+        d = cursor[None, :] - (sa[:, :2] + ab * t[:, None])
+        keep = ((sa[:, 2] > 0) & (sb[:, 2] > 0)
+                & (np.einsum("ij,ij->i", d, d) <= r2))
+        for i in np.nonzero(keep)[0]:
+            segs.append((a3[i], b3[i], sa[i], sb[i]))
+            if len(segs) >= _APPARENT_LIMIT:
+                return segs
+    return segs
+
+
+def _apparent_crossings(objects, camera, px, py, width, height,
+                        radius_px) -> list[tuple]:
+    """Where two edges cross on screen without meeting in space.
+
+    A rafter passing over a wall never touches it, so `int` has nothing at
+    the place the two cross in a Top view, and that place is often the one
+    being pointed at. It is made by where the camera stands, so unlike a
+    real intersection there is nothing to cache: turn the view and every one
+    of these moves. It is worked out per query, over the handful of segments
+    the cursor is already on top of.
+    """
+    segs = _cursor_segments(objects, camera, px, py, width, height,
+                            radius_px)
+    if len(segs) < 2:
+        return []
+    flat = getattr(camera, "projection", "perspective") == "parallel"
+    a3 = np.array([s[0] for s in segs])
+    b3 = np.array([s[1] for s in segs])
+    sa = np.array([s[2] for s in segs])
+    sb = np.array([s[3] for s in segs])
+
+    # every pair at once. A mat of rails over one spot fills the segment
+    # budget, and a hundred and sixty of those is thirteen thousand pairs
+    # per mouse move, which is a fifth of a second of arithmetic done one
+    # pair at a time and under a millisecond done all at once.
+    i, j = np.triu_indices(len(segs), k=1)
+    p, r = sa[i, :2], sa[j, :2]
+    u, v = sb[i, :2] - p, sb[j, :2] - r
+    den = u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0]
+    # running together on screen: either the same line drawn twice, or so
+    # nearly so that where they meet is noise
+    live = np.abs(den) >= 1e-6 * (np.hypot(u[:, 0], u[:, 1])
+                                  * np.hypot(v[:, 0], v[:, 1]) + 1.0)
+    safe = np.where(live, den, 1.0)
+    w = r - p
+    s1 = (w[:, 0] * v[:, 1] - w[:, 1] * v[:, 0]) / safe
+    s2 = (w[:, 0] * u[:, 1] - w[:, 1] * u[:, 0]) / safe
+    live &= (s1 >= 0.0) & (s1 <= 1.0) & (s2 >= 0.0) & (s2 <= 1.0)
+
+    da1, db1, da2, db2 = sa[i, 2], sb[i, 2], sa[j, 2], sb[j, 2]
+    t1 = _world_param(s1, da1, db1, flat)
+    t2 = _world_param(s2, da2, db2, flat)
+    d1 = da1 + (db1 - da1) * t1
+    d2 = da2 + (db2 - da2) * t2
+    # one pixel and one depth is one point in space, so the two agreeing on
+    # depth means the curves genuinely touch
+    live &= np.abs(d1 - d2) > _APPARENT_GAP
+
+    k = np.nonzero(live)[0]
+    if not len(k):
+        return []
+    # the near one is the one you can see at that pixel; the far one is
+    # behind something you are looking at
+    first = d1[k] <= d2[k]
+    ki, kj = i[k], j[k]
+    on_i = a3[ki] + (b3[ki] - a3[ki]) * t1[k][:, None]
+    on_j = a3[kj] + (b3[kj] - a3[kj]) * t2[k][:, None]
+    return [tuple(q) for q in np.where(first[:, None], on_i, on_j)]
+
+
 class SnapIndex:
     def __init__(self, scene, config=None):
         self.scene = scene
@@ -200,6 +353,11 @@ class SnapIndex:
             for p in self._intersection_points(objects):
                 pts.append(p)
                 kinds.append("int")
+        if self.types.get("appint"):
+            for p in _apparent_crossings(objects, camera, px, py, width,
+                                         height, radius_px):
+                pts.append(p)
+                kinds.append("appint")
         if self.types.get("perp") and base_point is not None:
             for p in self._perp_feet(objects, base_point):
                 pts.append(p)
