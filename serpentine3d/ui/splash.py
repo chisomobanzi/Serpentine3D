@@ -109,7 +109,7 @@ def _base_pixmap(version: str) -> QPixmap:
 
 
 class SplashScreen(QSplashScreen):
-    def __init__(self, version: str = "0.5.10"):
+    def __init__(self, version: str = "0.5.11"):
         super().__init__(_base_pixmap(version))
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self._status = ""
