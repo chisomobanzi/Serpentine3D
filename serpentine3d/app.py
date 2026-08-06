@@ -214,6 +214,7 @@ class MainWindow(QMainWindow):
         self.command_line.submitted.connect(self._on_submit)
         self.command_line.cancelled.connect(self._cancel)
         self.command_line.optionClicked.connect(self._on_option_chip)
+        self.command_line.keywordClicked.connect(self._on_keyword_chip)
         self.command_line.tabPressed.connect(self._toggle_direction_lock)
         self.command_line.input.textEdited.connect(self._live_preview)
         self._wire_viewport(self.viewport)
@@ -965,6 +966,11 @@ class MainWindow(QMainWindow):
         self._live_preview(self.command_line.input.text())
         self.command_line.focus()
 
+    def _on_keyword_chip(self, word: str):
+        """A keyword chip answers the prompt outright, as typing it would."""
+        self.processor.provide_text(word)
+        self.command_line.focus()
+
     def _toggle_direction_lock(self):
         """Tab while a point is wanted: freeze the direction, type a length.
 
@@ -997,6 +1003,7 @@ class MainWindow(QMainWindow):
         req = self.processor.request
         self.command_line.set_prompt(self.processor.prompt_text())
         self.command_line.set_options(self.processor.option_chips())
+        self.command_line.set_keywords(self.processor.keyword_chips())
         # every pane, because a ghost is set on every pane: clearing one of
         # them leaves a preview on the others that no command owns any more
         for vp in self.all_viewports():

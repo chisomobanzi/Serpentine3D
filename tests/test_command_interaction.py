@@ -56,10 +56,23 @@ KEYBOARD_ONLY = {
 }
 
 # (command, exact prompt) -> why this later point has nothing to preview yet.
+_FIRST_OF_ITS_FLOW = (
+    "the first pick of an alternate way in (Center, 2Point, ...) — it comes "
+    "after the keyword answer, so it is not the function's first PointReq, "
+    "but nothing exists yet to drag from"
+)
+
 NOTHING_TO_SHOW = {
     ("point", "Next point (Enter to finish)"):
         "each point object stands alone — nothing joins it to the last one, "
         "so a rubber band back to it would draw a line that is not there",
+    ("line", "Middle of line"): _FIRST_OF_ITS_FLOW,
+    ("circle", "Start of diameter"): _FIRST_OF_ITS_FLOW,
+    ("circle", "First point on circle"): _FIRST_OF_ITS_FLOW,
+    ("arc", "Center of arc"): _FIRST_OF_ITS_FLOW,
+    ("arc", "Start of arc"): _FIRST_OF_ITS_FLOW,
+    ("ellipse", "Start of first axis"): _FIRST_OF_ITS_FLOW,
+    ("sphere", "Start of diameter"): _FIRST_OF_ITS_FLOW,
 }
 
 

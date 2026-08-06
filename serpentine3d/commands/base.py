@@ -553,6 +553,9 @@ def format_prompt(req: Req) -> str:
     p = req.prompt
     if isinstance(req, OptionReq) and req.options:
         p += f" ({'/'.join(req.options)})"
+    extras = getattr(req, "extra_options", ())
+    if extras:
+        p += f" ({'/'.join(extras)})"
     default = getattr(req, "default", None)
     if default is not None:
         if isinstance(default, tuple):
@@ -913,6 +916,16 @@ class CommandProcessor:
         self._advance(objs)
 
     # -- prompt for UI --
+    def keyword_chips(self) -> list[str]:
+        """One-shot words the current prompt accepts, for clickable chips.
+
+        Where option chips carry a value and cycle, these answer the prompt
+        outright: Close on a polyline, Center on an arc. Clicking one is
+        the same as typing it.
+        """
+        req = self.request
+        return list(getattr(req, "extra_options", ()) or ())
+
     def option_chips(self) -> list:
         """[(name, current_value)] for the active request's options."""
         req = self.request

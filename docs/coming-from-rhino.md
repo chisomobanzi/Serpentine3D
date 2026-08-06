@@ -12,6 +12,11 @@ page maps your habits over and is honest about the gaps.
   completes, ++enter++ repeats the last command.
 - **Aliases.** `l`, `pl`, `c`, `m`, `co`, `mi`, `o`, `f`, … work as you'd
   expect, and you can import your own (below).
+- **Command options.** The words in a prompt's parentheses are choices, as
+  in Rhino: `arc` offers *Center* and *StartEnd*, `circle` offers *2Point*,
+  *3Point* and *Diameter*, `rectangle` *Center* and *3Point*, `line`
+  *BothSides*, `box` *Center*, `sphere` *2Point*. Type the word (a prefix
+  is enough) or click its chip beside the command line.
 - **Object snaps** — end, mid, cen, quad, int, perp, near — on a persistent
   osnap bar, plus a construction plane (`cplane`).
 - **++tab++ direction lock.** Aim, press ++tab++ to freeze that direction,

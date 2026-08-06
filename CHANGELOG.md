@@ -17,6 +17,25 @@
   so it moves when you orbit and it is worked out fresh every time the
   cursor moves. It starts switched off.
 
+- **More than one way to say a shape.** An arc is start, a point on it,
+  end. Unless what you know is the center and the sweep, in which case
+  those three picks are a puzzle about a shape you could already describe.
+  The creation commands now take options the way Rhino's do: words in the
+  prompt's parentheses that you type (a prefix is enough) or click, as
+  chips beside the command line. `arc` gains *Center*, where a typed
+  number is the sweep in degrees and a minus sign turns it the other way,
+  and *StartEnd*, which pins both ends first and bends the middle after.
+  `circle` gains *2Point* across a diameter, *3Point* through anywhere,
+  and *Diameter*, which makes a typed number mean the width across.
+  `rectangle` gains *Center*, spread evenly with clicks or typed sides,
+  and *3Point*, which lays one whole edge first so the rectangle can lean.
+  `ellipse` gains *Diameter*, taking the first axis end to end at any
+  angle. `line` gains *BothSides*, growing evenly out of its middle. `box`
+  gains *Center* for its base, `sphere` gains *2Point*, and a `curve` can
+  now *Close* back on itself smoothly, as a polyline always could. The
+  polyline's own close, and every word like it, is now a clickable chip
+  too.
+
 ### Fixed
 
 - **`osnap mid toggle` and its relatives now change the snap you are

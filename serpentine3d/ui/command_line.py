@@ -110,6 +110,7 @@ class CommandLine(QWidget):
     submitted = Signal(str)         # raw text the user entered
     cancelled = Signal()
     optionClicked = Signal(str)     # option chip clicked -> cycle its value
+    keywordClicked = Signal(str)    # keyword chip clicked -> answers prompt
     tabPressed = Signal()           # Tab while a point is wanted
 
     def __init__(self, parent=None):
@@ -177,6 +178,7 @@ class CommandLine(QWidget):
         self._chip_row.setContentsMargins(0, 0, 0, 0)
         self._chip_row.setSpacing(6)
         self._chips: list[QPushButton] = []
+        self._keyword_chips: list[QPushButton] = []
 
         row = QHBoxLayout()
         row.setContentsMargins(8, 4, 8, 6)
@@ -235,6 +237,35 @@ class CommandLine(QWidget):
                 lambda _=False, n=name: self.optionClicked.emit(n))
             self._chip_row.addWidget(chip)
             self._chips.append(chip)
+
+    def set_keywords(self, words: list):
+        """Show one-shot keyword chips; clicking one answers the prompt.
+
+        Where an option chip is Name=Value and cycles, a keyword is a word
+        the prompt takes whole — Close, Center, BothSides — the clickable
+        twin of typing it.
+        """
+        if words == [c.text() for c in self._keyword_chips]:
+            return
+        for c in self._keyword_chips:
+            self._chip_row.removeWidget(c)
+            c.deleteLater()
+        self._keyword_chips = []
+        for word in words:
+            chip = QPushButton(word)
+            chip.setFlat(True)
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            chip.setToolTip(f"Click (or type) {word}")
+            chip.setStyleSheet(
+                "QPushButton { color: #7fb3d8; background: #26272b;"
+                " border: 1px solid #3a3b40; border-radius: 9px;"
+                " padding: 1px 10px; }"
+                "QPushButton:hover { border-color: #7fb3d8; }")
+            chip.clicked.connect(
+                lambda _=False, w=word: self.keywordClicked.emit(w))
+            self._chip_row.addWidget(chip)
+            self._keyword_chips.append(chip)
 
     def focus(self):
         self.input.setFocus()

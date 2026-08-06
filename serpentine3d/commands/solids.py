@@ -12,7 +12,11 @@ from .base import PointReq, command, quadrant
 
 @command("box")
 def cmd_box(ctx):
-    c1 = yield PointReq("First corner of base")
+    """Box from a base and height; Center spreads the base evenly."""
+    c1 = yield PointReq("First corner of base", extra_options=("Center",))
+    if c1 == "Center":
+        yield from _box_from_center(ctx)
+        return
     cp = ctx.cplane
     u1, v1, w1 = cp.from_world(c1)
 
@@ -83,9 +87,91 @@ def cmd_box(ctx):
     ctx.echo(f"Created {obj.name}.")
 
 
+def _box_from_center(ctx):
+    """The base spread evenly about its middle, then the height as ever."""
+    cpt = yield PointReq("Center of base")
+    cp = ctx.cplane          # after the pick: it may have entered a detail
+    uc, vc, w1 = cp.from_world(cpt)
+
+    def _spread(du, dv):
+        if du < 1e-9 or dv < 1e-9:
+            return None
+        return g.make_polyline(
+            [cp.to_world(uc - du, vc - dv, w1),
+             cp.to_world(uc + du, vc - dv, w1),
+             cp.to_world(uc + du, vc + dv, w1),
+             cp.to_world(uc - du, vc + dv, w1)], closed=True)
+
+    def _corner_to(p):
+        u2, v2, _w = cp.from_world(p)
+        return _spread(abs(u2 - uc), abs(v2 - vc))
+
+    c2 = yield PointReq(
+        "Corner of base, or length", rubber_from=cpt, preview_fn=_corner_to,
+        rubber_sides=lambda p: (2 * abs(cp.from_world(p)[0] - uc),
+                                2 * abs(cp.from_world(p)[1] - vc)),
+        allow_number=True)
+    if isinstance(c2, float):
+        du = abs(c2) / 2
+        if du < 1e-9:
+            ctx.echo("Zero length — no box created.")
+            return
+        wp = yield PointReq(
+            "Width (click, or type a number)",
+            number_from=lambda v: cp.to_world(uc, vc + v / 2, w1),
+            rubber_from=cpt,
+            preview_fn=lambda p: _spread(du, abs(cp.from_world(p)[1] - vc)))
+        dv = abs(cp.from_world(wp)[1] - vc)
+    else:
+        u2, v2, _w = cp.from_world(c2)
+        du, dv = abs(u2 - uc), abs(v2 - vc)
+    base = _spread(du, dv)
+    if base is None:
+        ctx.echo("Zero width — no box created.")
+        return
+    up = tuple(float(a) for a in cp.normal)
+    anchor = cp.to_world(uc + du, vc + dv, w1)
+
+    def _box_to(p):
+        h = cp.from_world(p)[2] - w1
+        if abs(h) < 1e-9:
+            return None
+        return g.extrude(g.planar_face(_spread(du, dv)), up, h)
+
+    hp = yield PointReq("Height (click, or type a number)",
+                        axis_lock=(anchor, up), number_from=(anchor, up),
+                        rubber_from=anchor, preview_fn=_box_to)
+    shape = _box_to(hp)
+    if shape is None:
+        ctx.echo("Zero height — no box created.")
+        return
+    obj = ctx.scene.add(shape)
+    ctx.echo(f"Created {obj.name}.")
+
+
 @command("sphere", aliases=("sph",))
 def cmd_sphere(ctx):
-    center = yield PointReq("Center of sphere")
+    """Sphere from center and radius; 2Point spans a diameter instead."""
+    center = yield PointReq("Center of sphere", extra_options=("2Point",))
+    if center == "2Point":
+        a = yield PointReq("Start of diameter")
+
+        def _two_to(p):
+            r = _dist(a, p) / 2
+            if r < 1e-9:
+                return None
+            mid = tuple((x + y) / 2 for x, y in zip(a, p))
+            return g.make_sphere(mid, r)
+
+        b = yield PointReq("End of diameter", rubber_from=a,
+                           preview_fn=_two_to)
+        shape = _two_to(b)
+        if shape is None:
+            ctx.echo("Zero diameter — no sphere created.")
+            return
+        obj = ctx.scene.add(shape)
+        ctx.echo(f"Created {obj.name} (r={_dist(a, b) / 2:g}).")
+        return
 
     def _sphere_to(p):
         r = _dist(center, p)

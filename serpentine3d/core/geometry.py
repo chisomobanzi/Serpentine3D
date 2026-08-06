@@ -25,7 +25,8 @@ from .occ import (
     BRepPrimAPI_MakeTorus,
     BRepAlgoAPI_Fuse, BRepAlgoAPI_Cut, BRepAlgoAPI_Common,
     BRepOffsetAPI_ThruSections, BRepOffsetAPI_MakePipe,
-    GC_MakeArcOfCircle, GeomAPI_Interpolate, GeomAPI_PointsToBSpline,
+    GC_MakeArcOfCircle, GC_MakeCircle,
+    GeomAPI_Interpolate, GeomAPI_PointsToBSpline,
     Geom_BSplineCurve,
     TColgp_Array1OfPnt, TColgp_HArray1OfPnt, TColStd_Array1OfReal,
     TColStd_Array1OfInteger,
@@ -95,6 +96,66 @@ def make_arc_3pt(p1: Point, p2: Point, p3: Point) -> TopoDS_Shape:
     if not arc.IsDone():
         raise GeometryError("Cannot fit an arc through these points")
     return BRepBuilderAPI_MakeEdge(arc.Value()).Edge()
+
+
+def make_arc_center(center: Point, start: Point, angle: float,
+                    normal: Point = (0, 0, 1)) -> TopoDS_Shape:
+    """Arc swept about `center` from `start`, `angle` radians about `normal`.
+
+    Positive sweeps counterclockwise looking down the normal, negative the
+    other way, which is what lets a typed -90 mean the quarter you meant.
+    Built through three rotated copies of the start point rather than by
+    trimming a circle, so there is no seam parameter to land on.
+    """
+    c = tuple(float(v) for v in center)
+    r = math.dist(c, tuple(float(v) for v in start))
+    if r < tight():
+        raise GeometryError("Arc radius is zero")
+    if abs(angle) < 1e-9:
+        raise GeometryError("Zero sweep — no arc")
+    if abs(angle) > 2 * math.pi - 1e-9:
+        raise GeometryError("A full sweep is a circle, not an arc")
+    ax = gp_Ax1(_pnt(c), _dir(normal))
+
+    def turned(by: float) -> Point:
+        tr = gp_Trsf()
+        tr.SetRotation(ax, float(by))
+        p = _pnt(start).Transformed(tr)
+        return (p.X(), p.Y(), p.Z())
+
+    return make_arc_3pt(start, turned(angle / 2), turned(angle))
+
+
+def make_circle_3pt(p1: Point, p2: Point, p3: Point) -> TopoDS_Shape:
+    """The one circle through three points, however they lean."""
+    mk = GC_MakeCircle(_pnt(p1), _pnt(p2), _pnt(p3))
+    if not mk.IsDone():
+        raise GeometryError("Cannot fit a circle through these points")
+    return BRepBuilderAPI_MakeEdge(mk.Value()).Edge()
+
+
+def make_ellipse_axis(center: Point, xdir: Point, r1: float, r2: float,
+                      normal: Point = (0, 0, 1)) -> TopoDS_Shape:
+    """Ellipse with its first axis pointed along `xdir`, radii r1 and r2.
+
+    Unlike make_ellipse, which leaves the axes wherever the kernel puts
+    them, this one is for when the axis was picked. gp_Elips insists the
+    major radius comes first, so when the named axis is the short one the
+    frame is turned a quarter rather than letting the radii swap and drag
+    the axis with them.
+    """
+    if r1 <= 0 or r2 <= 0:
+        raise GeometryError("Ellipse radii must be positive")
+    n = _dir(normal)
+    x = _dir(xdir)
+    if r1 >= r2:
+        ax = gp_Ax2(_pnt(center), n, x)
+        el = gp_Elips(ax, float(r1), float(r2))
+    else:
+        y = gp_Dir(n.Crossed(x).XYZ())
+        ax = gp_Ax2(_pnt(center), n, y)
+        el = gp_Elips(ax, float(r2), float(r1))
+    return BRepBuilderAPI_MakeEdge(el).Edge()
 
 
 def make_ellipse(center: Point, major_radius: float, minor_radius: float,

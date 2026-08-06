@@ -21,16 +21,16 @@ F1 opens this list inside the app). Aliases in parentheses.
 
 | Command | Does |
 |---|---|
-| `arc` (`a`) | Arc |
-| `circle` (`c`, `ci`) | Circle |
+| `arc` (`a`) | Arc through three points; or Center and a sweep, or StartEnd. |
+| `circle` (`c`, `ci`) | Circle from center and radius; or 2Point across, or 3Point through. |
 | `closecrv` (`cc`, `closecurve`) | Close open curves with a straight segment between their ends. |
-| `curve` (`cv`, `interpcrv`) | NURBS curve interpolated through picked points. |
+| `curve` (`cv`, `interpcrv`) | NURBS curve through picked points; Close joins it back smoothly. |
 | `divide` | Divide |
-| `ellipse` (`el`) | Ellipse |
-| `line` (`l`) | Line |
+| `ellipse` (`el`) | Ellipse from center and two radii; Diameter takes an axis whole. |
+| `line` (`l`) | Straight line; BothSides grows it evenly out of its middle. |
 | `point` (`pt`) | Point |
 | `polyline` (`pl`, `pline`) | Polyline |
-| `rectangle` (`rect`, `rec`) | Rectangle |
+| `rectangle` (`rect`, `rec`) | Rectangle corner to corner; or Center out, or 3Point to lean it. |
 | `tweencurves` (`tween`) | Tweencurves |
 
 ## Deformation
@@ -219,6 +219,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `sellayer` | Sellayer |
 | `selname` | Select objects whose name contains the given text. |
 | `selprev` | Restore the previous selection. |
+| `selpt` (`selpoints`) | Selpt |
 | `selsolid` (`selsolids`) | Selsolid |
 | `selsrf` (`selsurfaces`) | Selsrf |
 | `unisolate` | Unisolate |
@@ -239,10 +240,10 @@ F1 opens this list inside the app). Aliases in parentheses.
 
 | Command | Does |
 |---|---|
-| `box` | Box |
+| `box` | Box from a base and height; Center spreads the base evenly. |
 | `cone` | Cone |
 | `cylinder` (`cyl`) | Cylinder |
-| `sphere` (`sph`) | Sphere |
+| `sphere` (`sph`) | Sphere from center and radius; 2Point spans a diameter instead. |
 | `torus` | Torus |
 
 ## Surfaces
@@ -290,7 +291,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `rotate` (`ro`) | Rotate around the CPlane normal: type an angle, or pick a |
 | `rotate3d` (`ro3`) | Rotate around an arbitrary axis picked as two points. |
 | `scale` (`sc`) | Scale about a base point: type a factor, or grab a reference |
-| `scale1d` | Stretch along one direction only (base + reference define the |
+| `scale1d` | Stretch along one direction only: type a factor and it stretches |
 | `scale2d` | Scale in the CPlane only (thickness along the CPlane normal is |
 | `scalenu` | Scale by a different amount along each axis: type the three |
 | `setpt` (`setpoints`) | Force chosen coordinates of every control point to one value — |
