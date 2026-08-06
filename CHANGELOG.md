@@ -57,6 +57,18 @@
 
 ### Fixed
 
+- **Text picked out of the command history can now be copied.** You could
+  always drag a selection across the echoed history and it lit up like a
+  selection, but nothing would take it. Typing goes to the command line
+  wherever you clicked, which is what it should do, so the history never
+  holds the keyboard focus and never saw ++ctrl+c++: the key reached the
+  Edit menu's Copy instead, which copies geometry, and with no object
+  picked it quietly did nothing. Copy asks the history first and the
+  drawing second now, so an error message you can see is an error message
+  you can paste into a bug report. Go back to a pane and the selection is
+  dropped, so the next ++ctrl+c++ over a picked object still copies the
+  object.
+
 - **The command area can be dragged taller.** It was pinned shut two ways
   over: its contents were laid out with a fixed height, which handed the
   dock a maximum equal to the height it opened at, so there was no separator

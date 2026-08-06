@@ -200,6 +200,14 @@ class CommandLine(QWidget):
         self.echo_view.appendPlainText(msg)
         self.echo_view.moveCursor(QTextCursor.MoveOperation.End)
 
+    def clear_history_selection(self):
+        """Drop any text picked out of the history.
+
+        Ctrl+C copies that text in preference to the drawing, so a
+        selection nobody meant any more has to stop being one.
+        """
+        self.echo_view.moveCursor(QTextCursor.MoveOperation.End)
+
     def set_prompt(self, text: str):
         self.prompt_label.setText(text)
 

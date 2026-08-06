@@ -391,6 +391,10 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.Type.MouseButtonPress \
                 and isinstance(obj, Viewport):
             self._set_active_viewport(obj)
+            # Copy asks the history before it asks the drawing, so a
+            # selection left lying in the history would be what Copy meant
+            # for the rest of the session. Going back to a pane ends it.
+            self.command_line.clear_history_selection()
         if (event.type() == QEvent.Type.Resize
                 and obj in (self._prop_dock, self._layer_dock)
                 and not getattr(self, "_settling", False)
@@ -1113,6 +1117,16 @@ class MainWindow(QMainWindow):
         A sheet has two things on it a command could mean, and the same rule
         that decides that for `move`, `delete` and `copy` decides it here.
         """
+        echo = self.command_line.echo_view
+        if echo.textCursor().hasSelection():
+            # Text picked out of the history is asked about first, because
+            # nothing else would ever ask: typing goes to the command line
+            # wherever you clicked, so the history never holds the keyboard
+            # focus and never sees the key itself. A cursor hands lines back
+            # separated by U+2029, which pastes as one long line.
+            QApplication.clipboard().setText(
+                echo.textCursor().selectedText().replace(" ", "\n"))
+            return
         import copy as _copy
         lv = self.ctx.sheet_view()
         if lv is not None:
