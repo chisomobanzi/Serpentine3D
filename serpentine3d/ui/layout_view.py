@@ -213,6 +213,11 @@ class LayoutView:
         self._drag_moved = False
         self._fitted_for: str | None = None
         self._hlr_cache: dict = {}
+        from .paper_gumball import PaperGumball
+        # A sheet's own handles. The model window's gumball holds model
+        # objects, including the ones seen through a detail; this one holds
+        # the paper itself, which is a different thing to take hold of.
+        self.gumball = PaperGumball(self)
 
     # ------------------------------------------------------------ transforms
 
@@ -715,6 +720,9 @@ class LayoutView:
             lambda x, y: self.paper_to_screen(x, y),
             self.px_per_mm, lay, scene,
             sheet_index=idx, sheet_count=max(len(scene.layouts), 1))
+        # Last of all, over the ink and under nothing: a handle is a thing to
+        # take hold of, so a detail's own linework must not cover it.
+        self.gumball.paint(painter)
         self._paint_box(painter)        # last: the band sits over everything
 
     def _pools(self, lay) -> dict:
@@ -1027,20 +1035,13 @@ class LayoutView:
         dx = px - self._drag_last[0]
         dy = py - self._drag_last[1]
         mode, corners, picks = self._drag
+        from ..core.layout import move_sheet_item, nudge_detail_corners
         for kind, obj in picks:
-            if kind == "object":
-                from ..core.layout import move_paper_object
-                move_paper_object(obj, dx, dy)
-            elif kind != "detail":
-                from ..core.layout import move_annotation
-                move_annotation(kind, obj, dx, dy)
-            elif mode == "move":
-                obj.x += dx
-                obj.y += dy
-                self._hlr_cache.pop(obj.id, None)
-            else:
-                from ..core.layout import nudge_detail_corners
+            if kind == "detail" and mode != "move":
                 nudge_detail_corners(obj, corners, dx, dy)
+            else:
+                move_sheet_item(kind, obj, dx, dy)
+            if kind == "detail":
                 self._hlr_cache.pop(obj.id, None)
         self._drag_moved = True
         self._drag_last = (px, py)

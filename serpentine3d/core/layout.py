@@ -523,6 +523,24 @@ def move_annotation(kind: str, obj, dx: float, dy: float):
         obj.points = [[p[0] + dx, p[1] + dy] for p in obj.points]
 
 
+def move_sheet_item(kind: str, obj, dx: float, dy: float):
+    """Translate anything a sheet holds by paper millimetres.
+
+    Three kinds each knew how to move themselves; what was missing was one
+    question that could be asked of a mixed handful, which is what a selection
+    on a sheet is. A locked detail is left where it is — that is what the lock
+    is for — so a caller can hand over the whole selection without sorting it.
+    """
+    if kind == "detail":
+        if not obj.locked:
+            obj.x += dx
+            obj.y += dy
+    elif kind == "object":
+        move_paper_object(obj, dx, dy)
+    else:
+        move_annotation(kind, obj, dx, dy)
+
+
 MIN_DETAIL_MM = 5.0
 
 

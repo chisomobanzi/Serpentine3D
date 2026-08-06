@@ -932,8 +932,8 @@ class Viewport(QOpenGLWidget):
     def _update_gumball_readout(self):
         """Position the value-readout label by the gumball (a real child
         widget, so it always composites and is testable)."""
-        info = self.gumball.readout() if self.gumball.drag is not None \
-            else None
+        gb = self._live_gumball()
+        info = gb.readout() if gb.drag is not None else None
         if info is None:
             if not self._gumball_readout.isHidden():
                 self._gumball_readout.setVisible(False)
@@ -1918,6 +1918,19 @@ class Viewport(QOpenGLWidget):
         """What screen positions are measured through: a detail, or the
         camera. Everything that projects to pick or to snap asks this."""
         return self._detail_eye() or self.camera
+
+    def _live_gumball(self):
+        """The gumball a press, a hover or a keystroke is talking to.
+
+        On bare paper what is picked is a sheet item, and the sheet's own
+        gumball moves it in millimetres. Anywhere else — the model window, or
+        inside a detail, where what is picked is a model object — it is the
+        model's. One question, asked in every place that routes to a handle,
+        so the three of them can never disagree about which one is live.
+        """
+        if self.space != "model" and self.layout_view._entered() is None:
+            return self.layout_view.gumball
+        return self.gumball
 
     def _pick_mode(self) -> str:
         """The display mode picking should believe.
@@ -3231,11 +3244,11 @@ class Viewport(QOpenGLWidget):
         handles are drawn on the same objects, through the same eye, so a
         press on one means what it means anywhere else.
         """
-        handle = self.gumball.hit_test(pos.x(), pos.y())
+        gb = self._live_gumball()
+        handle = gb.hit_test(pos.x(), pos.y())
         if handle is None:
             return False
-        if not self.gumball.begin_drag(handle, pos.x(), pos.y(),
-                                       ev.modifiers()):
+        if not gb.begin_drag(handle, pos.x(), pos.y(), ev.modifiers()):
             return False
         self._gumball_press = pos
         self.update()
@@ -3243,9 +3256,10 @@ class Viewport(QOpenGLWidget):
 
     def _move_gumball(self, pos, ev) -> bool:
         """Whether the mouse move was the gumball's: a drag, or a hover."""
-        if self.gumball.drag is not None \
+        gb = self._live_gumball()
+        if gb.drag is not None \
                 and ev.buttons() & Qt.MouseButton.LeftButton:
-            label = self.gumball.drag_to(pos.x(), pos.y(), ev.modifiers())
+            label = gb.drag_to(pos.x(), pos.y(), ev.modifiers())
             if label:
                 from PySide6.QtWidgets import QMainWindow
                 win = self.window()
@@ -3254,11 +3268,11 @@ class Viewport(QOpenGLWidget):
             self.update()
             return True
         if not ev.buttons() and not self.point_mode:
-            if self.gumball.update_hover(pos.x(), pos.y()):
+            if gb.update_hover(pos.x(), pos.y()):
                 self.update()
             # Only a cursor actually on a handle is the gumball's: a sheet has
             # its own things to light up under one that is not.
-            return self.gumball.hover is not None
+            return gb.hover is not None
         return False
 
     def _track_band(self, pos):
@@ -3326,8 +3340,8 @@ class Viewport(QOpenGLWidget):
                 self.update()      # navigation ended: recompute HLR view
             return
         if self.space != "model":
-            if self.gumball.drag is not None:
-                self._release_gumball(ev)   # let go of a handle in a detail
+            if self._live_gumball().drag is not None:
+                self._release_gumball(ev)   # let go of a handle on the sheet
                 return
             if self._press_pos is not None or self._box_active:
                 self._finish_pick(ev)      # the press was inside a detail
@@ -3354,11 +3368,12 @@ class Viewport(QOpenGLWidget):
         press = getattr(self, "_gumball_press", None)
         moved = (press is not None
                  and (ev.position() - press).manhattanLength() > 4)
-        d = self.gumball.drag
-        if d["typed"] or (not moved and self.gumball.accepts_typing()):
-            self.gumball.arm()
+        gb = self._live_gumball()
+        d = gb.drag
+        if d["typed"] or (not moved and gb.accepts_typing()):
+            gb.arm()
         else:
-            self.gumball.end_drag()
+            gb.end_drag()
         self.update()
 
     def _finish_pick(self, ev):
@@ -3660,23 +3675,24 @@ class Viewport(QOpenGLWidget):
 
     def keyPressEvent(self, ev):
         # while a gumball drag is live, type an exact distance/angle/factor
-        if self.gumball.drag is not None:
+        gb = self._live_gumball()
+        if gb.drag is not None:
             key = ev.key()
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                if self.gumball.commit_typed():
+                if gb.commit_typed():
                     self.update()
                     return
             elif key == Qt.Key.Key_Escape:
-                self.gumball.cancel_drag()
+                gb.cancel_drag()
                 self.update()
                 return
             elif key == Qt.Key.Key_Backspace:
-                if self.gumball.type_char("back"):
+                if gb.type_char("back"):
                     self.update()
                     return
             elif ev.text() in "0123456789.-" and ev.text() \
-                    and self.gumball.accepts_typing():
-                self.gumball.type_char(ev.text())
+                    and gb.accepts_typing():
+                gb.type_char(ev.text())
                 self.update()
                 return
         if self.space != "model":

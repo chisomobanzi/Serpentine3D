@@ -39,6 +39,13 @@ Double-click a detail to *enter* it (pan/zoom acts on the model);
 click outside to leave. Selected details show corner grips for
 resizing; drag the body to move it.
 
+Anything picked on a sheet also gets a gumball: an X arrow, a Y arrow
+and a pad that takes both at once. Drag a handle to move everything
+picked, or type a distance to move it exactly that far. Nothing on a
+sheet has an angle or a size to grab, so the sheet's gumball is arrows
+only. Locked details stay where they are. Step into a detail and the
+gumball goes back to holding the model objects inside it.
+
 ## Annotations
 
 `text` (multiline with `\n`), `leader`, `dim`, `dimradius`,

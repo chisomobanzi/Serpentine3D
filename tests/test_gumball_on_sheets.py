@@ -82,8 +82,9 @@ def test_the_gumball_is_offered_inside_a_detail(sheet):
 
 
 def test_bare_paper_has_no_gumball(sheet):
-    """Off a detail a sheet is millimetres of paper, and the model object
-    picked in one is not there to be dragged."""
+    """This one. Off a detail a sheet is millimetres of paper, and the model
+    object picked in one is not there to be dragged. The paper has handles of
+    its own for its own things: see `test_gumball_on_paper`."""
     w, _det, _box = sheet
     w.viewport.layout_view.entered_detail = None
     assert not w.viewport.gumball.active()

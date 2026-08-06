@@ -12,6 +12,18 @@
   arrangement for you. Rhino makes you leave model space to look at a
   sheet.
 
+- **The gumball is on the sheet now.** A detail, a note or a dimension moved
+  by dragging the thing itself, which wanted a steady hand and gave you no way
+  to say how far. Whatever is picked on a sheet now gets handles of its own: an
+  X arrow, a Y arrow and the pad that takes both at once, standing in the same
+  place and drawn at the same size as the gumball you already know. Drag one
+  and the readout gives the distance in millimetres, or type the distance if
+  you want an exact one, and ++esc++ puts it back. Nothing turns and nothing
+  scales, because nothing a sheet holds has an angle or a size a handle could
+  honestly change. A locked detail offers no handle at all and stays where it
+  is when the rest of the selection moves. Step into a detail and the model's
+  gumball takes over, since what is picked in there is a model object.
+
 - **The gumball extrudes.** It is already standing on the line you want a
   surface off, with an arrow pointing the way, so the only thing between you
   and the surface was having to leave it, type `extrude` and pick the line
