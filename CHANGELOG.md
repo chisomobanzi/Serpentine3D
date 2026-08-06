@@ -57,6 +57,16 @@
 
 ### Fixed
 
+- **The command area can be dragged taller.** It was pinned shut two ways
+  over: its contents were laid out with a fixed height, which handed the
+  dock a maximum equal to the height it opened at, so there was no separator
+  to take hold of, and the history view inside it was capped at four lines,
+  so even had the dock grown the history would have sat in the same four
+  lines with the new room empty below it. Both caps are gone. Take the room
+  off the viewports whenever you want to read further back, and it is the
+  history that gets it rather than a gap under the prompt. It still opens at
+  the height it always did.
+
 - **`4view` lays the four panes out again, whatever state they were left
   in.** It built the 2x2 the first time it was asked and after that only
   un-hid the three side panes, which made every way of disturbing the layout

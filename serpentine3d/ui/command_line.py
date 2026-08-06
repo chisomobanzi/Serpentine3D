@@ -81,6 +81,29 @@ class CommandInput(QLineEdit):
             super().keyPressEvent(ev)
 
 
+class _EchoView(QPlainTextEdit):
+    """The history. Asks for four lines, takes any more room it is given.
+
+    A plain text edit asks for a great deal of height, and the command area
+    is not where the window should be spending it, so this asks for the four
+    lines the history has always shown. It used to be held there by a
+    maximum height, which meant a taller command area put the extra space
+    below the input rather than into the part worth reading back.
+    """
+
+    LINES = 4
+
+    def sizeHint(self):
+        hint = super().sizeHint()
+        hint.setHeight(self.LINES * self.fontMetrics().lineSpacing() + 8)
+        return hint
+
+    def minimumSizeHint(self):
+        hint = super().minimumSizeHint()
+        hint.setHeight(self.fontMetrics().lineSpacing() + 8)   # one line
+        return hint
+
+
 class CommandLine(QWidget):
     """Bottom dock: scrolling echo area + prompt + input line."""
 
@@ -105,9 +128,8 @@ class CommandLine(QWidget):
         mono = QFont("monospace")
         mono.setStyleHint(QFont.StyleHint.TypeWriter)
 
-        self.echo_view = QPlainTextEdit()
+        self.echo_view = _EchoView()
         self.echo_view.setReadOnly(True)
-        self.echo_view.setMaximumHeight(64)
         self.echo_view.setFont(mono)
         self.echo_view.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -166,7 +188,10 @@ class CommandLine(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.echo_view)
+        # All the stretch goes to the history: drag the command area taller
+        # and it is the echoed output that gets the room, not a gap under
+        # the input.
+        layout.addWidget(self.echo_view, 1)
         layout.addLayout(row)
 
     # -- public API --

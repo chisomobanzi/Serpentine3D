@@ -122,13 +122,17 @@ class MainWindow(QMainWindow):
         self.osnap_bar = OsnapBar(self.viewport, self.cfg)
         cmd_container = QWidget()
         from PySide6.QtWidgets import QSizePolicy
+        # Preferred, not Fixed: Fixed handed the dock a maximum height equal
+        # to the height it opened at, which left no separator to drag,
+        # because nothing above it could give it room it would not take.
+        # The height it asks for is unchanged, so it still opens small.
         cmd_container.setSizePolicy(QSizePolicy.Policy.Expanding,
-                                    QSizePolicy.Policy.Fixed)   # never balloon
+                                    QSizePolicy.Policy.Preferred)
         cmd_layout = QVBoxLayout(cmd_container)
         cmd_layout.setContentsMargins(0, 0, 0, 0)
         cmd_layout.setSpacing(0)
         cmd_layout.addWidget(self._build_space_tab_row())   # tabs + "＋"
-        cmd_layout.addWidget(self.command_line)
+        cmd_layout.addWidget(self.command_line, 1)   # the history takes it
         cmd_layout.addWidget(self.osnap_bar)
         self._cmd_dock = QDockWidget("Command", self)
         self._cmd_dock.setObjectName("commandDock")
