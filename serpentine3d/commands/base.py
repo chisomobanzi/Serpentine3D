@@ -217,6 +217,10 @@ class CommandContext:
         self._echo_fns: list = []
         self.result_ids: list[str] = []
         self.result_subobjects: list = []
+        # set by the replay engine: the plane and aim a headless replay
+        # answers with, standing in for the viewport that recorded them
+        self.replay_cplane = None
+        self.replay_aim = None
 
     def held_control_points(self) -> dict:
         """{obj_id: [index, ...]} — the control points the selection holds.
@@ -305,6 +309,8 @@ class CommandContext:
         the one that detail looks at, and a command has no business knowing
         whether it is being run through a window onto the model.
         """
+        if self.replay_cplane is not None:
+            return self.replay_cplane
         if self.viewport is not None:
             return self.viewport.active_cplane()
         from ..core.cplane import CPlane
@@ -329,6 +335,8 @@ class CommandContext:
         how far. Only the viewport knows where the cursor is, and only it
         knows that ortho or a snap has already moved the answer.
         """
+        if self.replay_aim is not None:
+            return self.replay_aim
         for vp in self._aiming_panes():
             fn = getattr(vp, "aim_direction", None)
             aim = fn() if fn is not None else None
@@ -583,6 +591,11 @@ class CommandProcessor:
         # every point the running command has taken, so the UI can offer
         # them as snaps: what you are drawing is not in the scene yet
         self.picked_points: list = []
+        # the session journal, when one is attached (core/journal.py); the
+        # priming flag keeps the generator's start-up advance — which is
+        # nobody's answer to anything — out of the recording
+        self.journal = None
+        self._journal_priming = False
 
     # -- observers --
     def add_listener(self, fn):
@@ -623,6 +636,10 @@ class CommandProcessor:
             # were doing before it.
             self.last_command = cd.name
         self.ctx.echo(f"> {cd.name}")
+        # before the checkpoint: the journal separates a command's own
+        # checkpoint from an idle edit's by whether a command has begun
+        if self.journal is not None:
+            self.journal.begin_command(cd.name, self.ctx)
         if cd.mutates:
             self._start_revision = self.ctx.scene.revision
             self.ctx.history.checkpoint(cd.name)
@@ -632,6 +649,7 @@ class CommandProcessor:
         self._select_buffer = []
         self.command_options = {}
         self.ctx.options = self.command_options
+        self._journal_priming = True
         self._advance(None)
         for arg in args:
             if not self.busy:
@@ -640,6 +658,8 @@ class CommandProcessor:
         return True
 
     def _advance(self, value):
+        if self.journal is not None and not self._journal_priming:
+            self.journal.value(value, self.ctx)
         try:
             self.request = self.gen.send(value)
         except StopIteration:
@@ -656,6 +676,9 @@ class CommandProcessor:
             self.ctx.echo(f"Command failed: {type(exc).__name__}: {exc}")
             self._finish(success=False)
             return
+        # cleared before _prepare_request: a consumed preselection advances
+        # again from inside it, and that one IS an answer worth recording
+        self._journal_priming = False
         self._prepare_request()
         self._notify()
 
@@ -694,6 +717,8 @@ class CommandProcessor:
                         return
 
     def _finish(self, success: bool):
+        if self.journal is not None:
+            self.journal.finish(success)
         self.picked_points = []
         was = self.active
         self.gen = None
@@ -727,6 +752,8 @@ class CommandProcessor:
         self._notify()
 
     def cancel(self):
+        if self.gen is not None and self.journal is not None:
+            self.journal.cancelled()
         if self.gen is not None:
             gen = self.gen
             self.gen = None
@@ -773,6 +800,8 @@ class CommandProcessor:
                         return False
                     value = matches[0]
                 self.command_options[opt_name] = value
+                if self.journal is not None:
+                    self.journal.option(opt_name, value)
                 self.ctx.echo(f"{opt_name}={value}")
                 self._notify()
                 return True

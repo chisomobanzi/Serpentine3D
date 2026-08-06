@@ -4,6 +4,34 @@
 
 ### Added
 
+- **Every session is a recipe now.** Serpentine3D keeps a journal as you
+  work: each command and every point, number and selection it actually
+  received, resolved through snaps and planes, written to
+  `~/.local/share/serpentine3d/journals/` as it happens. Gumball drags
+  and control point edits ride along as exact geometry, one entry per
+  undo step. `serp3d replay <journal> --check` cooks the whole session
+  again headless and proves the result identical, which also makes a
+  journal the best bug report there is: a file that reproduces your
+  session keystroke for keystroke on someone else's machine. Undo, redo,
+  cancelled commands, files opened mid-session and drawing inside details
+  all replay as they happened. `SERP3D_NO_JOURNAL=1` turns it off.
+- **A session replays as a timelapse.** `serp3d replay <journal> --video
+  build.mp4` re-executes the session under a slow orbiting camera and
+  renders it, no screen recording anywhere: your pauses compress by
+  `--speed`, each command lands in a caption band as it runs, and the
+  same session comes out 16:9 for a video or `--aspect 9:16` for a reel
+  without remodelling a thing. A fumbled take never appears, because the
+  journal only holds what was actually done.
+- **The `turntable` command.** One command walks the camera around the
+  model - the selection if there is one - and writes an .mp4: seconds,
+  frame shape (16:9, 9:16, 1:1) and the file are all it asks. Frames
+  render offscreen at 1080p whatever size the window is. ffmpeg does the
+  encoding; without it you get numbered PNGs and the line that assembles
+  them.
+- **A quiet end card.** `--endcard` on a replay video, or the
+  `media.endcard` setting for turntables, closes a clip with a dark
+  card: Built with Serpentine3D, and the address. Off unless you ask.
+
 - **Apparent intersection snaps.** Two curves that pass one over the other
   never meet, so `Int` has nothing to offer at the place they cross on
   screen, and in a Top view that place is very often the one you are

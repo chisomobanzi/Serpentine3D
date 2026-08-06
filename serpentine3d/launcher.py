@@ -48,6 +48,12 @@ def main() -> int:
         from .app import _selftest
         return _selftest()
 
+    if len(sys.argv) > 1 and sys.argv[1] == "replay":
+        # re-execute a session journal: --check is headless, --video needs
+        # a display for GL and imports the whole app
+        from .replay_cli import main as replay_main
+        return replay_main(sys.argv[2:])
+
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     # The default surface format must be set before the QApplication; do it

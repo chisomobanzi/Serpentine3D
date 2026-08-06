@@ -241,6 +241,21 @@ class MainWindow(QMainWindow):
             self._autosave_timer.timeout.connect(self._autosave_tick)
             self._autosave_timer.start()
 
+        # the session journal: every resolved input, written as it happens,
+        # so `serp3d replay` can re-execute the session (core/journal.py)
+        from .core.journal import SessionJournal, JOURNAL_DIR
+        self.journal = SessionJournal.maybe(
+            os.environ.get("SERP3D_JOURNAL_DIR") or JOURNAL_DIR)
+        if self.journal is not None:
+            self.journal.attach(self.processor, self.scene, self.history)
+            # idle edits settle on a quiet moment, not on every mouse move
+            self._journal_timer = QTimer(self)
+            self._journal_timer.setSingleShot(True)
+            self._journal_timer.setInterval(800)
+            self._journal_timer.timeout.connect(self.journal.flush)
+            self.scene.add_listener(
+                lambda: self._journal_timer.start(), ("objects",))
+
         from .ui.spacemouse import SpaceMouseNavigator
         self.spacemouse = SpaceMouseNavigator(self)
 
@@ -1351,6 +1366,8 @@ class MainWindow(QMainWindow):
         try:
             self.history.checkpoint("open")
             self._import_showing_progress(path)
+            if self.journal is not None:
+                self.journal.note_load(path)
             if path.endswith(".serp"):
                 self.ctx.current_path = path
             self.command_line.echo(
@@ -1506,6 +1523,9 @@ class MainWindow(QMainWindow):
     def mark_saved(self):
         self._saved_revision = self.scene.revision
         self.autosave.set_doc_path(getattr(self.ctx, "current_path", None))
+        if self.journal is not None:
+            # a save is a moment the user believed in — anchor the replay
+            self.journal.write_fingerprint()
         self._update_status()
 
     def _autosave_tick(self):
@@ -1585,6 +1605,9 @@ class MainWindow(QMainWindow):
         if self.isVisible():
             self._remember_window()
         self.autosave.clean_exit()
+        if self.journal is not None:
+            self.journal.write_fingerprint()
+            self.journal.close()
         super().closeEvent(ev)
 
     def offer_recovery(self):

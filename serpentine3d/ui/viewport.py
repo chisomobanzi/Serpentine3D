@@ -2677,6 +2677,52 @@ class Viewport(QOpenGLWidget):
         img = self.grabFramebuffer()
         return img.save(path)
 
+    def render_model_image(self, camera, px_w: int, px_h: int):
+        """Render the model through `camera` at any size, offscreen.
+
+        The turntable and the replay renderer draw here: same shaders,
+        same theme, same display mode as the pane, at whatever resolution
+        the clip wants rather than whatever size the window happens to be.
+        """
+        from PySide6.QtOpenGL import QOpenGLFramebufferObject
+        self.makeCurrent()
+        try:
+            fbo = QOpenGLFramebufferObject(
+                px_w, px_h,
+                QOpenGLFramebufferObject.Attachment.CombinedDepthStencil)
+            fbo.bind()
+            GL.glViewport(0, 0, px_w, px_h)
+            self._reset_gl_state()
+            GL.glEnable(GL.GL_BLEND)
+            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+            GL.glEnable(GL.GL_DEPTH_TEST)
+            GL.glClearColor(*theme.VIEWPORT_BG_BOTTOM, 1.0)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+            GL.glDisable(GL.GL_DEPTH_TEST)
+            self._use(self._bg_prog)
+            GL.glUniform3f(self._uloc(self._bg_prog, "uTop"),
+                           *theme.VIEWPORT_BG_TOP)
+            GL.glUniform3f(self._uloc(self._bg_prog, "uBottom"),
+                           *theme.VIEWPORT_BG_BOTTOM)
+            GL.glBindVertexArray(self._bg_vao)
+            GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+            GL.glEnable(GL.GL_DEPTH_TEST)
+            self._sync_gpu()
+            proj = camera.proj_matrix(px_w, px_h)
+            view = camera.view_matrix()
+            mvp = (proj @ view).astype(np.float32)
+            self._draw_objects(mvp, view)
+            img = fbo.toImage()
+            fbo.release()
+            ratio = self.devicePixelRatioF()
+            GL.glViewport(0, 0, int(self.width() * ratio),
+                          int(self.height() * ratio))
+            return img
+        except Exception:                                  # noqa: BLE001
+            return None
+        finally:
+            self.doneCurrent()
+
     def render_detail_image(self, detail, px_w: int, px_h: int):
         """Render a detail's 3D content offscreen (for PDF export)."""
         from PySide6.QtOpenGL import QOpenGLFramebufferObject

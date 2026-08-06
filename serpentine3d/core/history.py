@@ -14,9 +14,15 @@ class History:
         self.scene = scene
         self._undo: list[tuple[str, dict]] = []
         self._redo: list[tuple[str, dict]] = []
+        # the session journal listens here: a checkpoint is what separates
+        # an edit somebody made from geometry that merely changed
+        self.on_checkpoint = None
+        self.on_discard = None
 
     def checkpoint(self, label: str = ""):
         """Record state before a mutating operation."""
+        if self.on_checkpoint is not None:
+            self.on_checkpoint(label)
         self._undo.append((label, self.scene.snapshot()))
         if len(self._undo) > MAX_UNDO:
             self._undo.pop(0)
@@ -26,6 +32,8 @@ class History:
         """Drop the most recent checkpoint (cancelled/no-op command)."""
         if self._undo:
             self._undo.pop()
+            if self.on_discard is not None:
+                self.on_discard()
 
     @property
     def can_undo(self) -> bool:

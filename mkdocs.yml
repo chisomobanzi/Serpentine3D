@@ -54,6 +54,7 @@ nav:
   - How-to guides:
       - Export for 3D printing: howto/3d-printing.md
       - Make a drawing sheet: howto/drawings.md
+      - Make a clip of your work: howto/clips.md
       - Script & automate: howto/scripting.md
       - Drive it with AI (MCP): howto/ai-mcp.md
   - Reference:

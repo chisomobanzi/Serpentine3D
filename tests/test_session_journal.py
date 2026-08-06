@@ -1,0 +1,366 @@
+"""The journal: every session is a recipe that can be cooked again.
+
+A model is the sequence of resolved inputs that made it. The command
+history echoes that sequence; the journal *records* it — every value a
+command actually received, the plane and aim it was resolved against,
+every idle edit the gumball made, every undo — so that a session can be
+re-executed headless and land on the same geometry. What Rhino cannot
+retrofit, this file keeps honest: the recording is only real if the
+replay comes back identical.
+"""
+
+import json
+import math
+import os
+
+import pytest
+
+import serpentine3d.commands  # registers all commands  # noqa: F401
+from serpentine3d.commands.base import CommandContext, CommandProcessor
+from serpentine3d.core import geometry as g
+from serpentine3d.core.cplane import CPlane, PRESETS
+from serpentine3d.core.history import History
+from serpentine3d.core.journal import SessionJournal
+from serpentine3d.core.replay import Replayer, load_events
+from serpentine3d.core.scene import Scene
+from serpentine3d.core.selection import SelectionManager
+
+
+@pytest.fixture
+def rig(tmp_path):
+    """A recording setup: scene, processor and an attached journal."""
+    scene = Scene()
+    selection = SelectionManager(scene)
+    history = History(scene)
+    ctx = CommandContext(scene, selection, history)
+    proc = CommandProcessor(ctx)
+    journal = SessionJournal(str(tmp_path / "session.jsonl"))
+    journal.attach(proc, scene, history)
+    return scene, selection, history, ctx, proc, journal
+
+
+def _events(journal):
+    journal.close()
+    with open(journal.path) as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def _replay(journal):
+    journal.close()
+    r = Replayer(load_events(journal.path))
+    r.run()
+    return r
+
+
+# -- recording --
+
+def test_a_command_writes_its_recipe(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box")
+    proc.provide_text("0,0,0")
+    proc.provide_text("10,8,0")
+    proc.provide_text("5")
+    ev = _events(journal)
+    assert ev[0]["ev"] == "session"
+    cmd = next(e for e in ev if e["ev"] == "cmd")
+    assert cmd["name"] == "box"
+    vals = [e for e in ev if e["ev"] == "val"]
+    assert vals[0]["v"] == {"p": [0.0, 0.0, 0.0]}
+    assert vals[1]["v"] == {"p": [10.0, 8.0, 0.0]}
+    # the height was typed as "5", but what the command received — and
+    # what replays — is the resolved point five up from the far corner
+    assert vals[2]["v"] == {"p": [10.0, 8.0, 5.0]}
+    fin = next(e for e in ev if e["ev"] == "fin")
+    assert fin["ok"] is True
+    assert len(fin["made"]) == 1
+    assert fin["made"][0] in scene.objects
+
+
+def test_a_click_and_typed_text_record_the_same_value(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("line")
+    proc.provide((1.0, 2.0, 3.0))              # a click, already resolved
+    proc.provide_text("4,5,6")                 # typed
+    ev = _events(journal)
+    vals = [e["v"] for e in ev if e["ev"] == "val"]
+    assert vals == [{"p": [1.0, 2.0, 3.0]}, {"p": [4.0, 5.0, 6.0]}]
+
+
+def test_a_keyword_answer_is_recorded_as_itself(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("arc center")
+    proc.provide_text("0,0,0")
+    proc.provide_text("10,0,0")
+    proc.provide_text("90")
+    ev = _events(journal)
+    vals = [e["v"] for e in ev if e["ev"] == "val"]
+    assert vals[0] == {"s": "Center"}
+    assert vals[-1] == {"n": 90.0}
+
+
+def test_an_unknown_command_writes_nothing(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("no_such_thing")
+    assert [e for e in _events(journal) if e["ev"] == "cmd"] == []
+
+
+def test_a_selection_answer_records_object_ids(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    box_id = scene.all()[0].id
+    sel.set([box_id])
+    proc.run("delete")                         # consumes the preselection
+    assert len(scene.all()) == 0
+    ev = _events(journal)
+    picked = [e["v"] for e in ev if e["ev"] == "val" and "ids" in e["v"]]
+    assert picked and picked[0]["ids"] == [box_id]
+
+
+def test_the_journal_survives_a_command_that_dies(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("line")
+    proc.provide_text("0,0,0")
+    proc.provide_text("0,0,0")                 # coincident: GeometryError
+    ev = _events(journal)
+    fin = next(e for e in ev if e["ev"] == "fin")
+    assert fin["ok"] is False
+
+
+# -- idle edits (the gumball's route) --
+
+def test_an_idle_edit_rides_as_a_delta(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    box = scene.all()[0]
+    hist.checkpoint("gumball move")            # what a drag start does
+    scene.replace_shape(box.id, g.translate(box.shape, (5.0, 0.0, 0.0)))
+    journal.flush()
+    ev = _events(journal)
+    assert any(e["ev"] == "ckpt" and e["label"] == "gumball move"
+               for e in ev)
+    edit = next(e for e in ev if e["ev"] == "edit")
+    assert [c[0] for c in edit["chg"]] == [box.id]
+
+
+def test_a_change_without_a_checkpoint_is_not_an_edit(rig):
+    """Deferred-shape conversion swaps geometry in place without any user
+    act; only a change that arrived with an undo checkpoint is a real
+    edit, so the conversion must not bloat the journal."""
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    box = scene.all()[0]
+    scene.replace_shape(box.id, g.translate(box.shape, (1.0, 0.0, 0.0)))
+    journal.flush()                            # no checkpoint came with it
+    assert [e for e in _events(journal) if e["ev"] == "edit"] == []
+
+
+def test_a_cancelled_drag_leaves_no_edit(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    box = scene.all()[0]
+    hist.checkpoint("gumball move")
+    scene.replace_shape(box.id, g.translate(box.shape, (5.0, 0.0, 0.0)))
+    scene.replace_shape(box.id, box.shape)     # drag went back to zero
+    hist.discard_checkpoint()                  # what cancel_drag does
+    journal.flush()
+    ev = _events(journal)
+    assert [e for e in ev if e["ev"] == "edit"] == []
+    assert [e for e in ev if e["ev"] == "ckpt"] == []
+
+
+# -- replay --
+
+def _volumes(scene):
+    return sorted(round(g.volume(o.shape), 4) for o in scene.all()
+                  if o.kind == "solid")
+
+
+def test_the_journal_replays_to_the_same_scene(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    proc.run("sphere 2point 20,0,0 30,0,0")
+    proc.run("circle 0,30,0 5")
+    r = _replay(journal)
+    assert len(r.scene.all()) == len(scene.all()) == 3
+    assert _volumes(r.scene) == _volumes(scene)
+    assert sorted(o.kind for o in r.scene.all()) == \
+        sorted(o.kind for o in scene.all())
+
+
+def test_a_selection_replays_by_new_identity(rig):
+    """Replayed ids differ; the journal's id map has to carry the answer
+    across, or the wrong object dies."""
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    proc.run("box 20,0,0 30,10,0 10")
+    keep_vol = round(g.volume(scene.all()[1].shape), 4)
+    sel.set([scene.all()[0].id])
+    proc.run("delete")
+    r = _replay(journal)
+    assert len(r.scene.all()) == 1
+    assert round(g.volume(r.scene.all()[0].shape), 4) == keep_vol
+
+
+def test_undo_and_redo_replay(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    proc.run("box 20,0,0 30,10,0 10")
+    proc.run("undo")
+    r = _replay(journal)
+    assert len(r.scene.all()) == len(scene.all()) == 1
+
+
+def test_a_cancelled_command_replays_cancelled(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("polyline")
+    proc.provide_text("0,0,0")
+    proc.provide_text("10,0,0")
+    proc.cancel()
+    proc.run("box 0,0,0 5,5,0 5")
+    r = _replay(journal)
+    assert len(r.scene.all()) == len(scene.all()) == 1
+    assert r.scene.all()[0].kind == "solid"
+
+
+def test_an_idle_edit_replays(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    box = scene.all()[0]
+    hist.checkpoint("gumball move")
+    scene.replace_shape(box.id, g.translate(box.shape, (5.0, 0.0, 0.0)))
+    journal.flush()
+    r = _replay(journal)
+    mn, mx = g.bbox(r.scene.all()[0].shape)
+    assert mn[0] == pytest.approx(5.0, abs=1e-6)
+    assert mx[0] == pytest.approx(15.0, abs=1e-6)
+
+
+def test_an_undo_over_an_idle_edit_replays(rig):
+    """The delta checkpoints during replay exactly as the drag did live,
+    or the undo peels the wrong layer."""
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    box = scene.all()[0]
+    hist.checkpoint("gumball move")
+    scene.replace_shape(box.id, g.translate(box.shape, (5.0, 0.0, 0.0)))
+    journal.flush()
+    proc.run("undo")                           # back to the unmoved box
+    r = _replay(journal)
+    mn, _mx = g.bbox(r.scene.all()[0].shape)
+    assert mn[0] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_the_plane_travels_with_the_point(rig):
+    """A box drawn on a Front plane must replay on a Front plane, even
+    though the replay has no viewport to ask."""
+    scene, sel, hist, ctx, proc, journal = rig
+
+    class FrontPane:
+        def active_cplane(self):
+            return PRESETS["front"]()
+    ctx.viewport = FrontPane()
+    proc.run("box 0,0,0 10,0,10 5")            # corners spread on the plane
+    mn_live, mx_live = g.bbox(scene.all()[0].shape)
+    r = _replay(journal)
+    mn, mx = g.bbox(r.scene.all()[0].shape)
+    assert mn == pytest.approx(mn_live, abs=1e-6)
+    assert mx == pytest.approx(mx_live, abs=1e-6)
+
+
+def test_replay_skips_commands_that_write_files(rig, tmp_path):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    out = str(tmp_path / "out.serp")
+    proc.run("save")
+    proc.provide_text(out)
+    assert os.path.exists(out)
+    os.unlink(out)
+    r = _replay(journal)
+    assert len(r.scene.all()) == 1
+    assert not os.path.exists(out)             # replay must not write it
+
+
+def test_a_menu_open_replays_as_a_load(rig, tmp_path):
+    scene, sel, hist, ctx, proc, journal = rig
+    from serpentine3d import fileio
+    donor = Scene()
+    donor.add(g.make_box((0, 0, 0), 4.0, 4.0, 4.0))
+    path = str(tmp_path / "donor.serp")
+    fileio.export_file(donor, path)
+    # what MainWindow._open_path does: checkpoint, import, then tell the
+    # journal, so the import is one named event rather than a BREP dump
+    hist.checkpoint("open")
+    fileio.import_file(scene, path)
+    journal.note_load(path)
+    proc.run("box 20,0,0 30,10,0 10")
+    r = _replay(journal)
+    assert len(r.scene.all()) == len(scene.all()) == 2
+    assert _volumes(r.scene) == _volumes(scene)
+
+
+# -- verification --
+
+def test_the_fingerprint_confirms_a_faithful_replay(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    proc.run("sphere 20,0,0 5")
+    journal.write_fingerprint()
+    journal.close()
+    r = Replayer(load_events(journal.path))
+    r.run()
+    assert r.verify() == []
+
+
+def test_the_fingerprint_catches_a_divergence(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    journal.write_fingerprint()
+    journal.close()
+    events = load_events(journal.path)
+    fp = next(e for e in events if e["ev"] == "fp")
+    fp["objects"][0]["size"] = 999.0           # lie about the volume
+    r = Replayer(events)
+    r.run()
+    assert r.verify() != []
+
+
+# -- the overrides that make a headless replay honest --
+
+def test_the_context_obeys_replay_overrides():
+    scene = Scene()
+    ctx = CommandContext(scene, SelectionManager(scene), History(scene))
+    front = PRESETS["front"]()
+    ctx.replay_cplane = front
+    ctx.replay_aim = ((0.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+    assert ctx.cplane is front
+    assert ctx.aim_direction() == ((0.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+
+
+def test_the_window_keeps_a_journal_of_its_own(tmp_path, monkeypatch):
+    """The whole loop through the real app: model, close, replay, match."""
+    monkeypatch.setenv("SERP3D_JOURNAL_DIR", str(tmp_path))
+    monkeypatch.setenv("SERP3D_CONFIG", str(tmp_path / "cfg.json"))
+    from serpentine3d.app import MainWindow
+    w = MainWindow()
+    w.viewport.resize(640, 480)
+    assert w.journal is not None
+    w.processor.run("box 0,0,0 10,10,0 10")
+    w.processor.run("sphere 30,0,0 5")
+    live_vols = _volumes(w.scene)
+    w.mark_saved()
+    w.close()                                  # fingerprints and closes it
+    files = [f for f in os.listdir(tmp_path) if f.endswith(".jsonl")]
+    assert len(files) == 1
+    r = Replayer(load_events(str(tmp_path / files[0])))
+    r.run()
+    assert r.verify() == []
+    assert _volumes(r.scene) == live_vols
+
+
+def test_journal_can_be_disabled_by_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("SERP3D_NO_JOURNAL", "1")
+    assert SessionJournal.maybe(str(tmp_path)) is None
+    monkeypatch.delenv("SERP3D_NO_JOURNAL")
+    j = SessionJournal.maybe(str(tmp_path))
+    assert j is not None
+    j.close()

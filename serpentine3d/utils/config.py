@@ -43,6 +43,9 @@ DEFAULTS = {
         "perp": False,
         "near": False,
     },
+    "media": {
+        "endcard": False,   # sign turntable/replay clips with the end card
+    },
     "grid_snap": False,
     "grid_snap_step": 1.0,
     "default_units": "mm",

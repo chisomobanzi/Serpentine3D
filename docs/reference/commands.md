@@ -17,6 +17,12 @@ F1 opens this list inside the app). Aliases in parentheses.
 |---|---|
 | `camera` (`cam`) | Camera |
 
+## Capture
+
+| Command | Does |
+|---|---|
+| `turntable` | Orbit the camera once around the work and write a video clip; |
+
 ## Curves
 
 | Command | Does |

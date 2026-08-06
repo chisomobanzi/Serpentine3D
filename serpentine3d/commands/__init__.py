@@ -1,7 +1,8 @@
 """Command registry: importing this package registers all built-in commands."""
 
 from . import (  # noqa: F401
-    base, boolean, camera_cmds, curves, deform_cmds, drafting, edit, file,
+    base, boolean, camera_cmds, capture, curves, deform_cmds, drafting,
+    edit, file,
     help_cmd, organize,
     select, solids,
     solids_edit, surfaces, surfaces2,
