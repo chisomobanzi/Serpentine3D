@@ -49,6 +49,12 @@
 
 ### Changed
 
+- **The `+` beside the Model tab says what it makes.** A drafting sheet is
+  the one thing in the app you would never guess was behind a bare plus, so
+  it reads `+  New layout` until you have made one and goes back to a `+`
+  once you have. Its menu and tooltip call them layouts too, which is what
+  the tabs have always called them.
+
 - **Ctrl and the orbit button is now what orbits an ortho view.** Shift used
   to do it, and Shift is held for so much else while you draw that Top kept
   swinging round into an axonometric view when nobody asked. Shift now pans
@@ -56,6 +62,14 @@
   orbits in perspective and pans in Top, Front and Right.
 
 ### Fixed
+
+- **The gap between the Model tab and the button next to it.** A tab bar
+  reserves room for the scroll buttons it might one day need and asks for
+  that room as a minimum, so a strip holding the one `Model` tab still
+  demanded fifty pixels more than the tab, and there they sat. It only
+  needs that floor when the tabs are wider than the strip, which with one
+  tab they are not. Enough sheets to fill the strip and the scroll buttons
+  still turn up.
 
 - **Text picked out of the command history can now be copied.** You could
   always drag a selection across the echoed history and it lit up like a

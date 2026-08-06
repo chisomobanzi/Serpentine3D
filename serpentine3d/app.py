@@ -11,7 +11,8 @@ from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
-    QMenu, QMessageBox, QProgressDialog, QToolBar, QVBoxLayout, QWidget,
+    QMenu, QMessageBox, QProgressDialog, QTabBar, QToolBar, QVBoxLayout,
+    QWidget,
 )
 
 from . import commands as cmd_pkg
@@ -79,9 +80,8 @@ class MainWindow(QMainWindow):
         self.history = History(self.scene)
 
         # widgets
-        from PySide6.QtWidgets import QTabBar
         self.viewport = Viewport(self.scene, self.selection, config=self.cfg)
-        self.space_tabs = QTabBar()
+        self.space_tabs = _SpaceTabs()
         self.space_tabs.setExpanding(False)
         self.space_tabs.setDrawBase(False)
         self.space_tabs.setStyleSheet(
@@ -1573,8 +1573,9 @@ class MainWindow(QMainWindow):
         hl.addWidget(self.space_tabs)
 
         add = QToolButton()
-        add.setText("+")
-        add.setToolTip("New drafting sheet")
+        # the strip is built after the first refresh, so it starts itself
+        add.setText("+" if self.scene.layouts else "+  New layout")
+        add.setToolTip("New layout: a paper sheet to draft views on")
         add.setAutoRaise(True)
         add.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         add.setStyleSheet(
@@ -1585,10 +1586,10 @@ class MainWindow(QMainWindow):
         add.clicked.connect(lambda: self._new_sheet("A3"))
         menu = QMenu(add)
         for size in ("A4", "A3", "A2", "A1", "Letter", "Tabloid"):
-            menu.addAction(f"New sheet — {size}",
+            menu.addAction(f"New layout — {size}",
                            lambda s=size: self._new_sheet(s))
         menu.addSeparator()
-        menu.addAction("New sheet…  (choose size / portrait)",
+        menu.addAction("New layout…  (choose size / portrait)",
                        lambda: self.run_command("layout"))
         add.setMenu(menu)
         self.add_space_btn = add
@@ -1618,6 +1619,12 @@ class MainWindow(QMainWindow):
         self._tabs_updating = True
         want = [("model", "Model")] + [(lay.id, lay.name)
                                        for lay in self.scene.layouts]
+        # A drafting sheet is the one thing you would never guess was
+        # behind a `+`, so the button says so until you have made one.
+        # Runs before the strip is built, on the first call of all.
+        add = getattr(self, "add_space_btn", None)
+        if add is not None:
+            add.setText("+" if self.scene.layouts else "+  New layout")
         while self.space_tabs.count() > len(want):
             self.space_tabs.removeTab(self.space_tabs.count() - 1)
         while self.space_tabs.count() < len(want):
@@ -1881,6 +1888,24 @@ class MainWindow(QMainWindow):
 
 
 from PySide6.QtWidgets import QWidget
+
+
+class _SpaceTabs(QTabBar):
+    """The Model / sheet tabs, asking for no more room than the tabs need.
+
+    A tab bar's minimum width is the room its scroll buttons would want,
+    which it asks for whether or not there is anything to scroll. Holding
+    the one `Model` tab it still demanded fifty pixels more than the tab,
+    and the strip put those pixels between the tab and the `+` next to it.
+    Where the tabs are narrower than that floor there is nothing to scroll,
+    so the floor is the tabs; where they are wider the floor stands and the
+    scroll buttons still turn up when the strip runs out of room.
+    """
+
+    def minimumSizeHint(self):
+        floor = super().minimumSizeHint()
+        fits = self.sizeHint()
+        return fits if fits.width() < floor.width() else floor
 
 
 class _EmptyTitleBar(QWidget):
