@@ -82,3 +82,10 @@ rm -rf "$STAGING"
 
 SIZE=$(du -h "$DMG" | cut -f1)
 echo "DMG OK: $(pwd)/$DMG ($SIZE)"
+
+# Put the venv back on the checkout. The install above is a copy of the
+# source, so once the branch moves on, anything run out of that venv is
+# quietly still the last build's code, which is a bad way to test a fix.
+# The bundle is made by now, and the next build starts by replacing this
+# with real files again, so PyInstaller never sees it.
+"$PY" -m pip install --quiet --no-deps -e ../.. || true
