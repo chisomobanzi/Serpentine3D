@@ -73,9 +73,9 @@ def test_the_layout_you_had_is_what_comes_back(win):
     rebuilding the default grid on the way back would throw it away every
     time you glanced at one pane full-size."""
     saved = []
-    real = win.restoreState
-    win.restoreState = lambda state, *a: (saved.append(bytes(state)),
-                                          real(state, *a))[1]
+    real = win.viewport_area.restoreState
+    win.viewport_area.restoreState = lambda state, *a: (
+        saved.append(bytes(state)), real(state, *a))[1]
 
     win.toggle_maximized_viewport(win.viewport)
     taken = bytes(win._maximized_state)

@@ -47,6 +47,10 @@ def sheet():
     lay.details.append(det)
     w.scene.layouts.append(lay)
     w.switch_space(lay.id)
+    # The window is never shown, so nothing lays the panes out and the
+    # pane keeps whatever size it was born with. Pixel distances are the
+    # whole point of these tests, so say which size they are measured in.
+    w.viewport.resize(640, 480)
     lv = w.viewport.layout_view
     lv.fit()
     lv._fitted_for = lay.id

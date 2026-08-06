@@ -275,8 +275,8 @@ def cmd_zoomwindow(ctx):
 @command("newviewport", aliases=("newvp", "splitview"), mutates=False)
 def cmd_newviewport(ctx):
     """Open an extra live viewport in a dockable panel — drag its title
-    bar to rearrange or tear it off to float; space tabs switch what the
-    focused pane shows (model and paper sheets can sit side by side)."""
+    bar to rearrange or tear it off to float; a pane's own title menu picks
+    what it shows, so a paper sheet can sit beside the model."""
     win = ctx.window
     if win is None:
         ctx.echo("Extra viewports need the GUI.")
@@ -295,7 +295,7 @@ def cmd_newviewport(ctx):
                          if lay.name == pick)
     win.new_viewport_dock(where, space)
     ctx.echo("New viewport opened — drag its title bar to rearrange; "
-             "click it, then a space tab, to change what it shows.")
+             "its title menu picks what it shows.")
 
 
 @command("floatviewport", aliases=("floatvp",), mutates=False)

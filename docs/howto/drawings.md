@@ -7,6 +7,17 @@ Serpentine3D has two spaces, like Rhino:
   holds *detail views* (windows into the model), plus annotations that
   live on the paper.
 
+The tab strip along the bottom switches workspaces. **Model** holds the
+panes you model in; a sheet opens as the sheet, filling the viewport area.
+Each tab remembers the arrangement of panes you left it in, splitters
+included, and Properties, Layers and Display stay where you put them
+throughout.
+
+A space belongs to each pane as well, so a pane's own title menu lists
+Model and every sheet in the drawing. Point one pane at a sheet and leave
+the others on the model when you want the drawing and the thing it draws
+side by side. Rhino makes you leave model space to look at a sheet.
+
 <figure markdown="span">
   ![A drawing sheet with dimensioned detail views](../assets/img/drawing-sheet.png){ width="720" }
   <figcaption>A sheet with plan / elevation / perspective details, dimensions

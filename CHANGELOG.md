@@ -4,6 +4,14 @@
 
 ### Added
 
+- **A pane can show a sheet while the panes next to it show the model.**
+  The tabs along the bottom are workspaces now, but a space is still a
+  property of a pane underneath them, so a pane's own title menu lists
+  Model and every sheet in the drawing. Point one pane at Layout 1 and
+  leave the other three on the model, and the Model tab keeps that
+  arrangement for you. Rhino makes you leave model space to look at a
+  sheet.
+
 - **The gumball extrudes.** It is already standing on the line you want a
   surface off, with an arrow pointing the way, so the only thing between you
   and the surface was having to leave it, type `extrude` and pick the line
@@ -62,6 +70,24 @@
   orbits in perspective and pans in Top, Front and Right.
 
 ### Fixed
+
+- **A layout is a workspace of its own.** Pressing `+ New layout` turned
+  whichever pane you happened to be in into paper and left the other three
+  showing the model beside it, which is not a drafting sheet. Press it
+  again and a second pane went the same way. And when the pane you were in
+  was tabbed away behind another one, the button appeared to do nothing at
+  all, which is how it was reported. A space was a setting on a single
+  pane, while the strip along the bottom looked like it spoke for the
+  window, and the two never agreed. Each tab is an arrangement of panes
+  now. Model holds the ones you model in, a sheet opens as the sheet
+  filling the area, and every tab hands back the arrangement you left it
+  in, splitters and all. Properties, Layers and Display sit still through
+  all of it.
+
+- **The `+` button asks which paper size.** Clicking the wide part of it
+  made an A3 and only the small arrow beside it offered a choice, so the
+  size you got depended on which half of a thirty pixel button you hit.
+  The whole button opens the menu now.
 
 - **The gap between the Model tab and the button next to it.** A tab bar
   reserves room for the scroll buttons it might one day need and asks for

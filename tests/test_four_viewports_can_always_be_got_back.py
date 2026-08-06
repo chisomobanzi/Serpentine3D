@@ -37,7 +37,7 @@ def _showing(w):
 
 def test_the_quad_starts_out_as_four_panes_side_by_side(win):
     assert len(_showing(win)) == 4
-    assert not win.tabifiedDockWidgets(win._primary_dock)
+    assert not win.viewport_area.tabifiedDockWidgets(win._primary_dock)
 
 
 def test_it_reopens_the_pane_you_closed_with_the_x(win):
@@ -58,10 +58,10 @@ def test_it_reopens_a_side_pane_you_closed(win):
 def test_it_pulls_the_panes_back_out_of_a_tab_stack(win):
     """Two panes dragged onto each other become tabs, and a tab stack is
     not four viewports however many of them are in it."""
-    win.tabifyDockWidget(win._primary_dock, win.aux_docks[0])
-    assert win.tabifiedDockWidgets(win._primary_dock)
+    win.viewport_area.tabifyDockWidget(win._primary_dock, win.aux_docks[0])
+    assert win.viewport_area.tabifiedDockWidgets(win._primary_dock)
     win.set_view_layout("quad")
-    assert not win.tabifiedDockWidgets(win._primary_dock)
+    assert not win.viewport_area.tabifiedDockWidgets(win._primary_dock)
     assert len(_showing(win)) == 4
 
 
@@ -81,7 +81,7 @@ def test_a_single_view_still_leaves_you_the_one_pane(win):
 
 
 def test_the_panes_keep_the_views_they_are_named_for(win):
-    win.tabifyDockWidget(win._primary_dock, win.aux_docks[0])
+    win.viewport_area.tabifyDockWidget(win._primary_dock, win.aux_docks[0])
     win.set_view_layout("quad")
     assert [v._view_name for v in win.aux_viewports] == \
         ["top", "front", "right"]

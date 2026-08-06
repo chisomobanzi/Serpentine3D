@@ -105,17 +105,32 @@ class MainWindow(QMainWindow):
         self._maximized_vp = None
         self._maximized_state = None
         # Every viewport lives in a dock, so any of them — the main one
-        # included — can be dragged out to float or re-docked. The central
-        # widget collapses to nothing so the docks fill the whole window.
+        # included — can be dragged out to float or re-docked. They dock
+        # into a window of their own, filling this one's middle, rather
+        # than into this one: an arrangement of panes is then a thing that
+        # can be saved and put back by itself, which is what a space tab
+        # hands over, and Properties and Layers stay out of it. Qt's state
+        # is one blob per window, so panes and panels sharing a window
+        # would mean every tab carrying its own opinion of where the
+        # panels go, and moving one would move it back on the next switch.
+        self.viewport_area = QMainWindow()
+        self.viewport_area.setDockNestingEnabled(True)
+        self.viewport_area.setWindowFlags(Qt.WindowType.Widget)
         self.setDockNestingEnabled(True)
         self._central_stub = QWidget()
         self._central_stub.setFixedSize(0, 0)
-        self.setCentralWidget(self._central_stub)
+        self.viewport_area.setCentralWidget(self._central_stub)
         self._central_stub.hide()   # visible, it still reserves layout space
+        self.setCentralWidget(self.viewport_area)
+        # The arrangement of panes each space tab last had, as saveState
+        # bytes: splitters the user dragged are part of an arrangement, and
+        # nothing shorter than the blob remembers those.
+        self.space = "model"
+        self._space_states: dict = {}
         self._primary_dock = self._dock_viewport(
             self.viewport, "Perspective", closable=False)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,
-                           self._primary_dock)
+        self.viewport_area.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea,
+                                         self._primary_dock)
 
         from .ui.osnap_bar import OsnapBar
         self.command_line = CommandLine()
@@ -244,8 +259,13 @@ class MainWindow(QMainWindow):
     @property
     def active_viewport(self):
         vp = self._active_vp
-        if vp is not self.viewport and not self._pane_alive(vp):
-            self._active_vp = self.viewport      # its dock was closed
+        if not self._pane_alive(vp):
+            # Its dock was closed. The primary is the usual answer, but on a
+            # sheet's tab the primary is the pane that got put away, so fall
+            # back to something the user can actually see.
+            alive = self.all_viewports()
+            self._active_vp = (self.viewport if self.viewport in alive
+                               else alive[0] if alive else self.viewport)
         return self._active_vp
 
     def _set_active_viewport(self, vp):
@@ -253,16 +273,20 @@ class MainWindow(QMainWindow):
             return
         self._active_vp = vp
         self.ctx.viewport = vp                   # commands act on this pane
-        self._refresh_space_tabs()
         self.properties.refresh()                # and so does the panel
         self.display_panel.refresh()             # which pane's settings
 
-    def _dock_viewport(self, vp, title: str, closable: bool = True):
+    def _dock_viewport(self, vp, title: str, closable: bool = True,
+                       name: str | None = None):
         """Wrap a viewport in a floatable/movable QDockWidget so it can be
         torn off. Not closable for the primary — there's always one view."""
-        dock = QDockWidget(title, self)
-        self._dock_seq = getattr(self, "_dock_seq", 0) + 1
-        dock.setObjectName(f"viewportDock{self._dock_seq}")
+        dock = QDockWidget(title, self.viewport_area)
+        if name is None:
+            self._dock_seq = getattr(self, "_dock_seq", 0) + 1
+            name = f"viewportDock{self._dock_seq}"
+        # A sheet's pane is named after the sheet, so the arrangement saved
+        # for that tab still finds it in a later session.
+        dock.setObjectName(name)
         feats = (QDockWidget.DockWidgetFeature.DockWidgetMovable
                  | QDockWidget.DockWidgetFeature.DockWidgetFloatable)
         if closable:
@@ -418,9 +442,8 @@ class MainWindow(QMainWindow):
                  "Left": Qt.DockWidgetArea.LeftDockWidgetArea,
                  "Top": Qt.DockWidgetArea.TopDockWidgetArea,
                  "Bottom": Qt.DockWidgetArea.BottomDockWidgetArea}
-        self.addDockWidget(areas.get(area,
-                                     Qt.DockWidgetArea.RightDockWidgetArea),
-                           dock)
+        self.viewport_area.addDockWidget(
+            areas.get(area, Qt.DockWidgetArea.RightDockWidgetArea), dock)
         if area == "Floating":
             dock.setFloating(True)
             dock.resize(860, 620)
@@ -507,6 +530,18 @@ class MainWindow(QMainWindow):
         for mode in vp.DISPLAY_MODES:
             toggle(mode.capitalize(), vp.display_mode == mode,
                    lambda m=mode: vp.set_display_mode(m))
+        if self.scene.layouts:
+            # A space tab swaps the whole arrangement, but a space is still
+            # a property of one pane underneath, and this is where you say
+            # so: a sheet in this pane and the model in the next one, which
+            # is the arrangement Rhino has no way to make. Nothing to
+            # choose between until there is a sheet, so nothing is offered.
+            menu.addSeparator()
+            toggle("Model", vp.space == "model",
+                   lambda: self.set_pane_space(vp, "model"))
+            for lay in self.scene.layouts:
+                toggle(lay.name, vp.space == lay.id,
+                       lambda i=lay.id: self.set_pane_space(vp, i))
         menu.addSeparator()
         self._action(menu, "Zoom Extents", None, vp.zoom_extents)
         menu.addSeparator()
@@ -569,9 +604,12 @@ class MainWindow(QMainWindow):
         menu.exec(QCursor.pos())
 
     def all_viewports(self) -> list:
-        return ([self.viewport]
-                + [v for v in self.aux_viewports if self._pane_alive(v)]
-                + [v for v in self.dock_viewports if self._pane_alive(v)])
+        """Every pane you can see. The primary is asked the same question
+        as the rest of them: on a sheet's tab it is the one put away."""
+        alive = ([v for v in [self.viewport] if self._pane_alive(v)]
+                 + [v for v in self.aux_viewports if self._pane_alive(v)]
+                 + [v for v in self.dock_viewports if self._pane_alive(v)])
+        return alive or [self.viewport]
 
     def set_view_layout(self, mode: str):
         """'single' or 'quad' (Top / Front / Right alongside Perspective).
@@ -608,16 +646,17 @@ class MainWindow(QMainWindow):
                 # that is already in place resets the sizes around it
                 if dock.isFloating():
                     dock.setFloating(False)   # back into the window it left
-                if not dock.isVisibleTo(self):
+                if not dock.isVisibleTo(self.viewport_area):
                     dock.show()
             # Splitting is what takes a pane out of a tab stack, so these run
             # whether or not the panes were built just now.
-            self.splitDockWidget(self._primary_dock, top,
-                                 Qt.Orientation.Horizontal)   # persp | top
-            self.splitDockWidget(self._primary_dock, front,
-                                 Qt.Orientation.Vertical)     # persp / front
-            self.splitDockWidget(top, right,
-                                 Qt.Orientation.Vertical)     # top   / right
+            va = self.viewport_area
+            va.splitDockWidget(self._primary_dock, top,
+                               Qt.Orientation.Horizontal)     # persp | top
+            va.splitDockWidget(self._primary_dock, front,
+                               Qt.Orientation.Vertical)       # persp / front
+            va.splitDockWidget(top, right,
+                               Qt.Orientation.Vertical)       # top   / right
             for aux in self.aux_viewports:
                 aux.show()
                 aux.zoom_extents()
@@ -630,7 +669,7 @@ class MainWindow(QMainWindow):
             # the one pane a single view is has to be one you can see
             if self._primary_dock.isFloating():
                 self._primary_dock.setFloating(False)
-            if not self._primary_dock.isVisibleTo(self):
+            if not self._primary_dock.isVisibleTo(self.viewport_area):
                 self._primary_dock.show()
         self.viewport.update()
 
@@ -664,7 +703,7 @@ class MainWindow(QMainWindow):
             state, self._maximized_state = self._maximized_state, None
             self._maximized_vp = None
             if state is not None:
-                self.restoreState(state)
+                self.viewport_area.restoreState(state)
             return False
 
         vp = vp if vp is not None else self.active_viewport
@@ -679,7 +718,7 @@ class MainWindow(QMainWindow):
             # layout that is on screen already.
             return False
 
-        self._maximized_state = self.saveState()
+        self._maximized_state = self.viewport_area.saveState()
         self._maximized_vp = vp
         for other in others:
             other.hide()
@@ -693,10 +732,11 @@ class MainWindow(QMainWindow):
         top, front, right = self.aux_docks
         h = Qt.Orientation.Horizontal
         v = Qt.Orientation.Vertical
-        self.resizeDocks([self._primary_dock, top], [1000, 1000], h)  # columns
-        self.resizeDocks([front, right], [1000, 1000], h)
-        self.resizeDocks([self._primary_dock, front], [1000, 1000], v)  # rows
-        self.resizeDocks([top, right], [1000, 1000], v)
+        va = self.viewport_area
+        va.resizeDocks([self._primary_dock, top], [1000, 1000], h)  # columns
+        va.resizeDocks([front, right], [1000, 1000], h)
+        va.resizeDocks([self._primary_dock, front], [1000, 1000], v)  # rows
+        va.resizeDocks([top, right], [1000, 1000], v)
         # Asking four panes for 1000 px each in a smaller window squeezes
         # the side panel down to its minimum on the way past, so put it back.
         self._set_panel_width(self._panel_width)
@@ -1484,7 +1524,15 @@ class MainWindow(QMainWindow):
         state = self.cfg.get("window", "state", default="")
         if state and self.restoreState(QByteArray.fromBase64(state.encode())):
             self._docks_restored = True
-        if not any(d.isVisibleTo(self) for d in self._viewport_docks()):
+        # Panels and panes are saved apart because they are put back apart:
+        # the panels belong to the window and the panes to whichever space
+        # tab was showing them.
+        panes = self.cfg.get("window", "panes", default="")
+        if panes and self.viewport_area.restoreState(
+                QByteArray.fromBase64(panes.encode())):
+            self._docks_restored = True
+        if not any(d.isVisibleTo(self.viewport_area)
+                   for d in self._viewport_docks()):
             # A session that ended with every pane shut is restored exactly,
             # and a window that opens with nowhere to draw is no use at all.
             self.set_view_layout(
@@ -1495,9 +1543,17 @@ class MainWindow(QMainWindow):
                      bytes(self.saveGeometry().toBase64()).decode())
         self.cfg.set("window", "state",
                      bytes(self.saveState().toBase64()).decode())
+        # The model arrangement, not whichever sheet happens to be open, so
+        # a session that ended on a layout still opens on the model panes.
+        model = (self.viewport_area.saveState() if self.space == "model"
+                 else self._space_states.get("model"))
+        if model is not None:
+            self.cfg.set("window", "panes",
+                         bytes(model.toBase64()).decode())
         self.cfg.set("window", "layout",
                      "quad" if self.aux_docks
-                     and self.aux_docks[0].isVisibleTo(self) else "single")
+                     and self.aux_docks[0].isVisibleTo(self.viewport_area)
+                     else "single")
         self.cfg.save()
 
     def closeEvent(self, ev):
@@ -1577,13 +1633,16 @@ class MainWindow(QMainWindow):
         add.setText("+" if self.scene.layouts else "+  New layout")
         add.setToolTip("New layout: a paper sheet to draft views on")
         add.setAutoRaise(True)
-        add.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        # The whole button opens the menu. It used to make an A3 on click
+        # and only offer a size from the little arrow, so the size you got
+        # depended on which half of a 30-pixel button you hit, and the one
+        # question worth asking went unasked.
+        add.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         add.setStyleSheet(
             "QToolButton { padding: 1px 8px; background: #212226;"
             " border: 1px solid #1b1c1f; color: #b9b9bd; font-size: 14px; }"
             "QToolButton:hover { background: #2f3035; color: #e8e8ea; }"
-            "QToolButton::menu-button { border: none; width: 13px; }")
-        add.clicked.connect(lambda: self._new_sheet("A3"))
+            "QToolButton::menu-indicator { width: 9px; }")
         menu = QMenu(add)
         for size in ("A4", "A3", "A2", "A1", "Letter", "Tabloid"):
             menu.addAction(f"New layout — {size}",
@@ -1629,33 +1688,74 @@ class MainWindow(QMainWindow):
             self.space_tabs.removeTab(self.space_tabs.count() - 1)
         while self.space_tabs.count() < len(want):
             self.space_tabs.addTab("")
+        live = [w[0] for w in want]
+        for stale in [s for s in list(self._space_states) if s not in live]:
+            self._forget_space(stale)
+        if self.space not in live:
+            # The sheet you were standing on was deleted, by undo or by the
+            # `layout` command. Go back to the model, which is the one tab
+            # that cannot go. Clearing the flag first: switch_space ends by
+            # calling this again, and it would otherwise find it set.
+            self._tabs_updating = False
+            self.switch_space("model")
+            return
         current_index = 0
         for i, (space_id, label) in enumerate(want):
             self.space_tabs.setTabText(i, label)
             self.space_tabs.setTabData(i, space_id)
-            if space_id == self.active_viewport.space:
+            if space_id == self.space:
                 current_index = i
-        if self.viewport.space != "model" and \
-                self.viewport.space not in [w[0] for w in want]:
-            # active layout was deleted (e.g. via undo)
-            self.viewport.set_space("model")
-            current_index = 0
         self.space_tabs.setCurrentIndex(current_index)
         self._tabs_updating = False
+
+    def _space_exists(self, space_id: str) -> bool:
+        return space_id == "model" or any(l.id == space_id
+                                          for l in self.scene.layouts)
+
+    def _forget_space(self, space_id: str):
+        """Drop what was remembered about a sheet that has gone."""
+        self._space_states.pop(space_id, None)
 
     def _space_tab_changed(self, index: int):
         if self._tabs_updating or index < 0:
             return
         space_id = self.space_tabs.tabData(index)
-        if space_id and space_id != self.active_viewport.space:
+        if space_id and space_id != self.space:
             self.switch_space(space_id)
 
     def switch_space(self, space_id: str):
+        """Show the arrangement of panes that belongs to a space tab.
+
+        A space used to be a setting on one pane and nothing more, so
+        opening a sheet turned whichever pane happened to be active into
+        paper and left the others in model space beside it — and if that
+        pane was tabbed away behind another, pressing the button changed
+        nothing you could see. A tab is an arrangement now. The main pane
+        draws the space the tab names, the panes that were on the tab you
+        left are put away rather than repurposed, and each tab hands back
+        the arrangement you left it in, splitters and all.
+        """
         if self.processor.busy:
             self.processor.cancel()
-        vp = self.active_viewport
-        vp.set_space(space_id)
-        self._update_viewport_dock_title(vp)
+        # Nothing is remembered about a tab that has just gone: leaving the
+        # sheet you deleted would otherwise file its arrangement again on
+        # the way out, under an id no tab will ever ask for.
+        if space_id != self.space and self._space_exists(self.space):
+            self._space_states[self.space] = self.viewport_area.saveState()
+        self.space = space_id
+        self.viewport.set_space(space_id)
+        self._update_viewport_dock_title(self.viewport)
+        remembered = self._space_states.get(space_id)
+        if remembered is not None:
+            self.viewport_area.restoreState(remembered)
+        elif space_id == "model":
+            self.set_view_layout("quad" if len(self.aux_docks) == 3
+                                 else "single")
+        else:
+            # A sheet opens as the sheet, filling the area. Put a model pane
+            # beside it if you want one and the tab will keep it there.
+            self._show_only(self.viewport)
+        self._set_active_viewport(self._pane_for_space(space_id))
         self._refresh_space_tabs()
         if space_id == "model":
             self.command_line.echo("Model space.")
@@ -1669,6 +1769,43 @@ class MainWindow(QMainWindow):
                     "it.")
         self._update_status()
         self.properties.refresh()       # different space, different selection
+
+    def _show_only(self, vp):
+        """That pane, and nothing else, filling the viewport area."""
+        keep = vp.parentWidget()
+        for dock in self._viewport_docks():
+            if dock is keep:
+                if dock.isFloating():
+                    dock.setFloating(False)
+                dock.show()
+            else:
+                dock.hide()
+
+    def _pane_for_space(self, space_id: str):
+        """Which pane the commands should be aimed at on this tab.
+
+        The main one when it is showing, since it is the one the tab just
+        pointed at the space; otherwise whatever else is drawing the space,
+        and failing that whatever you can see.
+        """
+        alive = self.all_viewports()
+        for vp in (self.viewport, *alive):
+            if vp in alive and vp.space == space_id:
+                return vp
+        return alive[0]
+
+    def set_pane_space(self, vp, space_id: str):
+        """Point one pane at a space without moving the window to it.
+
+        The tabs are workspaces, but a space is still a property of a pane
+        underneath them, so a sheet can be put in a pane beside a model
+        view. Rhino has no arrangement like it.
+        """
+        vp.set_space(space_id)
+        self._update_viewport_dock_title(vp)
+        if vp is self.active_viewport:
+            self._update_status()
+            self.properties.refresh()
 
     # ------------------------------------------------------------- settings
 

@@ -40,7 +40,11 @@ def test_dock_viewport_model_and_paper_side_by_side(window):
     assert vp2 in window.all_viewports()
 
 
-def test_space_tabs_act_on_focused_pane(window):
+def test_space_tabs_act_on_the_window_not_the_focused_pane(window):
+    """The strip speaks for the window. It used to write to whichever pane
+    was active, so a sheet opened on top of the pane you happened to be in
+    and clicking back onto a model pane snapped the strip to Model on its
+    own, with nothing said about it."""
     from serpentine3d.core.layout import Layout
     lay = Layout(name="Sheet 1")
     window.scene.layouts.append(lay)
@@ -48,14 +52,16 @@ def test_space_tabs_act_on_focused_pane(window):
     vp2 = window.new_viewport_dock("Right")
     assert window.active_viewport is vp2
 
-    # switching space moves only the focused pane
     window.switch_space(lay.id)
-    assert vp2.space == lay.id
-    assert window.viewport.space == "model"
+    assert window.space == lay.id
+    idx = window.space_tabs.currentIndex()
+    assert window.space_tabs.tabData(idx) == lay.id
+    assert vp2.space == "model"        # put away, not turned into paper
 
-    # focus back on the main pane: tabs highlight its space again
-    window._set_active_viewport(window.viewport)
-    assert window.ctx.viewport is window.viewport
+    # focus a model pane again: the tab stays where you put it
+    window.switch_space("model")
+    window._set_active_viewport(vp2)
+    assert window.ctx.viewport is vp2
     idx = window.space_tabs.currentIndex()
     assert window.space_tabs.tabData(idx) == "model"
 
