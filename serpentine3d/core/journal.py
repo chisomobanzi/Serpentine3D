@@ -97,6 +97,9 @@ class SessionJournal:
     def begin_command(self, name: str, ctx):
         """A command is starting: flush idle edits, note the ground truth."""
         self.flush()
+        # a marker that never found its edit is not coming back: the UI
+        # cannot start a command while a drag is still in flight
+        self._pending_ckpts.clear()
         self._in_command = True
         self._cmd_ids_at_start = set(self.scene.objects)
         e = {"ev": "cmd", "name": name,
@@ -173,19 +176,15 @@ class SessionJournal:
         UI quiet-period timer, and on close — never per mouse move, so a
         drag lands as one delta, not four hundred.
         """
-        if self._flushing or not (self._dirty or self._pending_ckpts):
+        if self._flushing or not self._dirty:
             return
         self._flushing = True
         try:
-            if not self._pending_ckpts:
-                # geometry changed but nobody checkpointed: a deferred
-                # shape converting on first read, not an edit
-                self._refresh_shadow()
-                self._dirty = False
-                return
             made, chg, gone = self._delta()
             if not (made or chg or gone):
-                self._pending_ckpts.clear()
+                # conversions only. The markers stay: a drag that has
+                # not moved yet still owns its checkpoint.
+                self._refresh_shadow()
                 self._dirty = False
                 return
             for label in self._pending_ckpts:
@@ -227,16 +226,41 @@ class SessionJournal:
     # -- internals --
 
     def _delta(self):
+        """What changed since the shadow, conversions filtered out.
+
+        The shadow holds the very _shape object each id had, so it knows
+        exactly which changes are a DeferredShape realising — geometry
+        swapped by bookkeeping, not by anybody's hand — and those are
+        never edits. It used to be inferred from the undo checkpoint,
+        and a drag held still past the flush timer had already spent
+        its checkpoint, so the movement after the pause was swallowed
+        and the replay put the object wherever the timer had caught it.
+        """
+        from .deferred import DeferredShape
         made, chg, gone = [], [], []
+        realised = False
         for oid in self.scene._order:
             obj = self.scene.objects[oid]
             if oid not in self._shadow:
-                made.append([oid, obj.name, _b64(obj.shape)])
+                # an object that is itself still a promise was put there
+                # by a load, not a hand; note_load covers those
+                if not isinstance(obj._shape, DeferredShape):
+                    made.append([oid, obj.name, _b64(obj.shape)])
             elif obj._shape is not self._shadow[oid]:
-                chg.append([oid, _b64(obj.shape)])
+                if isinstance(self._shadow[oid], DeferredShape):
+                    realised = True
+                else:
+                    chg.append([oid, _b64(obj.shape)])
         for oid in self._shadow:
             if oid not in self.scene.objects:
-                gone.append(oid)
+                if isinstance(self._shadow[oid], DeferredShape):
+                    realised = True     # converted to nothing, removed
+                else:
+                    gone.append(oid)
+        if realised and not self._pending_ckpts:
+            # realise can add siblings (one shape converting to two);
+            # with no drag in flight, whatever appeared came from it
+            made = []
         return made, chg, gone
 
     def _refresh_shadow(self):

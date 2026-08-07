@@ -41,6 +41,10 @@ def rig(tmp_path):
 
 def _events(journal):
     journal.close()
+    return _events_open(journal)
+
+
+def _events_open(journal):
     with open(journal.path) as f:
         return [json.loads(line) for line in f if line.strip()]
 
@@ -142,16 +146,60 @@ def test_an_idle_edit_rides_as_a_delta(rig):
     assert [c[0] for c in edit["chg"]] == [box.id]
 
 
-def test_a_change_without_a_checkpoint_is_not_an_edit(rig):
-    """Deferred-shape conversion swaps geometry in place without any user
-    act; only a change that arrived with an undo checkpoint is a real
-    edit, so the conversion must not bloat the journal."""
+def test_a_deferred_shape_converting_is_not_an_edit(rig):
+    """A deferred shape realising on first read swaps geometry without
+    any user act, and must not bloat the journal. The discriminator is
+    the shadow itself — it knows it held a promise — not the checkpoint,
+    which a paused drag can have already spent."""
+    from serpentine3d.core.deferred import DeferredShape
+    scene, sel, hist, ctx, proc, journal = rig
+    real = g.make_box((0.0, 0.0, 0.0), 4.0, 4.0, 4.0)
+    scene.add(DeferredShape(lambda: [real], kind="solid"))
+    journal.flush()                            # settle the addition
+    n_before = len([e for e in _events_open(journal) if e["ev"] == "edit"])
+    _ = scene.all()[0].shape                   # first read: realise
+    assert scene.all()[0].shape_ready
+    journal.flush()
+    ev = _events(journal)
+    assert len([e for e in ev if e["ev"] == "edit"]) == n_before
+
+
+def test_a_drag_that_pauses_and_continues_loses_nothing(rig):
+    """The quiet-period timer can flush in the middle of a held drag.
+    The movement after the pause arrives with the drag's checkpoint
+    already spent, and it is still an edit: swallowing it records the
+    object wherever it was when the flush fired, which is exactly the
+    kind of lie a replay check exists to catch."""
     scene, sel, hist, ctx, proc, journal = rig
     proc.run("box 0,0,0 10,10,0 10")
     box = scene.all()[0]
-    scene.replace_shape(box.id, g.translate(box.shape, (1.0, 0.0, 0.0)))
-    journal.flush()                            # no checkpoint came with it
-    assert [e for e in _events(journal) if e["ev"] == "edit"] == []
+    hist.checkpoint("gumball move")
+    scene.replace_shape(box.id, g.translate(box.shape, (100.0, 0.0, 0.0)))
+    journal.flush()                            # the timer, mid-drag
+    obj = scene.all()[0]
+    scene.replace_shape(box.id, g.translate(obj.shape, (200.0, 0.0, 0.0)))
+    journal.flush()                            # the drag has ended
+    r = _replay(journal)
+    mn, _mx = g.bbox(r.scene.all()[0].shape)
+    assert mn[0] == pytest.approx(300.0, abs=1e-6)
+
+
+def test_a_paused_alt_drag_copy_loses_nothing(rig):
+    """The session that found the bug: an alt-drag copy is an object
+    born mid-drag, and the movement after a pause must follow it."""
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    box = scene.all()[0]
+    hist.checkpoint("gumball move")
+    copy = scene.add(g.translate(box.shape, (50.0, 0.0, 0.0)))
+    journal.flush()                            # mid-drag: copy at 50
+    scene.replace_shape(copy.id,
+                        g.translate(box.shape, (300.0, 0.0, 0.0)))
+    journal.flush()                            # released at 300
+    r = _replay(journal)
+    assert len(r.scene.all()) == 2
+    xs = sorted(round(g.bbox(o.shape)[0][0], 6) for o in r.scene.all())
+    assert xs == [0.0, 300.0]
 
 
 def test_a_cancelled_drag_leaves_no_edit(rig):
