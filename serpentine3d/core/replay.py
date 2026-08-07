@@ -53,6 +53,7 @@ class Replayer:
         self.idmap: dict[str, str] = {}
         self._before_cmd: set = set()
         self._mismatches: list[str] = []
+        self.fingerprints_checked = 0
         self.on_event = None            # hook for the renderer: fn(event)
 
     # -- driving --
@@ -175,6 +176,7 @@ class Replayer:
             self.idmap[a] = b
 
     def _ev_fp(self, e, i):
+        self.fingerprints_checked += 1
         rec = e.get("objects", [])
         if len(rec) != len(self.scene.all()):
             self._mismatches.append(

@@ -71,5 +71,11 @@ def main(argv: list[str]) -> int:
             for m in problems:
                 print(f"MISMATCH {m}", file=sys.stderr)
             return 1
-        print("fingerprints match: the replay is faithful")
+        if r.fingerprints_checked == 0:
+            print("no fingerprints in this journal — save once during "
+                  "the session to write one; the replay ran with no "
+                  "desync, which is a weaker guarantee")
+        else:
+            print(f"{r.fingerprints_checked} fingerprint(s) match: "
+                  "the replay is faithful")
     return 0

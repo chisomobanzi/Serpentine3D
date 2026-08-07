@@ -235,6 +235,24 @@ def test_an_idle_edit_replays(rig):
     assert mx[0] == pytest.approx(15.0, abs=1e-6)
 
 
+def test_an_idle_edit_that_makes_and_removes_objects_replays(rig):
+    """A gumball extrude births geometry outside any command, and a panel
+    delete takes it away the same route; both travel as delta entries."""
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    box = scene.all()[0]
+    hist.checkpoint("gumball extrude")
+    made = scene.add(g.make_box((20.0, 0.0, 0.0), 5.0, 5.0, 5.0))
+    journal.flush()
+    hist.checkpoint("delete")
+    scene.remove(box.id)
+    journal.flush()
+    r = _replay(journal)
+    assert len(r.scene.all()) == 1
+    assert round(g.volume(r.scene.all()[0].shape), 4) == \
+        round(g.volume(made.shape), 4)
+
+
 def test_an_undo_over_an_idle_edit_replays(rig):
     """The delta checkpoints during replay exactly as the drag did live,
     or the undo peels the wrong layer."""
@@ -300,6 +318,18 @@ def test_a_menu_open_replays_as_a_load(rig, tmp_path):
 
 # -- verification --
 
+def test_a_journal_with_no_fingerprint_says_so(rig):
+    """A session that never saved has nothing to check against, and the
+    check must say that rather than call the replay faithful on no
+    evidence."""
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    journal.close()
+    r = Replayer(load_events(journal.path))
+    r.run()
+    assert r.fingerprints_checked == 0
+
+
 def test_the_fingerprint_confirms_a_faithful_replay(rig):
     scene, sel, hist, ctx, proc, journal = rig
     proc.run("box 0,0,0 10,10,0 10")
@@ -309,6 +339,7 @@ def test_the_fingerprint_confirms_a_faithful_replay(rig):
     r = Replayer(load_events(journal.path))
     r.run()
     assert r.verify() == []
+    assert r.fingerprints_checked == 1
 
 
 def test_the_fingerprint_catches_a_divergence(rig):
