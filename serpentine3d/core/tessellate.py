@@ -213,15 +213,95 @@ _ISO_FRACTIONS = (0.25, 0.5, 0.75)
 _ISO_SAMPLES = 48
 
 
+def _is_flat(face, surf) -> bool:
+    """Is this face flat, whatever OCCT files its surface under?
+
+    Cheap answer first: a surface built as a plane is one, and a
+    cylinder, cone, sphere or torus never is. Only the free-form
+    spellings are worth fitting a plane to, and those are exactly the
+    ones that arrive flat in practice: a wall swept from a NURBS
+    profile, or any extrusion read out of a .3dm, where every face
+    comes in as a BSpline no matter how straight it is.
+    """
+    from OCP.BRepLib import BRepLib_FindSurface
+    from OCP.GeomAbs import GeomAbs_SurfaceType as T
+
+    kind = surf.GetType()
+    if kind == T.GeomAbs_Plane:
+        return True
+    if kind not in (T.GeomAbs_BSplineSurface, T.GeomAbs_BezierSurface,
+                    T.GeomAbs_SurfaceOfExtrusion,
+                    T.GeomAbs_SurfaceOfRevolution,
+                    T.GeomAbs_OffsetSurface, T.GeomAbs_OtherSurface):
+        return False
+    if not _normals_agree(surf):
+        return False        # provably bent, and far cheaper to prove
+    try:
+        return bool(BRepLib_FindSurface(face, 1e-7, True).Found())
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
+#: Where the flatness sampler looks, in parametric fractions.
+_FLAT_SAMPLES = ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (0.5, 0.5))
+
+
+def _normals_agree(surf, tol: float = 1e-6) -> bool:
+    """Do a handful of sampled normals all point the same way?
+
+    A fast reject, not a proof: normals that disagree mean the surface
+    bends somewhere, which is enough to keep its isocurves without
+    paying for a least-squares plane fit that was always going to
+    fail. Normals that agree only earn the face the real test.
+
+    Deliberately plain arithmetic. numpy on five three-vectors costs
+    more than the plane fit this exists to avoid.
+    """
+    from ..core.occ import gp_Pnt, gp_Vec
+
+    u0, u1 = surf.FirstUParameter(), surf.LastUParameter()
+    v0, v1 = surf.FirstVParameter(), surf.LastVParameter()
+    for t in (u0, u1, v0, v1):
+        if t != t or t in (float("inf"), float("-inf")):
+            return False
+    p, du, dv = gp_Pnt(), gp_Vec(), gp_Vec()      # filled in place
+    first = None
+    for fu, fv in _FLAT_SAMPLES:
+        try:
+            surf.D1(u0 + (u1 - u0) * fu, v0 + (v1 - v0) * fv, p, du, dv)
+        except Exception:                                  # noqa: BLE001
+            return False
+        ax, ay, az = du.X(), du.Y(), du.Z()
+        bx, by, bz = dv.X(), dv.Y(), dv.Z()
+        nx = ay * bz - az * by
+        ny = az * bx - ax * bz
+        nz = ax * by - ay * bx
+        reach = (nx * nx + ny * ny + nz * nz) ** 0.5
+        if reach < 1e-12:
+            continue                      # degenerate corner, no opinion
+        nx, ny, nz = nx / reach, ny / reach, nz / reach
+        if first is None:
+            first = (nx, ny, nz)
+        else:
+            fx, fy, fz = first
+            if abs(abs(fx * nx + fy * ny + fz * nz) - 1.0) > tol:
+                return False
+    return first is not None
+
+
 def _face_isocurves(face) -> list[np.ndarray]:
-    """Isoparametric polylines on a curved face, clipped to its trims."""
+    """Isoparametric polylines on a curved face, clipped to its trims.
+
+    A flat face gets none. Its isocurves would be straight lines lying
+    in the plane of the edges already drawn around them, so they add
+    nothing to read and plenty to look at.
+    """
     from ..core.occ import (
         BRepAdaptor_Surface, BRepTopAdaptor_FClass2d, TopAbs_State, gp_Pnt2d,
     )
-    from OCP.GeomAbs import GeomAbs_SurfaceType
 
     surf = BRepAdaptor_Surface(face)
-    if surf.GetType() == GeomAbs_SurfaceType.GeomAbs_Plane:
+    if _is_flat(face, surf):
         return []
     u0, u1 = surf.FirstUParameter(), surf.LastUParameter()
     v0, v1 = surf.FirstVParameter(), surf.LastVParameter()

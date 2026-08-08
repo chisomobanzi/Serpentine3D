@@ -80,6 +80,16 @@
   plane. Ortho now means the point lies on an axis through the one you
   started from, all three of its coordinates.
 
+- **A flat face is no longer drawn as though it were curved.** A wall
+  swept from a NURBS profile, and every extrusion read out of a .3dm,
+  arrives with its faces stored as freeform surfaces rather than as
+  planes. Isocurves were decided from that stored name, so those walls
+  came back under a grid of lines describing nothing: on a flat face
+  an isocurve is a straight line lying in the plane of the edges
+  already drawn around it. Flatness is measured now instead of taken
+  on trust, which also draws those objects quicker, because working
+  the lines out cost far more than deciding to skip them.
+
 ## 0.5.11 — 2026-08-06
 
 ### Added
