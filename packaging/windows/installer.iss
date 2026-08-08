@@ -3,7 +3,7 @@
 ;   ISCC.exe installer.iss
 
 #define AppName "Serpentine3D"
-#define AppVersion "0.5.11"
+#define AppVersion "0.5.12"
 #define AppPublisher "Chisomo Banzi"
 #define AppURL "https://github.com/chisomobanzi/Serpentine3D"
 
