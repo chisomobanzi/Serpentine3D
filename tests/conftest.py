@@ -20,6 +20,25 @@ def _isolated_config(tmp_path_factory):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _isolated_session_data(tmp_path_factory):
+    """Journals and autosaves of the suite's own, thrown away after.
+
+    Both directories are self-pruning: the journal keeps the newest
+    KEEP_JOURNALS sessions and the autosave slot is claimed per pid. A
+    suite run opens dozens of windows, so aimed at the real directories
+    it evicts every session someone actually modelled in, and leaves
+    lockfiles with dead pids that the next real launch reads as crashes
+    worth recovering.
+
+    Session-scoped: the pruning is what has to be contained, and a
+    directory per test would make thousands of them.
+    """
+    data = tmp_path_factory.mktemp("session_data")
+    os.environ["SERP3D_JOURNAL_DIR"] = str(data / "journals")
+    os.environ["SERP3D_AUTOSAVE_DIR"] = str(data / "autosave")
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _qapp():
     """A full QApplication before anything creates a QGuiApplication
     (core/text.py would otherwise block widget construction later)."""

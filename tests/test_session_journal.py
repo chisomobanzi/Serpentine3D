@@ -436,6 +436,36 @@ def test_the_window_keeps_a_journal_of_its_own(tmp_path, monkeypatch):
     assert _volumes(r.scene) == live_vols
 
 
+def test_a_window_in_a_test_never_writes_into_the_real_directories():
+    """The suite keeps its own sessions somewhere it can throw away.
+
+    Every MainWindow opens a journal, and every journal prunes its
+    directory down to the newest KEEP_JOURNALS at startup. A suite run
+    builds dozens of windows, so pointed at the real directory it
+    quietly evicts every session a person actually modelled in. The
+    autosave slot next door is the same shape of accident: a test
+    process that dies leaves a lockfile with a dead pid, which is
+    exactly what a crashed session looks like, so the next real launch
+    offers to recover a scene out of somebody's test.
+    """
+    from serpentine3d.app import MainWindow
+    from serpentine3d.core.journal import JOURNAL_DIR
+    from serpentine3d.utils.autosave import AUTOSAVE_DIR
+
+    def inside(directory, path):
+        return os.path.realpath(path).startswith(
+            os.path.realpath(directory) + os.sep)
+
+    w = MainWindow()
+    try:
+        assert w.journal is not None            # still worth exercising
+        assert not inside(JOURNAL_DIR, w.journal.path)
+        assert not inside(AUTOSAVE_DIR, w.autosave.autosave_path)
+    finally:
+        w.mark_saved()
+        w.close()
+
+
 def test_journal_can_be_disabled_by_env(tmp_path, monkeypatch):
     monkeypatch.setenv("SERP3D_NO_JOURNAL", "1")
     assert SessionJournal.maybe(str(tmp_path)) is None
