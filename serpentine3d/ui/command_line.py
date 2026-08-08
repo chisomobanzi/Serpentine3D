@@ -45,7 +45,12 @@ class CommandInput(QLineEdit):
         super().focusOutEvent(ev)
 
     def event(self, ev):
-        if ev.type() == ev.Type.KeyPress and ev.key() == Qt.Key.Key_Tab:
+        # Backtab is Shift+Tab, which X delivers as its own key rather than
+        # as Tab with a modifier. The prompt keeps the focus through most of
+        # a pick, and Shift is held down through most of a pick, so this is
+        # the spelling that a direction lock usually arrives in.
+        if (ev.type() == ev.Type.KeyPress
+                and ev.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab)):
             self.tabPressed.emit()
             return True
         # with an empty input, cede Ctrl+C/V/A to the app-level shortcuts

@@ -8,8 +8,17 @@ import socket
 class SerpClient:
     def __init__(self, port: int | None = None, timeout: float = 60.0):
         if port is None:
-            port_file = os.path.expanduser("~/.serpentine3d/rpc.port")
-            port = int(open(port_file).read().strip())
+            # SERP3D_RPC_PORT is what the app itself reads, so naming one
+            # here says which instance to drive. The port file is only the
+            # fallback, and it is last-writer-wins: with a second copy of
+            # the app open, whichever launched last owns it, and a test
+            # that trusts it can end up running `new` on somebody's work.
+            env_port = os.environ.get("SERP3D_RPC_PORT")
+            if env_port:
+                port = int(env_port)
+            else:
+                port_file = os.path.expanduser("~/.serpentine3d/rpc.port")
+                port = int(open(port_file).read().strip())
         self.sock = socket.create_connection(("127.0.0.1", port),
                                              timeout=timeout)
         self._buf = b""

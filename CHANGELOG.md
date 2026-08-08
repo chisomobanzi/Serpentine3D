@@ -91,6 +91,14 @@
   plane. Ortho now means the point lies on an axis through the one you
   started from, all three of its coordinates.
 
+- **Tab holds the direction you aimed with Shift.** Square a line off
+  with Shift, press Tab to freeze that direction, then let go of Shift
+  and the direction went with it: nothing had been frozen, and the next
+  click drew wherever the cursor was. As far as the keyboard is
+  concerned Shift+Tab is a key of its own rather than Tab carrying a
+  modifier, and only the plain Tab was being listened for. Since Shift
+  is what holds ortho, the Tab that worked was the one nobody presses.
+
 - **A flat face is no longer drawn as though it were curved.** A wall
   swept from a NURBS profile, and every extrusion read out of a .3dm,
   arrives with its faces stored as freeform surfaces rather than as

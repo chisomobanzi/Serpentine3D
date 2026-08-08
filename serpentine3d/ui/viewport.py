@@ -3716,9 +3716,15 @@ class Viewport(QOpenGLWidget):
     def event(self, ev):
         # Qt spends Tab on focus navigation before keyPressEvent is reached,
         # so the direction lock has to be claimed here or clicking in the
-        # viewport mid-pick would quietly cost you the key
-        if (ev.type() == ev.Type.KeyPress and ev.key() == Qt.Key.Key_Tab
-                and self.point_mode and self.space == "model"):
+        # viewport mid-pick would quietly cost you the key.
+        #
+        # Backtab is what X sends for Shift+Tab: a key of its own, not Tab
+        # carrying a modifier. It has to count, because Shift is the ortho
+        # override, so aiming square and then freezing that aim is one
+        # gesture and the plain Tab is the one nobody presses.
+        if (ev.type() == ev.Type.KeyPress and self.point_mode
+                and self.space == "model"
+                and ev.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab)):
             self.tabPressed.emit()
             return True
         return super().event(ev)

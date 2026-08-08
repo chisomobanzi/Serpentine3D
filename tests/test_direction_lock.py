@@ -389,6 +389,54 @@ def test_tab_still_moves_focus_when_no_point_is_wanted():
     assert seen == []
 
 
+# -- Tab with Shift held is a different key --
+
+def _shift_tab_event():
+    """What X sends for Shift+Tab, which is not Key_Tab with a modifier.
+
+    Verified against a real X server, not remembered: the keystroke
+    arrives as Key_Backtab. It matters because Shift is the ortho
+    override, so aim-with-Shift then Tab is the ordinary way to reach
+    this feature and the only Tab the code saw was the one nobody
+    presses.
+    """
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    return QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Backtab,
+                     Qt.KeyboardModifier.ShiftModifier)
+
+
+def test_shift_tab_locks_the_direction_too():
+    from PySide6.QtCore import QPointF
+    vp = _viewport()
+    vp._last_mouse = QPointF(550, 220)
+    seen = []
+    vp.tabPressed.connect(lambda: seen.append(True))
+    assert vp.event(_shift_tab_event())
+    assert seen == [True]
+
+
+def test_shift_tab_still_moves_focus_when_no_point_is_wanted():
+    vp = _viewport()
+    vp.set_point_mode(False)
+    seen = []
+    vp.tabPressed.connect(lambda: seen.append(True))
+    vp.event(_shift_tab_event())
+    assert seen == []
+
+
+def test_the_lock_holds_the_ortho_direction_once_shift_is_let_go():
+    """The whole move: hold Shift to aim square, Tab, stop holding Shift."""
+    vp = _viewport()
+    vp.ortho = True                      # what holding Shift amounts to
+    assert vp.toggle_direction_lock(550, 220)
+    axis = np.asarray(vp.dir_lock[1], float)
+    assert np.count_nonzero(np.abs(axis) > 1e-9) == 1, axis
+    vp.ortho = False
+    assert np.allclose(np.cross(_direction(vp, 600, 180), axis), 0,
+                       atol=1e-6)
+
+
 # -- the command line has to let Tab through --
 
 def _command_line():
@@ -413,6 +461,17 @@ def test_tab_asks_for_a_direction_lock_while_a_point_is_pending():
     cl.input.tabPressed.emit()
     assert asked == [True]
     assert cl.input.text() == "cir", "Tab must not also complete"
+
+
+def test_shift_tab_at_the_prompt_asks_for_a_direction_lock():
+    """The prompt keeps the focus through most of a pick, so the key has
+    to survive there too."""
+    cl = _command_line()
+    cl.point_pending = True
+    asked = []
+    cl.tabPressed.connect(lambda: asked.append(True))
+    assert cl.input.event(_shift_tab_event())
+    assert asked == [True]
 
 
 def test_the_app_tells_the_command_line_when_a_point_is_pending():
