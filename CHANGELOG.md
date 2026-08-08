@@ -77,6 +77,26 @@
 
 ### Fixed
 
+- **Sub-object picking goes by depth.** Ctrl+Shift+click and the click
+  went to whichever edge fell nearest the cursor on screen, with faces
+  looked at only once no edge was within reach at all. On a box that
+  means the three edges meeting at the hidden far corner take every click
+  aimed at the face in front of them, and there is nowhere else to click
+  for that face, because the corner sits in the middle of the shape.
+  Edges and faces are now ranked against each other on how far in front
+  of the camera they are, the edge counted a thousandth nearer so that
+  the face it borders cannot take its click. A wireframe view draws no
+  faces, so there is nothing there to take a click or to hide an edge
+  behind.
+
+- **Control points round the back stop taking clicks meant for the
+  front.** They were ranked on how close they landed to the cursor and on
+  nothing else, so on any shape with a far side the point behind won
+  whenever it happened to fall a pixel nearer, which on a surface seen
+  face on is most of them. Points within a few pixels of each other now
+  all count as under the cursor and the front-most of those wins, the
+  same rule the edges already followed.
+
 - **`osnap mid toggle` and its relatives now change the snap you are
   using.** They wrote the setting to the config file and stopped there, so
   the osnap bar redrew itself from a snap index that had never heard about

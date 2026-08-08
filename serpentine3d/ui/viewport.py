@@ -31,6 +31,17 @@ PICK_RADIUS_PX = 7.0
 # front-most is the one you meant.
 PICK_DEPTH_BAND_PX = 4.0
 
+# How far forward an edge is treated as sitting when it is weighed against a
+# face. An edge borders the face it lies on, so on depth alone the two are
+# level and the face, being the larger target, would take every click. A
+# thousandth of the distance is enough to settle that, and far too little to
+# reach a face that is genuinely in front.
+EDGE_PICK_BIAS = 0.999
+
+# Control points are drawn as squares a few pixels across, so they are aimed
+# at rather than pointed at and get a wider reach than an edge does.
+CV_PICK_RADIUS_PX = 8.0
+
 # which end of a bounding box each of its eight corners takes per axis
 _BOX_CORNERS = np.array([(x, y, z) for x in (False, True)
                          for y in (False, True)
@@ -3052,47 +3063,61 @@ class Viewport(QOpenGLWidget):
             found.append((obj, mesh, sub, order, d2[order],
                           np.minimum(a[:, 2], b[:, 2])))
 
+        best_edge, best_edge_depth = None, np.inf
         if found:
             closest = math.sqrt(min(float(f[4][0]) for f in found))
             band = (closest + PICK_DEPTH_BAND_PX) ** 2
-            best_edge, best_depth = None, np.inf
             for obj, mesh, sub, order, sorted_d2, depth in found:
                 k = int(np.searchsorted(sorted_d2, band, side="right"))
                 if not k:
                     continue
                 within = order[:k]
                 seg = int(within[np.argmin(depth[within])])
-                if float(depth[seg]) >= best_depth:
+                if float(depth[seg]) >= best_edge_depth:
                     continue
                 i = int(sub[seg]) if sub is not None else seg
                 if len(mesh.edge_of_segment) > i:
-                    best_depth = float(depth[seg])
+                    best_edge_depth = float(depth[seg])
                     best_edge = (obj.id, "edge",
                                  int(mesh.edge_of_segment[i]))
-            if best_edge is not None:
-                return best_edge
-        # faces by nearest ray-triangle hit
+        # Faces by nearest ray-triangle hit. A wireframe view draws none, so
+        # there is nothing there to take the click, and nothing for an edge
+        # to be hidden behind either.
         best_face = None
         best_t = np.inf
-        for obj in near_cursor:             # same rect, already narrowed
-            mesh = obj.mesh
-            if not mesh.has_faces or not len(mesh.face_of_triangle):
-                continue
-            tris, sub = self._near_triangles(mesh, px - r, py - r,
-                                             px + r, py + r, w, h)
-            if not len(tris):
-                continue
-            t = ray_triangle_hits(origin, direction,
-                                  mesh.vertices[tris[:, 0]].astype(float),
-                                  mesh.vertices[tris[:, 1]].astype(float),
-                                  mesh.vertices[tris[:, 2]].astype(float))
-            i = int(np.argmin(t))
-            if np.isfinite(t[i]) and t[i] < best_t:
-                best_t = t[i]
-                if sub is not None:
-                    i = int(sub[i])          # back to the mesh's own numbering
-                best_face = (obj.id, "face",
-                             int(mesh.face_of_triangle[i]))
+        if self._pick_mode() != "wireframe":
+            for obj in near_cursor:         # same rect, already narrowed
+                mesh = obj.mesh
+                if not mesh.has_faces or not len(mesh.face_of_triangle):
+                    continue
+                tris, sub = self._near_triangles(mesh, px - r, py - r,
+                                                 px + r, py + r, w, h)
+                if not len(tris):
+                    continue
+                t = ray_triangle_hits(
+                    origin, direction,
+                    mesh.vertices[tris[:, 0]].astype(float),
+                    mesh.vertices[tris[:, 1]].astype(float),
+                    mesh.vertices[tris[:, 2]].astype(float))
+                i = int(np.argmin(t))
+                if np.isfinite(t[i]) and t[i] < best_t:
+                    best_t = t[i]
+                    if sub is not None:
+                        i = int(sub[i])      # back to the mesh's own numbering
+                    best_face = (obj.id, "face",
+                                 int(mesh.face_of_triangle[i]))
+        if best_edge is None:
+            return best_face
+        if best_face is None:
+            return best_edge
+        # Both are under the cursor, so the nearer one wins. The two are
+        # measured differently — the edge by how far in front of the camera
+        # it projects, the face by how far along the ray it was struck — so
+        # put the hit point through the same projection before comparing.
+        hit = origin + direction * best_t
+        face_depth = float(eye.project(np.asarray([hit], float), w, h)[0, 2])
+        if best_edge_depth * EDGE_PICK_BIAS <= face_depth:
+            return best_edge
         return best_face
 
     # ---------------------------------------------------------------- events
@@ -3608,10 +3633,16 @@ class Viewport(QOpenGLWidget):
         return (entry[1], entry[2])
 
     def _cv_hit(self, px, py):
-        """(obj_id, index, world_pos) of a control point near the pixel."""
+        """(obj_id, index, world_pos) of a control point near the pixel.
+
+        Points within a few pixels of each other all count as under the
+        cursor and the front-most of those wins, the same rule the edges
+        use. Closest-in-2D on its own handed the click to whichever point
+        happened to land a pixel nearer, which on a surface seen face on is
+        as often as not the one round the back.
+        """
         w, h = self.width(), self.height()
-        best = None
-        best_d2 = 8.0 ** 2
+        found = []
         for obj_id in list(self.cv_enabled):
             obj = self.scene.get(obj_id)
             if obj is None:
@@ -3623,9 +3654,22 @@ class Viewport(QOpenGLWidget):
             scr = self.camera.project(pts, w, h)
             d2 = (scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2
             d2[scr[:, 2] <= 0] = np.inf
-            i = int(np.argmin(d2))
-            if d2[i] < best_d2:
-                best_d2 = d2[i]
+            near = np.flatnonzero(d2 <= CV_PICK_RADIUS_PX ** 2)
+            if len(near):
+                found.append((obj_id, pts, near, d2[near], scr[near, 2]))
+        if not found:
+            return None
+        band = (math.sqrt(min(float(f[3].min()) for f in found))
+                + PICK_DEPTH_BAND_PX) ** 2
+        best, best_depth = None, np.inf
+        for obj_id, pts, near, d2, depth in found:
+            within = d2 <= band
+            if not within.any():
+                continue
+            j = int(np.argmin(np.where(within, depth, np.inf)))
+            if float(depth[j]) < best_depth:
+                best_depth = float(depth[j])
+                i = int(near[j])
                 best = (obj_id, i, tuple(pts[i]))
         return best
 

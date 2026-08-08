@@ -115,3 +115,145 @@ def test_the_nearer_of_two_edges_on_one_object_wins():
     assert float(scr[on_hit & within, 2].min()) == pytest.approx(
         float(scr[within, 2].min()), abs=1e-6), \
         "picked an edge that is not the front-most one under the cursor"
+
+
+# -- edges against faces -----------------------------------------------------
+#
+# Depth ordered the edges against each other, but the two kinds were never
+# ranked against one another: every edge within reach of the cursor was
+# resolved and returned before a face was so much as looked at. On a solid
+# that means the edges around the hidden far corner take the click off the
+# face you are pointing at, and there is nowhere on that face to click to
+# get it, because the far corner sits in the middle of the shape.
+
+
+def _solid_view(distance: float = 40.0):
+    """A cube in three-quarter view, where its hidden edges land inside it.
+
+    Seen this way the far corner projects to the middle of the silhouette,
+    so a click there is over three edges nobody can see and over the face
+    that hides them.
+    """
+    scene = Scene()
+    box = scene.add(geometry.make_box((-5.0, -5.0, -5.0), 10.0, 10.0, 10.0),
+                    name="box")
+    view = vp_mod.Viewport(scene, SelectionManager(scene))
+    view.resize(800, 600)
+    view.camera.set_standard_view("perspective")
+    view.camera.target = np.zeros(3)
+    view.camera.distance = distance
+    return scene, box, view
+
+
+def _corner_pixel(view, box, farthest: bool):
+    """Where a corner of the box lands, and how far off it is."""
+    verts = np.asarray(box.mesh.vertices, float)
+    away = np.linalg.norm(verts - view.camera.position, axis=1)
+    i = int(np.argmax(away) if farthest else np.argmin(away))
+    scr = view.camera.project(verts, view.width(), view.height())
+    return float(scr[i, 0]), float(scr[i, 1]), float(scr[i, 2])
+
+
+def _nearest_face_hit(view, box, px, py):
+    """Ray distance to the first triangle under a pixel, or inf."""
+    from serpentine3d.utils.math3d import ray_triangle_hits
+    verts = np.asarray(box.mesh.vertices, float)
+    tris = box.mesh.triangles
+    origin, direction = view.camera.ray_through(px, py, view.width(),
+                                                view.height())
+    t = ray_triangle_hits(origin, direction, verts[tris[:, 0]],
+                          verts[tris[:, 1]], verts[tris[:, 2]])
+    t = np.where(np.isfinite(t), t, np.inf)
+    return float(t.min()) if len(t) else np.inf
+
+
+def test_the_face_in_front_beats_the_edges_hidden_behind_it():
+    """Click into a solid and you get it, not the corner round the back."""
+    scene, box, view = _solid_view()
+    px, py, depth = _corner_pixel(view, box, farthest=True)
+
+    segs = np.asarray(box.mesh.edge_segments, float).reshape(-1, 3)
+    scr = view.camera.project(segs, view.width(), view.height())
+    d2 = (scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2
+    assert (d2 <= vp_mod.PICK_RADIUS_PX ** 2).any(), \
+        "no hidden edge under the cursor; the test proves nothing"
+    assert _nearest_face_hit(view, box, px, py) + 5.0 < depth, \
+        "the far corner is not actually behind a face here"
+
+    hit = view.pick_subobject(px, py)
+    assert hit is not None, "nothing was picked at all"
+    assert hit[1] == "face", "picked an edge hidden behind the face clicked on"
+
+
+def test_an_edge_you_can_see_still_beats_the_face_behind_it():
+    """Edges stay the easier target wherever they are actually drawn.
+
+    They are a couple of pixels wide against a whole face, so ranking the
+    two strictly on depth would put every edge out of reach: the face it
+    borders is at the same distance and covers far more of the cursor.
+    """
+    scene, box, view = _solid_view()
+    px, py, _ = _corner_pixel(view, box, farthest=False)
+
+    hit = view.pick_subobject(px, py)
+    assert hit is not None, "nothing was picked at all"
+    assert hit[1] == "edge", "a visible edge lost its click to the face"
+
+
+def test_wireframe_has_nothing_in_front_to_hide_behind():
+    """No faces are drawn, so the edge behind is the edge you meant."""
+    scene, box, view = _solid_view()
+    view.display_mode = "wireframe"
+    px, py, _ = _corner_pixel(view, box, farthest=True)
+
+    hit = view.pick_subobject(px, py)
+    assert hit is not None, "nothing was picked at all"
+    assert hit[1] == "edge", "picked a face in a view that draws none"
+
+
+# -- control points ----------------------------------------------------------
+#
+# The same complaint again one level down. Control points were ranked on
+# nothing but how close they fell to the cursor in 2D, so on any shape with
+# a back side — which is every surface seen face on — the point behind took
+# the click whenever it happened to land a pixel nearer.
+
+
+def _cv_line(near_at, far_at):
+    """A line with a control point at each end and points turned on."""
+    scene = Scene()
+    line = scene.add(geometry.make_line(near_at, far_at), name="line")
+    view = _viewport(scene)
+    view.cv_enabled.add(line.id)
+    pts = np.asarray(view._cv_points(line), float)
+    scr = view.camera.project(pts, view.width(), view.height())
+    assert scr[0, 2] < scr[1, 2], "the first control point is not the near one"
+    return line, view, pts, scr
+
+
+def test_the_control_point_in_front_wins_the_click():
+    """Aimed at the far point, and the near one is well within reach."""
+    line, view, pts, scr = _cv_line((0.0, 0.0, 0.0), (0.3, 40.0, 0.0))
+    gap = float(np.hypot(scr[0, 0] - scr[1, 0], scr[0, 1] - scr[1, 1]))
+    assert 0.5 < gap < vp_mod.PICK_DEPTH_BAND_PX, \
+        f"the two points are {gap:.1f}px apart; the test proves nothing"
+
+    hit = view._cv_hit(float(scr[1, 0]), float(scr[1, 1]))
+    assert hit is not None, "nothing was picked at all"
+    assert hit[1] == 0, "picked the control point behind the one in front"
+
+
+def test_a_control_point_far_enough_off_is_not_the_one_you_meant():
+    """Depth only settles points you could plausibly have been aiming at.
+
+    Past the band the click goes where it was pointed, or a point at the
+    front of the model would swallow every click aimed anywhere near it.
+    """
+    line, view, pts, scr = _cv_line((0.0, 0.0, 0.0), (2.0, 40.0, 0.0))
+    gap = float(np.hypot(scr[0, 0] - scr[1, 0], scr[0, 1] - scr[1, 1]))
+    assert gap > vp_mod.PICK_DEPTH_BAND_PX, \
+        f"the two points are only {gap:.1f}px apart; the test proves nothing"
+
+    hit = view._cv_hit(float(scr[1, 0]), float(scr[1, 1]))
+    assert hit is not None, "nothing was picked at all"
+    assert hit[1] == 1, "a distant point in front stole a click aimed past it"
