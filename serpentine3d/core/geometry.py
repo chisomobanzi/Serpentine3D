@@ -1463,6 +1463,31 @@ def explode(shape) -> list:
     return []
 
 
+def remove_faces(shape, indices) -> TopoDS_Shape | None:
+    """Everything but those faces, sewn back up. None if nothing is left.
+
+    Taking a face off a solid opens it, so what comes back is a shell,
+    not a solid: the hole is the point. Sewing is what keeps the rest
+    one object rather than a loose pile, and a single survivor is
+    handed back on its own because there is nothing to sew it to.
+    """
+    from .occ import BRepBuilderAPI_Sewing
+    drop = set(int(i) for i in indices)
+    keep = [f for i, f in enumerate(faces_of(shape)) if i not in drop]
+    if not keep:
+        return None
+    if len(keep) == 1:
+        return copy_shape(keep[0])
+    sew = BRepBuilderAPI_Sewing(tol())
+    for f in keep:
+        sew.Add(f)
+    sew.Perform()
+    sewn = sew.SewedShape()
+    if sewn is None or sewn.IsNull():
+        raise GeometryError("Could not rejoin the remaining faces")
+    return unwrap_compound(sewn)
+
+
 # --- solids -----------------------------------------------------------------
 
 def make_box(corner: Point, dx: float, dy: float, dz: float) -> TopoDS_Shape:

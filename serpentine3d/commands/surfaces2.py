@@ -343,6 +343,49 @@ def cmd_dupfaceborder(ctx):
     yield from ()
 
 
+@command("extractsrf", aliases=("extractsurface", "extractface"))
+def cmd_extractsrf(ctx):
+    """Pull Ctrl+Shift-picked faces out of the polysurfaces holding them.
+
+    Copy=No is Rhino's default and ours: the usual reason to reach for
+    this is to rebuild a face, and leaving the original in place would
+    put a duplicate surface exactly where the new one has to go.
+    """
+    picked: dict = {}
+    for (obj_id, kind, idx) in ctx.selection.subobjects:
+        if kind != "face":
+            continue
+        obj = ctx.scene.get(obj_id)
+        if obj is None or not (0 <= idx < len(g.faces_of(obj.shape))):
+            continue
+        picked.setdefault(obj_id, []).append(idx)
+    if not picked:
+        ctx.echo("Ctrl+Shift-click one or more faces first, "
+                 "then run ExtractSrf.")
+        yield from ()
+        return
+    copy = yield OptionReq("Copy the faces", options=["No", "Yes"],
+                           default="No")
+    made = []
+    for obj_id, indices in picked.items():
+        obj = ctx.scene.get(obj_id)
+        faces = g.faces_of(obj.shape)
+        for i in sorted(set(indices)):
+            made.append(ctx.scene.add(g.copy_shape(faces[i]),
+                                      layer_id=obj.layer_id))
+        if copy == "Yes":
+            continue
+        rest = g.remove_faces(obj.shape, indices)
+        if rest is None:
+            ctx.scene.remove(obj_id)     # every face taken, nothing behind
+        else:
+            ctx.scene.replace_shape(obj_id, rest)
+    # what you extracted is what you want to work on next
+    ctx.select_result(made)
+    ctx.echo(f"Extracted {len(made)} surface(s)"
+             + (" as copies." if copy == "Yes" else "."))
+
+
 def _picked_face_edges(ctx):
     """[(obj, face_shape, edge_shape, edge_index)] from Ctrl+Shift picks."""
     out = []

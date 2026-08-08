@@ -64,6 +64,17 @@
   polyline's own close, and every word like it, is now a clickable chip
   too.
 
+- **`extractsrf`.** Ctrl+Shift-click faces of a polysurface, run it,
+  and they come away as surfaces of their own while what is left sews
+  back into one open polysurface with a hole where they were. `Copy`
+  defaults to No, the way Rhino has it, because the usual reason to
+  pull a face off is to rebuild it, and a duplicate sitting exactly
+  where the new surface has to go is in the way. Say Yes and the
+  original stays whole. Take every face of an object and the object
+  goes too rather than staying behind as an empty shell. What you
+  extracted is what you are holding afterwards, so the gumball is
+  already on it, ready to slide it clear.
+
 ### Fixed
 
 - **`osnap mid toggle` and its relatives now change the snap you are

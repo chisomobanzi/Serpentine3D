@@ -264,6 +264,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `edgesrf` (`srfedges`) | Edgesrf |
 | `extendsrf` | Extend a surface past a Ctrl+Shift-picked boundary edge. |
 | `extractisocurve` (`isocurve`) | Extractisocurve |
+| `extractsrf` (`extractsurface`, `extractface`) | Pull Ctrl+Shift-picked faces out of the polysurfaces holding them. |
 | `extrude` (`ext`, `extrudecrv`) | Extrude |
 | `helix` | Helix |
 | `loft` | Loft |
