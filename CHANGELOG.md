@@ -71,6 +71,15 @@
   the osnap bar redrew itself from a snap index that had never heard about
   it and the button flipped back. The setting only took hold next launch.
 
+- **Ortho from a snapped start point stays level.** Hold Shift in the
+  Front view, begin a line on a corner that sits behind or in front of
+  the construction plane, and drag sideways: the line looked level in
+  that view and came out diagonal in Top and Perspective. The
+  constrained end kept the plane's depth instead of the start point's,
+  so any ortho line begun on existing geometry slid back onto the
+  plane. Ortho now means the point lies on an axis through the one you
+  started from, all three of its coordinates.
+
 ## 0.5.11 — 2026-08-06
 
 ### Added

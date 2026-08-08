@@ -2853,11 +2853,15 @@ class Viewport(QOpenGLWidget):
                      & Qt.KeyboardModifier.ShiftModifier)
         if self.snap_base is not None and (self.ortho != shift):
             bu, bv, bw = self.cplane.from_world(self.snap_base)
-            u, v, w = self.cplane.from_world(hit)
+            u, v, _w = self.cplane.from_world(hit)
+            # the constrained point lies on an axis THROUGH the base, so
+            # every coordinate but the driven one is the base's — `bw`,
+            # not the hit's, or a line started on a snapped corner off
+            # the plane runs level in this view and diagonal in the next
             if abs(u - bu) >= abs(v - bv):
-                hit = np.asarray(self.cplane.to_world(u, bv, w))
+                hit = np.asarray(self.cplane.to_world(u, bv, bw))
             else:
-                hit = np.asarray(self.cplane.to_world(bu, v, w))
+                hit = np.asarray(self.cplane.to_world(bu, v, bw))
         return tuple(round(float(c), 9) for c in hit)
 
     def _reject_boxes(self, boxes: list, x0, y0, x1, y1, w, h) -> np.ndarray:
