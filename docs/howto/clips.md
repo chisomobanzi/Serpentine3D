@@ -1,8 +1,8 @@
 # Make a clip of your work
 
-Serpentine3D can turn what you model into video two ways: a **turntable**
-of the finished thing, and a **timelapse replayed from the session
-itself**. Neither records your screen.
+Serpentine3D can turn what you model into video three ways: a clean
+**turntable** of the finished thing, a portrait **UI turntable** that shows
+the app around it, and a **timelapse replayed from the session itself**.
 
 ## The turntable
 
@@ -15,6 +15,18 @@ so a small laptop screen still produces a 1080p clip.
 
 The encoder is ffmpeg, found on your system. Without it you get the
 frames as numbered PNGs and the one command line that assembles them.
+
+## The UI turntable
+
+Resize the application window into the portrait composition you want and
+type `turntableui`. It keeps the current camera target, distance and
+elevation, rotates once around that shot, and records the whole application
+window into a 1080x1920, 30 fps story clip. The default length is 15 seconds.
+
+The window is scaled to fit without cropping or stretching. Any aspect-ratio
+difference becomes quiet dark padding, which is useful space for a caption or
+link sticker. When recording finishes, the camera returns to exactly where it
+started.
 
 ## The session timelapse
 

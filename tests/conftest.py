@@ -23,14 +23,12 @@ def _isolated_config(tmp_path_factory):
 def _isolated_session_data(tmp_path_factory):
     """Journals and autosaves of the suite's own, thrown away after.
 
-    Both directories are self-pruning: the journal keeps the newest
-    KEEP_JOURNALS sessions and the autosave slot is claimed per pid. A
-    suite run opens dozens of windows, so aimed at the real directories
-    it evicts every session someone actually modelled in, and leaves
-    lockfiles with dead pids that the next real launch reads as crashes
-    worth recovering.
+    A suite run opens dozens of windows, and each one lands in these
+    directories: journals nobody wants to read next to the ones someone
+    actually modelled in, and autosave lockfiles with dead pids that the
+    next real launch reads as crashes worth recovering.
 
-    Session-scoped: the pruning is what has to be contained, and a
+    Session-scoped: it is the volume that has to be contained, and a
     directory per test would make thousands of them.
     """
     data = tmp_path_factory.mktemp("session_data")

@@ -222,7 +222,11 @@ def _import_file(scene, path: str, ext: str, report) -> int:
 def export_file(scene, path: str, only_ids: list | None = None,
                 thumbnail: bytes | None = None, stl_quality: str = "standard",
                 rhino_version: int = 8):
-    """Export scene (or subset) to a file, format by extension."""
+    """Export scene (or subset) to a file, format by extension.
+
+    Returns a note about anything the format could not carry, or None
+    when everything went in.
+    """
     ext = os.path.splitext(path)[1].lower()
     objs = scene.all()
     if only_ids:
@@ -231,8 +235,9 @@ def export_file(scene, path: str, only_ids: list | None = None,
         native.save_scene(scene, path, thumbnail=thumbnail)
         return
     if ext in (".step", ".stp"):
-        step.export_step([o.shape for o in objs], path)
-        return
+        n = step.export_step([o.shape for o in objs], path)
+        return (f"{n} mesh object(s) left out: STEP cannot carry them"
+                if n else None)
     if ext == ".obj":
         obj.export_obj([(o.name, o.shape, scene.color_of(o))
                         for o in objs], path)

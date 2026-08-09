@@ -9,15 +9,31 @@ from ..core.occ import (
 )
 
 
-def export_step(shapes: list, path: str):
+def export_step(shapes: list, path: str) -> int:
+    """Write `shapes` as STEP; returns how many meshes it had to leave out.
+
+    STEP carries BREP and nothing else, so an imported mesh cannot go
+    in one. Handing the writer a mesh anyway raised a pybind overload
+    TypeError, which reached the user as a wall of OCP signatures.
+    """
+    from ..core.mesh import MeshShape
     writer = STEPControl_Writer()
+    skipped = 0
     for shape in shapes:
+        if isinstance(shape, MeshShape):
+            skipped += 1
+            continue
         status = writer.Transfer(shape,
                                  STEPControl_StepModelType.STEPControl_AsIs)
         if status != IFSelect_ReturnStatus.IFSelect_RetDone:
             raise IOError("STEP transfer failed for a shape")
+    if skipped == len(shapes):
+        raise ValueError(
+            "STEP cannot carry mesh objects, and every object here is one. "
+            "Export to OBJ, STL or 3MF instead.")
     if writer.Write(path) != IFSelect_ReturnStatus.IFSelect_RetDone:
         raise IOError(f"Could not write STEP file: {path}")
+    return skipped
 
 
 def import_step(path: str) -> list:

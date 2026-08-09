@@ -12,7 +12,7 @@ import os
 
 import numpy as np
 import pytest
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QPixmap
 
 from serpentine3d.core import geometry as g
 from serpentine3d.core.scene import Scene
@@ -195,6 +195,152 @@ def test_the_turntable_command_writes_a_clip(tmp_path, monkeypatch):
     assert all((w, h) == (1080, 1080) for _, w, h in rendered)
     frames_dir = out[:-4] + "-frames"
     assert len(os.listdir(frames_dir)) == 30
+
+
+def test_the_turntable_orbits_at_one_distance_without_losing_the_subject(
+        monkeypatch):
+    import serpentine3d.commands  # noqa: F401
+    from serpentine3d.commands.base import (
+        CommandContext, CommandProcessor)
+    from serpentine3d.core.history import History
+    from serpentine3d.core.selection import SelectionManager
+
+    scene = Scene()
+    scene.add(g.make_box((0.0, 0.0, 0.0), 40.0, 10.0, 20.0))
+    ctx = CommandContext(scene, SelectionManager(scene), History(scene))
+    cameras = []
+
+    class FakeWriter:
+        def write(self, _image):
+            pass
+
+        def close(self):
+            return "/tmp/spin.mp4"
+
+    class FakeGL:
+        class camera:
+            azimuth, elevation = 0.6, 0.5
+        config = None
+
+        def render_model_image(self, cam, _w, _h):
+            cameras.append(cam)
+            return object()
+
+    monkeypatch.setattr(encode, "writer_for",
+                        lambda *_args, **_kwargs: FakeWriter())
+    ctx.viewport = FakeGL()
+    proc = CommandProcessor(ctx)
+    proc.run("turntable")
+    proc.provide_text("1")
+    proc.provide_text("1:1")
+    proc.provide_text("/tmp/spin.mp4")
+
+    assert len(cameras) == 30
+    assert len({cam.azimuth for cam in cameras}) == 30
+    assert np.ptp([cam.distance for cam in cameras]) == pytest.approx(
+        0.0, abs=1e-9)
+
+    corners = np.array([[x, y, z] for x in (0, 40)
+                        for y in (0, 10) for z in (0, 20)], float)
+    for cam in cameras:
+        scr = cam.project(corners, 1080, 1080)
+        assert (scr[:, 2] > 0).all()
+        assert (scr[:, 0] > 0).all() and (scr[:, 0] < 1080).all()
+        assert (scr[:, 1] > 0).all() and (scr[:, 1] < 1080).all()
+
+
+def test_the_ui_turntable_records_the_current_window_as_a_story(monkeypatch):
+    """The shareable spin keeps the working shot and the app around it."""
+    import serpentine3d.commands  # noqa: F401
+    from serpentine3d.commands.base import (
+        CommandContext, CommandProcessor)
+    from serpentine3d.core.history import History
+    from serpentine3d.core.selection import SelectionManager
+    from serpentine3d.ui.camera import Camera
+
+    scene = Scene()
+    scene.add(g.make_box((0.0, 0.0, 0.0), 10.0, 10.0, 10.0))
+    camera = Camera()
+    camera.target = np.array([4.0, 5.0, 6.0])
+    camera.distance = 47.0
+    camera.azimuth = 0.6
+    camera.elevation = 0.35
+    original = (tuple(camera.target), camera.distance, camera.azimuth,
+                camera.elevation)
+    poses = []
+
+    # Deliberately narrower than 9:16. A fit makes it 960x1920 with 60 px
+    # dark pillars; a fill would crop its top and bottom, and a resize would
+    # stretch it across all 1080 pixels.
+    window_image = QImage(60, 120, QImage.Format.Format_RGB888)
+    window_image.fill(0xC8783C)
+    window_image.setDevicePixelRatio(2.0)  # a real HiDPI window grab
+
+    class FakeGL:
+        def __init__(self):
+            self.camera = camera
+
+        def update(self):
+            pass
+
+    class FakeWindow:
+        def repaint(self):
+            pass
+
+        def grab(self):
+            poses.append((camera.azimuth, camera.elevation, camera.distance,
+                          tuple(camera.target)))
+            return QPixmap.fromImage(window_image)
+
+    written = {"count": 0, "first": None, "args": None}
+
+    class FakeWriter:
+        def write(self, image):
+            assert (image.width(), image.height()) == (1080, 1920)
+            written["count"] += 1
+            if written["first"] is None:
+                written["first"] = image.copy()
+
+        def close(self):
+            return "/tmp/story.mp4"
+
+    def writer_for(out, width, height, fps):
+        written["args"] = (out, width, height, fps)
+        return FakeWriter()
+
+    monkeypatch.setattr(encode, "writer_for", writer_for)
+    viewport = FakeGL()
+    ctx = CommandContext(scene, SelectionManager(scene), History(scene),
+                         viewport=viewport, window=FakeWindow())
+    proc = CommandProcessor(ctx)
+
+    assert proc.run("turntableui"), "the UI turntable command is not registered"
+    assert proc.request.default == pytest.approx(15.0)
+    proc.provide_text("0.5")                 # keep the focused test quick
+    proc.provide_text("/tmp/story.mp4")
+
+    assert not proc.busy
+    assert written["args"] == ("/tmp/story.mp4", 1080, 1920, 30)
+    assert written["count"] == len(poses) == 15
+    assert [p[0] for p in poses] == pytest.approx(
+        turntable.orbit_azimuths(15, original[2]))
+    for _azimuth, elevation, distance, target in poses:
+        assert elevation == pytest.approx(original[3])
+        assert distance == pytest.approx(original[1])
+        assert target == pytest.approx(original[0])
+    assert tuple(camera.target) == pytest.approx(original[0])
+    assert camera.distance == pytest.approx(original[1])
+    assert camera.azimuth == pytest.approx(original[2])
+    assert camera.elevation == pytest.approx(original[3])
+
+    frame = written["first"]
+    assert frame.pixelColor(540, 960).name() == "#c8783c"
+    assert frame.pixelColor(0, 960).lightness() < 40
+    assert frame.pixelColor(59, 960).lightness() < 40
+    assert frame.pixelColor(60, 960).name() == "#c8783c"
+    assert frame.pixelColor(1019, 960).name() == "#c8783c"
+    assert frame.pixelColor(1020, 960).lightness() < 40
+    assert frame.pixelColor(1079, 960).lightness() < 40
 
 
 def test_the_turntable_command_needs_something_to_look_at(tmp_path):

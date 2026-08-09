@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import struct
 import tempfile
 
 from . import occ
@@ -1786,7 +1787,20 @@ def is_valid(shape) -> bool:
 
 # --- serialization ----------------------------------------------------------
 
+# An imported mesh is geometry, and BREP has nowhere to put it. Rather
+# than let every caller learn that, the bytes carry their own kind: a
+# mesh is tagged, anything else is the BREP it always was.
+_MESH_TAG = b"SMSH\x01"
+
+
 def shape_to_bytes(shape) -> bytes:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        import numpy as np
+        v = np.ascontiguousarray(shape.vertices, "<f4")
+        t = np.ascontiguousarray(shape.triangles, "<u4")
+        return (_MESH_TAG + struct.pack("<II", len(v), len(t))
+                + v.tobytes() + t.tobytes())
     fd, path = tempfile.mkstemp(suffix=".brep")
     os.close(fd)
     try:
@@ -1797,7 +1811,18 @@ def shape_to_bytes(shape) -> bytes:
         os.unlink(path)
 
 
-def shape_from_bytes(data: bytes) -> TopoDS_Shape:
+def shape_from_bytes(data: bytes):
+    if data[:len(_MESH_TAG)] == _MESH_TAG:
+        import numpy as np
+        from .mesh import MeshShape
+        head = len(_MESH_TAG) + 8
+        nv, nt = struct.unpack("<II", data[len(_MESH_TAG):head])
+        cut = head + nv * 12
+        return MeshShape(
+            np.frombuffer(data, "<f4", count=nv * 3,
+                          offset=head).reshape(-1, 3).astype(float),
+            np.frombuffer(data, "<u4", count=nt * 3,
+                          offset=cut).reshape(-1, 3))
     fd, path = tempfile.mkstemp(suffix=".brep")
     os.close(fd)
     try:

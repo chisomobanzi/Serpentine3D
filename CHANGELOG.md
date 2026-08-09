@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.6.1 — 2026-08-09
+
+### Added
+
+- **A story can show the app that made it.** `turntableui` records the
+  current shot turning inside the whole Serpentine3D window, ready for an
+  Instagram story: 1080x1920, 30 fps and fifteen seconds by default. It
+  keeps the camera's target, distance and elevation, fits the UI without
+  cropping or stretching, leaves quiet dark space for a caption or link
+  sticker, and puts the live camera exactly back where it started.
+
+### Fixed
+
+- **A turntable holds one camera distance all the way round.** Every frame
+  used to fit the model independently, so a rectangular object made the
+  shot breathe in and out as its wide and narrow sides turned past the
+  camera. The farthest required framing distance is chosen once now and
+  kept for the whole orbit, without losing any part of the model.
+- **UI turntables fill Retina and HiDPI story frames.** Qt carried the
+  monitor's device-pixel ratio into the window grab, then treated the
+  already-scaled pixels as logical ones and drew the app at half size in
+  a field of empty black. The ratio is normalised before compositing, so
+  the window fills the intended width on high-density displays too.
+- **One imported mesh used to stop every command in the session.** A
+  triangle mesh cannot be written as a BREP, and the journal's idle flush
+  tried anyway. The flush is the first thing a command does, so after an
+  FBX or OBJ import, delete, hide and move all quietly did nothing, on
+  the whole drawing and not just the mesh. Meshes now serialise properly,
+  so they record, replay and land back in the right place. Saving a
+  drawing with a mesh in it works again too.
+- **A journal that fails no longer takes your work with it.** The
+  recorder gives up, says so on stderr, and leaves the app alone.
+  Whatever it wrote up to that point still replays, and
+  `serp3d replay --check` names the moment it stopped rather than letting
+  a short recipe look like a complete one.
+- **STEP export explains itself.** A mesh handed to the STEP writer used
+  to surface a wall of OCP argument signatures in an "Export failed" box.
+  Now the solids and surfaces go out and the echo says how many meshes
+  stayed behind. A drawing of nothing but meshes gets a plain sentence
+  pointing at OBJ, STL or 3MF.
+- **Journals are no longer deleted to make room.** The journal directory
+  used to keep only the newest forty sessions and drop the rest at every
+  launch, which is how a cache behaves and not how a recipe does. A run
+  of short sessions could quietly evict a week of real modelling. Now a
+  session that recorded any work is kept forever, at any age and any
+  count. A session that recorded nothing removes its own file when you
+  close the window, and one abandoned by a crash gets swept a day later,
+  so opening the app to look at it still leaves nothing behind.
+
 ## 0.6.0 — 2026-08-09
 
 ### Added

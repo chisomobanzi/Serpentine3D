@@ -2348,7 +2348,7 @@ wheels = [
 
 [[package]]
 name = "serpentine3d"
-version = "0.6.0"
+version = "0.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "cadquery-ocp" },

@@ -207,6 +207,25 @@ def test_brep_roundtrip():
     assert g.volume(back) == pytest.approx(8.0)
 
 
+def test_a_mesh_survives_the_same_roundtrip():
+    """An imported mesh is geometry too, and BREP cannot hold it.
+
+    Everything that stores a shape as bytes goes through here: the
+    session journal, a layout detail, the .serp writer. Handing any of
+    them an FBX mesh used to raise a raw OCP TypeError from inside
+    BinTools, which is how one imported model could stop every command
+    in the session from running.
+    """
+    import numpy as np
+    from serpentine3d.core.mesh import MeshShape
+    verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], float)
+    tris = np.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]], np.uint32)
+    back = g.shape_from_bytes(g.shape_to_bytes(MeshShape(verts, tris)))
+    assert isinstance(back, MeshShape)
+    assert np.allclose(back.vertices, verts)
+    assert np.array_equal(back.triangles, tris)
+
+
 def test_measure():
     box = g.make_box((0, 0, 0), 2, 2, 2)
     assert g.centroid(box) == pytest.approx((1, 1, 1))

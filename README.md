@@ -8,7 +8,7 @@
 
 [Download for Linux](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) ·
 [Windows](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) ·
-[macOS](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.6.0-arm64.dmg) ·
+[macOS](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.6.1-arm64.dmg) ·
 [Website](https://chisomobanzi.github.io/Serpentine3D/)
 
 </div>
@@ -57,7 +57,7 @@ S-curve at the heart of NURBS geometry.
 |---|---|---|
 | **Linux** | [`Serpentine3D-x86_64.AppImage`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) | `chmod +x` and run — nothing to install |
 | **Windows** | [`Serpentine3D-Setup-x86_64.exe`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) | Installer (Inno Setup) |
-| **macOS** (Apple Silicon) | [`Serpentine3D-arm64.dmg`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.6.0-arm64.dmg) | Drag to Applications |
+| **macOS** (Apple Silicon) | [`Serpentine3D-arm64.dmg`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.6.1-arm64.dmg) | Drag to Applications |
 
 Each download bundles the OpenCASCADE kernel and Python runtime — nothing else to
 install. The GUI needs a GPU with OpenGL 3.3 drivers, which any normal desktop
@@ -105,6 +105,7 @@ commits a value mid-command, or repeats the last command.
 | **Analysis** | `distance` `length` `area` `volume` `curvature` `zebra` `curvaturegraph` (combs) `draftanalysis` `printcheck` (3D-print readiness: watertight, thin walls, overhangs, size) |
 | **View** | `top` `front` `right` `perspective` `4view`/`1view` `zoomextents` `wireframe` `shaded` `ghosted` `rendered` `technical` `grid` `snap` |
 | **Render** | `material` (Matte/Plastic/Metal/Glass/custom PBR — flows into GLB/USD export) `rendered` |
+| **Capture** | `turntable` (clean model clip) `turntableui` (portrait story with the app UI) |
 | **Layers** | `layer` (new/current/show/hide/rename/weight/**linetype**) — or use the Layers panel |
 | **Linetypes** | `linetype` — dashed/dotted/hidden/center/… per object or ByLayer (layers carry a linetype too); dashes render in the viewport *and* in exported layout sheets (PDF/SVG) |
 | **Meshes** | heavy OBJ/3DM/FBX props stay native meshes (instant display); `meshtobrep` / `breptomesh` convert |

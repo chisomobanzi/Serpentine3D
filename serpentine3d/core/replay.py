@@ -85,6 +85,16 @@ class Replayer:
             raise ReplayError(f"journal version {e['ver']} is newer "
                               "than this replayer")
 
+    def _ev_broken(self, e, i):
+        """The recorder gave up here, so the file stops before the work did.
+
+        Everything up to this point still replays. What follows it was
+        never written down, and saying so is the whole point of the
+        marker: a short recipe is fine, a silently short one is not.
+        """
+        self._mismatches.append(
+            f"the recording stopped early: {e.get('why', 'unknown')}")
+
     def _ev_cmd(self, e, i):
         from ..commands.base import resolve
         name = e["name"]

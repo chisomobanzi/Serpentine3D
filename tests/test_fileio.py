@@ -381,3 +381,37 @@ def test_save_command_keeps_a_typed_3dm_extension(scene, tmp_path):
     except StopIteration:
         pass
     assert os.path.exists(bare + ".serp")
+
+
+def test_a_step_export_says_what_it_could_not_carry(tmp_path):
+    """STEP has nowhere to put a triangle mesh.
+
+    Handing one to the writer used to surface a raw OCP TypeError about
+    argument overloads in an "Export failed" box, which tells a person
+    nothing about their drawing. The solids go out, and the note says
+    what stayed behind.
+    """
+    import numpy as np
+    from serpentine3d.core.mesh import MeshShape
+    from serpentine3d.core.scene import Scene
+    scene = Scene()
+    scene.add(g.make_box((0, 0, 0), 2, 2, 2), name="solid")
+    scene.add(MeshShape(np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], float),
+                        np.array([[0, 1, 2]], np.uint32)), name="imported")
+    out = tmp_path / "out.step"
+    note = fileio.export_file(scene, str(out))
+    assert out.exists() and out.stat().st_size > 0
+    assert note and "mesh" in note.lower()
+    assert len(fileio.step.import_step(str(out))) == 1
+
+
+def test_a_step_export_of_nothing_but_meshes_says_so(tmp_path):
+    import numpy as np
+    import pytest
+    from serpentine3d.core.mesh import MeshShape
+    from serpentine3d.core.scene import Scene
+    scene = Scene()
+    scene.add(MeshShape(np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], float),
+                        np.array([[0, 1, 2]], np.uint32)), name="imported")
+    with pytest.raises(ValueError, match="mesh"):
+        fileio.export_file(scene, str(tmp_path / "out.step"))

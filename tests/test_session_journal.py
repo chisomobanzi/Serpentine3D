@@ -12,6 +12,9 @@ replay comes back identical.
 import json
 import math
 import os
+import time
+
+import numpy as np
 
 import pytest
 
@@ -41,6 +44,8 @@ def rig(tmp_path):
 
 def _events(journal):
     journal.close()
+    if not os.path.exists(journal.path):
+        return []          # a session with no work takes its file away
     return _events_open(journal)
 
 
@@ -439,11 +444,12 @@ def test_the_window_keeps_a_journal_of_its_own(tmp_path, monkeypatch):
 def test_a_window_in_a_test_never_writes_into_the_real_directories():
     """The suite keeps its own sessions somewhere it can throw away.
 
-    Every MainWindow opens a journal, and every journal prunes its
-    directory down to the newest KEEP_JOURNALS at startup. A suite run
-    builds dozens of windows, so pointed at the real directory it
-    quietly evicts every session a person actually modelled in. The
-    autosave slot next door is the same shape of accident: a test
+    Every MainWindow opens a journal, and a suite run builds dozens of
+    them. Pointed at the real directory that buries the sessions a
+    person actually modelled in under test noise, and every command a
+    test runs is a recording of work nobody did.
+
+    The autosave slot next door is the same shape of accident: a test
     process that dies leaves a lockfile with a dead pid, which is
     exactly what a crashed session looks like, so the next real launch
     offers to recover a scene out of somebody's test.
@@ -473,3 +479,161 @@ def test_journal_can_be_disabled_by_env(tmp_path, monkeypatch):
     j = SessionJournal.maybe(str(tmp_path))
     assert j is not None
     j.close()
+
+
+# -- pruning: a recipe is not a cache entry --
+
+
+def _write_journal(path, events, when=None):
+    path.write_text("".join(json.dumps(e) + "\n" for e in events),
+                    encoding="utf-8")
+    if when is not None:
+        os.utime(path, (when, when))
+    return path
+
+
+def _stub(path, when=None):
+    """A session that opened, looked around, and closed again."""
+    return _write_journal(path, [{"ev": "session", "ver": 1, "app": "0"}],
+                          when)
+
+
+def _worked(path, when=None, ev="cmd"):
+    """A session with real work in it."""
+    body = ({"ev": "cmd", "name": "box", "sel": []} if ev == "cmd"
+            else {"ev": "edit", "made": [], "chg": [], "gone": []})
+    return _write_journal(path, [{"ev": "session", "ver": 1, "app": "0"},
+                                 body], when)
+
+
+def test_a_session_with_work_is_never_evicted_to_make_room(tmp_path):
+    """The bug that ate a week of Voyager sessions.
+
+    Pruning to the newest N at startup treats a recipe like a cache
+    entry, so a burst of short sessions silently deletes the ones
+    somebody actually modelled in. Age is not a reason to throw work
+    away; nothing anybody built is ever evicted for room.
+    """
+    old = time.time() - 90 * 86400
+    for i in range(60):
+        _worked(tmp_path / f"20260101-{i:06d}-1.jsonl", when=old)
+    j = SessionJournal.maybe(str(tmp_path))
+    try:
+        kept = [f for f in os.listdir(tmp_path) if f.endswith(".jsonl")]
+        assert len(kept) == 61          # the 60 recipes, plus this session
+    finally:
+        j.close()
+
+
+def test_a_session_that_recorded_nothing_takes_itself_away(tmp_path):
+    """Opening the app and closing it should not leave litter behind."""
+    j = SessionJournal.maybe(str(tmp_path))
+    path = j.path
+    j.close()
+    assert not os.path.exists(path)
+
+
+def test_a_session_that_recorded_something_stays(tmp_path, monkeypatch):
+    monkeypatch.setenv("SERP3D_JOURNAL_DIR", str(tmp_path))
+    monkeypatch.setenv("SERP3D_CONFIG", str(tmp_path / "cfg.json"))
+    from serpentine3d.app import MainWindow
+    w = MainWindow()
+    w.viewport.resize(640, 480)
+    path = w.journal.path
+    w.processor.run("box 0,0,0 10,10,0 10")
+    w.mark_saved()
+    w.close()
+    assert os.path.exists(path)
+    assert any(json.loads(ln)["ev"] == "cmd"
+               for ln in open(path, encoding="utf-8") if ln.strip())
+
+
+def test_an_abandoned_stub_is_swept_but_the_work_beside_it_is_not(tmp_path):
+    """A crash leaves a stub behind; close() never got to remove it."""
+    old = time.time() - 3 * 86400
+    stub = _stub(tmp_path / "20260101-000001-1.jsonl", when=old)
+    real = _worked(tmp_path / "20260101-000002-1.jsonl", when=old)
+    j = SessionJournal.maybe(str(tmp_path))
+    j.close()
+    assert not stub.exists()
+    assert real.exists()
+
+
+def test_a_second_window_still_open_keeps_its_stub(tmp_path):
+    """Another window's journal is a stub until its first command."""
+    live = _stub(tmp_path / "20260101-000003-1.jsonl")     # mtime is now
+    j = SessionJournal.maybe(str(tmp_path))
+    j.close()
+    assert live.exists()
+
+
+def test_a_session_of_nothing_but_gumball_work_is_work(tmp_path):
+    """An edit is a drag or a control point: no command, still a model."""
+    old = time.time() - 3 * 86400
+    p = _worked(tmp_path / "20260101-000004-1.jsonl", when=old, ev="edit")
+    j = SessionJournal.maybe(str(tmp_path))
+    j.close()
+    assert p.exists()
+
+
+# -- imported meshes --
+
+
+def _tetra(scale=1.0):
+    from serpentine3d.core.mesh import MeshShape
+    verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                     float) * scale
+    tris = np.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]], np.uint32)
+    return MeshShape(verts, tris)
+
+
+def test_an_imported_mesh_does_not_stop_every_command(rig):
+    """One FBX in the drawing used to end the session.
+
+    A mesh cannot be written as a BREP, so the idle flush raised on it,
+    and the flush is the first thing a command does. The dirty flag
+    survived the throw, so the next command raised too, and the next:
+    delete, hide and move all silently did nothing for the rest of the
+    session, on the whole drawing and not just the mesh.
+    """
+    scene, sel, hist, ctx, proc, journal = rig
+    hist.checkpoint("import")
+    scene.add(_tetra(), name="voyager")
+    journal.flush()                            # what the quiet timer does
+    proc.run("box 0,0,0 10,10,0 10")
+    assert len(scene.all()) == 2
+    sel.set([scene.all()[0].id])
+    assert proc.run("delete") is True
+    assert len(scene.all()) == 1
+
+
+def test_a_mesh_moved_by_hand_replays_where_it_was_put(rig):
+    scene, sel, hist, ctx, proc, journal = rig
+    hist.checkpoint("import")
+    obj = scene.add(_tetra(), name="voyager")
+    journal.flush()
+    hist.checkpoint("gumball")
+    moved = obj.shape.translated((0.0, 0.0, 100.0))
+    scene.replace_shape(obj.id, moved)
+    journal.flush()
+    r = _replay(journal)
+    back = r.scene.all()[0]
+    assert np.allclose(back.shape.vertices, moved.vertices)
+
+
+def test_a_recorder_that_fails_does_not_take_the_command_with_it(rig,
+                                                                monkeypatch):
+    """Losing the recording is a smaller thing than losing the work."""
+    scene, sel, hist, ctx, proc, journal = rig
+    from serpentine3d.core import geometry as geo
+
+    def boom(shape):
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(geo, "shape_to_bytes", boom)
+    hist.checkpoint("import")
+    scene.add(_tetra(), name="voyager")
+    journal.flush()
+    assert proc.run("box 0,0,0 10,10,0 10") is True
+    assert len(scene.all()) == 2
+    assert journal.broken is True

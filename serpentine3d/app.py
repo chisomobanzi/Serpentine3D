@@ -1488,12 +1488,13 @@ class MainWindow(QMainWindow):
                 return
         try:
             ids = self.selection.ids or None
-            fileio.export_file(
+            note = fileio.export_file(
                 self.scene, path, only_ids=ids, stl_quality=stl_quality,
                 rhino_version=fileio.rhino_version_from_filter(
                     getattr(self, "_picked_filter", "")))
             scope = "selection" if ids else "scene"
-            self.command_line.echo(f"Exported {scope} to {path}")
+            self.command_line.echo(f"Exported {scope} to {path}"
+                                   + (f" ({note})" if note else ""))
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Export failed", str(exc))
 

@@ -22,6 +22,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | Command | Does |
 |---|---|
 | `turntable` | Orbit the camera once around the work and write a video clip; |
+| `turntableui` | Record a portrait turntable of the current shot and application UI. |
 
 ## Curves
 
@@ -302,4 +303,3 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `scale2d` | Scale in the CPlane only (thickness along the CPlane normal is |
 | `scalenu` | Scale by a different amount along each axis: type the three |
 | `setpt` (`setpoints`) | Force chosen coordinates of every control point to one value — |
-
