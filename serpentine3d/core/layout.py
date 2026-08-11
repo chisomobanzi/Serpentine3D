@@ -707,6 +707,40 @@ class Layout:
     # `add` skips past a name already on the sheet
     _counters: dict = field(default_factory=dict, repr=False, compare=False)
 
+    # the sheet itself, as against anything put on it
+    _PAPER = ("id", "name", "paper_w", "paper_h", "margin", "_counters")
+
+    def is_empty(self) -> bool:
+        """True if nothing has been drawn or placed on the paper.
+
+        Read off the fields rather than a written-out list of them, so a
+        new kind of sheet content counts from the day it is added rather
+        than the day someone remembers this method. Deleting a sheet asks
+        first when this is False, and goes quietly when it is True.
+        """
+        return not any(getattr(self, f.name) for f in fields(self)
+                       if f.name not in self._PAPER)
+
+    def duplicate(self, name: str) -> Layout:
+        """A copy of the sheet under a new name, with fresh ids throughout.
+
+        Every kind of thing on paper carries an id, not only the details,
+        and two sheets holding the same one is the sort of fault that
+        surfaces late — in whichever feature is the first to look an item
+        up rather than walk to it. Fields are read the way `is_empty`
+        reads them, so a new kind of content is covered when it lands.
+        """
+        dup = self.clone()
+        dup.id = _uid()
+        dup.name = name
+        for f in fields(dup):
+            if f.name in self._PAPER:
+                continue
+            for item in getattr(dup, f.name) or ():
+                if hasattr(item, "id"):     # revisions and scale bars are
+                    item.id = _uid()        # bare lists, with no id to move
+        return dup
+
     def detail_at(self, px: float, py: float) -> DetailView | None:
         for d in reversed(self.details):        # topmost first
             if d.contains(px, py):
@@ -738,6 +772,23 @@ class Layout:
 
     def clone(self) -> "Layout":
         return copy.deepcopy(self)
+
+
+def unique_layout_name(layouts, base: str) -> str:
+    """`base`, or `base 2`, `base 3`… — the first of those not taken.
+
+    Sheets are told apart by name at the command line, so a second
+    'Site plan copy' would make `layout` > Delete a coin toss between
+    them. Duplicating is one click now, and it used to hand out the
+    same name every time.
+    """
+    taken = {lay.name.lower() for lay in layouts}
+    if base.lower() not in taken:
+        return base
+    n = 2
+    while f"{base} {n}".lower() in taken:
+        n += 1
+    return f"{base} {n}"
 
 
 # ------------------------------------------------------------- serialization

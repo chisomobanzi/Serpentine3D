@@ -90,6 +90,10 @@ class MainWindow(QMainWindow):
             "QTabBar::tab:selected { background: #4a3f28; color: #f0d9a8; }")
         self._tabs_updating = False
         self.space_tabs.currentChanged.connect(self._space_tab_changed)
+        self.space_tabs.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self.space_tabs.customContextMenuRequested.connect(
+            self._space_tab_menu)
         # None until _balance_docks has run: a resize before then has no
         # settled panel width to hold, and holding one would fight it.
         self._panel_width = None
@@ -1707,8 +1711,28 @@ class MainWindow(QMainWindow):
             "Use 'detail' to place model views.")
         return lay
 
+    def _space_below(self, space_id: str, order: list, live: list) -> str:
+        """Where a deleted sheet hands you off to: the next tab down.
+
+        Down rather than home to Model, which is only the right answer for
+        the first sheet. Deleting the third of three leaves you on the
+        second, the way closing a tab does everywhere else, and the sheet
+        you land on is the one that was next to the work you were doing.
+        Model sits at the bottom and cannot be deleted, so walking down
+        always lands somewhere.
+        """
+        if space_id in order:
+            for below in reversed(order[:order.index(space_id)]):
+                if below in live:
+                    return below
+        return "model"
+
     def _refresh_space_tabs(self):
         self._tabs_updating = True
+        # Read the strip before rebuilding it: the order the tabs were in
+        # is the only record of which sheet sat below a deleted one.
+        order = [self.space_tabs.tabData(i)
+                 for i in range(self.space_tabs.count())]
         want = [("model", "Model")] + [(lay.id, lay.name)
                                        for lay in self.scene.layouts]
         # A drafting sheet is the one thing you would never guess was
@@ -1724,13 +1748,20 @@ class MainWindow(QMainWindow):
         live = [w[0] for w in want]
         for stale in [s for s in list(self._space_states) if s not in live]:
             self._forget_space(stale)
+        # A pane pointed at a deleted sheet has nothing left to draw, and a
+        # pane nobody asks to redraw keeps the last frame it drew: the sheet
+        # stays on screen after the sheet is gone. Panes are moved off it
+        # here rather than in the deleting, so undo and the `layout` command
+        # are covered along with the tab menu. set_space repaints.
+        for vp in self.all_viewports():
+            if vp.space not in live:
+                vp.set_space(self._space_below(vp.space, order, live))
         if self.space not in live:
             # The sheet you were standing on was deleted, by undo or by the
-            # `layout` command. Go back to the model, which is the one tab
-            # that cannot go. Clearing the flag first: switch_space ends by
+            # `layout` command. Clearing the flag first: switch_space ends by
             # calling this again, and it would otherwise find it set.
             self._tabs_updating = False
-            self.switch_space("model")
+            self.switch_space(self._space_below(self.space, order, live))
             return
         current_index = 0
         for i, (space_id, label) in enumerate(want):
@@ -1740,6 +1771,98 @@ class MainWindow(QMainWindow):
                 current_index = i
         self.space_tabs.setCurrentIndex(current_index)
         self._tabs_updating = False
+
+    # ------------------------------------------- renaming / deleting a sheet
+
+    def _layout_at_tab(self, index: int):
+        """The sheet tab `index` stands for, or None if it is not a sheet."""
+        if index < 0:
+            return None
+        space_id = self.space_tabs.tabData(index)
+        return next((l for l in self.scene.layouts if l.id == space_id), None)
+
+    def _layout_tab_menu(self, index: int):
+        """The right-click menu for a sheet tab, or None where there is none.
+
+        Model is not a sheet — there is nothing to rename it to and nowhere
+        to go without it — so it gets no menu rather than a menu of words
+        greyed out. The menu closes over the layout itself, not the tab
+        number, so a sheet arriving or leaving mid-click cannot slide the
+        answer along to its neighbour.
+        """
+        lay = self._layout_at_tab(index)
+        if lay is None:
+            return None
+        menu = QMenu(self.space_tabs)
+        menu.addAction("Rename…", lambda: self.rename_layout(lay))
+        menu.addAction("Duplicate", lambda: self.duplicate_layout(lay))
+        menu.addAction("Delete", lambda: self.delete_layout(lay))
+        return menu
+
+    def _space_tab_menu(self, pos):
+        menu = self._layout_tab_menu(self.space_tabs.tabAt(pos))
+        if menu is not None:
+            menu.exec(self.space_tabs.mapToGlobal(pos))
+
+    def rename_layout(self, lay, new_name: str | None = None) -> bool:
+        """Rename a sheet, asking for the name if not given one."""
+        if new_name is None:
+            from PySide6.QtWidgets import QInputDialog
+            new_name, ok = QInputDialog.getText(
+                self, "Rename layout", "Layout name:", text=lay.name)
+            if not ok:
+                return False
+        new_name = new_name.strip()
+        if not new_name or new_name == lay.name:
+            return False
+        self.history.checkpoint("rename layout")
+        lay.name = new_name
+        self.scene.notify("layouts")
+        self.command_line.echo(f"Renamed layout to '{new_name}'.")
+        return True
+
+    def duplicate_layout(self, lay):
+        """Copy a sheet, drawing and all, and open the copy.
+
+        Opening it follows the `+` button rather than `layout` > Duplicate,
+        which leaves you where you were: a copy you made by hand is a copy
+        you are about to change.
+        """
+        from .core.layout import unique_layout_name
+        self.history.checkpoint("duplicate layout")
+        dup = lay.duplicate(
+            unique_layout_name(self.scene.layouts, f"{lay.name} copy"))
+        self.scene.layouts.append(dup)
+        self.scene.notify("layouts")
+        self.switch_space(dup.id)
+        self.command_line.echo(f"Duplicated as '{dup.name}'.")
+        return dup
+
+    def _confirm_layout_delete(self, lay) -> bool:
+        reply = QMessageBox.question(
+            self, "Delete layout",
+            f"Delete '{lay.name}'?\n\nThere is work on this sheet.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        return reply == QMessageBox.StandardButton.Yes
+
+    def delete_layout(self, lay) -> bool:
+        """Delete a sheet, asking first if anything has been put on it.
+
+        An empty sheet is one click to make and goes on one click; a sheet
+        with drawing on it is worth a question. Both are undoable, and the
+        asking happens before the checkpoint so that answering no does not
+        spend the undo step belonging to whatever came before.
+        """
+        if not lay.is_empty() and not self._confirm_layout_delete(lay):
+            return False
+        self.history.checkpoint("delete layout")
+        self.scene.layouts.remove(lay)
+        # the refresh drops the tab, and moves anything still looking at the
+        # sheet down to the tab below it
+        self.scene.notify("layouts")
+        self.command_line.echo(f"Deleted layout '{lay.name}'.")
+        return True
 
     def _space_exists(self, space_id: str) -> bool:
         return space_id == "model" or any(l.id == space_id

@@ -5,6 +5,7 @@ from __future__ import annotations
 from ..core import geometry as g
 from ..core.layout import (
     PAPER_SIZES, DetailView, Layout, LinearDim, TextNote, parse_scale,
+    unique_layout_name,
 )
 # a detail view named "front" should look where the front view looks
 from ..ui.camera import STANDARD_VIEWS as _VIEW_ANGLES
@@ -92,17 +93,15 @@ def cmd_layout(ctx):
         lay.name = new
         ctx.echo(f"Renamed to '{new}'.")
     elif action == "Delete":
+        # The window moves itself off a sheet that has gone, on the notify
+        # below — the same way it does for undo. Naming a fallback here as
+        # well is how the command line came to send you somewhere other
+        # than the tab menu did.
         scene.layouts.remove(lay)
-        if ctx.viewport is not None and ctx.viewport.space == lay.id:
-            _window(ctx).switch_space("model")
         ctx.echo(f"Deleted layout '{name}'.")
     elif action == "Duplicate":
-        copy = lay.clone()
-        import uuid
-        copy.id = uuid.uuid4().hex[:8]
-        for d in copy.details:
-            d.id = uuid.uuid4().hex[:8]
-        copy.name = f"{lay.name} copy"
+        copy = lay.duplicate(
+            unique_layout_name(scene.layouts, f"{lay.name} copy"))
         scene.layouts.append(copy)
         ctx.echo(f"Duplicated as '{copy.name}'.")
     scene.notify()
