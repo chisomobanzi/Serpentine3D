@@ -7,7 +7,7 @@ import signal
 import sys
 
 import numpy as np
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
@@ -2311,6 +2311,53 @@ def _selftest() -> int:
     return 0 if ok else 1
 
 
+class FileOpenRelay(QObject):
+    """macOS hands a double-clicked document over as a QFileOpenEvent on
+    the application, never argv — without this relay the Finder
+    association would only ever open an empty window."""
+
+    def __init__(self, window):
+        super().__init__(window)
+        self._window = window
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.FileOpen and ev.file():
+            self._window._open_path(ev.file())
+            return True
+        return super().eventFilter(obj, ev)
+
+
+def _offer_default_app(window):
+    """One launch-time ask to own .serp files. 'Not now' asks again next
+    launch; the other two answers settle it for good."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from .utils import file_assoc
+    box = QMessageBox(window)
+    box.setWindowTitle("Default application")
+    box.setText("Make Serpentine3D the default application "
+                "for .serp files?")
+    if sys.platform == "win32":
+        box.setInformativeText("Windows keeps the choice in Settings — "
+                               "this opens the right page.")
+    elif sys.platform == "darwin":
+        box.setInformativeText("macOS keeps the choice in Finder — "
+                               "this shows the steps.")
+    make = box.addButton("Make default", QMessageBox.ButtonRole.AcceptRole)
+    box.addButton("Not now", QMessageBox.ButtonRole.RejectRole)
+    never = box.addButton("Don't ask again",
+                          QMessageBox.ButtonRole.DestructiveRole)
+    box.setDefaultButton(make)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is make:
+        window.cfg.set("file_assoc", "asked", True)
+        _, message = file_assoc.make_default()
+        window.command_line.echo(message)
+    elif clicked is never:
+        window.cfg.set("file_assoc", "asked", True)
+
+
 def run_app(app, splash=None):
     """Build the main window and run the event loop.
 
@@ -2327,6 +2374,7 @@ def run_app(app, splash=None):
     if splash:
         splash.message("Preparing workspace…", 0.7)
     window = MainWindow()
+    app.installEventFilter(FileOpenRelay(window))
 
     # RPC bridge for the MCP server (unless disabled)
     if os.environ.get("SERP3D_NO_RPC") != "1":
@@ -2372,6 +2420,9 @@ def run_app(app, splash=None):
     from .ui.welcome import WelcomeScreen, should_show as _welcome
     if _welcome(window):
         WelcomeScreen(window).exec()
+    from .utils import file_assoc
+    if file_assoc.should_offer(window.cfg):
+        _offer_default_app(window)
     window.start_update_check()
     return app.exec()
 

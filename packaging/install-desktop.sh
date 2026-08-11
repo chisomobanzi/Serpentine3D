@@ -87,6 +87,9 @@ cat > "$MIME_DIR/packages/serpentine3d.xml" << 'EOF'
 EOF
 
 refresh
+# registration alone only adds an "Open With" entry; this makes it the default
+xdg-mime default serpentine3d.desktop application/x-serpentine3d \
+    2>/dev/null || true
 command -v desktop-file-validate > /dev/null \
     && desktop-file-validate "$DESKTOP_FILE"
 

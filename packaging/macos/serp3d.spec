@@ -62,5 +62,21 @@ app = BUNDLE(
         "LSMinimumSystemVersion": "11.0",
         "LSApplicationCategoryType": "public.app-category.graphics-design",
         "NSHumanReadableCopyright": "MIT License · Chisomo Banzi",
+        # Claim .serp so Finder offers (and can default to) this app.
+        # The path arrives as a QFileOpenEvent — see app.FileOpenRelay.
+        "CFBundleDocumentTypes": [{
+            "CFBundleTypeName": "Serpentine3D model",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Owner",
+            "LSItemContentTypes": ["com.chisomobanzi.serpentine3d.serp"],
+        }],
+        "UTExportedTypeDeclarations": [{
+            "UTTypeIdentifier": "com.chisomobanzi.serpentine3d.serp",
+            "UTTypeDescription": "Serpentine3D model",
+            "UTTypeConformsTo": ["public.data"],
+            "UTTypeTagSpecification": {
+                "public.filename-extension": ["serp"],
+            },
+        }],
     },
 )

@@ -89,6 +89,15 @@ def cmd_export(ctx):
     ctx.echo(f"Exported to {path}")
 
 
+@command("setdefaultapp", mutates=False)
+def cmd_setdefaultapp(ctx):
+    """Make Serpentine3D the default application for .serp files."""
+    from ..utils import file_assoc
+    _, message = file_assoc.make_default()
+    ctx.echo(message)
+    yield from ()
+
+
 @command("new", mutates=True)
 def cmd_new(ctx):
     confirm = yield OptionReq("Clear the scene?", options=["Yes", "No"],
