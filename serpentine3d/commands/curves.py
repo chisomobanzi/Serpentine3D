@@ -6,6 +6,16 @@ from ..core import geometry as g
 from .base import PointReq, SelectReq, command, frame_sides, quadrant
 
 
+def _back_at_the_start(p, pts) -> bool:
+    """A pick landing on the first point again, once a loop is possible.
+
+    Drawn as a gesture: End osnap puts the click exactly on the stored
+    point, so the tolerance only has to absorb float noise, not aim."""
+    if not isinstance(p, (tuple, list)) or len(pts) < 3:
+        return False        # option keywords ("Undo") pass through here too
+    return all(abs(a - b) < 1e-7 for a, b in zip(p, pts[0]))
+
+
 def _rubber(pts):
     """Preview segments through a point list."""
     if len(pts) < 2:
@@ -51,7 +61,7 @@ def cmd_polyline(ctx):
         p = yield req
         if p is None:
             break
-        if p == "Close":
+        if p == "Close" or _back_at_the_start(p, pts):
             obj = ctx.add(g.make_polyline(pts, closed=True))
             ctx.echo(f"Created closed {obj.name}.")
             return
@@ -71,7 +81,7 @@ def cmd_curve(ctx):
         p = yield req
         if p is None:
             break
-        if p == "Close":
+        if p == "Close" or _back_at_the_start(p, pts):
             obj = ctx.add(g.make_interp_curve(pts, closed=True))
             ctx.echo(f"Created closed {obj.name}.")
             return

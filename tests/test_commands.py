@@ -67,6 +67,41 @@ def test_polyline_close(env):
     assert g.is_closed_curve(scene.all()[0].shape)
 
 
+def test_polyline_closes_by_clicking_the_first_point(env):
+    scene, sel, hist, ctx, proc = env
+    proc.run("polyline")
+    for t in ("0,0", "10,0", "10,10"):
+        proc.provide_text(t)
+    proc.provide_text("0,0")         # back on the start = Close
+    assert not proc.busy
+    assert g.is_closed_curve(scene.all()[0].shape)
+
+
+def test_two_point_polyline_does_not_close_on_the_start(env):
+    """With two points down, the start is not yet a close gesture — a
+    zero-area loop is never what the click meant."""
+    scene, sel, hist, ctx, proc = env
+    proc.run("polyline")
+    proc.provide_text("0,0")
+    proc.provide_text("10,0")
+    proc.provide_text("0,0")         # doubles back, does not close
+    assert proc.busy                 # still drawing
+    proc.provide_text("5,5")
+    proc.provide_text("")            # Enter finishes open
+    assert not proc.busy
+    assert not g.is_closed_curve(scene.all()[0].shape)
+
+
+def test_curve_closes_by_clicking_the_first_point(env):
+    scene, sel, hist, ctx, proc = env
+    proc.run("curve")
+    for t in ("0,0", "10,0", "10,10"):
+        proc.provide_text(t)
+    proc.provide_text("0,0")
+    assert not proc.busy
+    assert g.is_closed_curve(scene.all()[0].shape)
+
+
 def test_circle_and_extrude_via_selection(env):
     scene, sel, hist, ctx, proc = env
     proc.run("circle")
