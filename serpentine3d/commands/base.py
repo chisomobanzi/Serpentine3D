@@ -132,6 +132,17 @@ class SelectReq(Req):
     preview_fn: object = None
 
 
+def _kinds_phrase(kinds: tuple) -> str:
+    """The kinds filter as prompt English: ('solid','surface') -> 'solid
+    or surface'. Every message about a rejected selection ends with this,
+    so the why is always in the same words the filter actually used."""
+    if not kinds:
+        return "any object"
+    if len(kinds) == 1:
+        return kinds[0]
+    return ", ".join(kinds[:-1]) + " or " + kinds[-1]
+
+
 class CancelCommand(Exception):
     """Raised inside a generator when the user hits Escape."""
 
@@ -704,17 +715,37 @@ class CommandProcessor:
         if isinstance(req, SelectReq):
             self._select_buffer = []
             if (req.allow_preselected and self.ctx.selection.ids):
-                pre = [o.id for o in self.ctx.selection.objects()
+                held = self.ctx.selection.objects()
+                pre = [o.id for o in held
                        if not req.kinds or o.kind in req.kinds]
-                if pre:
-                    if req.max_count:
-                        pre = pre[:req.max_count]
-                    if len(pre) >= req.min_count:
-                        # consume pre-selection immediately
-                        self.ctx.selection.clear()
-                        self._advance(
-                            [self.ctx.scene.objects[i] for i in pre])
-                        return
+                # A selection the filter throws out has to be spoken for:
+                # the alternative is a command parked on a prompt while the
+                # highlight still says "these", and every click from then
+                # on reads as a dead viewport.
+                if not pre:
+                    self.ctx.echo(
+                        f"None of the {len(held)} selected object(s) can "
+                        f"be used here — needs: {_kinds_phrase(req.kinds)}.")
+                    return
+                if len(pre) < len(held):
+                    self.ctx.echo(
+                        f"Skipped {len(held) - len(pre)} selected "
+                        f"object(s) — needs: {_kinds_phrase(req.kinds)}.")
+                if req.max_count and len(pre) > req.max_count:
+                    self.ctx.echo(f"Using the first {req.max_count} of "
+                                  f"{len(pre)} selected.")
+                    pre = pre[:req.max_count]
+                if len(pre) >= req.min_count:
+                    # consume pre-selection immediately
+                    self.ctx.selection.clear()
+                    self._advance(
+                        [self.ctx.scene.objects[i] for i in pre])
+                    return
+                # too few to consume: carry the usable part into the
+                # pending pick, so adding to it completes the answer
+                # rather than starting the count again from nothing
+                self._select_buffer = pre
+                self.ctx.selection.set(pre)
 
     def _finish(self, success: bool):
         if self.journal is not None:
@@ -890,9 +921,17 @@ class CommandProcessor:
             self.finish_selection()
             return
         if text.lower() == "all":
-            self._select_buffer = [
-                o.id for o in self.ctx.scene.visible_objects()
-                if self._matching(o, req)]
+            matches = [o.id for o in self.ctx.scene.visible_objects()
+                       if self._matching(o, req)]
+            if not matches:
+                # 'all' of nothing used to empty the buffer and fall into
+                # the Enter-on-nothing cancel — the command vanished with
+                # no word on why. Explain and keep asking instead.
+                self.ctx.echo("Nothing eligible to select — needs: "
+                              f"{_kinds_phrase(req.kinds)}.")
+                self._notify()
+                return
+            self._select_buffer = matches
             self.ctx.selection.set(self._select_buffer)
             self.finish_selection()
             return
@@ -913,14 +952,20 @@ class CommandProcessor:
         req = self.request
         if not isinstance(req, SelectReq):
             return
+        eligible = False
         for obj_id in obj_ids:
             obj = self.ctx.scene.get(obj_id)
             if obj is None or not self._matching(obj, req):
                 continue
+            eligible = True
             if obj_id not in self._select_buffer:
                 self._select_buffer.append(obj_id)
                 if req.max_count and len(self._select_buffer) >= req.max_count:
                     break
+        if obj_ids and not eligible:
+            # a sweep that catches only wrong-kind objects looks exactly
+            # like a sweep that caught nothing — same words as a click
+            self.ctx.echo("Object type not accepted here.")
         self.ctx.selection.set(self._select_buffer)
         if req.max_count and len(self._select_buffer) >= req.max_count:
             self.finish_selection()
@@ -941,7 +986,13 @@ class CommandProcessor:
             self._notify()
             return
         objs = [self.ctx.scene.objects[i] for i in self._select_buffer]
+        # sub-objects picked while the request waited (control points go
+        # around the request, straight into the selection) are part of
+        # the answer: the command reads them after the yield returns
+        held = list(self.ctx.selection.subobjects)
         self.ctx.selection.clear()
+        if held:
+            self.ctx.selection.set_subobjects(held)
         self._advance(objs)
 
     # -- prompt for UI --
