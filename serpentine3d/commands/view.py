@@ -495,7 +495,7 @@ def cmd_pointson(ctx):
     _redraw_all(ctx)
     if shown:
         ctx.echo(f"Control points on for {shown} object(s) — drag to edit, "
-                 "F11 to hide.")
+                 "F11 or Esc to hide.")
 
 
 @command("pointsoff", aliases=("pf",), mutates=False)
@@ -503,6 +503,12 @@ def cmd_pointsoff(ctx):
     vp = _vp(ctx)
     n = len(vp.cv_enabled)
     vp.cv_enabled.clear()
+    # Let go of the points it just hid. A held point is what the transform
+    # commands work on and what the gumball stands on, and neither should be
+    # holding a marker nobody can see.
+    kept = [e for e in ctx.selection.subobjects if e[1] != "cv"]
+    if len(kept) != len(ctx.selection.subobjects):
+        ctx.selection.set_subobjects(kept)
     _redraw_all(ctx)
     ctx.echo(f"Control points off ({n} curve(s)).")
     yield from ()

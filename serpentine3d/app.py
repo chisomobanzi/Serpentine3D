@@ -951,6 +951,12 @@ class MainWindow(QMainWindow):
     def _cancel(self):
         if self.processor.busy:
             self.processor.cancel()
+        elif self.scene.cv_enabled:
+            # Escape gives up one thing at a time, most recent first, and
+            # points on is the state you got into last. The object stays
+            # selected: you asked to stop editing points, not to lose what
+            # you were editing, so F10 brings back what was on screen.
+            self.processor.run("pointsoff")
         else:
             self.selection.clear()
         for vp in self.all_viewports():
