@@ -1359,6 +1359,40 @@ def move_control_point(shape, index: int, new_point: Point) -> TopoDS_Shape:
     return mk.Wire()
 
 
+def delete_control_points(shape, indices: list[int]):
+    """What is left of a curve once the given control points (0-based) go.
+
+    A polyline closes over the gap with a straight segment; a NURBS curve
+    is rebuilt from its remaining poles at the same degree. Below that the
+    curve gives up one piece of structure at a time rather than refusing
+    the delete: a loop down to two points straightens out, a single point
+    is returned as a point object, and nothing left returns None — the
+    caller's cue to take the object out of the scene. Joined wires of
+    mixed degree still have no one honest answer for a shared corner,
+    while enough curve survives to need one.
+    """
+    splines, pts, _owners = _control_point_map(shape)
+    drop = set(indices)
+    bad = [i for i in drop if not (0 <= i < len(pts))]
+    if bad:
+        raise GeometryError(f"Control point index {bad[0]} out of range")
+    keep = [p for i, p in enumerate(pts) if i not in drop]
+    if not keep:
+        return None
+    if len(keep) == 1:
+        return make_point(keep[0])
+    # two points cannot bound an area, so the loop opens instead
+    closed = is_closed_curve(shape) and len(keep) >= 3
+    degrees = {bs.Degree() for bs in splines}
+    if degrees == {1}:
+        return make_polyline(keep, closed=closed)
+    if len(splines) == 1:
+        return make_control_curve(keep, degree=splines[0].Degree(),
+                                  closed=closed)
+    raise GeometryError("Control points of joined curves cannot be "
+                        "deleted — explode the curve first")
+
+
 def sample_curve(shape, count: int) -> list[Point]:
     """`count` points spaced uniformly by arc length along a curve/wire."""
     from OCP.BRepAdaptor import BRepAdaptor_CompCurve

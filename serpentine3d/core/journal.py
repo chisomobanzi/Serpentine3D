@@ -196,6 +196,13 @@ class SessionJournal:
     def value(self, value, ctx):
         """One resolved answer, with the plane and aim it resolved under."""
         e: dict = {"ev": "val", "v": self._encode(value)}
+        if isinstance(value, list):
+            # a selection answer carries the sub-objects held alongside it
+            # (a control point clicked mid-request never passed through the
+            # request, so the ids alone would replay to a different scene)
+            sub = [list(s) for s in getattr(ctx.selection, "subobjects", [])]
+            if sub:
+                e["sub"] = sub
         cp = self._current_cp(ctx)
         if cp is not None and cp != self._last_cp:
             e["cp"] = cp

@@ -4,6 +4,44 @@ from ..core import geometry as g
 from .base import NumberReq, OptionReq, SelectReq, TextReq, command
 
 
+def _delete_held_points(ctx) -> bool:
+    """Take out any held control points. True if that is what Delete meant."""
+    cvs = [(oid, i) for (oid, kind, i) in ctx.selection.subobjects
+           if kind == "cv"]
+    if not cvs:
+        return False
+    by_obj: dict[str, list[int]] = {}
+    for oid, i in cvs:
+        by_obj.setdefault(oid, []).append(i)
+    done = 0
+    for oid, indices in by_obj.items():
+        obj = ctx.scene.get(oid)
+        if obj is None:
+            continue
+        was_closed = g.is_closed_curve(obj.shape)
+        try:
+            shape = g.delete_control_points(obj.shape, indices)
+        except g.GeometryError as exc:
+            ctx.echo(f"{obj.name}: {exc}")
+            continue
+        done += len(indices)
+        if shape is None:
+            ctx.scene.remove(oid)
+            ctx.echo(f"{obj.name}: last control point deleted, "
+                     "so the object went with it.")
+            continue
+        new = ctx.scene.replace_shape(oid, shape)
+        # taking a curve apart this far changes what it is, and the
+        # viewport alone does not say so once the points are gone
+        if new.kind == "point":
+            ctx.echo(f"{obj.name} is a point now.")
+        elif was_closed and not g.is_closed_curve(shape):
+            ctx.echo(f"{obj.name} is open now.")
+    if done:
+        ctx.echo(f"Deleted {done} control point(s).")
+    return True
+
+
 @command("delete", aliases=("del", "erase"), space="any", repeatable=False)
 def cmd_delete(ctx):
     lv = ctx.sheet_view()
@@ -17,7 +55,18 @@ def cmd_delete(ctx):
             return
         ctx.echo(f"Deleted {count} sheet item(s).")
         return
-    objs = yield SelectReq("Select objects to delete")
+    # held control points are the picked thing when no object is
+    if not ctx.selection.ids and _delete_held_points(ctx):
+        return
+    # min_count=0: a bare Enter comes back here, where clicking a control
+    # point during the wait (which bypasses the request) can still answer
+    objs = yield SelectReq("Select objects or control points to delete",
+                           min_count=0)
+    if not objs:
+        if _delete_held_points(ctx):
+            return
+        ctx.echo("Nothing selected to delete.")
+        return
     for o in objs:
         ctx.scene.remove(o.id)
     ctx.echo(f"Deleted {len(objs)} object(s).")

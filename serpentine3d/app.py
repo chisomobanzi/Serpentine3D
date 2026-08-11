@@ -1170,7 +1170,9 @@ class MainWindow(QMainWindow):
                 self.viewport.update()
                 self._update_status()
             return
-        if self.selection.ids and not self.processor.busy:
+        held_cvs = any(kind == "cv"
+                       for (_, kind, _) in self.selection.subobjects)
+        if (self.selection.ids or held_cvs) and not self.processor.busy:
             self.run_command("delete")
 
     def _copy_selected(self):

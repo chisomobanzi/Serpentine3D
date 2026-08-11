@@ -128,6 +128,13 @@ class Replayer:
                         for x in self._mapped(v["ids"])
                         if x in self.scene.objects]
                 self.selection.clear()
+                sub = [(self.idmap.get(s[0], s[0]), s[1], s[2])
+                       for s in e.get("sub", [])]
+                sub = [s for s in sub if s[0] in self.scene.objects]
+                if sub:
+                    # sub-objects held when the live answer was given —
+                    # the command reads these right after the yield
+                    self.selection.set_subobjects(sub)
                 self.proc._advance(objs)
             # else: the preselection consumed it inside run(), identically
         elif v is None:
