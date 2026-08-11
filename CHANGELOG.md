@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.6.2 — 2026-08-12
+
+### Added
+
+- **Right-clicking a layout tab renames, duplicates or deletes that sheet.**
+  The only way to work on a sheet was knowing the `layout` command had
+  those words inside it. The menu acts on the tab you clicked, so it is
+  never the wrong sheet, and it asks first when there is work on the one
+  you are deleting. Duplicate gives every item on the copied sheet a fresh
+  id rather than only the details, and counts the name up instead of
+  handing out 'Site plan copy' twice, which is what the command line tells
+  sheets apart by.
+- **Delete takes control points, one piece of structure at a time.**
+  Delete with control points held takes those points rather than the whole
+  object. A curve that runs short of points degrades instead of refusing: a
+  closed curve opens once two points are left, two points collapse to a
+  point object, and deleting the last one takes the object with it. Joined
+  wires of mixed degree still refuse a shared corner, which is the one case
+  with no honest answer. The command says what changed, because the
+  viewport cannot once the points are gone.
+- **A click back on the first point closes the curve.** Drawing a loop
+  meant reaching for the Close option, when the gesture people already make
+  is one last click on the point they started from. End osnap puts that
+  click exactly on the stored point, so the tolerance only has to absorb
+  float noise rather than aim. Two points down is not yet a close: a
+  zero-area loop is never what the click meant.
+- **Double-clicking a .serp file opens it.** Each platform allows a
+  different amount of help, so `setdefaultapp` asks for what it can get.
+  Linux registers the MIME type and desktop entry and sets the default
+  outright, Windows opens the Default Apps page because the UserChoice key
+  is hash-protected against applications setting it themselves, and macOS
+  declares the document type in the bundle and points at Finder's Change
+  All.
+
+### Changed
+
+- **Escape puts the control points away.** Escape gave up whatever was in
+  hand, a running command or the selection, but had nothing to say about
+  control points: a drawing covered in markers stayed covered until you
+  remembered F11. It gives up one thing at a time now, most recent first:
+  the command, then the points, then the selection. The object stays
+  selected while the points go, so the key you already press to back out of
+  things backs out of point editing too.
+
+### Fixed
+
+- **Deleting a sheet leaves the view somewhere sensible.** Deleting hands
+  you the tab below rather than sending you home to Model, which was only
+  ever the right answer for the first sheet. It also moves any pane still
+  pointing at that sheet: a pane nobody asks to redraw keeps the last frame
+  it drew, so a deleted sheet stayed on screen until something else caused
+  a repaint. The rule lives in the tab refresh, so the menu, the `layout`
+  command and undo all follow the same one.
+- **A selection request says why it ignored what you had selected.**
+  Running `booleanunion` with 17 meshes selected parked the command at
+  "Select 2 solids" with no word about the selection it had thrown out, and
+  every click from then on read as a dead viewport. The kinds filter speaks
+  for itself now, in the words the filter actually used, and 'all' of
+  nothing explains itself instead of falling into the Enter-on-nothing
+  cancel. A partly usable selection is carried into the pending pick, so
+  adding to it completes the answer rather than starting the count from
+  nothing. A control point clicked mid-request is carried through as well.
+- **Hiding control points lets go of them.** A held control point is what
+  `move` moves and what the gumball stands on, and after F11 those were
+  markers nobody could see: the next `move` would quietly drag invisible
+  corners instead of asking which objects to work on.
+
 ## 0.6.1 — 2026-08-09
 
 ### Added
