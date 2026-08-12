@@ -77,6 +77,7 @@ def test_the_menu_sets_the_view_of_its_own_viewport(win):
     aux = win.aux_viewports[0]
     menu = win._viewport_menu(aux)
     _menu_action(menu, "Front").trigger()
+    aux.land_flight()                # it turns to it; this is the arrival
     assert aux._view_name == "front"
 
 

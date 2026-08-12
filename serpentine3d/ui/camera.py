@@ -54,6 +54,90 @@ STANDARD_VIEWS = {
 }
 
 
+def projection_for(name: str) -> str:
+    """The named axis views are orthographic; only Perspective foreshortens."""
+    return "perspective" if name == "perspective" else "parallel"
+
+
+# How far a swipe has to travel before it counts as one, in pixels. Small
+# enough to feel like a flick, big enough that a click with a shaky hand
+# does not throw the view somewhere.
+SWIPE_MIN_PX = 12.0
+
+# Which named view stands on which axis, as (positive, negative) per column
+# of the eye direction. Read off STANDARD_VIEWS: front is azimuth -90, so
+# the eye is out at -Y and looking back at the model.
+_AXIS_NAMES = (("right", "left"), ("back", "front"), ("top", "bottom"))
+
+
+def axis_view_after_swipe(azimuth: float, elevation: float,
+                          dx_px: float, dy_px: float,
+                          threshold: float = SWIPE_MIN_PX) -> str | None:
+    """Which axis view a swipe from this pose lands on, or None if too short.
+
+    A quarter turn the way the drag went, then whichever axis is nearest.
+    The turn is about the camera's own up and right rather than about world
+    Z, so a sideways swipe still goes somewhere from a Top view, where the
+    world axis would be the one you are looking straight down.
+
+    The direction follows `orbit`, which the mouse has already taught: drag
+    right and the model turns right, so you end up on its left side.
+    """
+    if max(abs(dx_px), abs(dy_px)) < threshold:
+        return None
+
+    ce = math.cos(elevation)
+    eye = np.array([ce * math.cos(azimuth), ce * math.sin(azimuth),
+                    math.sin(elevation)])
+    fwd = -eye
+    cross = np.cross(fwd, Z_UP)
+    if np.linalg.norm(cross) < 1e-6:
+        right = np.array([-math.sin(azimuth), math.cos(azimuth), 0.0])
+    else:
+        right = normalize(cross)
+    up = np.cross(right, fwd)
+
+    if abs(dx_px) >= abs(dy_px):
+        axis, angle = up, -math.copysign(math.pi / 2, dx_px)
+    else:
+        axis, angle = right, -math.copysign(math.pi / 2, dy_px)
+
+    # Rodrigues, for the one rotation in this file that is not a matrix.
+    c, s = math.cos(angle), math.sin(angle)
+    turned = (eye * c + np.cross(axis, eye) * s
+              + axis * float(np.dot(axis, eye)) * (1.0 - c))
+
+    i = int(np.argmax(np.abs(turned)))
+    return _AXIS_NAMES[i][0 if turned[i] >= 0 else 1]
+
+
+def pose_between(start: tuple[float, float], end: tuple[float, float],
+                 t: float) -> tuple[float, float]:
+    """(azimuth, elevation) a fraction `t` of the way from one to the other.
+
+    The pair, rather than the eye direction, because azimuth is also what a
+    Top view is rolled to: coming to Top from Right there is a quarter turn
+    of roll to make up, and spreading it over the flight arrives with the
+    plan the right way up instead of popping it round at the end.
+
+    Azimuth goes the short way, which is the way you swiped: a swipe turns
+    ninety degrees plus at most forty-five of snap, so the long way round is
+    never the way you came. Exactly half a turn apart there is no shorter
+    way and no gesture to follow, so it picks one and is consistent.
+    """
+    az0, el0 = start
+    az1, el1 = end
+    turn = (az1 - az0 + math.pi) % (2.0 * math.pi) - math.pi
+    return az0 + turn * t, el0 + (el1 - el0) * t
+
+
+def eased(t: float) -> float:
+    """Away quickly, into the view gently. It is the easing rather than the
+    motion that reads as a turn rather than a lurch."""
+    t = max(0.0, min(1.0, t))
+    return 1.0 - (1.0 - t) ** 3
+
+
 class Camera:
     def __init__(self):
         self.target = np.zeros(3)
@@ -256,8 +340,7 @@ class Camera:
         if name not in STANDARD_VIEWS:
             raise ValueError(f"Unknown view '{name}'")
         self.azimuth, self.elevation = STANDARD_VIEWS[name]
-        # the named axis views are orthographic; only Perspective foreshortens
-        self.projection = "perspective" if name == "perspective" else "parallel"
+        self.projection = projection_for(name)
 
     # -- picking ----------------------------------------------------------------
 

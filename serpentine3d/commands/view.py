@@ -24,35 +24,35 @@ def _redraw_all(ctx):
 
 @command("top", mutates=False)
 def cmd_top(ctx):
-    _vp(ctx).set_view("top")
+    _vp(ctx).go_to_view("top")
     ctx.echo("Top view.")
     yield from ()
 
 
 @command("front", mutates=False)
 def cmd_front(ctx):
-    _vp(ctx).set_view("front")
+    _vp(ctx).go_to_view("front")
     ctx.echo("Front view.")
     yield from ()
 
 
 @command("right", mutates=False)
 def cmd_right(ctx):
-    _vp(ctx).set_view("right")
+    _vp(ctx).go_to_view("right")
     ctx.echo("Right view.")
     yield from ()
 
 
 @command("isometric", aliases=("iso",), mutates=False)
 def cmd_isometric(ctx):
-    _vp(ctx).set_view("isometric")
+    _vp(ctx).go_to_view("isometric")
     ctx.echo("Isometric view.")
     yield from ()
 
 
 @command("perspective", aliases=("persp",), mutates=False)
 def cmd_persp(ctx):
-    _vp(ctx).set_view("perspective")
+    _vp(ctx).go_to_view("perspective")
     ctx.echo("Perspective view.")
     yield from ()
 
@@ -87,19 +87,19 @@ def cmd_ghosted(ctx):
 
 @command("back", mutates=False)
 def cmd_back(ctx):
-    _vp(ctx).set_view("back")
+    _vp(ctx).go_to_view("back")
     yield from ()
 
 
 @command("left", mutates=False)
 def cmd_left(ctx):
-    _vp(ctx).set_view("left")
+    _vp(ctx).go_to_view("left")
     yield from ()
 
 
 @command("bottom", mutates=False)
 def cmd_bottom(ctx):
-    _vp(ctx).set_view("bottom")
+    _vp(ctx).go_to_view("bottom")
     yield from ()
 
 

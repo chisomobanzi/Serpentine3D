@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Alt and a swipe turn the view to the nearest axis.** Blender's gesture:
+  hold Alt, flick the orbit button the way you want to go, and the view
+  makes a quarter turn and settles on whichever axis it lands nearest. It is
+  for a single maximised pane, where the alternative is a function key or
+  the View menu. The turn is about the camera's own up and right rather than
+  world Z, so a sideways swipe still goes somewhere from Top, where the
+  world axis is the one you are looking down. A perspective pane comes out
+  perspective, seen from the top, and an ordinary drag orbits straight back
+  out of it; a pane that was already parallel lands on the whole named view,
+  construction plane and label with it. A flick too short to mean anything
+  is handed back to the button, so Alt and a click still opens the popup.
+
+- **Views turn rather than cut.** The swipe, F1 to F4, the View menu and a
+  pane's title menu all take about a fifth of a second to get there, easing
+  out of the motion. Front and Back are the same picture on a symmetric
+  model, so a cut says nothing about where you went and the eye has to
+  work it out again; a turn shows you. The camera takes the shortest way
+  round, which is the way your hand went, since a swipe turns at most 135
+  degrees. A perspective pane asked for a named view stops foreshortening
+  as it sets off, while it is moving quickest, rather than popping once it
+  has settled. Anything you do next lands the turn at once, so two quick
+  presses are two turns and never a race, and `set_viewport` over RPC still
+  arrives immediately, as scripts that read the camera back expect.
+  `display.view_transition_ms` sets the length; 0 cuts as before.
+
 ## 0.6.2 — 2026-08-12
 
 ### Added

@@ -10,13 +10,53 @@ remappable in *Settings → Shortcuts* and *Settings → Mouse*.
 |---|---|
 | **Middle-mouse drag** | Orbit |
 | **Shift + middle-drag** | Pan |
+| **Alt + middle-drag** | Turn to face the nearest axis (see below) |
 | **Scroll wheel** | Zoom (anchors on the cursor) |
 | ++f1++ / ++f2++ / ++f3++ / ++f4++ | Top / Front / Right / Perspective |
 | ++ctrl+e++ | Zoom to fit (extents) |
 | ++f7++ | Toggle grid |
 
 Orbit can be moved to the **right** mouse button in *Settings → Mouse* (a
-common Rhino preference).
+common Rhino preference). Whichever button orbits is the one that swipes.
+
+## Swipe to an axis
+
+Hold ++alt++ and flick the orbit button the way you want to go. The view
+turns a quarter of the way round, then settles on whichever axis is nearest,
+so a swipe left from Front lands on Right and a swipe down lands on Top. It
+is the quickest way to get somewhere in a single maximised pane, where the
+alternative is a function key or the View menu.
+
+The swipe turns the camera and nothing else. Do it in a perspective pane and
+you get Top *in perspective*, with an ordinary drag to orbit back out of it.
+Do it in a pane that is already parallel, such as one of the four in the
+default layout, and you land on the whole named view: construction plane,
+label and all, exactly as if you had picked it from the menu.
+
+A flick under about 12 pixels is not a swipe, so ++alt++ and a click still
+does whatever it did before.
+
+If nothing happens, check whether your desktop uses ++alt++ and a drag to
+move windows: some Linux setups do, and the window manager takes the drag
+before Serpentine3D sees it. GNOME and current KDE use the Super key for
+that, so this is mostly older or hand-configured setups.
+
+## Views turn rather than cut
+
+The swipe, ++f1++ to ++f4++, the View menu and a pane's own title menu all
+turn the camera to the new view over about a fifth of a second. Front and
+Back look identical on a symmetric model, so a cut tells you nothing about
+where you ended up; the motion does. Anything you do next lands it at once,
+so two quick presses are two turns rather than a race, and a script that
+sets a view and reads it back still sees the answer immediately.
+
+Change the length, or switch it off, in your settings file:
+
+```json
+"display": { "view_transition_ms": 180 }
+```
+
+Zero cuts straight there, as it did before.
 
 ## Mouse chords
 

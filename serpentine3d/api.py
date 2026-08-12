@@ -70,9 +70,23 @@ class SerpApi:
             "display_mode": self.viewport.display_mode,
         }
 
+    def _land_view_flights(self):
+        """Finish any turn in progress before reading a camera.
+
+        A pane turning to a view is a camera between two answers. Nothing
+        that reads one should have to wait a fifth of a second first, or
+        get a pose that was never asked for.
+        """
+        listing = getattr(self.window, "all_viewports", None)
+        for vp in (listing() if listing is not None else [self.viewport]):
+            land = getattr(vp, "land_flight", None)
+            if land is not None:
+                land()
+
     def screenshot(self, path: str | None = None, width: int | None = None,
                    height: int | None = None,
                    full_window: bool = False) -> dict:
+        self._land_view_flights()
         if not path:
             fd, path = tempfile.mkstemp(suffix=".png", prefix="serp_")
             os.close(fd)
@@ -403,6 +417,7 @@ class SerpApi:
         optional world->screen projection of points."""
         import numpy as np
         from PySide6.QtCore import QPoint
+        self._land_view_flights()
         vp = self.viewport
         origin = vp.mapToGlobal(QPoint(0, 0))
         cam = vp.camera

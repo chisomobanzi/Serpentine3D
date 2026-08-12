@@ -545,7 +545,7 @@ class MainWindow(QMainWindow):
                             ("Front", "front"), ("Back", "back"),
                             ("Right", "right"), ("Left", "left")):
             toggle(label, vp._view_name == name,
-                   lambda n=name: vp.set_view(n))
+                   lambda n=name: vp.go_to_view(n))
         menu.addSeparator()
         for mode in vp.DISPLAY_MODES:
             toggle(mode.capitalize(), vp.display_mode == mode,

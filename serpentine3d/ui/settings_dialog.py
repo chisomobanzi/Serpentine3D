@@ -472,7 +472,7 @@ class SettingsDialog(QDialog):
         row3 = QHBoxLayout()
         row3.addWidget(QLabel("New viewports open in"))
         self.cb_mode = QComboBox()
-        from .viewport import Viewport
+        from .viewport import VIEW_FLIGHT_MS, Viewport
         for mode in Viewport.DISPLAY_MODES:
             self.cb_mode.addItem(mode.capitalize(), mode)
         current = self.cfg.get("display", "default_mode", default="shaded")
@@ -482,6 +482,20 @@ class SettingsDialog(QDialog):
         row3.addWidget(self.cb_mode)
         row3.addStretch(1)
         layout.addLayout(row3)
+
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel("Turn to a named view over"))
+        self.sp_transition = QSpinBox()
+        self.sp_transition.setRange(0, 1000)
+        self.sp_transition.setSingleStep(10)
+        self.sp_transition.setSuffix(" ms")
+        self.sp_transition.setSpecialValueText("no time (cut)")
+        self.sp_transition.setValue(int(self.cfg.get(
+            "display", "view_transition_ms", default=VIEW_FLIGHT_MS)))
+        self.sp_transition.valueChanged.connect(self._display_changed)
+        row4.addWidget(self.sp_transition)
+        row4.addStretch(1)
+        layout.addLayout(row4)
         layout.addStretch(1)
         return w
 
@@ -489,6 +503,8 @@ class SettingsDialog(QDialog):
         self.cfg.set("display", "grid_extent", self.sp_extent.value())
         self.cfg.set("display", "grid_major", self.sp_major.value())
         self.cfg.set("display", "default_mode", self.cb_mode.currentData())
+        self.cfg.set("display", "view_transition_ms",
+                     self.sp_transition.value())
         self.window.viewport.set_grid_params(self.sp_extent.value(),
                                              self.sp_major.value())
 

@@ -866,11 +866,16 @@ def test_back_left_bottom_views(env):
     from serpentine3d.ui.viewport import Viewport
     vp = Viewport(scene, SelectionManager(scene))
     ctx.viewport = vp
-    proc.run("back")
+
+    def go(name):                    # the view is turned to, so let it arrive
+        proc.run(name)
+        vp.land_flight()
+
+    go("back")
     assert vp.camera.azimuth == pytest.approx(math.radians(90))
-    proc.run("left")
+    go("left")
     assert vp.camera.azimuth == pytest.approx(math.radians(180))
-    proc.run("bottom")
+    go("bottom")
     assert vp.camera.elevation == pytest.approx(math.radians(-89.9))
 
 

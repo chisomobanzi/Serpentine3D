@@ -6,10 +6,11 @@ import ctypes
 import math
 import os
 import sys
+import time
 
 import numpy as np
 from OpenGL import GL
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QCursor, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -20,9 +21,20 @@ from ..utils import config as _cfg
 from ..utils import units as _units
 from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
 from . import gpu_share, theme
-from .camera import Camera
+from .camera import (
+    STANDARD_VIEWS,
+    Camera,
+    axis_view_after_swipe,
+    eased,
+    pose_between,
+    projection_for,
+)
 
 PICK_RADIUS_PX = 7.0
+# How long turning to a named view takes, in milliseconds. Long enough to
+# see which way the model went, short enough that nobody waits for it.
+# Settable as display.view_transition_ms; 0 turns it off.
+VIEW_FLIGHT_MS = 180.0
 
 # Two edges this close to each other on screen are both taken to be under the
 # cursor, and the one in front wins. Without a band, depth alone would let an
@@ -654,6 +666,10 @@ class Viewport(QOpenGLWidget):
         self.draft_angle = 3.0              # draft analysis threshold (deg)
         self._cv_cache: dict = {}
         self._cv_drag = None                # (obj_id, index, plane_pt, normal)
+        self._swipe_press = None            # where an Alt view-swipe started
+        self._flight = None                 # (from, to, name, t0, secs)
+        self._flight_tick = QTimer(self)
+        self._flight_tick.timeout.connect(self.advance_flight)
         self._press_pos = None
         self._box_end = None
         self._box_active = False
@@ -3132,11 +3148,20 @@ class Viewport(QOpenGLWidget):
         super().mouseDoubleClickEvent(ev)
 
     def mousePressEvent(self, ev):
+        # Whatever this click turns out to mean, it means it in the view you
+        # asked for: two quick swipes are two quarter turns, not one and a
+        # bit of whatever the animation had reached.
+        self.land_flight()
         self._last_mouse = ev.position()
         if ev.button() == Qt.MouseButton.RightButton:
             self._rmb_press = ev.position()
         if ev.button() == Qt.MouseButton.MiddleButton:
             self._mmb_press = ev.position()
+        if (ev.button() == self._nav_button() and self.space == "model"
+                and ev.modifiers() & Qt.KeyboardModifier.AltModifier):
+            # Alt and a swipe: the view waits where it is until you let go,
+            # then turns to face the axis you swiped towards.
+            self._swipe_press = ev.position()
         if ev.button() == Qt.MouseButton.LeftButton:
             pos = ev.position()
             # resolve a gumball armed for numeric entry before anything else
@@ -3248,6 +3273,11 @@ class Viewport(QOpenGLWidget):
             self._last_mouse = pos
             return
         if ev.buttons() & self._nav_button():
+            if self._swipe_press is not None:
+                # Mid-swipe: the view holds still until the button comes up,
+                # rather than orbiting away and then jumping to an axis.
+                self._last_mouse = pos
+                return
             speed = (float(self.config.get("mouse", "orbit_speed",
                                            default=1.0))
                      if self.config else 1.0)
@@ -3388,6 +3418,8 @@ class Viewport(QOpenGLWidget):
         return True
 
     def mouseReleaseEvent(self, ev):
+        if self._finish_swipe(ev):
+            return
         if ev.button() == Qt.MouseButton.RightButton:
             press = getattr(self, "_rmb_press", None)
             self._rmb_press = None
@@ -3433,6 +3465,115 @@ class Viewport(QOpenGLWidget):
             self._cv_drag = None
             return
         self._finish_pick(ev)
+
+    def _finish_swipe(self, ev) -> bool:
+        """Let go of an Alt swipe: turn to face the axis, or leave it be.
+
+        In a pane that is already parallel this is the named view entire, the
+        same one the View menu sets, construction plane and label with it. In
+        a perspective pane only the camera turns: you get Top with perspective
+        still on, and an ordinary drag orbits straight back out of it, which
+        is the whole reason to swipe rather than pick a view.
+
+        A drag too short to count is handed back to whatever the button
+        already meant, so an Alt middle click still opens the popup.
+        """
+        press = self._swipe_press
+        if press is None or ev.button() != self._nav_button():
+            # Some other button let go mid-swipe. The swipe is still on.
+            return False
+        self._swipe_press = None
+        pos = ev.position()
+        name = axis_view_after_swipe(self.camera.azimuth,
+                                     self.camera.elevation,
+                                     pos.x() - press.x(), pos.y() - press.y())
+        if name is None:
+            return False
+        self._rmb_press = self._mmb_press = None
+        # Parallel already, so arriving means becoming that named view.
+        # Perspective stays perspective: only the angles are going anywhere.
+        self.fly_to(STANDARD_VIEWS[name],
+                    name if self.camera.projection == "parallel" else None)
+        return True
+
+    # -- turning to a view over time ------------------------------------------
+
+    @property
+    def flying(self) -> bool:
+        """Mid-turn. Whatever reads the camera next may want to land it."""
+        return self._flight is not None
+
+    @property
+    def flight_started_at(self) -> float | None:
+        return self._flight[3] if self._flight else None
+
+    def _flight_secs(self) -> float:
+        ms = (float(self.config.get("display", "view_transition_ms",
+                                    default=VIEW_FLIGHT_MS))
+              if self.config else VIEW_FLIGHT_MS)
+        return max(0.0, ms) / 1000.0
+
+    def fly_to(self, pose, name: str | None = None):
+        """Turn to a pose over the transition time, easing into it.
+
+        Front and Back look the same on a symmetric model, so a cut says
+        nothing about which way you went. The motion is what tells you.
+
+        `name` also makes the pane that named view on arrival, plane, label
+        and projection, which is what a view by name means. Without it only
+        the camera moves. Either way `set_view` stays instant, because the
+        RPC bridge and the scripts read the camera the moment they set it.
+        """
+        if self._flight_secs() <= 0.0:
+            self._land_at(pose, name)
+            return
+        if name is not None:
+            # Take the projection now rather than on arrival. The ease is
+            # quickest at the start and still at the end, so a perspective
+            # pane asked for Top stops foreshortening while everything is
+            # already moving, instead of popping once it has settled.
+            self.camera.projection = projection_for(name)
+        self._flight = ((self.camera.azimuth, self.camera.elevation),
+                        (float(pose[0]), float(pose[1])), name,
+                        time.monotonic(), self._flight_secs())
+        self._flight_tick.start(16)
+        self.update()
+
+    def advance_flight(self, now: float | None = None):
+        """One frame of the turn. `now` is for tests; the timer has a clock."""
+        if self._flight is None:
+            return
+        start, end, name, t0, secs = self._flight
+        elapsed = (time.monotonic() if now is None else now) - t0
+        t = elapsed / secs if secs > 0 else 1.0
+        if t >= 1.0:
+            self._land_at(end, name)
+            return
+        # By the clock rather than by the frame: a heavy scene drops frames
+        # and still finishes in the same fifth of a second, where counting
+        # frames would turn it into a slideshow.
+        self.camera.azimuth, self.camera.elevation = pose_between(
+            start, end, eased(t))
+        self.update()
+
+    def go_to_view(self, name: str):
+        """A named view, turned to. `set_view` is the same view, arrived at."""
+        self.fly_to(STANDARD_VIEWS[name], name)
+
+    def land_flight(self):
+        """Get there now, so the next thing you do happens in that view."""
+        if self._flight is not None:
+            _, end, name, _, _ = self._flight
+            self._land_at(end, name)
+
+    def _land_at(self, pose, name: str | None):
+        self._flight = None
+        self._flight_tick.stop()
+        if name is not None:
+            self.set_view(name)
+        else:
+            self.camera.azimuth, self.camera.elevation = pose
+            self.update()
 
     def _release_gumball(self, ev):
         """Letting go of a handle: end the drag, or keep it live to type in.
@@ -3704,6 +3845,7 @@ class Viewport(QOpenGLWidget):
                 else Qt.MouseButton.MiddleButton)
 
     def wheelEvent(self, ev):
+        self.land_flight()          # zoom from where you were going, not from midway
         steps = ev.angleDelta().y() / 120.0
         if self.config:
             if self.config.get("mouse", "invert_scroll", default=False):
