@@ -1917,6 +1917,14 @@ class MainWindow(QMainWindow):
             # A sheet opens as the sheet, filling the area. Put a model pane
             # beside it if you want one and the tab will keep it there.
             self._show_only(self.viewport)
+        # Ask for the frame once the docks have stopped moving, never
+        # before: a dock put away and brought back loses the repaint it was
+        # waiting on, and a pane shown with none pending does not draw one.
+        # It blits whatever its buffer still holds, which is the space you
+        # just left. Only the panes on show — a pane put away has nowhere
+        # to draw, and gets its frame when the tab brings it back.
+        for pane in self.all_viewports():
+            pane.update()
         self._set_active_viewport(self._pane_for_space(space_id))
         self._refresh_space_tabs()
         if space_id == "model":

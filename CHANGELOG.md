@@ -31,6 +31,16 @@
 
 ### Fixed
 
+- **Pressing a space tab draws that space.** Switching between the model
+  and a layout told the pane which space it was in, asked for a frame, and
+  then rearranged the docks underneath it, which threw the frame away. The
+  tab, the title and the echo all changed and the pane went on showing the
+  space you had just left until a scroll or an orbit asked for a frame by
+  accident. It only bit when both tabs held the same arrangement, which is
+  why a brand new layout always looked right: going from four panes to one
+  moves every pane, and a pane that moves is redrawn anyway. The frame is
+  now asked for once the docks have stopped moving.
+
 - **A viewport that cannot draw says so instead of breaking something
   else.** An error in a frame was an error let out of a Qt virtual call,
   and Qt carried on: the next thing Python was asked for, usually the size
