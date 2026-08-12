@@ -7,6 +7,7 @@ import math
 import os
 import sys
 import time
+import traceback
 
 import numpy as np
 from OpenGL import GL
@@ -709,6 +710,7 @@ class Viewport(QOpenGLWidget):
         self._bound_prog = -1
         self._bound_width = -1.0
         self._bg_vao = 0
+        self._paint_failed = False          # a frame threw; see paintGL
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         scene.add_listener(self.update)
@@ -718,6 +720,7 @@ class Viewport(QOpenGLWidget):
 
     def initializeGL(self):
         self._uloc_cache.clear()      # programs below are about to be relinked
+        self._paint_failed = False    # a new context, so a fresh go at drawing
         self._reset_gl_state()
         if not GL.glCreateProgram:
             # a legacy context (e.g. Windows GDI GL 1.1 in a VM or over
@@ -830,7 +833,33 @@ class Viewport(QOpenGLWidget):
 
     # ---------------------------------------------------------------- render
 
+    @property
+    def paint_failed(self) -> bool:
+        """This pane hit something it could not draw and has stopped."""
+        return self._paint_failed
+
     def paintGL(self):
+        """A frame, and a floor under it.
+
+        Anything let out of here is let out of a Qt virtual call, and Qt
+        carries on: the next Python override reached from C++ is the one
+        that reports it, as a SystemError about a QSize returned with an
+        exception set, naming a widget with nothing to do with it. The
+        error that caused it is gone by then. `initializeGL` says the same
+        about the OpenGL 3.3 check and exits rather than raise.
+        """
+        if self._paint_failed:
+            return              # said why once; not once per repaint
+        try:
+            self._paint_frame()
+        except Exception:                                       # noqa: BLE001
+            self._paint_failed = True
+            traceback.print_exc()
+            print("serp3d: this viewport has stopped drawing after the "
+                  "error above. Redocking it, or reopening the window, "
+                  "builds a new context and tries again.", file=sys.stderr)
+
+    def _paint_frame(self):
         # QPainter overlays (dots, layout text) reset GL state behind our
         # back — re-assert what every frame relies on.
         self._reset_gl_state()

@@ -313,7 +313,7 @@ def test_the_sheet_paints_it(sheet):
     """Offscreen tests cannot run the GL path, so this is about the sheet
     being told to draw the gumball at all."""
     vp = type(sheet[0].viewport)
-    sheet_branch = inspect.getsource(vp.paintGL).split(
+    sheet_branch = inspect.getsource(vp._paint_frame).split(
         'if self.space != "model":')[1]
     assert "_draw_gumball_in_detail" in sheet_branch
     assert "_update_gumball_readout" in sheet_branch

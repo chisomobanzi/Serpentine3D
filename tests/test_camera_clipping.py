@@ -106,7 +106,7 @@ def test_zoom_reaches_below_old_clamp():
 
 # -- viewport wiring ---------------------------------------------------------
 # The draw path itself cannot run under offscreen pytest (no GL), so the
-# helper is exercised directly and paintGL is only checked by source.
+# helper is exercised directly and the frame is only checked by source.
 
 def _viewport():
     from serpentine3d.core.scene import Scene
@@ -145,5 +145,5 @@ def test_paint_refreshes_bounds_before_projecting():
     import inspect
 
     from serpentine3d.ui.viewport import Viewport
-    src = inspect.getsource(Viewport.paintGL)
+    src = inspect.getsource(Viewport._paint_frame)
     assert src.index("_refresh_camera_bounds") < src.index("proj_matrix")

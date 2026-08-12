@@ -29,6 +29,18 @@
   arrives immediately, as scripts that read the camera back expect.
   `display.view_transition_ms` sets the length; 0 cuts as before.
 
+### Fixed
+
+- **A viewport that cannot draw says so instead of breaking something
+  else.** An error in a frame was an error let out of a Qt virtual call,
+  and Qt carried on: the next thing Python was asked for, usually the size
+  of some unrelated widget, was what reported it, as a SystemError naming a
+  widget that had nothing to do with it. The frame now keeps its own
+  errors, prints the traceback that used to be thrown away, and stops
+  drawing that pane rather than repeating itself once per repaint.
+  Redocking the pane, or reopening the window, builds a new context and it
+  tries again.
+
 ## 0.6.2 — 2026-08-12
 
 ### Added

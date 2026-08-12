@@ -2,7 +2,7 @@
 
 `rectangle` asks for the opposite corner with a rubber leg from the first
 corner *and* a ghost of the rectangle under the cursor. On a sheet only the
-leg arrived: the layout branch of `paintGL` drew the rubber band and never
+leg arrived: the layout branch of the frame drew the rubber band and never
 called the ghost at all, so a rectangle looked like a line, and so did an
 arc, a circle and everything else that previews a shape. Technical display
 mode had lost it the same way.
@@ -127,7 +127,7 @@ def test_no_paint_path_can_draw_one_without_the_other():
     import inspect
 
     from serpentine3d.ui.viewport import Viewport
-    src = inspect.getsource(Viewport.paintGL)
+    src = inspect.getsource(Viewport._paint_frame)
     assert "_draw_pending" in src
     assert "_draw_preview" not in src
     assert "_draw_ghost" not in src
