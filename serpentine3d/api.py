@@ -45,6 +45,9 @@ class SerpApi:
             "kind": obj.kind,
             "layer": self.scene.layers.get(obj.layer_id).name,
             "visible": obj.visible,
+            # a locked object is on screen and cannot be picked, so a script
+            # that cannot select one needs to be able to see why
+            "locked": bool(obj.locked),
             "bbox": [list(mn), list(mx)],
         }
 

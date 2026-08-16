@@ -72,6 +72,7 @@ Most Rhino command names and aliases resolve directly. A few worth knowing:
 | `Trim` `Split` `Join` `Explode` `Offset` | `trim` `split` `join` `offset` |
 | `Layout` `Detail` `Make2D` `Dim` | `layout` `detail` `make2d` `dim` |
 | `Zebra` `CurvatureAnalysis` `DraftAngleAnalysis` | `zebra` `curvature` `draftanalysis` |
+| `UndoView` `RedoView` `LockOther` | `undoview` `redoview` `lockother` |
 
 The in-app `help` (or ++f1++) opens a searchable
 [command reference](reference/commands.md) with every command and its aliases.

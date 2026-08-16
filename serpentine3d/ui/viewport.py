@@ -25,6 +25,7 @@ from . import gpu_share, theme
 from .camera import (
     STANDARD_VIEWS,
     Camera,
+    ViewHistory,
     axis_view_after_swipe,
     eased,
     pose_between,
@@ -110,6 +111,12 @@ def cv_marker_outline(points, right, up, half):
     a, b, c, d = _cv_corners(points, right, up, half)
     return np.stack([a, b, b, c, c, d, d, a], axis=1).reshape(-1, 3)
 
+
+# How long the view has to sit still before the next move counts as a new
+# thing you did rather than more of the last one. Long enough to cover the
+# gap between two wheel clicks, short enough that two deliberate moves are
+# two steps back.
+VIEW_SETTLE = 0.5
 
 # Length of a direction arrow, in pixels, and the head as a fraction of it.
 # ARROW_COUNT is how many go on a curve, and roughly how many on each face of
@@ -703,6 +710,9 @@ class Viewport(QOpenGLWidget):
         self.draft_angle = 3.0              # draft analysis threshold (deg)
         self._cv_cache: dict = {}
         self._dir_cache: dict = {}          # direction arrows, per mesh uid
+        self.view_history = ViewHistory()   # for undoview / redoview
+        self._view_last = self.camera.state()
+        self._view_moved_at = 0.0
         self._cv_drag = None                # (obj_id, index, plane_pt, normal)
         self._swipe_press = None            # where an Alt view-swipe started
         self._flight = None                 # (from, to, name, t0, secs)
@@ -897,6 +907,9 @@ class Viewport(QOpenGLWidget):
                   "builds a new context and tries again.", file=sys.stderr)
 
     def _paint_frame(self):
+        # Every way of moving the camera ends up here, so this is where the
+        # view history is told the view moved.
+        self.note_view_change()
         # QPainter overlays (dots, layout text) reset GL state behind our
         # back — re-assert what every frame relies on.
         self._reset_gl_state()
@@ -3845,6 +3858,51 @@ class Viewport(QOpenGLWidget):
         drawing owns this, so all of its panes agree about it.
         """
         return self.scene.cv_enabled
+
+    # ---------------------------------------------------------- view history
+
+    def note_view_change(self, now: float | None = None):
+        """Notice that the view has moved, and where it moved from.
+
+        Called every time the pane paints, which is the one place every way
+        of moving the camera meets: a drag, the wheel, a swipe to an axis,
+        `top`, `zoomextents`, the SpaceMouse. Hooking each of those instead
+        would mean finding all of them and finding each new one after that.
+
+        What is recorded is a gesture rather than a frame. A drag arrives as
+        a hundred small changes with no gap between them and is one thing you
+        did, so a change within VIEW_SETTLE of the last one carries on the
+        entry already there, and only a change after a pause starts a new one.
+        """
+        state = self.camera.state()
+        if state == self._view_last:
+            return
+        when = time.monotonic() if now is None else now
+        if when - self._view_moved_at > VIEW_SETTLE:
+            self.view_history.record(self._view_last)
+        self._view_last = state
+        self._view_moved_at = when
+
+    def _go_to_view_state(self, state) -> bool:
+        if state is None:
+            return False
+        self.camera.restore(state)
+        # so the next paint does not read this as somewhere new you went,
+        # and so the next real move is a step of its own however soon it is
+        self._view_last = self.camera.state()
+        self._view_moved_at = 0.0
+        self.update()
+        return True
+
+    def undo_view(self) -> bool:
+        """Back to the view before the last change. False if there is none."""
+        return self._go_to_view_state(
+            self.view_history.undo(self.camera.state()))
+
+    def redo_view(self) -> bool:
+        """Forward again, after an undo_view. False if there is none."""
+        return self._go_to_view_state(
+            self.view_history.redo(self.camera.state()))
 
     @property
     def dir_enabled(self) -> set:

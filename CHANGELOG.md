@@ -37,6 +37,23 @@
   leave behind. The arrows are a fixed size on screen and they belong to the
   command: they go when it ends, including on Escape.
 
+- **`undoview` and `redoview`**, a history for the camera. An orbit that
+  went too far leaves the drawing exactly as it was, so the general undo is
+  no help at all: there is nothing about the model to take back, and what
+  you want is the view you had a second ago. A whole gesture is one step, so
+  a drag that turns the model right round comes back in one, and so does a
+  burst of wheel clicks. Typing `top` or running `zoomextents` is a step
+  like any other. Each pane keeps its own history, because where the Top
+  view has been says nothing about where Perspective has been.
+
+- **`lockother`**, the other half of isolate. Isolate takes the rest of the
+  drawing off the screen; this leaves it up to line the new work against and
+  only stops you picking it, which is what you actually wanted when the
+  thing you keep catching is a background curve you have no intention of
+  moving. What you picked stays picked, and `unlockall` releases the rest.
+  The scripting API reports `locked` on every object now, so a script can
+  see why a pick found nothing.
+
 - **`insertknot`, `insertcontrolpoint`, `removeknot` and
   `removecontrolpoint`**, under Rhino's names. Inserting a knot is the one
   edit that hands you a control point without moving the curve by so much

@@ -93,6 +93,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `pointson` (`po`) | Show control points for selected curves and surfaces (F10). |
 | `printcheck` (`printinfo`) | Check selected objects for 3D-print readiness: watertight, manifold, |
 | `radius` | Radius of curvature of a curve at a picked point. |
+| `redoview` | Go forward again through the views `undoview` stepped back through. |
 | `rendered` (`render`) | Environment-lit display with materials and a ground shadow. |
 | `right` | Right |
 | `selclippingplane` | Select every clipping plane object. |
@@ -103,6 +104,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `technical` (`tech`) | Hidden-line technical display (parallel projection linework). |
 | `tolerance` | Show or set the document's absolute modelling tolerance. |
 | `top` | Top |
+| `undoview` | Put the view back where it was before the last view change. |
 | `units` | Set document units; optionally rescale the model to keep real size. |
 | `viewcapturetoclipboard` (`vcc`) | Copy the active viewport image to the clipboard. |
 | `viewcapturetofile` (`vcf`, `viewcapture`) | Save the active viewport as a PNG image. |
@@ -210,6 +212,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `insert` | Insert |
 | `linetype` (`lt`, `setlinetype`) | Set the dash style of selected objects (Continuous/Dashed/…/ByLayer). |
 | `lock` | Lock |
+| `lockother` | Lock everything except what you picked, as Rhino's LockOther does. |
 | `matchprops` (`matchproperties`) | Copy layer, colour and material from one object to others. |
 | `meshtobrep` | Convert mesh objects into exact BREP shells (slow for big meshes). |
 | `purge` | Remove empty layers and unused block definitions. |

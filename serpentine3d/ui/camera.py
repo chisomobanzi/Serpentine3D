@@ -342,6 +342,37 @@ class Camera:
         self.azimuth, self.elevation = STANDARD_VIEWS[name]
         self.projection = projection_for(name)
 
+    # -- where the view is, as something you can keep -------------------------
+
+    def state(self) -> dict:
+        """Everything about where this camera is looking from, copied out.
+
+        Plain numbers, so it survives being written to a file as a named
+        view and being held in a pane's view history at the same time. The
+        target is copied rather than referred to: it is a numpy array that
+        the next pan writes straight through, and a view you cannot go back
+        to is not worth keeping.
+        """
+        return {
+            "target": [float(c) for c in self.target],
+            "distance": float(self.distance),
+            "azimuth": float(self.azimuth),
+            "elevation": float(self.elevation),
+            "fov": float(self.fov),
+            "sensor": self.sensor_name,
+            "projection": self.projection,
+        }
+
+    def restore(self, state: dict):
+        """Look from where `state` was looking from."""
+        self.target = np.asarray(state["target"], float)
+        self.distance = state["distance"]
+        self.azimuth = state["azimuth"]
+        self.elevation = state["elevation"]
+        self.fov = state.get("fov", self.fov)
+        self.sensor_name = state.get("sensor", self.sensor_name)
+        self.projection = state.get("projection", "perspective")
+
     # -- picking ----------------------------------------------------------------
 
     def ray_through(self, px: float, py: float, width: int,
@@ -415,3 +446,44 @@ class Camera:
         else:
             out[:, 2] = w[:, 0]
         return out
+
+
+class ViewHistory:
+    """Where a pane's view has been, so you can go back to it.
+
+    Rhino's UndoView and RedoView. It is separate from the drawing's undo
+    because nothing about the drawing changed: an orbit that went too far
+    leaves the model exactly as it was, and taking back the last edit is no
+    help at all when what you want is the camera you had a second ago.
+
+    One entry per gesture, not per frame. A drag that turns the model right
+    round is one thing you did, so it is one step back, and the pane decides
+    where a gesture ends before it records anything here.
+    """
+
+    def __init__(self, limit: int = 64):
+        self._back: list[dict] = []
+        self._fwd: list[dict] = []
+        self._limit = limit
+
+    def record(self, state: dict):
+        """Remember somewhere the view has been."""
+        if self._back and self._back[-1] == state:
+            return
+        self._back.append(state)
+        del self._back[:-self._limit]
+        self._fwd.clear()
+
+    def undo(self, now: dict) -> dict | None:
+        """Where to go back to from `now`, or None if there is nowhere."""
+        if not self._back:
+            return None
+        self._fwd.append(now)
+        return self._back.pop()
+
+    def redo(self, now: dict) -> dict | None:
+        """Where to go forward to from `now`, or None if there is nowhere."""
+        if not self._fwd:
+            return None
+        self._back.append(now)
+        return self._fwd.pop()

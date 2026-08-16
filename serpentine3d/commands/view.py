@@ -64,6 +64,35 @@ def cmd_zoom_extents(ctx):
     yield from ()
 
 
+@command("undoview", mutates=False, space="any")
+def cmd_undoview(ctx):
+    """Put the view back where it was before the last view change.
+
+    Rhino's UndoView. It is a separate history from the drawing's undo
+    because nothing about the drawing changed: an orbit that went too far
+    leaves the model exactly as it was, and taking back the last edit is no
+    help when what you want back is the camera you had a moment ago. A whole
+    drag counts as one change, and each pane remembers its own.
+    """
+    vp = _vp(ctx)
+    if vp is None or not vp.undo_view():
+        ctx.echo("No earlier view to go back to.")
+    else:
+        ctx.echo("Previous view.")
+    yield from ()
+
+
+@command("redoview", mutates=False, space="any")
+def cmd_redoview(ctx):
+    """Go forward again through the views `undoview` stepped back through."""
+    vp = _vp(ctx)
+    if vp is None or not vp.redo_view():
+        ctx.echo("No later view to go forward to.")
+    else:
+        ctx.echo("Next view.")
+    yield from ()
+
+
 @command("wireframe", aliases=("wf",), mutates=False)
 def cmd_wireframe(ctx):
     _vp(ctx).set_display_mode("wireframe")
@@ -677,16 +706,9 @@ def cmd_namedview(ctx):
         return
     name = yield TextReq("View name")
     if action == "Save":
-        cam = vp.camera
-        views[name] = {
-            "target": [float(c) for c in cam.target],
-            "distance": cam.distance,
-            "azimuth": cam.azimuth,
-            "elevation": cam.elevation,
-            "fov": cam.fov,
-            "sensor": cam.sensor_name,
-            "projection": cam.projection,
-        }
+        # the same shape the view history keeps, so a view saved into a file
+        # and a view stepped back to cannot drift apart
+        views[name] = vp.camera.state()
         ctx.scene.notify()
         ctx.echo(f"Saved view '{name}'.")
     elif action == "Restore":
@@ -694,15 +716,7 @@ def cmd_namedview(ctx):
         if v is None:
             ctx.echo(f"No view named '{name}'.")
             return
-        import numpy as np
-        cam = vp.camera
-        cam.target = np.asarray(v["target"], float)
-        cam.distance = v["distance"]
-        cam.azimuth = v["azimuth"]
-        cam.elevation = v["elevation"]
-        cam.fov = v.get("fov", cam.fov)
-        cam.sensor_name = v.get("sensor", cam.sensor_name)
-        cam.projection = v.get("projection", "perspective")
+        vp.camera.restore(v)
         vp.update()
         ctx.echo(f"Restored view '{name}'.")
     elif action == "Delete":

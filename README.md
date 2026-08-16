@@ -99,11 +99,11 @@ commits a value mid-command, or repeats the last command.
 | **Transform** | `move` `copy` `rotate` `scale` `scalenu` `mirror` `array` |
 | **Edit** | `join` `explode` `trim` `split` `offset` `fillet` `rebuild` `pointson`/`pointsoff` (control points, curves *and* surfaces) `dir`/`flip` (curve direction and surface normals) `delete` `hide` `show` `rename` `undo` `redo` |
 | **Select** | `selall` `selnone` `selcrv` `selsrf` `selsolid` `sellayer` `selname` `sellast` `invert` `isolate` `unisolate` |
-| **Organise** | `group`/`ungroup` `lock`/`unlockall` `block` `insert` `blocklist` `count` `bringtofront`/`sendtoback` `bringforward`/`sendbackward` (draw order) |
+| **Organise** | `group`/`ungroup` `lock`/`unlockall` `lockother` (lock all but the picked) `block` `insert` `blocklist` `count` `bringtofront`/`sendtoback` `bringforward`/`sendbackward` (draw order) |
 | **Camera** | `camera` (lens mm, cinema sensors, placement, 2.39/1.85 frame guides) `units` `cplane` |
 | **Array** | `array` (grid) `arraypolar` `arraypath` (along a curve) |
 | **Analysis** | `distance` `length` `area` `volume` `curvature` `zebra` `curvaturegraph` (combs) `draftanalysis` `printcheck` (3D-print readiness: watertight, thin walls, overhangs, size) |
-| **View** | `top` `front` `right` `perspective` `4view`/`1view` `zoomextents` `wireframe` `shaded` `ghosted` `rendered` `technical` `grid` `snap` |
+| **View** | `top` `front` `right` `perspective` `4view`/`1view` `zoomextents` `undoview`/`redoview` (a history for the camera, per pane) `wireframe` `shaded` `ghosted` `rendered` `technical` `grid` `snap` |
 | **Render** | `material` (Matte/Plastic/Metal/Glass/custom PBR — flows into GLB/USD export) `rendered` |
 | **Capture** | `turntable` (clean model clip) `turntableui` (portrait story with the app UI) |
 | **Layers** | `layer` (new/current/show/hide/rename/weight/**linetype**) — or use the Layers panel |

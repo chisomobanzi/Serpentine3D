@@ -37,6 +37,31 @@ def cmd_lock(ctx):
              "'unlockall' releases them.")
 
 
+@command("lockother")
+def cmd_lockother(ctx):
+    """Lock everything except what you picked, as Rhino's LockOther does.
+
+    The other half of isolate. Isolate takes the rest of the drawing off the
+    screen; this leaves it up to line the new work against, and only stops
+    you picking it, which is what you actually wanted when the thing you
+    keep catching is a background curve you have no intention of moving.
+
+    What you picked stays picked, so you can get straight on with it.
+    """
+    objs = yield SelectReq("Select objects to leave unlocked")
+    keep = {o.id for o in objs}
+    n = 0
+    for o in ctx.scene.all():
+        if o.id not in keep and not o.locked:
+            ctx.scene.update(o.id, locked=True)
+            n += 1
+    # a command normally lets go of the selection on the way out, and here
+    # that would leave you holding nothing and everything else unpickable
+    ctx.select_result(list(keep))
+    ctx.echo(f"Locked {n} object(s); {len(keep)} left to work on. "
+             "'unlockall' releases them.")
+
+
 @command("unlockall", aliases=("unlock",))
 def cmd_unlockall(ctx):
     n = 0
