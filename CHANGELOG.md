@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **`curve` draws by control points now, and `interpcrv` is its own
+  command.** These are Rhino's names, and they finally mean what Rhino
+  means by them: `curve` (alias `cv`, for control vertex) pulls a NURBS
+  curve toward the points you pick, and `interpcrv` runs one through them.
+  Serpentine's `curve` used to be the interpolating one, so a Rhino user
+  typing the command they use most got the other tool with no sign that
+  anything was wrong: both make a smooth curve through roughly the right
+  place, and only the control points give it away. A script, alias or habit
+  that relied on `curve` interpolating should say `interpcrv`.
+
+### Added
+
+- **You can see the curve while you are drawing it.** Both curve commands
+  now ghost the curve the next click would make, instead of showing only
+  the points already picked and the straight chain between them. That chain
+  is the one shape the curve is not: an interpolated curve bulges away from
+  it, and a control point curve does not go through the middle of it at
+  all. So `interpcrv` drops the chain entirely, while `curve` keeps it,
+  because there the chain is the control polygon and part of what you are
+  drawing rather than a stand-in for it.
+
+- **`insertknot`, `insertcontrolpoint`, `removeknot` and
+  `removecontrolpoint`**, under Rhino's names. Inserting a knot is the one
+  edit that hands you a control point without moving the curve by so much
+  as a tolerance, so you can get a handle where you want to pull from
+  rather than making do with the ones the curve was built with; Automatic
+  puts one in the middle of every span. Removing a knot goes the other way
+  and does move the curve, so the command says by how far. With several
+  curves picked, the point you click says which one you meant and which
+  knot you meant. Both commands turn the control points on for what you
+  picked, and both preview under the cursor: the control polygon you would
+  get for an insertion, the curve you would be left with for a removal.
+
+### Fixed
+
+- **A closed control point curve is now closed all the way round.**
+  `make_control_curve(..., closed=True)` took the argument and ignored it,
+  and built an open curve. It builds a periodic one, so the poles are a
+  ring with no first or last and the curve runs through the seam as
+  smoothly as it runs anywhere else, rather than meeting itself at a
+  corner.
+
 ## 0.6.3 — 2026-08-13
 
 ### Added

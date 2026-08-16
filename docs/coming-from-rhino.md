@@ -61,8 +61,9 @@ Most Rhino command names and aliases resolve directly. A few worth knowing:
 
 | Rhino | Serpentine3D |
 |---|---|
-| `Line` `Polyline` `InterpCrv` | `line` `polyline` `curve` |
+| `Line` `Polyline` `Curve` `InterpCrv` | `line` `polyline` `curve` `interpcrv` |
 | `Circle` `Arc` `Rectangle` | `circle` `arc` `rectangle` |
+| `InsertKnot` `RemoveKnot` `InsertControlPoint` | `insertknot` `removeknot` `insertcontrolpoint` |
 | `ExtrudeCrv` `Revolve` `Loft` `Sweep1/2` | `extrude` `revolve` `loft` `sweep1` `sweep2` |
 | `FilletEdge` `ChamferEdge` `Shell` | `filletedge` `chamferedge` `shell` |
 | `BooleanUnion / Difference / Intersection` | `booleanunion` `booleandifference` `booleanintersection` |

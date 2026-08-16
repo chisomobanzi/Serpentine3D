@@ -40,6 +40,10 @@ class PointReq(Req):
     rubber_pts: list | None = None        # accumulated points (polyline preview)
     rubber_sides: object = None           # point -> the sides of the frame it
                                           # spans: no band, and two numbers
+    rubber_band: bool = True              # False: keep the picked markers but
+                                          # draw no line between them, for a
+                                          # shape the ghost already draws and
+                                          # that does not run through them
     allow_empty: bool = False             # Enter with no input -> None (done)
     extra_options: tuple = ()             # typed keywords returned verbatim
     choices: dict | None = None

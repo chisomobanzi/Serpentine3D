@@ -31,9 +31,10 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `arc` (`a`) | Arc through three points; or Center and a sweep, or StartEnd. |
 | `circle` (`c`, `ci`) | Circle from center and radius; or 2Point across, or 3Point through. |
 | `closecrv` (`cc`, `closecurve`) | Close open curves with a straight segment between their ends. |
-| `curve` (`cv`, `interpcrv`) | NURBS curve through picked points; Close joins it back smoothly. |
+| `curve` (`cv`) | NURBS curve by control points, as Rhino's Curve does. |
 | `divide` | Divide |
 | `ellipse` (`el`) | Ellipse from center and two radii; Diameter takes an axis whole. |
+| `interpcrv` (`interpcurve`) | NURBS curve through picked points; Close joins it back smoothly. |
 | `line` (`l`) | Straight line; BothSides grows it evenly out of its middle. |
 | `point` (`pt`) | Point |
 | `polyline` (`pl`, `pline`) | Polyline |
@@ -154,6 +155,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `explode` (`x`) | Explode |
 | `fillet` | Fillet |
 | `hide` | Hide |
+| `insertknot` (`insertcontrolpoint`) | Add a control point to a curve without moving the curve. |
 | `join` (`j`) | Join |
 | `layer` | Layer |
 | `material` (`mat`) | Assign a look (metallic/roughness/opacity) for rendered display |
@@ -162,6 +164,8 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `rebuild` | Rebuild |
 | `recordhistory` (`history`) | Toggle record history: loft/extrude/revolve outputs rebuild when |
 | `redo` | Redo |
+| `removecontrolpoint` | Delete the control points you are holding, as Delete does. |
+| `removeknot` | Take a knot out of a curve and say how far the curve moved. |
 | `rename` | Rename |
 | `selall` (`sa`) | Selall |
 | `selnone` (`sn`) | Selnone |
@@ -180,6 +184,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `new` | New |
 | `open` | Open |
 | `save` | Save |
+| `setdefaultapp` | Make Serpentine3D the default application for .serp files. |
 
 ## Help
 
@@ -303,3 +308,4 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `scale2d` | Scale in the CPlane only (thickness along the CPlane normal is |
 | `scalenu` | Scale by a different amount along each axis: type the three |
 | `setpt` (`setpoints`) | Force chosen coordinates of every control point to one value — |
+

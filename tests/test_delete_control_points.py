@@ -190,6 +190,25 @@ def test_clicked_point_delete_replays_identically(tmp_path):
     assert len(g.get_control_points(replayed.shape)) == 3
 
 
+# --------------------------------------------- Rhino's name for the same
+
+def test_removecontrolpoint_deletes_the_held_points(env):
+    scene, selection, proc, _echoes = env
+    obj = scene.add(g.make_polyline(SQUARE))
+    selection.toggle_subobject(obj.id, "cv", 1)
+    proc.run("removecontrolpoint")
+    assert not proc.busy
+    assert len(g.get_control_points(scene.get(obj.id).shape)) == 3
+
+
+def test_removecontrolpoint_with_nothing_held_says_where_to_start(env):
+    scene, _selection, proc, echoes = env
+    obj = scene.add(g.make_polyline(SQUARE))
+    proc.run("removecontrolpoint")
+    assert len(g.get_control_points(scene.get(obj.id).shape)) == 4
+    assert any("pointson" in m.lower() or "f10" in m.lower() for m in echoes)
+
+
 # ------------------------------------------------------ the Delete key
 
 def test_delete_takes_the_held_corner_and_undo_puts_it_back(monkeypatch,

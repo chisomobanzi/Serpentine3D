@@ -1,7 +1,8 @@
 """Editing commands: delete, join, hide/show, selection, undo/redo, layers."""
 
 from ..core import geometry as g
-from .base import NumberReq, OptionReq, SelectReq, TextReq, command
+from .base import (
+    NumberReq, OptionReq, PointReq, SelectReq, TextReq, command)
 
 
 def _delete_held_points(ctx) -> bool:
@@ -217,6 +218,157 @@ def cmd_rebuild(ctx):
             o.id, g.rebuild_curve(o.shape, point_count=count, degree=degree))
     ctx.echo(f"Rebuilt {len(objs)} curve(s) with {count} points, "
              f"degree {degree}.")
+
+
+# --- knots ------------------------------------------------------------------
+
+def _live(ctx, ids):
+    """The picked objects as they are now. A knot put in a moment ago means
+    the shape the SelectReq handed over is already out of date."""
+    return [o for o in (ctx.scene.get(i) for i in ids) if o is not None]
+
+
+def _aimed_at(objs, p):
+    """The curve the click is on. Several can be picked at once, and the
+    point says which of them you meant, the way clicking it does in Rhino."""
+    best, best_d = None, None
+    for o in objs:
+        try:
+            d = g.distance_point_to_shape(o.shape, p)
+        except g.GeometryError:
+            continue
+        if best_d is None or d < best_d:
+            best, best_d = o, d
+    return best
+
+
+def _show_points(ctx, ids):
+    """Turn the control points on, as Rhino does for these two commands.
+    Both of them are about a point you are about to gain or lose, and that
+    is hard to follow with nothing on screen to gain or lose it from."""
+    vp = getattr(ctx, "viewport", None)
+    if vp is None:
+        return
+    vp.cv_enabled.update(ids)
+    from .view import _redraw_all
+    _redraw_all(ctx)
+
+
+@command("insertknot", aliases=("insertcontrolpoint",))
+def cmd_insertknot(ctx):
+    """Add a control point to a curve without moving the curve.
+
+    Rhino's InsertKnot and InsertControlPoint. Automatic puts a knot in the
+    middle of every span instead of taking them one click at a time.
+    """
+    objs = yield SelectReq("Select curves for knot insertion",
+                           kinds=("curve",))
+    ids = [o.id for o in objs]
+    _show_points(ctx, ids)
+
+    def ghost(p):
+        # the curve does not move, so a ghost of the curve would show
+        # nothing. What changes is the control polygon and where the new
+        # handle sits in it, so that is what follows the cursor.
+        if not isinstance(p, (tuple, list)):
+            return None
+        o = _aimed_at(_live(ctx, ids), p)
+        if o is None:
+            return None
+        try:
+            out = g.insert_knot(o.shape, p)
+            return g.make_polyline(g.get_control_points(out),
+                                   closed=g.is_closed_curve(out))
+        except g.GeometryError:
+            return None
+
+    added = 0
+    while True:
+        p = yield PointReq("Point on curve to add a knot (Enter to finish)",
+                           allow_empty=True, extra_options=("Automatic",),
+                           preview_fn=ghost)
+        if p is None:
+            break
+        if p == "Automatic":
+            for o in _live(ctx, ids):
+                before = len(g.get_control_points(o.shape))
+                try:
+                    shape = g.insert_knots_at_spans(o.shape)
+                except g.GeometryError as exc:
+                    ctx.echo(f"{o.name}: {exc}")
+                    continue
+                ctx.scene.replace_shape(o.id, shape)
+                added += len(g.get_control_points(shape)) - before
+            continue
+        o = _aimed_at(_live(ctx, ids), p)
+        if o is None:
+            continue
+        try:
+            ctx.scene.replace_shape(o.id, g.insert_knot(o.shape, p))
+        except g.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+            continue
+        added += 1
+    ctx.echo(f"Added {added} control point(s)." if added
+             else "Nothing added.")
+
+
+@command("removeknot")
+def cmd_removeknot(ctx):
+    """Take a knot out of a curve and say how far the curve moved.
+
+    Rhino's RemoveKnot. One span fewer, so the curve has to give up
+    whatever that knot was holding.
+    """
+    objs = yield SelectReq("Select curves for knot removal", kinds=("curve",))
+    ids = [o.id for o in objs]
+    _show_points(ctx, ids)
+
+    def ghost(p):
+        # this one does move the curve, so the curve is the honest preview
+        if not isinstance(p, (tuple, list)):
+            return None
+        o = _aimed_at(_live(ctx, ids), p)
+        if o is None:
+            return None
+        try:
+            return g.remove_knot(o.shape, p)
+        except g.GeometryError:
+            return None
+
+    removed = 0
+    while True:
+        p = yield PointReq("Point on curve near the knot to remove "
+                           "(Enter to finish)", allow_empty=True,
+                           preview_fn=ghost)
+        if p is None:
+            break
+        o = _aimed_at(_live(ctx, ids), p)
+        if o is None:
+            continue
+        try:
+            shape = g.remove_knot(o.shape, p)
+        except g.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+            continue
+        moved = g.max_deviation(o.shape, shape)
+        ctx.scene.replace_shape(o.id, shape)
+        removed += 1
+        ctx.echo(f"{o.name}: knot out, curve moved by up to "
+                 f"{ctx.scene.format_length(moved)}.")
+    ctx.echo(f"Removed {removed} knot(s)." if removed else "Nothing removed.")
+
+
+@command("removecontrolpoint", repeatable=False)
+def cmd_removecontrolpoint(ctx):
+    """Delete the control points you are holding, as Delete does.
+
+    Rhino's RemoveControlPoint, for the muscle memory that types it.
+    """
+    if not _delete_held_points(ctx):
+        ctx.echo("No control points are held — turn them on with F10 or "
+                 "`pointson`, then click the ones to remove.")
+    yield from ()
 
 
 @command("hide")

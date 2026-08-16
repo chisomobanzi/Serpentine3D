@@ -196,14 +196,36 @@ def make_interp_curve(points: list[Point], closed: bool = False) -> TopoDS_Shape
 
 def make_control_curve(control_points: list[Point], degree: int = 3,
                        closed: bool = False) -> TopoDS_Shape:
-    """NURBS curve from explicit control points (uniform clamped knots)."""
+    """NURBS curve from explicit control points.
+
+    Open, the knots are uniform and clamped, so the curve starts and ends on
+    its first and last poles and is pulled toward the rest. Closed, it is
+    periodic instead: the poles are a ring with no first or last, so the
+    curve runs through the seam as smoothly as anywhere else rather than
+    meeting itself at a corner. Repeating the first point as the last would
+    also close it, and would put a kink exactly where the eye looks first.
+    """
     n = len(control_points)
     if n < 2:
         raise GeometryError("Need at least 2 control points")
-    degree = max(1, min(degree, n - 1))
     poles = TColgp_Array1OfPnt(1, n)
     for i, p in enumerate(control_points, start=1):
         poles.SetValue(i, _pnt(p))
+    if closed:
+        if n < 3:
+            raise GeometryError("Need at least 3 control points to close")
+        # A periodic knot vector is unclamped and one longer than the poles,
+        # every multiplicity 1: the ring joins back on itself.
+        degree = max(1, min(degree, n))
+        n_knots = n + 1
+        knots = TColStd_Array1OfReal(1, n_knots)
+        mults = TColStd_Array1OfInteger(1, n_knots)
+        for i in range(1, n_knots + 1):
+            knots.SetValue(i, float(i - 1))
+            mults.SetValue(i, 1)
+        curve = Geom_BSplineCurve(poles, knots, mults, degree, True)
+        return BRepBuilderAPI_MakeEdge(curve).Edge()
+    degree = max(1, min(degree, n - 1))
     n_knots = n - degree + 1
     knots = TColStd_Array1OfReal(1, n_knots)
     mults = TColStd_Array1OfInteger(1, n_knots)
@@ -1247,6 +1269,24 @@ def _wire_bsplines(shape) -> list:
     return out
 
 
+def curve_degree(shape) -> int:
+    """The degree of a curve. A wire of mixed degree reports its highest,
+    which is the one that decides what the whole thing can represent."""
+    if len(edges_of(shape)) == 1:
+        return _bspline_of_edge(edges_of(shape)[0]).Degree()
+    return max(bs.Degree() for bs in _wire_bsplines(shape))
+
+
+def distance_point_to_shape(shape, point: Point) -> float:
+    """Shortest distance from a point to anything with an edge or a face."""
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    v = BRepBuilderAPI_MakeVertex(_pnt(point)).Vertex()
+    dist = BRepExtrema_DistShapeShape(v, shape)
+    if not dist.IsDone():
+        raise GeometryError("Could not measure to that shape")
+    return dist.Value()
+
+
 def _control_point_map(shape) -> tuple:
     """(splines, points, owners) — every control point on the curve, and the
     (spline, pole) places each one lives in.
@@ -1342,13 +1382,18 @@ def move_surface_control_point(shape, flat_index: int,
     return mk.Face()
 
 
-def move_control_point(shape, index: int, new_point: Point) -> TopoDS_Shape:
-    """Return a new curve with control point `index` (0-based) moved."""
-    splines, pts, owners = _control_point_map(shape)
-    if not (0 <= index < len(pts)):
-        raise GeometryError(f"Control point index {index} out of range")
-    for k, i in owners[index]:
-        splines[k].SetPole(i, _pnt(new_point))
+def _splines_of(shape) -> list:
+    """A curve's pieces as b-splines, in the order you walk the curve."""
+    if shape_kind(shape) != "curve":
+        raise GeometryError("Not a curve")
+    edges = edges_of(shape)
+    if len(edges) == 1:
+        return [_bspline_of_edge(edges[0])]
+    return _wire_bsplines(shape)
+
+
+def _curve_from_splines(splines) -> TopoDS_Shape:
+    """The edge one spline makes, or the wire several make in order."""
     if len(splines) == 1:
         return BRepBuilderAPI_MakeEdge(splines[0]).Edge()
     mk = BRepBuilderAPI_MakeWire()
@@ -1357,6 +1402,16 @@ def move_control_point(shape, index: int, new_point: Point) -> TopoDS_Shape:
     if not mk.IsDone():
         raise GeometryError("Could not put the curve back together")
     return mk.Wire()
+
+
+def move_control_point(shape, index: int, new_point: Point) -> TopoDS_Shape:
+    """Return a new curve with control point `index` (0-based) moved."""
+    splines, pts, owners = _control_point_map(shape)
+    if not (0 <= index < len(pts)):
+        raise GeometryError(f"Control point index {index} out of range")
+    for k, i in owners[index]:
+        splines[k].SetPole(i, _pnt(new_point))
+    return _curve_from_splines(splines)
 
 
 def delete_control_points(shape, indices: list[int]):
@@ -1391,6 +1446,117 @@ def delete_control_points(shape, indices: list[int]):
                                   closed=closed)
     raise GeometryError("Control points of joined curves cannot be "
                         "deleted — explode the curve first")
+
+
+# --- knots ------------------------------------------------------------------
+
+def _nearest_place_on(splines, point) -> tuple[int, float]:
+    """(which spline, at what parameter) is closest to `point`.
+
+    You aim a click at a curve rather than hitting it, so every pick has to
+    come back down onto the curve before it means anything.
+    """
+    from OCP.GeomAPI import GeomAPI_ProjectPointOnCurve
+    p = _pnt(point)
+    best = None
+    for k, bs in enumerate(splines):
+        params = [bs.FirstParameter(), bs.LastParameter()]
+        proj = GeomAPI_ProjectPointOnCurve(p, bs)
+        if proj.NbPoints() > 0:
+            params.append(proj.LowerDistanceParameter())
+        for u in params:
+            d = p.Distance(bs.Value(u))
+            if best is None or d < best[0]:
+                best = (d, k, u)
+    if best is None:
+        raise GeometryError("Not a curve")
+    return best[1], best[2]
+
+
+def _removable_knots(bs) -> list[int]:
+    """The knot indices worth offering. The first and last are left out:
+    they are what holds a curve onto its end poles, and pulling one is not
+    an edit to the curve so much as an end to it."""
+    return list(range(2, bs.NbKnots()))
+
+
+def curve_knot_points(shape) -> list[Point]:
+    """Where the curve's spans meet, in order along it — the knots you can
+    take out. A curve of a single span has none."""
+    out: list[Point] = []
+    for bs in _splines_of(shape):
+        for i in _removable_knots(bs):
+            out.append(pnt_tuple(bs.Value(bs.Knot(i))))
+    return out
+
+
+def insert_knot(shape, point) -> TopoDS_Shape:
+    """A copy of the curve with a knot added where `point` falls on it.
+
+    The curve does not move by so much as a tolerance: this is the one edit
+    that hands you a control point for free, which is why it is how you get
+    a handle where you want to pull from rather than making do with the
+    ones the curve was built with.
+    """
+    splines = _splines_of(shape)
+    k, u = _nearest_place_on(splines, point)
+    bs = splines[k]
+    span = bs.LastParameter() - bs.FirstParameter()
+    eps = max(abs(span), 1.0) * 1e-9
+    if min(abs(u - bs.FirstParameter()), abs(u - bs.LastParameter())) < eps:
+        raise GeometryError("That is the end of the curve — pick a point "
+                            "along it")
+    try:
+        bs.InsertKnot(u)
+    except Exception as exc:                                   # noqa: BLE001
+        raise GeometryError(f"Could not add a knot there: {exc}") from exc
+    return _curve_from_splines(splines)
+
+
+def insert_knots_at_spans(shape) -> TopoDS_Shape:
+    """A knot in the middle of every span, the way Rhino's Automatic does.
+    Doubles what you have to pull on and still leaves the curve alone."""
+    splines = _splines_of(shape)
+    for bs in splines:
+        knots = [bs.Knot(i) for i in range(1, bs.NbKnots() + 1)]
+        for a, b in zip(knots[:-1], knots[1:]):
+            bs.InsertKnot((a + b) / 2.0)
+    return _curve_from_splines(splines)
+
+
+def remove_knot(shape, point) -> TopoDS_Shape:
+    """A copy of the curve with the knot nearest `point` taken out.
+
+    Unlike putting one in, this changes the shape: with a span fewer the
+    curve has to give up whatever that knot was holding. OCCT asks first
+    how far the curve may move, and asking for the knot out is the answer,
+    so there is no limit here. What it actually cost is worth measuring
+    afterwards (`max_deviation`) rather than forbidding in advance.
+    """
+    from OCP.Precision import Precision
+    splines = _splines_of(shape)
+    k, u = _nearest_place_on(splines, point)
+    bs = splines[k]
+    candidates = _removable_knots(bs)
+    if not candidates:
+        raise GeometryError("This curve has no knots to remove — it is a "
+                            "single span already")
+    i = min(candidates, key=lambda j: abs(bs.Knot(j) - u))
+    if not bs.RemoveKnot(i, bs.Multiplicity(i) - 1, Precision.Infinite_s()):
+        raise GeometryError("That knot cannot come out without tearing the "
+                            "curve")
+    return _curve_from_splines(splines)
+
+
+def max_deviation(a, b, count: int = 64) -> float:
+    """How far apart two curves run, sampled along both by arc length.
+
+    Point n of one against point n of the other, which is not quite the
+    distance between the curves but is the number that answers "did that
+    edit move anything I care about".
+    """
+    return max(_d3(x, y) for x, y in
+               zip(sample_curve(a, count), sample_curve(b, count)))
 
 
 def sample_curve(shape, count: int) -> list[Point]:

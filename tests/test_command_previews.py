@@ -43,6 +43,62 @@ def test_orient3pt_shows_where_the_objects_land(env):
     assert hi[0] - lo[0] == pytest.approx(2, abs=1e-6)
 
 
+def test_a_control_point_curve_is_previewed_as_it_will_be_built(env):
+    """The ghost takes the cursor as its next control point, so what you are
+    looking at is the curve the next click makes."""
+    _scene, _sel, _hist, _ctx, proc = env
+    proc.run("curve")
+    for p in ("0,0", "10,10", "20,-10"):
+        proc.provide_text(p)
+    ghost = proc.preview_for((30.0, 0.0, 0.0))
+    assert ghost is not None, "no curve under the cursor while drawing one"
+    poles = g.get_control_points(ghost)
+    assert poles[-1] == pytest.approx((30, 0, 0), abs=1e-9)
+    assert len(poles) == 4
+
+
+def test_an_interpolated_curve_is_previewed_through_its_points(env):
+    _scene, _sel, _hist, _ctx, proc = env
+    proc.run("interpcrv")
+    for p in ("0,0", "10,10", "20,-10"):
+        proc.provide_text(p)
+    ghost = proc.preview_for((30.0, 0.0, 0.0))
+    assert ghost is not None
+    for want in ((0, 0, 0), (10, 10, 0), (20, -10, 0), (30, 0, 0)):
+        assert g.distance_point_to_shape(ghost, want) < 1e-6
+
+
+def test_the_preview_is_the_curve_and_not_the_chain_of_picks(env):
+    """The complaint this fixes: the straight chain between the picks was
+    the only thing on screen, and it is the one shape the curve is not."""
+    _scene, _sel, _hist, _ctx, proc = env
+    proc.run("interpcrv")
+    for p in ("0,0", "10,10", "20,-10"):
+        proc.provide_text(p)
+    ghost = proc.preview_for((30.0, 0.0, 0.0))
+    midpoint_of_a_straight_leg = (5.0, 5.0, 0.0)
+    assert g.distance_point_to_shape(ghost, midpoint_of_a_straight_leg) > 0.1
+
+
+def test_the_first_pick_of_a_curve_has_nothing_to_preview_yet(env):
+    """One point and a cursor is a line, and drawing one would say the
+    command makes lines. Two is the first honest preview."""
+    _scene, _sel, _hist, _ctx, proc = env
+    proc.run("curve")
+    assert proc.preview_for((10.0, 0.0, 0.0)) is None
+
+
+def test_a_curve_preview_survives_a_cursor_on_top_of_the_last_point(env):
+    """Coincident points have no curve through them. The ghost goes quiet
+    rather than the command falling over."""
+    _scene, _sel, _hist, _ctx, proc = env
+    proc.run("interpcrv")
+    for p in ("0,0", "10,10"):
+        proc.provide_text(p)
+    proc.preview_for((10.0, 10.0, 0.0))     # must not raise
+    assert proc.busy
+
+
 def test_orient3pt_still_completes(env):
     scene, sel, _hist, _ctx, proc = env
     obj = scene.add(g.make_box((0, 0, 0), 2, 2, 2))

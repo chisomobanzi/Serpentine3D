@@ -142,7 +142,7 @@ def _merge(base: dict, override: dict):
 
 # Rhino command -> serpentine3d command (used when importing Rhino alias files)
 RHINO_COMMAND_MAP = {
-    "line": "line", "polyline": "polyline", "interpcrv": "curve",
+    "line": "line", "polyline": "polyline", "interpcrv": "interpcrv",
     "curve": "curve", "circle": "circle", "arc": "arc",
     "ellipse": "ellipse", "rectangle": "rectangle",
     "extrudecrv": "extrude", "extrudesrf": "extrude", "extrude": "extrude",

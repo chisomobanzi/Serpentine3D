@@ -224,6 +224,58 @@ def test_every_silent_point_gives_a_reason(entry, reason):
     assert reason and len(reason) > 15, f"{entry} needs a real reason"
 
 
+# Commands where the chain drawn between the picked points is the shape, so
+# the band is not standing in for anything and needs nothing behind it.
+CHAIN_IS_THE_SHAPE = {
+    "polyline": "a polyline is exactly the segments between its points",
+    "point": "each pick is its own object, and the chain is drawn for the "
+             "order alone",
+    "leader": "a leader is the straight run of segments you picked",
+    "hatch": "the boundary is the polygon through the points",
+}
+# `curve` is deliberately not here. Its chain is the control polygon, which
+# is part of what a control point curve is, but it draws the curve as well,
+# so it passes the rule on its own and stays covered by it.
+
+
+def test_a_gathered_chain_that_is_not_the_shape_shows_the_shape():
+    """`rubber_pts` draws straight lines between the points picked so far.
+    Where the result runs through those points that is the shape being made.
+    Where it does not, the band is a drawing of something that will never
+    exist, and the user is left to imagine the real one until they commit.
+
+    This is what `curve` did: it interpolated a smooth curve and drew you
+    the straight chain, so the one thing on screen was the one thing you
+    already knew.
+    """
+    offenders = []
+    for fname, cmd, reqs in _commands():
+        if cmd in CHAIN_IS_THE_SHAPE:
+            continue
+        for rtype, prompt, kwargs, line in reqs:
+            if rtype != "PointReq" or "rubber_pts" not in kwargs:
+                continue
+            if "preview_fn" in kwargs:
+                continue
+            offenders.append(f"  {fname}:{line}  {cmd}: {prompt!r}")
+    assert not offenders, (
+        "these gather points and draw a straight chain between them, but "
+        "make something else:\n" + "\n".join(offenders)
+        + "\n\nPass preview_fn= so the real shape follows the cursor, or add "
+          "the command to CHAIN_IS_THE_SHAPE if the chain is the shape.")
+
+
+@pytest.mark.parametrize("cmd,reason", sorted(CHAIN_IS_THE_SHAPE.items()))
+def test_every_chain_exemption_gives_a_reason(cmd, reason):
+    assert reason and len(reason) > 15, f"{cmd} needs a real reason"
+
+
+def test_the_chain_exemptions_are_all_real_commands():
+    live = {cmd for _f, cmd, _r in _commands()}
+    stale = sorted(c for c in CHAIN_IS_THE_SHAPE if c not in live)
+    assert not stale, f"CHAIN_IS_THE_SHAPE names no such command: {stale}"
+
+
 def _commands_using(helper):
     """(file, command, [(prompt, kwargs, line)]) for commands calling helper."""
     out = []

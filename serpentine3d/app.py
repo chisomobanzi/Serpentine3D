@@ -1158,7 +1158,7 @@ class MainWindow(QMainWindow):
             # and the band can only be its diagonal — a slash across the middle
             # of the shape it was meant to help place. The number it carried is
             # still wanted, so it is asked for as sides instead of a length.
-            if len(chain) >= 2 and sides is None:
+            if len(chain) >= 2 and sides is None and req.rubber_band:
                 arr = np.asarray(chain, np.float32)
                 segs = np.stack([arr[:-1], arr[1:]], axis=1)
         # in every pane, for the same reason the picked points already are:

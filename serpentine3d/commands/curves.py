@@ -3,7 +3,8 @@
 import numpy as np
 
 from ..core import geometry as g
-from .base import PointReq, SelectReq, command, frame_sides, quadrant
+from .base import (
+    IntReq, PointReq, SelectReq, command, frame_sides, quadrant)
 
 
 def _back_at_the_start(p, pts) -> bool:
@@ -70,15 +71,79 @@ def cmd_polyline(ctx):
     ctx.echo(f"Created {obj.name} with {len(pts)} points.")
 
 
-@command("curve", aliases=("cv", "interpcrv"), space="any")
+def _curve_ghost(build, pts, **kw):
+    """A preview of the curve this command would make if the next point
+    landed under the cursor.
+
+    Drawing the picked points and a straight chain between them says where
+    you have clicked, which is the one thing you already know. What you
+    cannot work out in your head is the curve those points imply, and for a
+    control point curve it does not even go through them.
+    """
+    def ghost(p):
+        if not isinstance(p, (tuple, list)):
+            return None                     # an option keyword, not a point
+        try:
+            return build(list(pts) + [tuple(p)], **kw)
+        except g.GeometryError:
+            return None                     # too few points yet, or coincident
+    return ghost
+
+
+@command("curve", aliases=("cv",), space="any")
 def cmd_curve(ctx):
-    """NURBS curve through picked points; Close joins it back smoothly."""
-    pts = [(yield PointReq("First point of curve"))]
+    """NURBS curve by control points, as Rhino's Curve does.
+
+    The curve is pulled toward the points rather than run through them,
+    and Degree decides how far.
+    """
+    degree = 3
+    pts = []
     while True:
-        req = PointReq("Next point (Enter to finish)",
-                       rubber_pts=list(pts), allow_empty=len(pts) >= 2,
-                       extra_options=("Close",) if len(pts) >= 3 else ())
-        p = yield req
+        opts = ["Degree"]
+        if len(pts) >= 3:
+            opts.append("Close")
+        if not pts:
+            prompt = "Start of curve"
+        elif len(pts) < 2:
+            prompt = "Next control point"
+        else:
+            prompt = "Next control point (Enter to finish)"
+        p = yield PointReq(
+            prompt, rubber_pts=list(pts), allow_empty=len(pts) >= 2,
+            extra_options=tuple(opts),
+            # the chain between control points is the control polygon, which
+            # is part of what you are drawing rather than a stand-in for it
+            preview_fn=_curve_ghost(g.make_control_curve, pts, degree=degree))
+        if p is None:
+            break
+        if p == "Degree":
+            degree = yield IntReq("Degree", default=degree, minimum=1)
+            continue
+        if p == "Close" or _back_at_the_start(p, pts):
+            obj = ctx.add(g.make_control_curve(pts, degree=degree,
+                                               closed=True))
+            ctx.echo(f"Created closed {obj.name}.")
+            return
+        pts.append(p)
+    obj = ctx.add(g.make_control_curve(pts, degree=degree))
+    ctx.echo(f"Created {obj.name} from {len(pts)} control points.")
+
+
+@command("interpcrv", aliases=("interpcurve",), space="any")
+def cmd_interpcrv(ctx):
+    """NURBS curve through picked points; Close joins it back smoothly."""
+    pts = []
+    while True:
+        prompt = ("First point of curve" if not pts
+                  else "Next point (Enter to finish)")
+        p = yield PointReq(
+            prompt, rubber_pts=list(pts), allow_empty=len(pts) >= 2,
+            extra_options=("Close",) if len(pts) >= 3 else (),
+            # no band: the curve bulges away from the straight chain, so
+            # drawing the chain draws a line that will not be there
+            rubber_band=False,
+            preview_fn=_curve_ghost(g.make_interp_curve, pts))
         if p is None:
             break
         if p == "Close" or _back_at_the_start(p, pts):
