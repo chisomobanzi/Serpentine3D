@@ -152,8 +152,10 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `boundingbox` (`bb`) | Create the world-aligned bounding box of the selection. |
 | `chamfer` | Bevel the corner between two curves with straight cut-offs. |
 | `delete` (`del`, `erase`) | Delete |
+| `dir` | Show which way curves run and which way surfaces face. |
 | `explode` (`x`) | Explode |
 | `fillet` | Fillet |
+| `flip` | Turn curves round and surfaces inside out, as Rhino's Flip does. |
 | `hide` | Hide |
 | `insertknot` (`insertcontrolpoint`) | Add a control point to a curve without moving the curve. |
 | `join` (`j`) | Join |

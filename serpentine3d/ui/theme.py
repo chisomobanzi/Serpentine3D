@@ -21,6 +21,12 @@ ACCENT = "#d9a441"
 CONTROL_POINT = (0.36, 0.80, 1.0)
 CONTROL_POINT_EDGE = (0.04, 0.06, 0.09, 0.95)
 CONTROL_NET = (0.34, 0.44, 0.56, 0.6)
+
+# Direction arrows, while Dir is running. Green, because the two things it can
+# be showing you at once are a curve's direction and a surface's normal, and
+# both have to stand out against a drawing that is already white, gold and
+# control point blue.
+DIRECTION_ARROW = (0.40, 0.95, 0.50, 0.95)
 ACCENT_DIM = "#8a6a2f"
 
 # Shaded-mode lighting. SHADED_AMBIENT mirrors a constant hardcoded in

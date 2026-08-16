@@ -371,6 +371,76 @@ def cmd_removecontrolpoint(ctx):
     yield from ()
 
 
+# --- direction ---------------------------------------------------------------
+
+def flip_objects(ctx, objs) -> int:
+    """Turn each object round, whichever kind it is. Returns how many went.
+
+    Shared with `dir`, which is the same edit with the arrows up so you can
+    see what you did to them.
+    """
+    done = 0
+    for o in objs:
+        live = ctx.scene.get(o.id)
+        if live is None:
+            continue
+        try:
+            shape = (g.reverse_curve(live.shape) if live.kind == "curve"
+                     else g.flip_surface(live.shape))
+        except g.GeometryError as exc:
+            ctx.echo(f"{live.name}: {exc}")
+            continue
+        ctx.scene.replace_shape(live.id, shape)
+        done += 1
+    return done
+
+
+@command("flip")
+def cmd_flip(ctx):
+    """Turn curves round and surfaces inside out, as Rhino's Flip does.
+
+    A curve runs from one end to the other and a surface faces one way, and
+    both decide things you only find out later: which end an offset comes
+    out on, which way a sweep travels, which side a shell thickens.
+    """
+    objs = yield SelectReq("Select curves or surfaces to flip",
+                           kinds=("curve", "surface", "solid"))
+    done = flip_objects(ctx, objs)
+    ctx.echo(f"Flipped {done} object(s)." if done else "Nothing flipped.")
+
+
+@command("dir")
+def cmd_dir(ctx):
+    """Show which way curves run and which way surfaces face.
+
+    Rhino's Dir. Flip turns round whatever it is showing and leaves the
+    arrows up, because the reason to look is to fix what you find, and a
+    flip you cannot see is a flip you do twice.
+    """
+    from .view import _redraw_all
+    objs = yield SelectReq("Select objects to show the direction of",
+                           kinds=("curve", "surface", "solid"))
+    ids = [o.id for o in objs]
+    ctx.scene.dir_enabled.update(ids)
+    _redraw_all(ctx)
+    try:
+        while True:
+            choice = yield OptionReq("Direction shown (Enter when done)",
+                                     options=["Flip", "Done"], default="Done")
+            if choice == "Done":
+                break
+            done = flip_objects(ctx, _live(ctx, ids))
+            ctx.echo(f"Flipped {done} object(s)." if done
+                     else "Nothing flipped.")
+            _redraw_all(ctx)
+    finally:
+        # the arrows belong to the command, not to the drawing: Rhino's go
+        # when Dir ends, whether you finished or pressed Escape
+        for i in ids:
+            ctx.scene.dir_enabled.discard(i)
+        _redraw_all(ctx)
+
+
 @command("hide")
 def cmd_hide(ctx):
     objs = yield SelectReq("Select objects to hide")

@@ -110,6 +110,42 @@ def cv_marker_outline(points, right, up, half):
     a, b, c, d = _cv_corners(points, right, up, half)
     return np.stack([a, b, b, c, c, d, d, a], axis=1).reshape(-1, 3)
 
+
+# Length of a direction arrow, in pixels, and the head as a fraction of it.
+# ARROW_COUNT is how many go on a curve, and roughly how many on each face of
+# a surface: enough to see the run at a glance, few enough to see through.
+ARROW_PX = 22.0
+ARROW_COUNT = 12
+ARROW_HEAD = 0.34
+ARROW_BARB = 0.17
+
+
+def arrow_segments(points, dirs, fwd, right, length):
+    """Little arrows standing at `points`, as line segments (N*6, 3).
+
+    Six points per arrow: the shaft, then a barb either side of the tip. The
+    barbs are swung out along whichever way across the arrow faces the camera,
+    so the head still reads when the arrow runs straight at you, which is
+    exactly the case that matters for a surface normal on the surface you are
+    looking at.
+    """
+    pts = np.asarray(points, float).reshape(-1, 3)
+    d = np.asarray(dirs, float).reshape(-1, 3)
+    d = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+    ln = np.asarray(length, float).reshape(-1, 1)
+    tip = pts + d * ln
+    side = np.cross(d, np.asarray(fwd, float))
+    flat = np.linalg.norm(side, axis=1, keepdims=True)
+    # end-on, so there is no across to speak of: any direction square to the
+    # arrow will do, and the camera's own right is square to it by definition
+    side = np.where(flat < 1e-6, np.asarray(right, float),
+                    side / np.maximum(flat, 1e-12))
+    back = tip - d * ln * ARROW_HEAD
+    barb = side * ln * ARROW_BARB
+    return np.stack([pts, tip,
+                     tip, back + barb,
+                     tip, back - barb], axis=1).reshape(-1, 3)
+
 MESH_VERT = """
 #version 330 core
 layout(location=0) in vec3 pos;
@@ -666,6 +702,7 @@ class Viewport(QOpenGLWidget):
         self.comb_enabled: set[str] = set() # curvature combs on curves
         self.draft_angle = 3.0              # draft analysis threshold (deg)
         self._cv_cache: dict = {}
+        self._dir_cache: dict = {}          # direction arrows, per mesh uid
         self._cv_drag = None                # (obj_id, index, plane_pt, normal)
         self._swipe_press = None            # where an Alt view-swipe started
         self._flight = None                 # (from, to, name, t0, secs)
@@ -924,6 +961,7 @@ class Viewport(QOpenGLWidget):
         self._draw_pending(mvp)
         self._draw_control_points(mvp)
         self._draw_combs(mvp)
+        self._draw_direction_arrows(mvp)
         self.gumball.paint(mvp)
         self._draw_axis_triad(view, w, h)
         self._draw_frame_guides(w, h)
@@ -2177,6 +2215,34 @@ class Viewport(QOpenGLWidget):
                     self._line_width(width)
                     GL.glBindVertexArray(self._preview.vao)
                     GL.glDrawArrays(GL.GL_LINES, 0, len(arr))
+        GL.glEnable(GL.GL_DEPTH_TEST)
+
+    def _draw_direction_arrows(self, mvp):
+        """Which way each curve runs, and which way each surface faces.
+
+        Rhino's Dir. The arrows are a fixed length on the glass, like the
+        control point markers, so a curve receding from you does not end up
+        with hedgehogs at the near end and specks at the far one.
+        """
+        if not self.dir_enabled:
+            return
+        w, h = self.width(), self.height()
+        right, up = self.camera.right_up()
+        fwd = np.cross(right, up)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        for obj_id in list(self.dir_enabled):
+            obj = self.scene.get(obj_id)
+            if obj is None:
+                self.dir_enabled.discard(obj_id)
+                continue
+            arrows = self._dir_entry(obj)
+            if not len(arrows):
+                continue
+            at = arrows[:, 0]
+            length = cv_marker_size(at, self.camera, w, h, ARROW_PX)
+            segs = arrow_segments(at, arrows[:, 1], fwd, right, length)
+            self._preview.update(segs.astype(np.float32))
+            self._draw_lines(self._preview, mvp, theme.DIRECTION_ARROW, 1.5)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _draw_selection_box(self, w, h):
@@ -3779,6 +3845,34 @@ class Viewport(QOpenGLWidget):
         drawing owns this, so all of its panes agree about it.
         """
         return self.scene.cv_enabled
+
+    @property
+    def dir_enabled(self) -> set:
+        """The objects showing direction arrows, for the same reason.
+
+        Which way a curve runs is a fact about the curve, so every pane
+        showing that curve says the same thing about it.
+        """
+        return self.scene.dir_enabled
+
+    def _dir_entry(self, obj) -> np.ndarray:
+        """(N, 2, 3): where each arrow stands and which way it points.
+
+        Worked out from the shape, which is slow enough to be worth keeping,
+        and thrown away when the shape changes: the whole point of Flip is
+        that the arrows come back round the other way.
+        """
+        from ..core import geometry as _g
+        entry = self._dir_cache.get(obj.id)
+        key = obj.mesh.uid            # not id(obj.mesh) — see DisplayMesh.uid
+        if entry is None or entry[0] != key:
+            try:
+                found = _g.direction_arrows(obj.shape, ARROW_COUNT)
+            except _g.GeometryError:
+                found = []
+            entry = (key, np.asarray(found, float).reshape(-1, 2, 3))
+            self._dir_cache[obj.id] = entry
+        return entry[1]
 
     def _cv_points(self, obj) -> np.ndarray | None:
         return self._cv_entry(obj)[0]

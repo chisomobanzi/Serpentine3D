@@ -1559,6 +1559,163 @@ def max_deviation(a, b, count: int = 64) -> float:
                zip(sample_curve(a, count), sample_curve(b, count)))
 
 
+# --- direction ---
+
+def _ordered_edges(shape) -> list:
+    """A curve's edges in the order and the direction you walk them."""
+    st = shape.ShapeType()
+    if st == occ.EDGE:
+        return [occ.to_edge(shape)]
+    if st != occ.WIRE:
+        raise GeometryError("Not a curve")
+    from OCP.BRepTools import BRepTools_WireExplorer
+    out = []
+    exp = BRepTools_WireExplorer(occ.to_wire(shape))
+    while exp.More():
+        out.append(occ.to_edge(exp.Current()))
+        exp.Next()
+    if not out:
+        raise GeometryError("Not a curve")
+    return out
+
+
+def _reversed_edge(edge):
+    """One edge running the other way, still the curve it was.
+
+    Reversing the topology alone would not do: an edge marked REVERSED is
+    read forwards by everything that asks it for a point, and only a wire
+    walking it takes the mark into account. This turns the geometry round
+    instead, so a circle stays a circle rather than becoming the b-spline
+    a conversion would leave.
+    """
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    curve = BRep_Tool.Curve_s(edge, 0.0, 0.0)
+    if curve is None:
+        raise GeometryError("That curve has no 3D geometry to reverse")
+    ad = BRepAdaptor_Curve(edge)
+    first, last = ad.FirstParameter(), ad.LastParameter()
+    mk = BRepBuilderAPI_MakeEdge(curve.Reversed(),
+                                 curve.ReversedParameter(last),
+                                 curve.ReversedParameter(first))
+    if not mk.IsDone():
+        raise GeometryError("Could not reverse that curve")
+    return mk.Edge()
+
+
+def reverse_curve(shape) -> TopoDS_Shape:
+    """The same curve, running the other way.
+
+    Which way a curve runs decides which end an offset comes out on, which
+    way a sweep travels along its rail and which side a shell thickens, so
+    it is worth being able to turn round without redrawing.
+    """
+    if shape_kind(shape) != "curve":
+        raise GeometryError("Not a curve")
+    edges = [_reversed_edge(e) for e in reversed(_ordered_edges(shape))]
+    if len(edges) == 1:
+        return edges[0]
+    mk = BRepBuilderAPI_MakeWire()
+    for e in edges:
+        mk.Add(e)
+    if not mk.IsDone():
+        raise GeometryError("Could not put the curve back together")
+    return mk.Wire()
+
+
+def flip_surface(shape) -> TopoDS_Shape:
+    """The same surface with its normal pointing the other way.
+
+    Nothing about the shape changes, only which side of it is the outside.
+    That is a topological mark rather than new geometry, which is why it is
+    exact and why doing it twice leaves no trace.
+    """
+    if not faces_of(shape):
+        raise GeometryError("Not a surface")
+    return shape.Reversed()
+
+
+def direction_arrows(shape, count: int = 8) -> list:
+    """Where to stand an arrow on a shape and which way it should point.
+
+    A curve's arrows run along it the way it is parameterised. A surface's
+    stand off each face along its normal, kept off the trimmed-away parts
+    where an arrow would float beside the surface rather than on it. Both
+    come back as (point, unit direction) pairs for the viewport to draw.
+    """
+    if shape_kind(shape) == "curve":
+        return _curve_arrows(shape, count)
+    if faces_of(shape):
+        return _surface_arrows(shape, count)
+    raise GeometryError("Nothing here has a direction to show")
+
+
+def _curve_arrows(shape, count: int) -> list:
+    from OCP.BRepAdaptor import BRepAdaptor_CompCurve
+    from OCP.GCPnts import GCPnts_UniformAbscissa
+    from OCP.gp import gp_Pnt, gp_Vec
+    st = shape.ShapeType()
+    if st == occ.WIRE:
+        ad = BRepAdaptor_CompCurve(occ.to_wire(shape))
+    elif st == occ.EDGE:
+        ad = occ.edge_adaptor(occ.to_edge(shape))
+    else:
+        raise GeometryError("Not a curve")
+    n = max(int(count), 1)
+    # n + 2 samples and the two ends dropped: an arrow standing on the last
+    # point of the curve has its head off the end of it.
+    ua = GCPnts_UniformAbscissa(ad, n + 2)
+    if not ua.IsDone():
+        raise GeometryError("Could not sample curve")
+    out = []
+    for i in range(2, ua.NbPoints()):
+        p, v = gp_Pnt(), gp_Vec()
+        ad.D1(ua.Parameter(i), p, v)
+        if v.Magnitude() < 1e-12:
+            continue
+        v.Normalize()
+        out.append(((p.X(), p.Y(), p.Z()), (v.X(), v.Y(), v.Z())))
+    return out
+
+
+def _surface_arrows(shape, count: int) -> list:
+    import math
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.BRepLProp import BRepLProp_SLProps
+    from OCP.BRepTopAdaptor import BRepTopAdaptor_FClass2d
+    from OCP.gp import gp_Pnt2d
+    from OCP.TopAbs import TopAbs_Orientation, TopAbs_State
+    faces = faces_of(shape)
+    k = max(1, int(round(math.sqrt(max(int(count), 1)))))
+    out = []
+    for face in faces:
+        surf = BRepAdaptor_Surface(face)
+        u0, u1 = surf.FirstUParameter(), surf.LastUParameter()
+        v0, v1 = surf.FirstVParameter(), surf.LastVParameter()
+        inside = BRepTopAdaptor_FClass2d(face, 1e-6)
+        flipped = face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED
+        for i in range(k):
+            for j in range(k):
+                u = u0 + (u1 - u0) * (i + 0.5) / k
+                v = v0 + (v1 - v0) * (j + 0.5) / k
+                if inside.Perform(gp_Pnt2d(u, v)) == TopAbs_State.TopAbs_OUT:
+                    continue
+                props = BRepLProp_SLProps(surf, u, v, 1, 1e-7)
+                if not props.IsNormalDefined():
+                    continue
+                p, n = props.Value(), props.Normal()
+                d = (n.X(), n.Y(), n.Z())
+                if flipped:
+                    d = (-d[0], -d[1], -d[2])
+                out.append(((p.X(), p.Y(), p.Z()), d))
+    if not out:
+        # every sample fell in a trimmed-away part, so fall back to the one
+        # point each face is sure to have: a surface with no arrow at all
+        # looks like a surface with no direction.
+        out = [face_point_normal(f) for f in faces]
+    return out
+
+
 def sample_curve(shape, count: int) -> list[Point]:
     """`count` points spaced uniformly by arc length along a curve/wire."""
     from OCP.BRepAdaptor import BRepAdaptor_CompCurve

@@ -97,7 +97,7 @@ commits a value mid-command, or repeats the last command.
 | **Deform** | `twist` `taper` `bend` `flow` (curve-to-curve) `extend` `matchcrv` |
 | **Booleans** | `booleanunion` `booleandifference` `booleanintersection` |
 | **Transform** | `move` `copy` `rotate` `scale` `scalenu` `mirror` `array` |
-| **Edit** | `join` `explode` `trim` `split` `offset` `fillet` `rebuild` `pointson`/`pointsoff` (control points, curves *and* surfaces) `delete` `hide` `show` `rename` `undo` `redo` |
+| **Edit** | `join` `explode` `trim` `split` `offset` `fillet` `rebuild` `pointson`/`pointsoff` (control points, curves *and* surfaces) `dir`/`flip` (curve direction and surface normals) `delete` `hide` `show` `rename` `undo` `redo` |
 | **Select** | `selall` `selnone` `selcrv` `selsrf` `selsolid` `sellayer` `selname` `sellast` `invert` `isolate` `unisolate` |
 | **Organise** | `group`/`ungroup` `lock`/`unlockall` `block` `insert` `blocklist` `count` `bringtofront`/`sendtoback` `bringforward`/`sendbackward` (draw order) |
 | **Camera** | `camera` (lens mm, cinema sensors, placement, 2.39/1.85 frame guides) `units` `cplane` |

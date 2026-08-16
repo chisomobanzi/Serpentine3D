@@ -25,6 +25,18 @@
   because there the chain is the control polygon and part of what you are
   drawing rather than a stand-in for it.
 
+- **`dir` and `flip`**, Rhino's pair for direction. Which way a curve runs
+  and which way a surface faces are invisible until something draws them,
+  and then they decide what happens next: which end an offset comes out on,
+  which way a sweep travels, which side a shell thickens. `dir` stands green
+  arrows on what you picked, along a curve or off a surface, and stays up
+  with Flip on the prompt so you can turn a face round and watch the arrows
+  come back the other way. `flip` is the same edit without the looking.
+  Reversing works on the geometry rather than the topology, so a circle
+  turned round is still a circle rather than the b-spline a conversion would
+  leave behind. The arrows are a fixed size on screen and they belong to the
+  command: they go when it ends, including on Escape.
+
 - **`insertknot`, `insertcontrolpoint`, `removeknot` and
   `removecontrolpoint`**, under Rhino's names. Inserting a knot is the one
   edit that hands you a control point without moving the curve by so much
