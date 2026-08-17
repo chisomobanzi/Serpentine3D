@@ -8,7 +8,7 @@
 
 [Download for Linux](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) ·
 [Windows](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) ·
-[macOS](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.6.3-arm64.dmg) ·
+[macOS](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.7.0-arm64.dmg) ·
 [Website](https://chisomobanzi.github.io/Serpentine3D/)
 
 </div>
@@ -57,7 +57,7 @@ S-curve at the heart of NURBS geometry.
 |---|---|---|
 | **Linux** | [`Serpentine3D-x86_64.AppImage`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) | `chmod +x` and run — nothing to install |
 | **Windows** | [`Serpentine3D-Setup-x86_64.exe`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) | Installer (Inno Setup) |
-| **macOS** (Apple Silicon) | [`Serpentine3D-arm64.dmg`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.6.3-arm64.dmg) | Drag to Applications |
+| **macOS** (Apple Silicon) | [`Serpentine3D-arm64.dmg`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.7.0-arm64.dmg) | Drag to Applications |
 
 Each download bundles the OpenCASCADE kernel and Python runtime — nothing else to
 install. The GUI needs a GPU with OpenGL 3.3 drivers, which any normal desktop
@@ -91,7 +91,7 @@ commits a value mid-command, or repeats the last command.
 
 | | Commands |
 |---|---|
-| **Curves** | `line` `polyline` `curve` (interpolated NURBS) `circle` `arc` `ellipse` `rectangle` `helix` `textobject` `blendcrv` `project` `pull` `intersect` |
+| **Curves** | `line` `polyline` `curve` (NURBS by control points) `interpcrv` (through the points) `circle` `arc` `ellipse` `rectangle` `helix` `textobject` `blendcrv` `project` `pull` `intersect` |
 | **Surfaces** | `extrude` `revolve` `loft` `sweep1` `sweep2` `planarsrf` `patch`/`networksrf` `offsetsrf` `unrollsrf` |
 | **Solids** | `box` `sphere` `cylinder` `cone` `torus` `filletedge` `chamferedge` (both pick edges directly; fillets chain and take `start,end` variable radii) `shell` `cap` `contour` `booleansplit` `pushpull` |
 | **Deform** | `twist` `taper` `bend` `flow` (curve-to-curve) `extend` `matchcrv` |
