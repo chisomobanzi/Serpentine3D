@@ -184,7 +184,7 @@ def test_native_mesh_objects(tmp_path):
 def test_obj_import_is_mesh(tmp_path):
     from serpentine3d import fileio
     p = str(tmp_path / "tri.obj")
-    with open(p, "w") as f:
+    with open(p, "w", encoding="utf-8") as f:
         f.write("o T\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
     scene = Scene()
     fileio.import_file(scene, p)

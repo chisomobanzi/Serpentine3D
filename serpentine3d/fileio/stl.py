@@ -140,7 +140,7 @@ def _write_ascii(tris: np.ndarray, normals: np.ndarray, path: str, name: str):
         out.append("    endloop")
         out.append("  endfacet")
     out.append(f"endsolid {name}")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
 
 

@@ -79,7 +79,7 @@ class RpcServer(QObject):
             return
         self._sock.listen(4)
         os.makedirs(os.path.dirname(PORT_FILE), exist_ok=True)
-        with open(PORT_FILE, "w") as f:
+        with open(PORT_FILE, "w", encoding="utf-8") as f:
             f.write(str(self.port))
         threading.Thread(target=self._accept_loop, daemon=True).start()
 

@@ -111,7 +111,8 @@ class SessionJournal:
         self.path = path
         self.broken = False          # gave up recording; the app carries on
         self.failure: Exception | None = None
-        self._f = open(path, "a", buffering=1)     # line-buffered: crash-safe
+        self._f = open(path, "a", buffering=1,     # line-buffered: crash-safe
+                       encoding="utf-8")
         self.scene = None
         self.history = None
         self.processor = None

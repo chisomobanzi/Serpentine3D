@@ -18,7 +18,7 @@ class SerpClient:
                 port = int(env_port)
             else:
                 port_file = os.path.expanduser("~/.serpentine3d/rpc.port")
-                port = int(open(port_file).read().strip())
+                port = int(open(port_file, encoding="utf-8").read().strip())
         self.sock = socket.create_connection(("127.0.0.1", port),
                                              timeout=timeout)
         self._buf = b""

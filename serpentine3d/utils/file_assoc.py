@@ -132,11 +132,11 @@ def _make_default_linux() -> tuple[bool, str]:
     if not os.path.exists(desktop_path):
         # install-desktop.sh may have written a richer entry; only a
         # missing one (bare AppImage download) gets this minimal stand-in
-        with open(desktop_path, "w") as f:
+        with open(desktop_path, "w", encoding="utf-8") as f:
             f.write(desktop_entry(exec_line()))
     mime_path = os.path.join(mime_dir, "packages", "serpentine3d.xml")
     if not os.path.exists(mime_path):
-        with open(mime_path, "w") as f:
+        with open(mime_path, "w", encoding="utf-8") as f:
             f.write(mime_xml())
 
     def _run(cmd) -> bool:

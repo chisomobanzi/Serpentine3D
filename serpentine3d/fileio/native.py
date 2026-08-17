@@ -125,7 +125,7 @@ def load_scene(scene, path: str):
         with zipfile.ZipFile(path) as z:
             doc = json.loads(z.read("document.json"))
     else:                                 # v1: bare JSON
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             doc = json.load(f)
     _load_doc(scene, doc)
 

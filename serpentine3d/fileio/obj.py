@@ -46,10 +46,10 @@ def export_obj(named_shapes: list, path: str):
             a, b, c = (int(i) + v_offset for i in t)
             lines.append(f"f {a}//{a} {b}//{b} {c}//{c}")
         v_offset += len(mesh.vertices)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     if has_colors and mtl_lines:
-        with open(mtl_path, "w") as f:
+        with open(mtl_path, "w", encoding="utf-8") as f:
             f.write("\n".join(mtl_lines) + "\n")
 
 
@@ -59,7 +59,7 @@ def import_obj(path: str, as_mesh: bool = True) -> list:
     verts: list = []
     groups: dict[str, list] = {}
     current = "obj"
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             parts = line.split()
             if not parts:

@@ -50,7 +50,7 @@ def _events(journal):
 
 
 def _events_open(journal):
-    with open(journal.path) as f:
+    with open(journal.path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
 

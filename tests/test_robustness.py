@@ -42,7 +42,7 @@ def test_serp_v1_still_loads(tmp_path):
     with zipfile.ZipFile(v2) as z:                  # unwrap to legacy JSON
         doc = json.loads(z.read("document.json"))
     v1 = str(tmp_path / "legacy.serp")
-    with open(v1, "w") as f:
+    with open(v1, "w", encoding="utf-8") as f:
         json.dump(doc, f)
     assert native.read_meta(v1) is None             # not a container
     loaded = Scene()

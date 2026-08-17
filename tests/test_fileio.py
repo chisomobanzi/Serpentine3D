@@ -52,7 +52,7 @@ def test_step_roundtrip(scene, tmp_path):
 def test_obj_export_import(scene, tmp_path):
     path = str(tmp_path / "test.obj")
     fileio.export_file(scene, path)
-    text = open(path).read()
+    text = open(path, encoding="utf-8").read()
     assert "v " in text and "f " in text
 
     loaded = Scene()
@@ -231,7 +231,7 @@ def test_dxf_roundtrip(scene, tmp_path):
 
 def test_svg_import(tmp_path):
     svg_path = str(tmp_path / "in.svg")
-    with open(svg_path, "w") as f:
+    with open(svg_path, "w", encoding="utf-8") as f:
         f.write('''<svg xmlns="http://www.w3.org/2000/svg">
 <circle cx="50" cy="50" r="20"/>
 <rect x="0" y="0" width="30" height="20"/>
@@ -283,7 +283,7 @@ def test_glb_export_uses_the_colour_on_the_material(scene, tmp_path):
 def test_usda_export(scene, tmp_path):
     path = str(tmp_path / "out.usda")
     fileio.export_file(scene, path)
-    text = open(path).read()
+    text = open(path, encoding="utf-8").read()
     assert text.startswith("#usda 1.0")
     assert 'def Mesh' in text
     assert 'upAxis = "Z"' in text
@@ -295,8 +295,8 @@ def test_obj_mtl_colors(scene, tmp_path):
     box = scene.find_by_name("Box A")
     scene.update(box.id, color=(1.0, 0.0, 0.0))
     fileio.export_file(scene, path)
-    assert "usemtl" in open(path).read()
-    mtl = open(str(tmp_path / "colored.mtl")).read()
+    assert "usemtl" in open(path, encoding="utf-8").read()
+    mtl = open(str(tmp_path / "colored.mtl"), encoding="utf-8").read()
     assert "Kd 1 0 0" in mtl
 
 

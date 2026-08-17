@@ -31,7 +31,7 @@ def main():
             lines.append(f"| {label} | {doc} |")
         lines.append("")
     out = os.path.join(os.path.dirname(__file__), "reference", "commands.md")
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     print(f"wrote {out}")
 

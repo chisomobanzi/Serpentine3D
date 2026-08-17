@@ -85,7 +85,7 @@ class Config:
 
     def load(self):
         try:
-            with open(self.path) as f:
+            with open(self.path, encoding="utf-8") as f:
                 stored = json.load(f)
         except (OSError, ValueError):
             return
@@ -94,7 +94,7 @@ class Config:
     def save(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         tmp = self.path + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=2, sort_keys=True)
         if os.name != "nt":
             os.chmod(tmp, 0o600)    # may hold an API key

@@ -286,7 +286,7 @@ class SettingsDialog(QDialog):
         if not path:
             return
         try:
-            parsed = parse_shortcuts(open(path).read())
+            parsed = parse_shortcuts(open(path, encoding="utf-8").read())
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Import failed", str(exc))
             return
@@ -340,7 +340,8 @@ class SettingsDialog(QDialog):
         if not path:
             return
         try:
-            aliases, unmapped = parse_rhino_aliases(open(path).read())
+            aliases, unmapped = parse_rhino_aliases(
+                open(path, encoding="utf-8").read())
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Import failed", str(exc))
             return

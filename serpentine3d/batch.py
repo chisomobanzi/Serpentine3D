@@ -49,7 +49,7 @@ def main(argv: list | None = None) -> int:
         "geo": geo,
         "args": argv[1:],
     }
-    with open(script_path) as f:
+    with open(script_path, encoding="utf-8") as f:
         code = compile(f.read(), script_path, "exec")
     try:
         exec(code, namespace)                       # noqa: S102

@@ -148,7 +148,8 @@ class _HlrWorker:
         env["SERP3D_NO_RPC"] = "1"    # a helper does not answer for the app
         self.proc = _subprocess.Popen(
             cmd, stdin=_subprocess.PIPE, stdout=_subprocess.PIPE,
-            stderr=_subprocess.DEVNULL, env=env, text=True)
+            stderr=_subprocess.DEVNULL, env=env, text=True,
+            encoding="utf-8")   # pin the pipe protocol, not the OS locale
         return True
 
     def _answer(self, timeout: float) -> str:
@@ -251,9 +252,11 @@ def _worker_streams():
     """
     # Not a context manager: these live as long as the worker does.
     stdin = (_sys.stdin if _sys.stdin is not None
-             else open(0, closefd=False))              # noqa: SIM115
+             else open(0, closefd=False,               # noqa: SIM115
+                       encoding="utf-8"))
     stdout = (_sys.stdout if _sys.stdout is not None
-              else open(1, "w", closefd=False))        # noqa: SIM115
+              else open(1, "w", closefd=False,         # noqa: SIM115
+                        encoding="utf-8"))
     return stdin, stdout
 
 

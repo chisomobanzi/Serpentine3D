@@ -41,7 +41,7 @@ class _Bridge:
         port = os.environ.get("SERP3D_RPC_PORT")
         if not port:
             try:
-                port = open(PORT_FILE).read().strip()
+                port = open(PORT_FILE, encoding="utf-8").read().strip()
             except OSError as exc:
                 raise RuntimeError(
                     "Serpentine3D is not running (no RPC port file). "

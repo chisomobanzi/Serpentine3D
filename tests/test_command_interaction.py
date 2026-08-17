@@ -81,7 +81,7 @@ def _commands():
     out = []
     for path in sorted(glob.glob(os.path.join(
             ROOT, "serpentine3d", "commands", "*.py"))):
-        tree = ast.parse(open(path).read())
+        tree = ast.parse(open(path, encoding="utf-8").read())
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -281,7 +281,7 @@ def _commands_using(helper):
     out = []
     for path in sorted(glob.glob(os.path.join(
             ROOT, "serpentine3d", "commands", "*.py"))):
-        tree = ast.parse(open(path).read())
+        tree = ast.parse(open(path, encoding="utf-8").read())
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue

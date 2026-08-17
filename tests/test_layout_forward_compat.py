@@ -122,7 +122,7 @@ def test_a_whole_file_from_a_later_build_opens(tmp_path):
         doc = json.loads(z.read("document.json"))
     doc["layouts"][0]["details"] = [{"x": 15.0, "y": 25.0,
                                      "shadow_softness": 0.3}]
-    with open(path, "w") as f:                  # v1 bare JSON still loads
+    with open(path, "w", encoding="utf-8") as f:   # v1 bare JSON still loads
         json.dump(doc, f)
 
     other = Scene()

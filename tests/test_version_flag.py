@@ -59,7 +59,8 @@ def test_every_console_script_answers_the_same_way():
         scripts = tomllib.load(fh)["project"]["scripts"]
     modules = {re.sub(r":.*", "", t) for t in scripts.values()}
     for mod in sorted(modules):
-        with open(os.path.join(ROOT, mod.replace(".", "/") + ".py")) as fh:
+        with open(os.path.join(ROOT, mod.replace(".", "/") + ".py"),
+                  encoding="utf-8") as fh:
             src = fh.read()
         assert "--version" in src, (
             f"{mod} backs a console script but has no --version")

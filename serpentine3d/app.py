@@ -2320,7 +2320,7 @@ def _selftest() -> int:
     except Exception:                                         # noqa: BLE001
         pass                        # windowed exe: stdout may be closed
     path = os.path.join(tempfile.gettempdir(), "serp3d-selftest.txt")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(report)
     return 0 if ok else 1
 

@@ -65,7 +65,7 @@ class AutosaveManager:
         data = {"pid": self.pid, "started": time.time(),
                 "autosave": self.autosave_path, "doc_path": self.doc_path}
         tmp = self.lock_path + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f)
         os.replace(tmp, self.lock_path)
 
@@ -117,7 +117,7 @@ class AutosaveManager:
                 continue
             path = os.path.join(self.dir, name)
             try:
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     data = json.load(f)
             except (OSError, ValueError):
                 continue

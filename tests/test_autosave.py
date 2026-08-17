@@ -25,7 +25,7 @@ def test_autosave_and_recovery_cycle(tmp_path):
     stale_lock = os.path.join(d, "session-999999.json")
     stale_save = os.path.join(d, "autosave-999999.serp")
     os.rename(mgr.autosave_path, stale_save)
-    with open(stale_lock, "w") as f:
+    with open(stale_lock, "w", encoding="utf-8") as f:
         json.dump({"pid": 999999, "autosave": stale_save,
                    "doc_path": "/tmp/mydoc.serp"}, f)
 
@@ -59,7 +59,8 @@ def test_clean_exit_removes_files(tmp_path):
 
 def test_stale_lock_without_autosave_is_cleaned(tmp_path):
     d = str(tmp_path)
-    with open(os.path.join(d, "session-888888.json"), "w") as f:
+    with open(os.path.join(d, "session-888888.json"), "w",
+              encoding="utf-8") as f:
         json.dump({"pid": 888888, "autosave": os.path.join(d, "gone.serp")},
                   f)
     mgr = AutosaveManager(Scene(), d)

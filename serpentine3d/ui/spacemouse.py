@@ -96,7 +96,7 @@ class SpaceMouseNavigator(QObject):
 
     def _open_evdev(self):
         try:
-            with open("/proc/bus/input/devices") as f:
+            with open("/proc/bus/input/devices", encoding="utf-8") as f:
                 block_name, node = "", None
                 for line in f:
                     if line.startswith("N: Name="):

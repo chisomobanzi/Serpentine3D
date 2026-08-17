@@ -173,7 +173,7 @@ def test_materials_persist_and_export(tmp_path):
     # USD gets a bound UsdPreviewSurface
     usda = str(tmp_path / "mat.usda")
     fileio.export_file(loaded, usda)
-    text = open(usda).read()
+    text = open(usda, encoding="utf-8").read()
     assert "UsdPreviewSurface" in text
     assert "inputs:metallic = 1" in text
     assert "material:binding" in text
