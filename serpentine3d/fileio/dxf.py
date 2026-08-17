@@ -186,9 +186,18 @@ def export_layout_dxf(window, layout, path: str):
         def to_paper(poly):
             return [(cx + p[0] * s, cy + p[1] * s) for p in poly[:, :2]]
 
-        for poly in data["visible"]:
-            msp.add_lwpolyline(to_paper(poly),
-                               dxfattribs={"layer": "VISIBLE"})
+        # Visible edges plot at their layer's print width. DXF lineweight is in
+        # 1/100mm; a layer left at the device default sets none, so the plot
+        # stays the way it has always drawn (by-layer default).
+        groups = data.get("visible_groups")
+        if groups is None:
+            groups = [(0.0, "Continuous", data["visible"])]
+        for width_mm, _name, polys in groups:
+            attribs = {"layer": "VISIBLE"}
+            if width_mm > 0:
+                attribs["lineweight"] = round(width_mm * 100)
+            for poly in polys:
+                msp.add_lwpolyline(to_paper(poly), dxfattribs=dict(attribs))
         if detail.display_mode == "hidden":
             for poly in data["hidden"]:
                 msp.add_lwpolyline(to_paper(poly),

@@ -213,6 +213,26 @@ class PaperObject:
         return twin
 
 
+def merge_line_groups(entries: list) -> list:
+    """A detail's visible line work bucketed by the pen it plots with.
+
+    `entries` is one (print width in mm, linetype name, polylines) for each
+    object the hidden-line pass drew. Objects that plot at the same width with
+    the same dash pattern come out as one group, so a plot puts down as few
+    pens as the drawing has distinct ones rather than one per object. First-
+    seen order is kept, so the same drawing groups the same way every run.
+    """
+    groups: dict = {}
+    order: list = []
+    for width, name, polys in entries:
+        key = (round(float(width), 6), name or "Continuous")
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].extend(polys)
+    return [(key[0], key[1], groups[key]) for key in order]
+
+
 def hatch_lines(points: list, angle_deg: float,
                 spacing: float) -> list:
     """Hatch segments filling a closed polygon (even-odd), as

@@ -134,15 +134,22 @@ def _paint_detail_vector(painter, layout_view, detail, layout, k):
         pen_h = QPen(QColor(110, 110, 120), 0.18 * k)
         pen_h.setDashPattern([4.0, 2.5])
         draw_polys(data["hidden"], pen_h)
-    draw_polys(data["visible"], QPen(QColor(15, 15, 18), 0.3 * k))
-    # non-Continuous linetypes: same ink, dashed per their pattern. Qt dash
-    # units are multiples of pen width, so divide the paper-mm pattern by it.
+    # Visible edges plot at their layer's print width; a layer left at the
+    # device default plots the thin default line the detail has always used.
+    # Ink stays near-black: a plot is black-on-white whatever the screen shows.
+    # Qt dash units are multiples of pen width, so a paper-mm dash pattern is
+    # divided by the width the pen is actually drawn at.
     from ..core import linetype as _lt
-    for name, polys in data.get("visible_lt", []):
-        pen = QPen(QColor(15, 15, 18), 0.3 * k)
+    groups = data.get("visible_groups")
+    if groups is None:
+        groups = [(0.0, "Continuous", data["visible"])] + \
+                 [(0.0, n, p) for n, p in data.get("visible_lt", [])]
+    for width_mm, name, polys in groups:
+        mm = width_mm if width_mm > 0 else 0.3
+        pen = QPen(QColor(15, 15, 18), mm * k)
         pattern = _lt.pattern_for(name)
         if pattern:
-            pen.setDashPattern([max(v, 0.01) / 0.3 for v in pattern])
+            pen.setDashPattern([max(v, 0.01) / mm for v in pattern])
         draw_polys(polys, pen)
     cut = data.get("cut") or []
     if cut:

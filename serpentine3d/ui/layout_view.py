@@ -580,6 +580,7 @@ class LayoutView:
         layer_types = vp._layer_linetypes()                 # once, not per object
         lts = [vp._effective_linetype(o, layer_types)
                for o in objs]                               # aligned to shapes
+        pws = [vp.scene.print_width_of(o) for o in objs]    # plot pen, aligned
 
         cut_polys = []
         if shapes and detail.section_offset is not None \
@@ -590,7 +591,7 @@ class LayoutView:
 
         if not shapes:
             data = {"visible": [], "hidden": [], "cut": cut_polys,
-                    "visible_lt": [], "visible_by_obj": []}
+                    "visible_lt": [], "visible_by_obj": [], "visible_groups": []}
             self._hlr_cache[detail.id] = (key, data)
             return data
 
@@ -601,27 +602,33 @@ class LayoutView:
                                    view_dir=d, x_dir=right)
         by_shape = res.get("visible_by_shape") or []
         by_obj = []                 # (object id, linetype name, polylines)
+        entries = []                # (print width mm, linetype name, polylines)
         if by_shape:
             for i, obj in enumerate(objs):
-                by_obj.append((obj.id,
-                               lts[i] if i < len(lts) else "Continuous",
-                               hlr.edges_to_polylines(
-                                   by_shape[i] if i < len(by_shape) else [])))
+                name = lts[i] if i < len(lts) else "Continuous"
+                polys = hlr.edges_to_polylines(
+                    by_shape[i] if i < len(by_shape) else [])
+                by_obj.append((obj.id, name, polys))
+                entries.append((pws[i] if i < len(pws) else 0.0, name, polys))
         else:                                   # older worker: no split
             # Nothing to say which object any of it came from, so it belongs to
-            # no object: it draws, and nothing in it can go gold.
-            by_obj = [(None, "Continuous", hlr.edges_to_polylines(
-                res["visible"] + res["outline"]))]
+            # no object: it draws, and nothing in it can go gold, and it plots
+            # at the device default because no layer owns it.
+            polys = hlr.edges_to_polylines(res["visible"] + res["outline"])
+            by_obj = [(None, "Continuous", polys)]
+            entries = [(0.0, "Continuous", polys)]
         visible = []
         lt_groups: dict = {}
         for _oid, name, polys in by_obj:
             (visible if name == "Continuous"
              else lt_groups.setdefault(name, [])).extend(polys)
+        from ..core.layout import merge_line_groups
         data = {"visible": visible,
                 "hidden": hlr.edges_to_polylines(res["hidden"]),
                 "cut": cut_polys,
                 "visible_lt": [(n, p) for n, p in lt_groups.items()],
-                "visible_by_obj": by_obj}
+                "visible_by_obj": by_obj,
+                "visible_groups": merge_line_groups(entries)}
         self._hlr_cache[detail.id] = (key, data)
         return data
 
