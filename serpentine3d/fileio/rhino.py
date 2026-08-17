@@ -695,6 +695,10 @@ def read_layers(model) -> dict:
             "material": layer.RenderMaterialIndex,
             "visible": bool(layer.Visible),
             "locked": bool(layer.Locked),
+            # Rhino's PlotWeight is mm; 0 is the device default and a negative
+            # is a pen that does not plot, neither of which we carry, so both
+            # land on our own default of 0.
+            "print_width": max(0.0, float(layer.PlotWeight)),
         }
     return layers
 
@@ -774,6 +778,7 @@ def object_appearance(attrs, layers: dict, materials: dict,
     return {"layer": layer.get("name"), "layer_color": layer.get("color"),
             "layer_visible": layer.get("visible", True),
             "layer_locked": layer.get("locked", False),
+            "layer_print_width": layer.get("print_width", 0.0),
             "color": color, "material": _shading(material),
             "visible": visible}
 
@@ -1122,6 +1127,7 @@ def export_3dm(scene, path: str, only_ids: list | None = None,
                     int(layer.color[2] * 255), 255)
         rl.Visible = bool(layer.visible)
         rl.Locked = bool(layer.locked)
+        rl.PlotWeight = float(layer.print_width)   # mm; 0 = device default
         idx = model.Layers.Add(rl)
         layer_index[layer.id] = idx
 

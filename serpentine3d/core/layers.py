@@ -29,6 +29,7 @@ class Layer:
     locked: bool = False
     lineweight: float = 1.4        # on-screen edge width in pixels
     linetype: str = "Continuous"   # dash-pattern name (core/linetype.py)
+    print_width: float = 0.0       # plotted pen width in mm; 0 = device default
 
 
 class LayerManager:
@@ -100,6 +101,10 @@ class LayerManager:
     def set_linetype(self, layer_id: str, name: str):
         self._layers[layer_id] = replace(self._layers[layer_id],
                                          linetype=name or "Continuous")
+
+    def set_print_width(self, layer_id: str, width: float):
+        self._layers[layer_id] = replace(self._layers[layer_id],
+                                         print_width=max(0.0, float(width)))
 
     def set_locked(self, layer_id: str, locked: bool):
         self._layers[layer_id] = replace(self._layers[layer_id], locked=locked)

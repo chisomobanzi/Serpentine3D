@@ -444,6 +444,14 @@ class Scene:
     def color_of(self, obj: SceneObject) -> tuple[float, float, float]:
         return obj.color or self.layers.get(obj.layer_id).color
 
+    def print_width_of(self, obj: SceneObject) -> float:
+        """The pen width, in mm, a plot draws this object with.
+
+        Taken off the layer: an object plots at its layer's print width, and
+        0 means the device default, the same as Rhino's PlotWeight.
+        """
+        return self.layers.get(obj.layer_id).print_width
+
     def render_color_of(self, obj: SceneObject) -> tuple[float, float, float]:
         """The colour rendered mode draws the object's surfaces in.
 

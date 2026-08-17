@@ -83,6 +83,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "locked": layer.locked,
                 "lineweight": layer.lineweight,
                 "linetype": layer.linetype,
+                "print_width": layer.print_width,
             }
             for layer in scene.layers.all()
         ],
@@ -144,6 +145,7 @@ def _load_doc(scene, doc: dict):
             layers.set_visible("default", ld.get("visible", True))
             layers.set_lineweight("default", ld.get("lineweight", 1.4))
             layers.set_linetype("default", ld.get("linetype", "Continuous"))
+            layers.set_print_width("default", ld.get("print_width", 0.0))
             id_map[ld["id"]] = "default"
         else:
             layer = layers.create(ld["name"], tuple(ld["color"]))
@@ -151,6 +153,7 @@ def _load_doc(scene, doc: dict):
             layers.set_lineweight(layer.id, ld.get("lineweight", 1.4))
             layers.set_linetype(layer.id, ld.get("linetype", "Continuous"))
             layers.set_locked(layer.id, ld.get("locked", False))
+            layers.set_print_width(layer.id, ld.get("print_width", 0.0))
             id_map[ld["id"]] = layer.id
 
     current = doc.get("current_layer", "default")

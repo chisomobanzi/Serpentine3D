@@ -202,6 +202,9 @@ def _import_file(scene, path: str, ext: str, report) -> int:
                             scene.layers.set_visible(existing.id, False)
                         if meta.get("layer_locked"):
                             scene.layers.set_locked(existing.id, True)
+                        if meta.get("layer_print_width"):
+                            scene.layers.set_print_width(
+                                existing.id, meta["layer_print_width"])
                     layer_map[lname] = existing.id
                 layer_id = layer_map[lname]
             # Not `obj`: that name is the .obj importer, one branch above.
