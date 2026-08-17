@@ -1,6 +1,26 @@
 # Changelog
 
-## 0.7.0 — 2026-08-18
+## Unreleased
+
+### Fixed
+
+- **A boolean that cuts a solid in two now gives you two objects.** Saw a
+  bar in half with `booleandifference` and Serpentine kept it as one: one
+  name in the layers panel, one gumball sitting in the gap, and both halves
+  moving together. The kernel was never confused, it handed back a compound
+  with a solid in it per piece, but nothing downstream looked inside. Now
+  each loose piece is its own object, the first one keeping the original's
+  id so its name, its layer and anything built from it survive the cut.
+  Union and intersection do the same, so unioning two solids that never
+  touch leaves two objects rather than one. Anything still joined is left
+  alone, including a solid with a void in it, which has a second shell but
+  is emphatically still one object. Reported by Jonas Pedrotti.
+
+- **`explode` on a severed solid gives you the pieces, not the faces.**
+  A bar cut in half exploded into twelve faces rather than the two bars,
+  because the shape was asked what kind of thing it was before it was asked
+  what it held. Compounds of curves exploded into nothing at all, and now
+  come apart properly too.
 
 ### Changed
 

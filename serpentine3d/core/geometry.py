@@ -266,6 +266,32 @@ def faces_of(shape) -> list:
     return out
 
 
+def loose_pieces(shape) -> list:
+    """The separate solids a severed shape falls into, or [] if it is whole.
+
+    A boolean that cuts right through hands back a compound holding one
+    solid per piece, which is what says a cut fell through rather than
+    merely notched something.
+
+    Everything else comes back empty, and the two ways that happens are
+    both deliberate. A lone solid has not been severed however many shells
+    it has, so a solid with a void in it stays one object. And a compound
+    holding anything other than solids is not ours to take apart, because
+    handing back only the solids would quietly lose the rest.
+    """
+    if shape.ShapeType() != occ.COMPOUND:
+        return []
+    from .occ import TopoDS_Iterator
+    out = []
+    it = TopoDS_Iterator(shape)
+    while it.More():
+        out.append(it.Value())
+        it.Next()
+    if len(out) < 2 or any(p.ShapeType() != occ.SOLID for p in out):
+        return []
+    return [occ.to_solid(p) for p in out]
+
+
 def to_wire(shape) -> TopoDS_Shape:
     """Promote an edge (or wire) to a wire."""
     st = shape.ShapeType()
@@ -1801,7 +1827,25 @@ def curvature_at(shape, near_point: Point) -> dict:
 
 
 def explode(shape) -> list:
-    """Decompose: wires -> edges, shells/solids -> faces, compounds -> parts."""
+    """Decompose: wires -> edges, shells/solids -> faces, compounds -> parts.
+
+    Compounds are asked what they hold before anything else asks what they
+    are. shape_kind() classifies a compound by its contents, so a compound
+    of solids reports "solid", and going by that gave the faces of every
+    lump at once: a bar cut in half exploded into twelve faces rather than
+    the two bars. A compound holding one thing has nothing to come apart
+    at, so the thing itself is what gets exploded.
+    """
+    if shape.ShapeType() == occ.COMPOUND:
+        from .occ import TopoDS_Iterator
+        out = []
+        it = TopoDS_Iterator(shape)
+        while it.More():
+            out.append(it.Value())
+            it.Next()
+        if len(out) > 1:
+            return out
+        return explode(out[0]) if out else []
     kind = shape_kind(shape)
     if kind == "curve" and shape.ShapeType() == occ.WIRE:
         return [e for e in edges_of(shape)]
@@ -1810,14 +1854,6 @@ def explode(shape) -> list:
         if len(parts) > 1:
             return parts
         return []
-    if kind == "compound":
-        from .occ import TopoDS_Iterator
-        out = []
-        it = TopoDS_Iterator(shape)
-        while it.More():
-            out.append(it.Value())
-            it.Next()
-        return out
     return []
 
 
