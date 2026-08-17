@@ -1,0 +1,32 @@
+name: Tests (Windows)
+
+# The suite on a Windows box, run by hand.
+#
+# CI proper is ubuntu-only, and a handful of tests were written to posix
+# assumptions without anyone noticing: a bare open() reads cp1252 there, a
+# monkeypatched HOME isolates nothing because expanduser reads USERPROFILE,
+# socketpair() is loopback TCP rather than AF_UNIX so a fixed pause can run
+# out mid-flight, and Qt has no bundled fonts so text metrics differ. None
+# of those show up on Linux, and none of them are visible in an installer
+# build either, which is all the Windows runner did before.
+#
+# workflow_dispatch only, so it costs nothing until someone asks for it:
+#   gh workflow run tests-windows.yml
+on:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - name: Install
+        run: uv sync --extra dev --locked --python 3.12
+      - name: Unit tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run pytest tests/ -q --ignore=tests/e2e_dod.py

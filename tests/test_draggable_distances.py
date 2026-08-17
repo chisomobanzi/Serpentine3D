@@ -445,19 +445,36 @@ def test_extend_still_takes_typed_numbers(env):
 
 
 def test_textobject_asks_where_before_how_big(env):
-    """Text height is a size in the model, so it is dragged — but there is
-    nothing to drag it from until the text has somewhere to sit."""
+    """Text height is a size in the model, so it is dragged, but there is
+    nothing to drag it from until the text has somewhere to sit.
+
+    What the ghost measures is glyph outlines, and how tall those come out
+    for a given height is the font's business, not the command's: the same
+    "Hi" spans 1.02 times the drag against DejaVu here and 1.37 times on a
+    Windows box, where PySide6 ships no fonts and Qt falls back to whatever
+    it can find. So the check is that the ghost tracks the drag, which is
+    what textobject is answerable for.
+    """
     scene, sel, _hist, _ctx, proc = env
     proc.run("textobject")
     proc.provide_text("Hi")
     assert "position" in proc.request.prompt.lower()
     proc.provide((0.0, 0.0, 0.0))
     assert proc.request.number_from is not None
-    ghost = proc.preview_for((0, 20, 0))
-    assert ghost is not None, "no ghost while dragging the text height"
-    lo, hi = g.bbox(ghost)
-    assert hi[1] - lo[1] == pytest.approx(20, rel=0.35), (
-        "the ghost should be as tall as the drag")
+
+    tall = []
+    for drag in (20.0, 40.0):
+        ghost = proc.preview_for((0, drag, 0))
+        assert ghost is not None, "no ghost while dragging the text height"
+        lo, hi = g.bbox(ghost)
+        tall.append(hi[1] - lo[1])
+
+    assert tall[1] == pytest.approx(2 * tall[0], rel=1e-6), (
+        f"twice the drag should be twice the ghost, got {tall[0]:.3f} then "
+        f"{tall[1]:.3f}")
+    assert 0.5 < tall[0] / 20.0 < 2.0, (
+        f"a drag of 20 ghosted {tall[0]:.3f} tall, which is further off than "
+        "any font's metrics would put it")
 
 
 def test_textobject_still_takes_typed_numbers(env):

@@ -5,6 +5,8 @@ Beta feedback: nothing ever asks. The offer is one dialog on launch
 utils/file_assoc.py and is what these tests pin down.
 """
 
+import ntpath
+import posixpath
 import subprocess
 
 import pytest
@@ -17,6 +19,35 @@ from serpentine3d.utils.config import Config
 @pytest.fixture
 def config(tmp_path):
     return Config(path=str(tmp_path / "settings.json"))
+
+
+def _own_home(monkeypatch, tmp_path):
+    """Give the test a home directory of its own, on any platform.
+
+    HOME alone is a posix answer: expanduser("~") is ntpath's on Windows,
+    and that reads USERPROFILE. Both, plus no XDG_DATA_HOME, is what puts
+    the whole of _data_home() inside tmp_path wherever this runs.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+
+
+@pytest.mark.parametrize("flavour", [posixpath, ntpath],
+                         ids=["posix", "windows"])
+def test_the_home_a_test_sets_is_the_home_that_gets_used(
+        monkeypatch, tmp_path, flavour):
+    """Pointing HOME at a tmp_path only isolates the run on posix.
+
+    expanduser("~") is ntpath's on Windows, and that one reads USERPROFILE
+    and never looks at HOME. So make_default went on writing into the real
+    user profile while the assertions below looked at an empty tmp_path,
+    and the only reason it showed up as a failure rather than as a mess is
+    that the .desktop file was not where the test expected it.
+    """
+    _own_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(file_assoc.os.path, "expanduser", flavour.expanduser)
+    assert file_assoc._data_home().startswith(str(tmp_path))
 
 
 # ------------------------------------------------- what gets registered
@@ -84,8 +115,7 @@ def test_never_offers_when_already_default(monkeypatch, config):
 
 def test_make_default_registers_and_sets_the_handler(monkeypatch, tmp_path):
     monkeypatch.setattr(file_assoc.sys, "platform", "linux")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    _own_home(monkeypatch, tmp_path)
     monkeypatch.setenv("APPIMAGE", "/apps/S.AppImage")
     calls = []
 
@@ -109,8 +139,7 @@ def test_make_default_registers_and_sets_the_handler(monkeypatch, tmp_path):
 def test_make_default_keeps_an_existing_desktop_entry(monkeypatch, tmp_path):
     """install-desktop.sh writes a richer entry; ours must not clobber it."""
     monkeypatch.setattr(file_assoc.sys, "platform", "linux")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    _own_home(monkeypatch, tmp_path)
     apps = tmp_path / ".local" / "share" / "applications"
     apps.mkdir(parents=True)
     (apps / "serpentine3d.desktop").write_text("[Desktop Entry]\nName=Rich\n")

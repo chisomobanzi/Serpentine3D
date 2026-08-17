@@ -8,6 +8,7 @@ for free suddenly did not have it.
 
 import ast
 import os
+import subprocess
 import sys
 import tomllib
 
@@ -16,6 +17,18 @@ import importlib.metadata as md
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PKG = os.path.join(ROOT, "serpentine3d")
 CI = os.path.join(ROOT, ".github", "workflows", "ci.yml")
+
+
+def _read(path: str) -> str:
+    """Our own source, read as what it is.
+
+    Without the encoding, open() asks the locale, and the locale on a
+    Windows box is cp1252: the curly quotes in ai/panel.py and the bullet
+    in ui/layers_panel.py are then undecodable and this file's tests die
+    on a UnicodeDecodeError before they test anything.
+    """
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
 
 
 def _normalise(name: str) -> str:
@@ -29,7 +42,7 @@ def _imported_roots() -> set[str]:
         for f in files:
             if not f.endswith(".py"):
                 continue
-            tree = ast.parse(open(os.path.join(dirpath, f)).read())
+            tree = ast.parse(_read(os.path.join(dirpath, f)))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
@@ -86,7 +99,7 @@ def test_ci_installs_the_versions_the_lock_file_pins():
     tested against; `--locked` is what makes CI read it instead of guessing,
     and makes a stale lock a failure rather than a silent re-resolve.
     """
-    text = open(CI).read()
+    text = _read(CI)
 
     assert "pip install -e" not in text, (
         "a CI job installs with pip, which cannot read uv.lock and so "
@@ -101,6 +114,28 @@ def test_ci_installs_the_versions_the_lock_file_pins():
         "other than what the lock pins:\n  " + "\n  ".join(unpinned))
 
 
+def test_the_source_walk_says_what_encoding_it_is_reading():
+    """A bare open() reads in whatever the locale says, and this file walks
+    every module in the package.
+
+    On Linux that locale is UTF-8 and nothing is ever wrong. On Windows it
+    is cp1252, which cannot decode the curly quotes in ai/panel.py or the
+    bullet in ui/layers_panel.py, so the walk died on a UnicodeDecodeError
+    before it checked a single import. Running the walk under
+    PYTHONWARNDEFAULTENCODING is how that shows up here rather than only
+    on somebody else's machine.
+    """
+    proc = subprocess.run(
+        [sys.executable, "-X", "warn_default_encoding",
+         "-W", "error::EncodingWarning", "-c",
+         "import test_dependencies as t; t._imported_roots()"],
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        capture_output=True, text=True, check=False)   # the code is the result
+    assert proc.returncode == 0, (
+        "the package source is read without an encoding, so a Windows run "
+        "reads it as cp1252:\n" + proc.stderr[-1500:])
+
+
 def test_mcp_is_pinned_to_the_api_the_server_is_written_against():
     """mcp 1.x and 2.x do not offer the same module: `mcp.server.fastmcp`
     became `mcp.server.mcpserver`. Whichever one the server imports, the
@@ -109,7 +144,7 @@ def test_mcp_is_pinned_to_the_api_the_server_is_written_against():
     with open(os.path.join(ROOT, "pyproject.toml"), "rb") as fh:
         deps = tomllib.load(fh)["project"]["dependencies"]
     spec = next(d for d in deps if d.split(">")[0].split("<")[0] == "mcp")
-    source = open(os.path.join(PKG, "mcp_server", "server.py")).read()
+    source = _read(os.path.join(PKG, "mcp_server", "server.py"))
 
     if "mcp.server.fastmcp" in source:
         wanted, era = "<2", "mcp.server.fastmcp, which 2.x removed"
