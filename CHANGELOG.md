@@ -4,6 +4,14 @@
 
 ### Added
 
+- **`mergeallcoplanarfaces` tidies a polysurface after a boolean.** A union
+  of two boxes side by side leaves each spanning side split into two
+  coplanar strips, so the result has ten faces where six would do.
+  `mergeallcoplanarfaces` (alias `mergeallfaces`) fuses coplanar neighbours
+  and drops the seam edges with them, so the box reads as a box again. This
+  is Rhino's MergeAllCoplanarFaces. The volume does not move, and an object
+  with nothing to merge is left alone. Requested by Jonas Pedrotti.
+
 - **`join` works on surfaces, not just curves.** Pick two surfaces that
   share an edge and `join` (alias `j`) now stitches them into one
   polysurface, exactly as it always has for curves. Surfaces that close up

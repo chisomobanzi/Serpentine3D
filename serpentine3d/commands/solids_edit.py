@@ -273,6 +273,33 @@ def cmd_booleansplit(ctx):
     ctx.echo(f"Split into {len(made)} piece(s).")
 
 
+@command("mergeallcoplanarfaces", aliases=("mergeallfaces",))
+def cmd_merge_all_coplanar_faces(ctx):
+    """Fuse coplanar neighbouring faces of each selected polysurface.
+
+    Rhino's MergeAllCoplanarFaces. A union that left a side split along a
+    seam reads back as one face. An object with nothing to merge is left
+    alone, so running this on a clean box does nothing and says so.
+    """
+    objs = yield SelectReq("Select solids or surfaces to merge coplanar faces",
+                           kinds=("solid", "surface", "compound"))
+    removed = 0
+    touched = []
+    for o in objs:
+        before = len(g.faces_of(o.shape))
+        merged = g.merge_coplanar_faces(o.shape)
+        after = len(g.faces_of(merged))
+        if after < before:
+            touched.append(ctx.scene.replace_shape(o.id, merged))
+            removed += before - after
+    if not touched:
+        ctx.echo("No coplanar faces to merge.")
+        return
+    ctx.select_result(touched)
+    ctx.echo(f"Merged {removed} coplanar face(s) across {len(touched)} "
+             f"object(s).")
+
+
 @command("pushpull", aliases=("pp", "moveface"))
 def cmd_pushpull(ctx):
     """SketchUp-style push/pull on a planar face.

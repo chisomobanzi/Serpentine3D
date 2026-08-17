@@ -372,6 +372,24 @@ def joined_pieces(shape) -> list:
     return out
 
 
+def merge_coplanar_faces(shape) -> TopoDS_Shape:
+    """Fuse coplanar neighbours into single faces, seam edges and all.
+
+    Rhino's MergeAllCoplanarFaces. A union of two boxes side by side comes
+    back with each spanning side split into two coplanar strips; this fuses
+    them so the box has its six faces again. It is a change of description,
+    not of the solid, so the volume is left exactly where it was.
+
+    ShapeUpgrade_UnifySameDomain does both halves of the tidy-up: unify the
+    faces that share a surface, and unify the edges that share a curve so
+    the redundant seams do not linger as splits in the remaining faces.
+    """
+    from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+    up = ShapeUpgrade_UnifySameDomain(shape, True, True, False)
+    up.Build()
+    return up.Shape()
+
+
 def apply_matrix(shape, matrix):
     """Apply any 4x4 affine transform: rotation, translation, scale, shear.
 
