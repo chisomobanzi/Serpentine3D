@@ -9,6 +9,28 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from ..core import linetype as _lt
+
+# tree columns: name, visible check, colour swatch, linetype, print width
+_TYPE_COL = 3
+_PRINT_COL = 4
+
+
+def _parse_print_width(text: str):
+    """Millimetres from a print-width cell, or None if it makes no sense.
+
+    Empty or "Default" is the device default, 0. A negative reads as the
+    default too, since we have no no-plot pen. Anything unparseable returns
+    None so the caller can leave the width where it was.
+    """
+    t = (text or "").strip()
+    if t == "" or t.lower() == "default":
+        return 0.0
+    try:
+        return max(0.0, float(t))
+    except ValueError:
+        return None
+
 
 class LayersPanel(QWidget):
     changed = Signal()
@@ -20,13 +42,15 @@ class LayersPanel(QWidget):
         self._rebuilding = False
 
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(3)
-        self.tree.setHeaderLabels(["Layer", "", ""])
+        self.tree.setColumnCount(5)
+        self.tree.setHeaderLabels(["Layer", "", "", "Type", "Print"])
         self.tree.setRootIsDecorated(False)
         self.tree.header().setStretchLastSection(False)
         self.tree.header().resizeSection(0, 130)
         self.tree.header().resizeSection(1, 32)
         self.tree.header().resizeSection(2, 32)
+        self.tree.header().resizeSection(_TYPE_COL, 78)
+        self.tree.header().resizeSection(_PRINT_COL, 54)
         self.tree.itemChanged.connect(self._item_changed)
         self.tree.itemClicked.connect(self._item_clicked)
         self.tree.itemDoubleClicked.connect(self._edit_item)
@@ -69,7 +93,9 @@ class LayersPanel(QWidget):
             label = f"{layer.name}" + (f"  ({n})" if n else "")
             if layer.id == current:
                 label = "● " + label
-            item = QTreeWidgetItem([label, "", ""])
+            print_text = ("Default" if layer.print_width == 0
+                          else f"{layer.print_width:g}")
+            item = QTreeWidgetItem([label, "", "", layer.linetype, print_text])
             item.setData(0, Qt.ItemDataRole.UserRole, layer.id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(
@@ -80,6 +106,9 @@ class LayersPanel(QWidget):
             item.setBackground(2, color)
             item.setToolTip(2, "Double-click name to rename; click swatch "
                                "to change colour")
+            item.setToolTip(_TYPE_COL, "Click to cycle the layer's linetype")
+            item.setToolTip(_PRINT_COL, "Plotted pen width in mm; "
+                                        "double-click to edit, blank for default")
             self.tree.addTopLevelItem(item)
         self._rebuilding = False
 
@@ -102,6 +131,13 @@ class LayersPanel(QWidget):
                 self.scene.layers.set_color(
                     layer_id, (color.redF(), color.greenF(), color.blueF()))
                 self.scene.notify()
+        elif column == _TYPE_COL:
+            layer = self.scene.layers.get(layer_id)
+            names = list(_lt.LINETYPES)
+            i = names.index(layer.linetype) if layer.linetype in names else -1
+            self.history.checkpoint("layer linetype")
+            self.scene.layers.set_linetype(layer_id, names[(i + 1) % len(names)])
+            self.scene.notify()
 
     def _item_changed(self, item, column):
         if self._rebuilding:
@@ -119,6 +155,15 @@ class LayersPanel(QWidget):
                 self.history.checkpoint("rename layer")
                 self.scene.layers.rename(layer_id, text)
             self.scene.notify()
+        elif column == _PRINT_COL:
+            layer_id = self._layer_id(item)
+            width = _parse_print_width(item.text(_PRINT_COL))
+            if width is not None:
+                self.history.checkpoint("layer print width")
+                self.scene.layers.set_print_width(layer_id, width)
+            # notify redraws the cell from the layer, so a rejected value
+            # snaps back to what the layer still says
+            self.scene.notify()
 
     def _edit_item(self, item, column):
         if column == 0:
@@ -126,6 +171,12 @@ class LayersPanel(QWidget):
             item.setText(0, layer.name)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
             self.tree.editItem(item, 0)
+        elif column == _PRINT_COL:
+            layer = self.scene.layers.get(self._layer_id(item))
+            item.setText(_PRINT_COL,
+                         "" if layer.print_width == 0 else f"{layer.print_width:g}")
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+            self.tree.editItem(item, _PRINT_COL)
 
     def _new_layer(self):
         self.history.checkpoint("new layer")
