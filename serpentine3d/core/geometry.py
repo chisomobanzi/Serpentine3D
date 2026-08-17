@@ -321,6 +321,57 @@ def join_curves(shapes: list) -> TopoDS_Shape:
     return mk.Wire()
 
 
+def join_surfaces(shapes: list) -> TopoDS_Shape:
+    """Sew touching surfaces into one polysurface, sealed to a solid if closed.
+
+    This is Rhino's Join for surfaces: coincident edges are stitched so the
+    pieces stop being separate objects, and a polysurface that ends up
+    enclosing a volume becomes a solid. Surfaces that meet nothing come back
+    still loose inside the result, so the caller reads joined_pieces() to
+    tell a clean join from a partial one rather than trusting this to have
+    merged everything it was handed.
+    """
+    from OCP.BRepCheck import BRepCheck_Shell, BRepCheck_Status
+
+    from .occ import BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Sewing
+    sew = BRepBuilderAPI_Sewing(tol())
+    for s in shapes:
+        sew.Add(s)
+    sew.Perform()
+    sewn = sew.SewedShape()
+    if sewn is None or sewn.IsNull():
+        raise GeometryError("Surfaces could not be joined")
+    # A single closed shell is a solid waiting to happen. Only a closed one:
+    # MakeSolid will wrap an open shell just as happily and hand back a
+    # bogus volume, so the closedness check is what keeps a half-box a
+    # surface rather than a lie about a solid.
+    if sewn.ShapeType() == occ.SHELL:
+        shell = occ.to_shell(sewn)
+        if BRepCheck_Shell(shell).Closed() == BRepCheck_Status.BRepCheck_NoError:
+            mk = BRepBuilderAPI_MakeSolid(shell)
+            if mk.IsDone() and abs(volume(mk.Solid())) > 1e-12:
+                return mk.Solid()
+    return sewn
+
+
+def joined_pieces(shape) -> list:
+    """The separate pieces a join produced: one if it all stitched together.
+
+    Sewing hands back a compound when some surfaces never met their
+    neighbours, one child per piece that could not be merged into the rest.
+    Anything that is not a compound is a single joined piece.
+    """
+    if shape.ShapeType() != occ.COMPOUND:
+        return [shape]
+    from .occ import TopoDS_Iterator
+    out = []
+    it = TopoDS_Iterator(shape)
+    while it.More():
+        out.append(it.Value())
+        it.Next()
+    return out
+
+
 def apply_matrix(shape, matrix):
     """Apply any 4x4 affine transform: rotation, translation, scale, shear.
 

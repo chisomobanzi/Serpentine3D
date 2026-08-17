@@ -75,13 +75,43 @@ def cmd_delete(ctx):
 
 @command("join", aliases=("j",))
 def cmd_join(ctx):
-    objs = yield SelectReq("Select curves to join", kinds=("curve",),
-                           min_count=2)
-    joined = g.join_curves([o.shape for o in objs])
+    objs = yield SelectReq("Select curves or surfaces to join",
+                           kinds=("curve", "surface"), min_count=2)
+    kinds = {o.kind for o in objs}
+    if kinds == {"curve"}:
+        joined = g.join_curves([o.shape for o in objs])
+        for o in objs[1:]:
+            ctx.scene.remove(o.id)
+        new = ctx.scene.replace_shape(objs[0].id, joined)
+        ctx.echo(f"Joined {len(objs)} curves into {new.name}.")
+        return
+    if kinds != {"surface"}:
+        ctx.echo("Join needs all curves or all surfaces, not a mix of the two.")
+        return
+
+    result = g.join_surfaces([o.shape for o in objs])
+    pieces = g.joined_pieces(result)
+    if len(pieces) >= len(objs):
+        # Nothing merged: every surface came back as its own piece. Leave
+        # the scene untouched rather than shuffle the same faces around.
+        ctx.echo("These surfaces share no edges, so nothing was joined.")
+        return
+
+    new = ctx.scene.replace_shape(objs[0].id, pieces[0])
+    made = [new]
+    for p in pieces[1:]:
+        made.append(ctx.scene.add(p, layer_id=objs[0].layer_id))
     for o in objs[1:]:
         ctx.scene.remove(o.id)
-    new = ctx.scene.replace_shape(objs[0].id, joined)
-    ctx.echo(f"Joined {len(objs)} curves into {new.name}.")
+    ctx.select_result(made)
+
+    if len(pieces) == 1:
+        tail = (" into a closed solid" if new.kind == "solid"
+                else f" into {new.name}")
+        ctx.echo(f"Joined {len(objs)} surfaces{tail}.")
+    else:
+        ctx.echo(f"Joined {len(objs)} surfaces into {len(pieces)} "
+                 f"polysurfaces.")
 
 
 @command("offset")

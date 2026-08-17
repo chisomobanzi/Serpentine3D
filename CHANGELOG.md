@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- **`join` works on surfaces, not just curves.** Pick two surfaces that
+  share an edge and `join` (alias `j`) now stitches them into one
+  polysurface, exactly as it always has for curves. Surfaces that close up
+  a volume between them, the six faces of a box for instance, come back as
+  a solid rather than a hollow shell. Surfaces that touch nothing are left
+  where they are, and the command says so instead of quietly bundling them
+  together. Requested by Jonas Pedrotti.
+
 ### Fixed
 
 - **A boolean that cuts a solid in two now gives you two objects.** Saw a
