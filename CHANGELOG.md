@@ -1,8 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.7.1 — 2026-08-18
 
 ### Added
+
+- **A layer carries a print width and a linetype you can set in the panel.**
+  The layers panel grows a Print column and a Type column: Print is the pen
+  width in millimetres a layer plots at, blank for the device default, and
+  Type cycles the layer's linetype. A detail on a layout now plots each
+  layer's edges at that layer's width, in PDF and in DXF, rather than the one
+  width every line used to get. The on-screen weight is untouched, so nothing
+  looks different in the viewport, and the width round-trips through a .3dm as
+  Rhino's PlotWeight. Requested by Jonas Pedrotti.
 
 - **`mergeallcoplanarfaces` tidies a polysurface after a boolean.** A union
   of two boxes side by side leaves each spanning side split into two
@@ -39,6 +48,16 @@
   because the shape was asked what kind of thing it was before it was asked
   what it held. Compounds of curves exploded into nothing at all, and now
   come apart properly too.
+
+- **Text files are UTF-8 everywhere, not the machine's locale.** A document,
+  a config, an autosave, an .obj, an .stl, a .usda or a journal was read and
+  written in whatever encoding the operating system defaulted to, which is
+  UTF-8 on Linux and macOS but can be cp1252 on a Windows box in a non-English
+  locale. A layer name or a file path outside ASCII round-tripped to mojibake,
+  or raised, on that one machine and nowhere we could reproduce. Every text
+  file now states UTF-8.
+
+## 0.7.0 — 2026-08-18
 
 ### Changed
 
