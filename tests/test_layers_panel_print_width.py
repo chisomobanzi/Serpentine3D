@@ -4,7 +4,8 @@ The panel already shows a layer's name, whether it is on, and its colour.
 Item 6 wants the two attributes a plot is read by as well: the pen width it
 prints at, and the dash pattern its lines take. Print width is a number in
 millimetres, edited in place, with an empty or "Default" cell meaning the
-device default. Linetype cycles through the patterns the app knows.
+device default. Linetype is picked from a drop-down of the patterns the
+app knows.
 
 Both go through history, so an edit here undoes like any other.
 """
@@ -13,7 +14,6 @@ from __future__ import annotations
 
 from serpentine3d.core.history import History
 from serpentine3d.core.layers import DEFAULT_LAYER_ID
-from serpentine3d.core.linetype import LINETYPES
 from serpentine3d.core.scene import Scene
 from serpentine3d.ui.layers_panel import LayersPanel
 
@@ -99,15 +99,6 @@ def test_editing_the_width_can_be_undone():
     _commit(panel, item, PRINT_COL, "0.4")
     history.undo()
     assert scene.layers.get(DEFAULT_LAYER_ID).print_width == 0.0
-
-
-def test_clicking_the_type_cell_cycles_the_linetype():
-    scene, panel = _panel()
-    order = list(LINETYPES)
-    item = _item_for(panel, DEFAULT_LAYER_ID)
-    assert scene.layers.get(DEFAULT_LAYER_ID).linetype == order[0]
-    panel._item_clicked(item, TYPE_COL)
-    assert scene.layers.get(DEFAULT_LAYER_ID).linetype == order[1]
 
 
 def test_the_type_cell_shows_the_pattern_name():

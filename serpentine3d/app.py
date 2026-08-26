@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from . import commands as cmd_pkg
 from . import fileio
 from .commands.base import (
-    CommandContext, CommandProcessor, PointReq, SelectReq,
+    CommandContext, CommandProcessor, PointReq, SelectReq, TextReq,
 )
 from .core.history import History
 from .core.scene import Scene
@@ -190,8 +190,11 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
                            self._display_dock)
 
-        for dock in (self._prop_dock, self._layer_dock):
-            dock.installEventFilter(self)   # to notice a splitter drag
+        # The panels a field's Enter must stay in, and whose splitter the
+        # user drags: see eventFilter.
+        self._panel_docks = (self._prop_dock, self._layer_dock)
+        for dock in self._panel_docks:
+            dock.installEventFilter(self)
         # proportions are set post-show in _balance_docks (a pre-show
         # resizeDocks gets redistributed once the layout is realised)
         QTimer.singleShot(0, self._balance_docks)
@@ -361,7 +364,7 @@ class MainWindow(QMainWindow):
         """The docks making up the right-hand column, if it is there at all.
         A floating panel is its own window and says nothing about how much of
         this one the column should hold."""
-        return [d for d in (self._prop_dock, self._layer_dock)
+        return [d for d in self._panel_docks
                 if d.isVisibleTo(self) and not d.isFloating()]
 
     def _keep_panel_width(self):
@@ -415,14 +418,18 @@ class MainWindow(QMainWindow):
             self._set_panel_width(self._panel_width)
 
     def eventFilter(self, obj, event):
-        """The two things watched from outside the widget they happen in.
+        """The things watched from outside the widget they happen in.
 
         A click in a pane makes it the active one — the pane commands act
         on, and the pane the panels are showing. There is one filter and
-        not two because a class only keeps the last method of a name, and
-        two `eventFilter`s meant one of these had never run.
+        not several because a class only keeps the last method of a name,
+        and two `eventFilter`s meant one of these had never run.
 
-        The other is the user dragging the panel splitter, so the width
+        An Enter in a panel field stops at its dock, so the Enter that
+        repeats the last command is only ever the viewport's or the empty
+        command line's.
+
+        The last is the user dragging the panel splitter, so the width
         held across the next window resize is the one they chose. Only a
         dock resized with the window at the size it last came to rest at
         counts. Neither half of that is spare. A maximise lays the docks
@@ -439,8 +446,16 @@ class MainWindow(QMainWindow):
             # selection left lying in the history would be what Copy meant
             # for the rest of the session. Going back to a pane ends it.
             self.command_line.clear_history_selection()
+        # QLineEdit leaves its Return event ignored (command_line.py says
+        # why that matters), so a panel field's Enter would climb to
+        # keyPressEvent and repeat the last command on top of the edit.
+        if (event.type() == QEvent.Type.KeyPress
+                and obj in self._panel_docks
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)):
+            event.accept()
+            return True
         if (event.type() == QEvent.Type.Resize
-                and obj in (self._prop_dock, self._layer_dock)
+                and obj in self._panel_docks
                 and not getattr(self, "_settling", False)
                 and self.width() == self._settled_width
                 and not obj.isFloating() and obj.isVisibleTo(self)):
@@ -1034,6 +1049,8 @@ class MainWindow(QMainWindow):
         for vp in self.all_viewports():
             vp.set_ghost(None)
         self.command_line.point_pending = isinstance(req, PointReq)
+        # Space submits like Enter everywhere but a free-text prompt
+        self.command_line.text_pending = isinstance(req, TextReq)
         # Only guess at command names at the "Command" prompt; mid-command the
         # words belong to the command, not to the registry.
         self.command_line.awaiting_command = not busy

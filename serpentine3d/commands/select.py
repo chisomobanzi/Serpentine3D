@@ -82,11 +82,9 @@ def cmd_invert(ctx):
 def cmd_isolate(ctx):
     objs = yield SelectReq("Select objects to isolate")
     keep = {o.id for o in objs}
-    hidden = []
-    for o in ctx.scene.all():
-        if o.id not in keep and o.visible:
-            ctx.scene.update(o.id, visible=False)
-            hidden.append(o.id)
+    hidden = [o.id for o in ctx.scene.all()
+              if o.id not in keep and o.visible]
+    ctx.scene.update_many(hidden, visible=False)
     ctx._isolated = getattr(ctx, "_isolated", [])
     ctx._isolated.extend(hidden)
     ctx.echo(f"Isolated {len(keep)} object(s); {len(hidden)} hidden. "
@@ -96,11 +94,8 @@ def cmd_isolate(ctx):
 @command("unisolate")
 def cmd_unisolate(ctx):
     hidden = getattr(ctx, "_isolated", [])
-    n = 0
-    for obj_id in hidden:
-        if ctx.scene.get(obj_id):
-            ctx.scene.update(obj_id, visible=True)
-            n += 1
+    n = ctx.scene.update_many((i for i in hidden if ctx.scene.get(i)),
+                              visible=True)
     ctx._isolated = []
     ctx.echo(f"Restored {n} object(s).")
     yield from ()

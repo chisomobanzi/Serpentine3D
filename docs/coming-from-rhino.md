@@ -9,7 +9,10 @@ page maps your habits over and is honest about the gaps.
 
 - **The command line.** Type a command, answer its prompts, click points or
   type coordinates (`10,5,0`, relative `@5,0,0`, polar `10<45`). ++tab++
-  completes, ++enter++ repeats the last command.
+  completes, ++enter++ or ++space++ repeats the last command, and
+  ++space++ is Enter everywhere it is in Rhino.
+- **The mouse.** Right-drag orbits, ++shift++ pans, ++ctrl++ zooms, and a
+  right-click is Enter.
 - **Aliases.** `l`, `pl`, `c`, `m`, `co`, `mi`, `o`, `f`, … work as you'd
   expect, and you can import your own (below).
 - **Command options.** The words in a prompt's parentheses are choices, as

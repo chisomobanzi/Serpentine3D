@@ -128,6 +128,9 @@ def view(tmp_path):
     from serpentine3d.ui import viewport as vp_mod
     from serpentine3d.utils.config import Config
     cfg = Config(path=str(tmp_path / "settings.json"))
+    # These tests swipe with the middle button; which button orbits by
+    # default is another test's business.
+    cfg.set("mouse", "orbit_button", "middle")
     scene = Scene()
     v = vp_mod.Viewport(scene, SelectionManager(scene), config=cfg)
     v.resize(800, 600)

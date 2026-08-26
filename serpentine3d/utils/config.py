@@ -26,7 +26,7 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "settings.json")
 
 DEFAULTS = {
     "mouse": {
-        "orbit_button": "middle",      # middle | right
+        "orbit_button": "right",       # middle | right; right as in Rhino
         "invert_scroll": False,
         "orbit_speed": 1.0,
         "zoom_speed": 1.0,

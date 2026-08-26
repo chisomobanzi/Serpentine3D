@@ -10,8 +10,7 @@ from .base import OptionReq, PointReq, SelectReq, TextReq, command
 def cmd_group(ctx):
     objs = yield SelectReq("Select objects to group", min_count=2)
     gid = uuid.uuid4().hex[:8]
-    for o in objs:
-        ctx.scene.update(o.id, group_id=gid)
+    ctx.scene.update_many([o.id for o in objs], group_id=gid)
     ctx.echo(f"Grouped {len(objs)} object(s) — clicking one now selects "
              "them all.")
 
@@ -19,19 +18,15 @@ def cmd_group(ctx):
 @command("ungroup")
 def cmd_ungroup(ctx):
     objs = yield SelectReq("Select grouped objects to ungroup")
-    n = 0
-    for o in objs:
-        if o.group_id:
-            ctx.scene.update(o.id, group_id=None)
-            n += 1
+    n = ctx.scene.update_many([o.id for o in objs if o.group_id],
+                              group_id=None)
     ctx.echo(f"Ungrouped {n} object(s).")
 
 
 @command("lock")
 def cmd_lock(ctx):
     objs = yield SelectReq("Select objects to lock")
-    for o in objs:
-        ctx.scene.update(o.id, locked=True)
+    ctx.scene.update_many([o.id for o in objs], locked=True)
     ctx.selection.clear()
     ctx.echo(f"Locked {len(objs)} object(s) — visible but unselectable. "
              "'unlockall' releases them.")
@@ -50,11 +45,9 @@ def cmd_lockother(ctx):
     """
     objs = yield SelectReq("Select objects to leave unlocked")
     keep = {o.id for o in objs}
-    n = 0
-    for o in ctx.scene.all():
-        if o.id not in keep and not o.locked:
-            ctx.scene.update(o.id, locked=True)
-            n += 1
+    n = ctx.scene.update_many([o.id for o in ctx.scene.all()
+                               if o.id not in keep and not o.locked],
+                              locked=True)
     # a command normally lets go of the selection on the way out, and here
     # that would leave you holding nothing and everything else unpickable
     ctx.select_result(list(keep))
@@ -64,11 +57,8 @@ def cmd_lockother(ctx):
 
 @command("unlockall", aliases=("unlock",))
 def cmd_unlockall(ctx):
-    n = 0
-    for o in ctx.scene.all():
-        if o.locked:
-            ctx.scene.update(o.id, locked=False)
-            n += 1
+    n = ctx.scene.update_many([o.id for o in ctx.scene.all() if o.locked],
+                              locked=False)
     ctx.echo(f"Unlocked {n} object(s).")
     yield from ()
 
@@ -252,14 +242,14 @@ def cmd_matchprops(ctx):
     targets = yield SelectReq("Select objects to change",
                               allow_preselected=False)
     s = src[0]
-    n = 0
-    for o in targets:
-        if o.id == s.id:
-            continue
-        ctx.scene.update(o.id, layer_id=s.layer_id, color=s.color,
-                         material=dict(s.material) if s.material else None)
-        n += 1
-    ctx.echo(f"Matched properties on {n} object(s) from {s.name}.")
+    targets = [o for o in targets if o.id != s.id]
+    # one notification, not one a target; not update_many, since each
+    # target gets its own copy of the material
+    with ctx.scene.batched():
+        for o in targets:
+            ctx.scene.update(o.id, layer_id=s.layer_id, color=s.color,
+                             material=dict(s.material) if s.material else None)
+    ctx.echo(f"Matched properties on {len(targets)} object(s) from {s.name}.")
 
 
 @command("linetype", aliases=("lt", "setlinetype"))
@@ -272,23 +262,25 @@ def cmd_linetype(ctx):
         return
     style = yield OptionReq("Linetype", options=["ByLayer", *lt.LINETYPES],
                             default="ByLayer")
-    for o in objs:
-        ctx.scene.update(o.id, linetype=style)
+    ctx.scene.update_many([o.id for o in objs], linetype=style)
     ctx.echo(f"Set linetype '{style}' on {len(objs)} object(s).")
 
 
 def _reorder(scene, objs, mode: str):
     orders = [o.draw_order for o in scene.all()] or [0]
     hi, lo = max(orders), min(orders)
-    for i, o in enumerate(objs):
-        if mode == "front":
-            scene.update(o.id, draw_order=hi + 1 + i)
-        elif mode == "back":
-            scene.update(o.id, draw_order=lo - 1 - i)
-        elif mode == "forward":
-            scene.update(o.id, draw_order=o.draw_order + 1)
-        elif mode == "backward":
-            scene.update(o.id, draw_order=o.draw_order - 1)
+    # one notification, not one an object; not update_many, since each
+    # object lands at its own order
+    with scene.batched():
+        for i, o in enumerate(objs):
+            if mode == "front":
+                scene.update(o.id, draw_order=hi + 1 + i)
+            elif mode == "back":
+                scene.update(o.id, draw_order=lo - 1 - i)
+            elif mode == "forward":
+                scene.update(o.id, draw_order=o.draw_order + 1)
+            elif mode == "backward":
+                scene.update(o.id, draw_order=o.draw_order - 1)
 
 
 @command("bringtofront", aliases=("bf",))
@@ -340,8 +332,7 @@ def cmd_changelayer(ctx):
     if layer is None:
         layer = ctx.scene.layers.create(name)
         ctx.echo(f"Created layer {layer.name}.")
-    for o in objs:
-        ctx.scene.update(o.id, layer_id=layer.id)
+    ctx.scene.update_many([o.id for o in objs], layer_id=layer.id)
     ctx.scene.notify("layers")
     ctx.echo(f"Moved {len(objs)} object(s) to {layer.name}.")
 

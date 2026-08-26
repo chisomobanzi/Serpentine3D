@@ -474,18 +474,14 @@ def cmd_dir(ctx):
 @command("hide")
 def cmd_hide(ctx):
     objs = yield SelectReq("Select objects to hide")
-    for o in objs:
-        ctx.scene.update(o.id, visible=False)
+    ctx.scene.update_many([o.id for o in objs], visible=False)
     ctx.echo(f"Hid {len(objs)} object(s).")
 
 
 @command("show", aliases=("unhide",))
 def cmd_show(ctx):
-    n = 0
-    for o in ctx.scene.all():
-        if not o.visible:
-            ctx.scene.update(o.id, visible=True)
-            n += 1
+    n = ctx.scene.update_many([o.id for o in ctx.scene.all() if not o.visible],
+                              visible=True)
     ctx.echo(f"Showed {n} object(s).")
     yield from ()
 
@@ -609,8 +605,7 @@ def cmd_material(ctx):
         "Material", options=[*_MATERIAL_PRESETS, "Custom", "Remove"],
         default="Matte")
     if preset == "Remove":
-        for o in objs:
-            ctx.scene.update(o.id, material=None)
+        ctx.scene.update_many([o.id for o in objs], material=None)
         ctx.echo(f"Cleared material on {len(objs)} object(s).")
         return
     if preset == "Custom":
@@ -623,8 +618,7 @@ def cmd_material(ctx):
                "opacity": min(float(opacity), 1.0)}
     else:
         mat = dict(_MATERIAL_PRESETS[preset])
-    for o in objs:
-        ctx.scene.update(o.id, material=mat)
+    ctx.scene.update_many([o.id for o in objs], material=mat)
     ctx.echo(f"{preset if preset != 'Custom' else 'Custom'} material on "
              f"{len(objs)} object(s) — see it with 'rendered'.")
 

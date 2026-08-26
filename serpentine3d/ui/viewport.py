@@ -27,6 +27,7 @@ from .camera import (
     Camera,
     ViewHistory,
     axis_view_after_swipe,
+    drag_action,
     eased,
     pose_between,
     projection_for,
@@ -3386,16 +3387,17 @@ class Viewport(QOpenGLWidget):
                 # rather than orbiting away and then jumping to an axis.
                 self._last_mouse = pos
                 return
-            speed = (float(self.config.get("mouse", "orbit_speed",
-                                           default=1.0))
-                     if self.config else 1.0)
-            from .camera import drag_pans
             shift = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
             ctrl = bool(ev.modifiers()
                         & Qt.KeyboardModifier.ControlModifier)
-            if drag_pans(self.camera.projection, shift, ctrl):
+            action = drag_action(self.camera.projection, shift, ctrl)
+            if action == "pan":
                 self.camera.pan(dx, dy, self.height())
+            elif action == "zoom":
+                # The same speed the wheel zooms at, so the two agree.
+                self.camera.zoom_drag(dy * self._mouse_speed("zoom_speed"))
             else:
+                speed = self._mouse_speed("orbit_speed")
                 self.camera.orbit(dx * speed, dy * speed)
             self.update()
         elif self._move_gumball(pos, ev):
@@ -4018,21 +4020,25 @@ class Viewport(QOpenGLWidget):
             sel.toggle_subobject(*entry)
         return True
 
+    def _mouse_speed(self, key: str) -> float:
+        """A speed multiplier from the Mouse preferences; 1 when unset."""
+        return (float(self.config.get("mouse", key, default=1.0))
+                if self.config else 1.0)
+
     def _nav_button(self) -> Qt.MouseButton:
         """The mouse button used for orbit/pan (configurable)."""
-        name = (self.config.get("mouse", "orbit_button", default="middle")
-                if self.config else "middle")
+        name = (self.config.get("mouse", "orbit_button", default="right")
+                if self.config else "right")
         return (Qt.MouseButton.RightButton if name == "right"
                 else Qt.MouseButton.MiddleButton)
 
     def wheelEvent(self, ev):
         self.land_flight()          # zoom from where you were going, not from midway
         steps = ev.angleDelta().y() / 120.0
-        if self.config:
-            if self.config.get("mouse", "invert_scroll", default=False):
-                steps = -steps
-            steps *= float(self.config.get("mouse", "zoom_speed",
-                                           default=1.0))
+        if self.config and self.config.get("mouse", "invert_scroll",
+                                           default=False):
+            steps = -steps
+        steps *= self._mouse_speed("zoom_speed")
         if self.space != "model":
             pos = ev.position()
             self.layout_view.wheel(steps, pos.x(), pos.y())

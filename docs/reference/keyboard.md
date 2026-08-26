@@ -8,16 +8,19 @@ remappable in *Settings → Shortcuts* and *Settings → Mouse*.
 
 | Input | Action |
 |---|---|
-| **Middle-mouse drag** | Orbit |
-| **Shift + middle-drag** | Pan |
-| **Alt + middle-drag** | Turn to face the nearest axis (see below) |
+| **Right-mouse drag** | Orbit (pan in a parallel view) |
+| **Shift + right-drag** | Pan |
+| **Ctrl + right-drag** | Zoom (drag up to come closer) |
+| **Ctrl + Shift + right-drag** | Orbit, even in a parallel view |
+| **Alt + right-drag** | Turn to face the nearest axis (see below) |
 | **Scroll wheel** | Zoom (anchors on the cursor) |
 | ++f1++ / ++f2++ / ++f3++ / ++f4++ | Top / Front / Right / Perspective |
 | ++ctrl+e++ | Zoom to fit (extents) |
 | ++f7++ | Toggle grid |
 
-Orbit can be moved to the **right** mouse button in *Settings → Mouse* (a
-common Rhino preference). Whichever button orbits is the one that swipes.
+These are Rhino's chords. Orbit can be moved to the **middle** mouse button
+in *Settings → Mouse*; whichever button orbits is the one that takes the
+Shift, Ctrl and Alt chords, and the one that swipes.
 
 ## Swipe to an axis
 
@@ -121,9 +124,11 @@ Nothing is bound out of the box.
 
 - **Tab** completes command names, except while a command is waiting for a
   point, when it locks the direction instead; **↑ / ↓** recall history.
-- **Enter** on an empty line repeats the last command; a **right-click** in
-  the viewport is Enter — it runs what you've typed or repeats the last
-  command. `delete` is never repeated, so a right-click after deleting
+- **Enter** on an empty line repeats the last command; **Space** is Enter
+  too, as in Rhino, so one hand can stay on the mouse (while a command is
+  asking for text, such as a layer name, Space is just a space); a
+  **right-click** in the viewport is Enter as well — it runs what you've
+  typed or repeats the last command. `delete` is never repeated, so a right-click after deleting
   something repeats whatever you were doing before it instead.
 - Type command options inline (`cap=n`) or click the chips under the prompt.
 - ++f1++ opens the searchable [command reference](commands.md) inside the app.

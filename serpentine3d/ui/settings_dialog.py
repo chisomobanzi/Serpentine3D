@@ -104,12 +104,13 @@ class SettingsDialog(QDialog):
     def _mouse_page(self) -> QWidget:
         w, layout = _page("Mouse",
                           "How the mouse drives the viewport. Shift + the "
-                          "orbit button always pans and Ctrl + it always "
-                          "orbits; left button selects and picks points.")
-        self.rb_middle = QRadioButton("Orbit with the middle mouse button "
-                                      "(Rhino default)")
-        self.rb_right = QRadioButton("Orbit with the right mouse button")
-        current = self.cfg.get("mouse", "orbit_button", default="middle")
+                          "orbit button always pans, and Ctrl + the orbit "
+                          "button zooms; left button selects and picks "
+                          "points.")
+        self.rb_middle = QRadioButton("Orbit with the middle mouse button")
+        self.rb_right = QRadioButton("Orbit with the right mouse button "
+                                     "(Rhino default)")
+        current = self.cfg.get("mouse", "orbit_button", default="right")
         (self.rb_right if current == "right" else self.rb_middle
          ).setChecked(True)
         self.rb_middle.toggled.connect(self._mouse_changed)

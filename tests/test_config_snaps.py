@@ -46,11 +46,11 @@ def test_snapindex_respects_type_toggles():
 def test_config_roundtrip(tmp_path):
     path = str(tmp_path / "settings.json")
     cfg = Config(path)
-    assert cfg.get("mouse", "orbit_button") == "middle"
-    cfg.set("mouse", "orbit_button", "right")
+    assert cfg.get("mouse", "orbit_button") == "right"
+    cfg.set("mouse", "orbit_button", "middle")
     cfg.set("aliases", {"zz": "box"})
     cfg2 = Config(path)
-    assert cfg2.get("mouse", "orbit_button") == "right"
+    assert cfg2.get("mouse", "orbit_button") == "middle"
     assert cfg2.get("aliases") == {"zz": "box"}
 
 

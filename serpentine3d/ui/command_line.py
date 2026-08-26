@@ -31,8 +31,12 @@ class CommandInput(QLineEdit):
     # Set on every keypress: a guess must not be filled back in over a
     # deletion, or the box fights the person trying to correct it.
     deleting = False
+    # True while a command is asking for free text: the one prompt where
+    # Space has to stay a space rather than standing in for Enter.
+    text_pending = False
 
     tabPressed = Signal()
+    spacePressed = Signal()
     upPressed = Signal()
     downPressed = Signal()
     escPressed = Signal()
@@ -70,6 +74,12 @@ class CommandInput(QLineEdit):
             # Enter-repeats-last-command fallback instantly re-runs the
             # command the returnPressed handling just completed
             super().keyPressEvent(ev)
+            ev.accept()
+        elif (key == Qt.Key.Key_Space and not self.text_pending
+                and not ev.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            # Rhino habit: Space submits, like Enter, unless the prompt
+            # wants free text (a layer called "Ground floor")
+            self.spacePressed.emit()
             ev.accept()
         elif key == Qt.Key.Key_Up:
             self.upPressed.emit()
@@ -170,6 +180,7 @@ class CommandLine(QWidget):
         self.suggestions.itemClicked.connect(self._on_suggestion_clicked)
 
         self.input.returnPressed.connect(self.submit_input)
+        self.input.spacePressed.connect(self.submit_input)
         self.input.tabPressed.connect(self._on_tab)
         self.input.textEdited.connect(self._on_typed)
         self.input.upPressed.connect(self._on_up)
@@ -202,6 +213,15 @@ class CommandLine(QWidget):
         layout.addLayout(row)
 
     # -- public API --
+
+    @property
+    def text_pending(self) -> bool:
+        """Whether the running command is asking for free text."""
+        return self.input.text_pending
+
+    @text_pending.setter
+    def text_pending(self, value: bool):
+        self.input.text_pending = bool(value)
 
     def echo(self, msg: str):
         self.echo_view.appendPlainText(msg)

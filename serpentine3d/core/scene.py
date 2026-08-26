@@ -403,6 +403,19 @@ class Scene:
         self.notify("objects")
         return new
 
+    def update_many(self, ids, **fields) -> int:
+        """Change the same fields on every object in `ids`. Returns how many.
+
+        One notification for the lot, not one an object: hiding a thousand
+        objects is one change to the drawing and should cost the listeners
+        what hiding one does.
+        """
+        ids = list(ids)
+        with self.batched():
+            for obj_id in ids:
+                self.update(obj_id, **fields)
+        return len(ids)
+
     def get(self, obj_id: str) -> SceneObject | None:
         return self.objects.get(obj_id)
 

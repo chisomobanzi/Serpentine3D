@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.7.2 — Unreleased
+
+### Added
+
+- **Space is Enter at the command line.** Type `line` and press Space and
+  the command starts; type a point and Space commits it; Space on an empty
+  prompt repeats the last command, all exactly as Enter does and as Rhino
+  does, so one hand can stay on the mouse. While a command is asking for
+  text, a layer name say, Space is still a space, so "Ground floor" can be
+  typed. Requested by Lourenço Vaz Pinto.
+
+- **The right mouse button orbits, out of the box.** Rhino's chords on the
+  orbit button are now Serpentine's: drag orbits, Shift pans, and Ctrl
+  zooms, dragging up to come closer. Ctrl+Shift orbits from anywhere,
+  including a parallel view, where a plain drag pans. The Preferences page
+  now says which button Rhino uses instead of claiming the middle one is
+  the Rhino default; anyone who chose the middle button keeps it. A
+  right-click with no drag is still Enter. Requested by Lourenço Vaz Pinto.
+
+- **Layer linetype and print width are drop-downs.** The Type cell offered
+  its options one click at a time, each click rolling on to the next
+  linetype with no way to see the list, and Print was a bare box to type
+  into. Both now open a list: every linetype for Type, and Default plus
+  the standard pen widths (0.13 to 1.0 mm) for Print, which still takes a
+  typed width such as 0.42. A single click on Type no longer changes
+  anything. Requested by Lourenço Vaz Pinto.
+
+- **Several layers can be switched off at once.** The layers panel takes a
+  Ctrl- or Shift-click selection, and the on/off box of any selected layer
+  applies to all of them, as one undo step and one redraw. Clicking a box
+  leaves the selection as it was, so the next click switches the same
+  layers back on, and a Shift-click picks the range from the layer you
+  last clicked, not from the top of the list. Requested by Lourenço Vaz
+  Pinto.
+
+- **A detail's scale is set in the Properties panel.** Pick a detail on a
+  sheet and the panel shows it as a detail, with its frame size and a Scale
+  drop-down of the scales an architect draws at, 1:1 to 1:200, that also
+  takes a typed 1:75. A scale that makes no sense is refused and the
+  control goes back to the real one. `detailscale` still works. Requested
+  by Lourenço Vaz Pinto.
+
+### Fixed
+
+- **`isolate` on a big file no longer crawls.** Hiding, showing, locking,
+  grouping, restyling or re-layering many objects at once told the viewport
+  about each object separately, and the viewport rebuilt everything it
+  draws each time, so isolating one object among three hundred rebuilt the
+  scene three hundred times. Every command that changes many objects now
+  reports once for the lot: `isolate`, `unisolate`, `hide`, `show`, `lock`,
+  `lockother`, `unlockall`, `group`, `ungroup`, `changelayer`, `linetype`,
+  `matchprops`, `material` and the draw-order commands. Reported by
+  Lourenço Vaz Pinto.
+
+- **Enter in a Properties field no longer runs the last command.** Type a
+  new name for an object, or a scale for a detail, and press Enter, and the
+  edit was applied and then the last command started again on top of it,
+  because an Enter that nothing consumed fell through to the command line's
+  "Enter repeats the last command". A field keeps its Enter now; the command
+  line and the viewport still repeat.
+
+- **Two crashes in the layers panel.** Renaming a layer by double-clicking
+  its name, and clicking its on/off box, could each delete the row Qt was
+  still holding and take the app down with it; the panel now finishes
+  handling a click before it redraws.
+
 ## 0.7.1 — 2026-08-18
 
 ### Added

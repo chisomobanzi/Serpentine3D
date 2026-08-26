@@ -8,7 +8,7 @@ pan/orbit decision.
 import numpy as np
 import pytest
 
-from serpentine3d.ui.camera import Camera, drag_pans
+from serpentine3d.ui.camera import Camera, drag_action, drag_pans
 
 
 def test_named_ortho_views_are_parallel():
@@ -97,9 +97,9 @@ def test_shift_never_orbits_an_ortho_view():
 
 
 @pytest.mark.parametrize("projection", ["parallel", "perspective"])
-@pytest.mark.parametrize("shift", [False, True])
-def test_ctrl_is_the_key_that_orbits(projection, shift):
-    """Whatever the view and whatever else is held, Ctrl and the orbit
-    button orbit. It is the only way out of an ortho view now, so it has to
-    work from wherever you are."""
-    assert drag_pans(projection, shift, ctrl=True) is False
+def test_ctrl_zooms_and_ctrl_shift_is_the_chord_that_orbits(projection):
+    """Ctrl and the orbit button zoom, as in Rhino. Ctrl+Shift orbits
+    whatever the view; it is the only way out of an ortho view now, so it
+    has to work from wherever you are."""
+    assert drag_action(projection, shift=False, ctrl=True) == "zoom"
+    assert drag_action(projection, shift=True, ctrl=True) == "orbit"

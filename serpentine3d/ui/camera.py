@@ -11,16 +11,26 @@ from ..utils.math3d import look_at, normalize, ortho, perspective
 Z_UP = np.array([0.0, 0.0, 1.0])
 
 
-def drag_pans(projection: str, shift: bool, ctrl: bool = False) -> bool:
-    """Which navigation a nav-button drag performs. A plain drag orbits in
-    perspective and pans in a parallel (orthographic) view, so a Top view
-    drags-to-pan like a drawing. Ctrl orbits from anywhere, and is the only
-    way to swing an ortho view round: Shift used to do it, but Shift is held
-    for so much else while you draw that Top kept turning into an
-    axonometric view by accident. Shift pans, wherever you are."""
+def drag_action(projection: str, shift: bool, ctrl: bool = False) -> str:
+    """Which navigation a nav-button drag performs: "orbit", "pan" or "zoom".
+
+    A plain drag orbits in perspective and pans in a parallel (orthographic)
+    view, so a Top view drags-to-pan like a drawing. Shift pans, wherever
+    you are. Ctrl zooms, as in Rhino, where the three chords on the orbit
+    button are drag, Shift and Ctrl for orbit, pan and zoom. Ctrl+Shift
+    orbits from anywhere, and is the only way to swing an ortho view round:
+    Shift alone used to do it, but Shift is held for so much else while you
+    draw that Top kept turning into an axonometric view by accident."""
     if ctrl:
-        return False
-    return projection == "parallel" or bool(shift)
+        return "orbit" if shift else "zoom"
+    if projection == "parallel" or shift:
+        return "pan"
+    return "orbit"
+
+
+def drag_pans(projection: str, shift: bool, ctrl: bool = False) -> bool:
+    """Whether a nav-button drag pans; see drag_action."""
+    return drag_action(projection, shift, ctrl) == "pan"
 
 
 # cinema sensor presets: (width, height) in millimetres
@@ -270,6 +280,13 @@ class Camera:
         scale = 2.0 * self.distance * math.tan(math.radians(self.fov) / 2)
         per_px = scale / max(viewport_h, 1)
         self.target += (-dx_px * right + dy_px * up) * per_px
+
+    def zoom_drag(self, dy_px: float):
+        """Zoom by a vertical drag. Push the mouse away (up the screen, so a
+        negative dy) and the camera comes closer, as in Rhino. Forty pixels
+        is one wheel notch, so a drag across the window is a decent spin of
+        the wheel and a nudge is a nudge."""
+        self.zoom(-dy_px / 40.0)
 
     def zoom(self, steps: float):
         self.distance *= math.pow(0.88, steps)

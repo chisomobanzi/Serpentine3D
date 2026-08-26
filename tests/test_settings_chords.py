@@ -97,6 +97,7 @@ def test_the_other_mouse_settings_survive_a_chord_edit(dlg):
     """The chords live under 'mouse' alongside orbit button and speeds —
     writing one must not flatten the rest."""
     d, cfg = dlg
+    cfg.set("mouse", "orbit_button", "middle")   # not the default, on purpose
     d.chord_table.insertRow(0)
     _set(d.chord_table, 0, "ctrl+shift+mmb", "zoomselected")
 
