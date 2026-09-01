@@ -6,20 +6,39 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.7.3 was cut (2026-09-01).
+Last updated when 0.8.0 was cut (2026-09-02).
 
 ---
 
 ## Where things stand
 
-Version `0.7.3` in `pyproject.toml`, the lockfile and the three packaging
-files; `CHANGELOG.md`'s 0.7.3 section is dated 2026-09-01 and holds the
-layers work below. **Released on 2026-09-01: pushed, tagged `v0.7.3`,
-published with the AppImage and the Windows `.exe` attached; the macOS
-`.dmg` is still to come.** Suite on Linux: 2544 passed, nothing skipped.
+Version `0.8.0` in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.8.0 section is dated 2026-09-02 and holds the
+drafting work below. Suite on Linux: 2650 passed, nothing skipped.
 
-0.7.2 before it was released on 2026-09-01: pushed, tagged, and published
-with the AppImage and the macOS `.dmg` attached.
+The minor bump rather than another patch because the app does something
+it could not do before. `section` is a new modelling command, and a layer
+now carries a `hatch`, so a file saved by 0.8.0 holds material
+information that 0.7.x drops on load. Old files still open: `native.py`
+defaults the field to empty, and `FORMAT_VERSION` did not have to move.
+
+0.7.3 was released on 2026-09-01: pushed, tagged, and published with the
+AppImage and the Windows `.exe` attached; the macOS `.dmg` never went up.
+
+### Drafting, released in 0.8.0
+
+Sections and hatching, driven test-first and then looked at in the
+running app:
+
+- **`section`**: draw a line across the model and get the cut back, a
+  filled face from a solid so there is something to hatch
+- **A layer says what its material is hatched with**, set from the Layers
+  panel row menu or `layer` → Hatch, saved with the file
+- **`hatch` opens on that pattern** in both Corners and Region mode
+- **A section cut is drawn in the hatch of the layer it cut through**, so
+  concrete and steel read apart on one detail without hand-hatching
+- **`solid` is flooded, not lined**, so a cut face keeps its bores open,
+  and the screen and the PDF go through the same two functions
 
 ### Layers, released in 0.7.3
 
