@@ -6,21 +6,34 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when sublayers landed (2026-09-01).
+Last updated when 0.7.3 was cut (2026-09-01).
 
 ---
 
 ## Where things stand
 
-Version `0.7.2` in `pyproject.toml`, the lockfile and the three packaging
-files; `CHANGELOG.md`'s 0.7.2 section is dated 2026-09-01 and holds batch 1.
-**Released as `v0.7.2` on 2026-09-01**: pushed, tagged, and published as
-a GitHub release with the AppImage and the macOS `.dmg` attached. Nothing
-was left on the pre-release list.
-
-Since then, on `main` and unreleased: **sublayers**, in three commits
-(the model, the file formats, the panel). Suite on Linux: 2467 passed,
+Version `0.7.3` in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.7.3 section is dated 2026-09-01 and holds the
+layers work below. **Committed and tagged `v0.7.3` on 2026-09-01, not yet
+pushed or published as a GitHub release.** Suite on Linux: 2543 passed,
 nothing skipped.
+
+0.7.2 before it was released on 2026-09-01: pushed, tagged, and published
+with the AppImage and the macOS `.dmg` attached.
+
+### Layers, released in 0.7.3
+
+The whole of the layers panel Lourenço asked for, driven test-first and
+then checked in the running app or under Xephyr:
+
+- **Sublayers**, in three commits: the model, both file formats, the panel
+- The layer tree on the RPC API and the MCP server, layers named by path
+- `Walls::Interior` and `Roof::Interior` no longer collide on `.3dm` import
+- Layers move up and down the list with the arrows, branch and all
+- A layer dropped between two rows lands there, which is also how a
+  sublayer comes back out of its branch
+- The layer you draw on is chosen with a double-click, not a single click
+- `+` makes a layer beside the picked one, `↳` makes one inside it
 
 ### Batch 1 — released in 0.7.2
 
@@ -202,13 +215,13 @@ Triaged by cost. Everything below is still open unless marked.
 | Item | Notes |
 |---|---|
 | **Array / ArrayPath won't start on Enter** | No code reason found — `array`, `arraypath`, `arraypolar` are registered normally (`commands/transform.py:309,338,358`). Suspect the suggestion list (`array` is a prefix of two others) or a preselection interaction. **Needs a repro from Lourenço.** |
-| **Layer reorder (move up/down)** | ✅ **Done, on `main`, unreleased.** `move_up`/`move_down` on `LayerManager` move a layer among its siblings and carry its branch, the `↑` and `↓` buttons move the whole picked run as a block, and `set_order` makes a file's order the one it comes back in. A layer can also be dropped into the gap between two rows, which is how it goes to either end of the list and how a sublayer comes back out of its branch. |
+| **Layer reorder (move up/down)** | ✅ **Done, released in 0.7.3.** `move_up`/`move_down` on `LayerManager` move a layer among its siblings and carry its branch, the `↑` and `↓` buttons move the whole picked run as a block, and `set_order` makes a file's order the one it comes back in. A layer can also be dropped into the gap between two rows, which is how it goes to either end of the list and how a sublayer comes back out of its branch. |
 
 ### Medium
 
 | Item | Notes |
 |---|---|
-| **Sublayers** | ✅ **Done, on `main`, unreleased.** `parent` on `Layer`, inherited visibility and locking computed by `is_visible`/`is_locked` (each layer keeps its own switch, Rhino's model), both file formats, and a tree in the panel with a sublayer button and drag-to-reparent. The `Walls::Interior` / `Roof::Interior` import collision went with it, since an imported layer is matched by full path now. Notes below. |
+| **Sublayers** | ✅ **Done, released in 0.7.3.** `parent` on `Layer`, inherited visibility and locking computed by `is_visible`/`is_locked` (each layer keeps its own switch, Rhino's model), both file formats, and a tree in the panel with a sublayer button and drag-to-reparent. The `Walls::Interior` / `Roof::Interior` import collision went with it, since an imported layer is matched by full path now. Notes below. |
 | **Layer hatch** | A `hatch` field on `Layer`, used as the default by the paper-space `hatch` command (`commands/drafting.py:431`). Machinery exists: `core/layout.py:105 Hatch`, `:236 hatch_lines()`. But "hatch when cut" implies the section tool — do that first. |
 | **ArrayPath orientation** (Freeform, etc.) | `commands/transform.py:338`. Needs a proper frame-along-curve. |
 | **Visual feedback when picking edges** | Lourenço reported none. **It exists** — `ui/viewport.py:1864` draws picked sub-object edges. So this is a *visibility/tuning* problem (colour, width, z-bias), not a missing feature. Look at it on screen before writing code. |
