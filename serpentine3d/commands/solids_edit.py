@@ -250,6 +250,94 @@ def cmd_contour(ctx):
              f"(spacing {spacing:g}).")
 
 
+def _section_normal(p1, p2, up):
+    """The normal of the plane standing on the line from `p1` to `p2`.
+
+    A section line is drawn across the plan and the saw goes down, so the
+    plane contains the line and stands square to the construction plane.
+    That is what makes the same two points cut vertically in Front and
+    horizontally in Top, the way anyone from Rhino expects.
+
+    None when the two points sit on top of each other, or when the line
+    runs straight up the construction plane's normal, because neither
+    names a plane to cut with.
+    """
+    import numpy as np
+    normal = np.cross(up, np.subtract(p2, p1))
+    if np.linalg.norm(normal) < 1e-9:
+        return None
+    return tuple(float(c) for c in normal)
+
+
+def _cut_through(obj, point, normal):
+    """What the plane takes out of one object.
+
+    A solid gives the filled face, because that is what a section drawing
+    shows and what a hatch needs: an outline cannot say which side is
+    material, so a pipe would read as two unrelated circles instead of a
+    ring of wall with a bore down the middle. A surface has no inside and
+    so gives the curve.
+    """
+    if obj.kind == "solid":
+        return g.section_regions(obj.shape, point, normal)
+    return g.section_curves(obj.shape, point, normal)
+
+
+@command("section", aliases=("sec",))
+def cmd_section(ctx):
+    """Cut the selection with a plane drawn as a line across it.
+
+    You draw the line where the saw goes and get back what it went
+    through: the filled face for a solid, the curve for a surface. The
+    plane stands on that line and leans with the construction plane.
+
+    The objects you picked are left alone. A section is a drawing of the
+    model, not a change to it.
+    """
+    from .base import PointReq
+    objs = yield SelectReq("Select objects to section",
+                           kinds=("surface", "solid"))
+    up = tuple(ctx.cplane.normal)
+    p1 = yield PointReq("Start of section line")
+
+    def _cut_to(p):
+        normal = _section_normal(p1, p, up)
+        if normal is None:
+            return None
+        made = []
+        for o in objs:
+            try:
+                made.extend(_cut_through(o, p1, normal))
+            except g.GeometryError:
+                return None
+        return g.make_compound(made) if made else None
+
+    p2 = yield PointReq("End of section line", rubber_from=p1,
+                        preview_fn=_cut_to)
+    normal = _section_normal(p1, p2, up)
+    if normal is None:
+        ctx.echo("Those two points do not stand a plane up, so nothing "
+                 "was cut.")
+        return
+    made = []
+    for o in objs:
+        try:
+            made.extend(_cut_through(o, p1, normal))
+        except g.GeometryError as exc:
+            ctx.echo(f"{o.name}: {exc}")
+    if not made:
+        ctx.echo("The section plane missed everything selected.")
+        return
+    layer = ctx.scene.layers.find_by_name("Sections")
+    layer_id = layer.id if layer else ctx.scene.layers.create(
+        "Sections", (0.90, 0.45, 0.45)).id
+    with ctx.scene.batched():
+        for shape in made:
+            ctx.scene.add(shape, layer_id=layer_id)
+    ctx.scene.notify()
+    ctx.echo(f"Created {len(made)} section piece(s) on layer 'Sections'.")
+
+
 @command("booleansplit", aliases=("bsplit",))
 def cmd_booleansplit(ctx):
     """Split solids with cutters, keeping every piece."""

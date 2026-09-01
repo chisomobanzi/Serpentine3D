@@ -222,7 +222,7 @@ Triaged by cost. Everything below is still open unless marked.
 | Item | Notes |
 |---|---|
 | **Sublayers** | ✅ **Done, released in 0.7.3.** `parent` on `Layer`, inherited visibility and locking computed by `is_visible`/`is_locked` (each layer keeps its own switch, Rhino's model), both file formats, and a tree in the panel with a sublayer button and drag-to-reparent. The `Walls::Interior` / `Roof::Interior` import collision went with it, since an imported layer is matched by full path now. Notes below. |
-| **Layer hatch** | A `hatch` field on `Layer`, used as the default by the paper-space `hatch` command (`commands/drafting.py:431`). Machinery exists: `core/layout.py:105 Hatch`, `:236 hatch_lines()`. But "hatch when cut" implies the section tool — do that first. |
+| **Layer hatch** | A `hatch` field on `Layer`, used as the default by the paper-space `hatch` command (`commands/drafting.py:431`). Machinery exists: `core/layout.py:105 Hatch`, `:236 hatch_lines()`. The section tool it was waiting on is now there. Two things left in the way: `layout_view.py:1269` still cuts with its own hand-rolled plane loop and hands on flat polygons, so route it through `g.section_regions()` + `g.face_loops()` (three consumers: `layout_view.py:678`, `fileio/pdf.py:154`, `commands/drafting.py:658`); and `Hatch` stores a single closed polygon, so it cannot say a hole is a hole. |
 | **ArrayPath orientation** (Freeform, etc.) | `commands/transform.py:338`. Needs a proper frame-along-curve. |
 | **Visual feedback when picking edges** | Lourenço reported none. **It exists** — `ui/viewport.py:1864` draws picked sub-object edges. So this is a *visibility/tuning* problem (colour, width, z-bias), not a missing feature. Look at it on screen before writing code. |
 
@@ -230,7 +230,7 @@ Triaged by cost. Everything below is still open unless marked.
 
 | Item | Notes |
 |---|---|
-| **Section / cut plane** | Split it. A display-only `clippingplane` is modest (a clip distance in the shader). A `section` command returning curves is easy on OCC (`BRepAlgoAPI_Section` with a plane). Rhino-style *live* section/plan is much bigger — defer. `core/hlr.py` is the relevant neighbour. |
+| **Section / cut plane** | ✅ **`section` shipped.** Draw a line, get the cut: `core/geometry.py section_regions()`/`section_curves()`/`face_loops()`, command at `commands/solids_edit.py`. A solid gives the filled face, not the outline, so a hatch has something to fill. Still open: a display-only `clippingplane` (a clip distance in the shader), and Rhino-style *live* section/plan, which is much bigger and stays deferred. `core/hlr.py` is the relevant neighbour. |
 | **Navigation of large .3dm is slow** | ⚠️ **Correcting an earlier wrong diagnosis.** Frustum culling *does* exist and is well built — `ui/viewport.py:1221 _cull()`, six clip planes, vectorised across all objects. So "it renders everything" is not the cause. This needs actual profiling on a real file before anyone writes code. **Ask Lourenço for one of his heavy files.** |
 | **Opening .3dm is slow** | Import path is `fileio/rhino.py` + `fileio/rhino_parallel.py` (already multi-process). Profile before optimising. |
 | **Layouts not imported from .3dm** | Likely **blocked upstream**: rhino3dm 8.32's `ViewInfo` exposes only `Name`, `Viewport`, wallpaper and focal-blur — no page geometry, no detail frames. `File3dm.Views` / `NamedViews` are all that's there. Confirm, then either say so publicly or find another route. |

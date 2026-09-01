@@ -251,7 +251,9 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `contour` | Contour |
 | `filletedge` (`fe`) | Fillet edges. Ctrl+Shift-click edges first to fillet only those; |
 | `intersect` (`int`) | Intersect |
+| `mergeallcoplanarfaces` (`mergeallfaces`) | Fuse coplanar neighbouring faces of each selected polysurface. |
 | `pushpull` (`pp`, `moveface`) | SketchUp-style push/pull on a planar face. |
+| `section` (`sec`) | Cut the selection with a plane drawn as a line across it. |
 
 ## Solids
 

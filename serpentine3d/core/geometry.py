@@ -832,14 +832,88 @@ def intersect_shapes(a, b) -> list:
     return _curve_pieces(edges, [])
 
 
+def _plane_extent(shape, point: Point) -> float:
+    """How far a cutting plane must reach to pass right through a shape.
+
+    Measured from the plane's own point, because a plane placed off to
+    one side still has to span back across the object.
+    """
+    (mn, mx) = bbox(shape)
+    far = max(math.dist((x, y, z), point)
+              for x in (mn[0], mx[0])
+              for y in (mn[1], mx[1])
+              for z in (mn[2], mx[2]))
+    return far * 1.5 or 1.0
+
+
+def section_curves(shape, point: Point, normal: Point) -> list:
+    """The curves where an unbounded plane crosses a shape.
+
+    A plane that misses comes back empty rather than raising. A section
+    is normally asked of several objects at once, and the ones the plane
+    sails past are not an error: only the caller knows whether missing
+    everything is worth complaining about.
+    """
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+    from .occ import gp_Pln
+    sec = BRepAlgoAPI_Section(shape, gp_Pln(_pnt(point), _dir(normal)))
+    sec.Build()
+    if not sec.IsDone():
+        raise GeometryError("Section failed")
+    edges = edges_of(sec.Shape())
+    return _curve_pieces(edges, []) if edges else []
+
+
+def section_regions(shape, point: Point, normal: Point) -> list:
+    """The filled faces a plane cuts out of a solid.
+
+    The cut itself rather than its outline, which is what a section
+    drawing shows and what a hatch needs. An outline cannot say which
+    side of it is material, so a pipe cut across reads as two unrelated
+    circles instead of a ring of wall with a bore down the middle.
+
+    A surface has no inside and so gives back nothing here. Ask
+    `section_curves` for that, and for a plane that misses.
+    """
+    from .occ import gp_Pln
+    reach = _plane_extent(shape, point)
+    mk = BRepBuilderAPI_MakeFace(gp_Pln(_pnt(point), _dir(normal)),
+                                 -reach, reach, -reach, reach)
+    if not mk.IsDone():
+        raise GeometryError("Section failed")
+    try:
+        common = boolean_intersection(shape, mk.Face())
+    except GeometryError:
+        return []
+    return faces_of(common)
+
+
+def face_loops(face, count: int = 96) -> list:
+    """A face's rings as point loops, the ring around the outside first.
+
+    Everything that draws or fills a cut face wants the same two things
+    from it: which ring to run a line around, and which rings to leave
+    empty.
+    """
+    from OCP.BRepTools import BRepTools
+    f = occ.to_face(face)
+    outer = BRepTools.OuterWire_s(f)
+    rings, holes = [], []
+    exp = TopExp_Explorer(f, occ.WIRE)
+    while exp.More():
+        wire = occ.to_wire(exp.Current())
+        pts = sample_curve(wire, count)
+        (rings if wire.IsSame(outer) else holes).append(pts)
+        exp.Next()
+    return rings + holes
+
+
 def contour(shape, direction: Point = (0, 0, 1),
             spacing: float = 10.0) -> list[tuple[float, list]]:
     """Slice a shape into section curves at regular intervals.
 
     Returns [(offset_along_direction, [curves]), ...]."""
     import numpy as np
-    from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
-    from .occ import gp_Pln
     if spacing <= 0:
         raise GeometryError("Spacing must be positive")
     d = np.asarray(direction, float)
@@ -852,13 +926,12 @@ def contour(shape, direction: Point = (0, 0, 1),
     out = []
     level = lo + spacing
     while level < hi - 1e-6:
-        plane = gp_Pln(_pnt(tuple(d * level)), _dir(tuple(d)))
-        sec = BRepAlgoAPI_Section(shape, plane)
-        sec.Build()
-        if sec.IsDone():
-            edges = edges_of(sec.Shape())
-            if edges:
-                out.append((level - lo, _curve_pieces(edges, [])))
+        try:
+            curves = section_curves(shape, tuple(d * level), tuple(d))
+        except GeometryError:
+            curves = []      # one sour level must not lose the others
+        if curves:
+            out.append((level - lo, curves))
         level += spacing
     if not out:
         raise GeometryError("No contours produced (check the spacing)")

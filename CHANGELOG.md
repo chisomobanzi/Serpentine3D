@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- **`section`: draw a line across the model and get the cut back.** Pick
+  the objects, then the two points the saw goes through. The plane stands
+  on that line and leans with the construction plane, so the same two
+  points cut vertically in Front and horizontally in Top. A solid gives
+  back the filled face rather than its outline, which is what a section
+  drawing shows and what a hatch will need: a pipe cut across stays a ring
+  of wall with a bore down the middle instead of reading as two unrelated
+  circles. A surface has no inside, so it gives the curve. Everything
+  lands on a `Sections` layer, and the objects you picked are left alone.
+
 ### Fixed
 
 - **The Layers panel is as wide as its columns need, not as wide as our
