@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..core import layout as _layout
 from ..core import linetype as _lt
 from . import theme
 
@@ -725,6 +726,8 @@ class LayersPanel(QWidget):
         menu.addAction("New sublayer",
                        lambda: self._new_sublayer_under(layer_id))
         menu.addSeparator()
+        self._add_hatch_menu(menu, ids)
+        menu.addSeparator()
         # Name the branch when they all sit in the same one, so the entry
         # says where the layer ends up and not merely that it moves.
         if len(parents) == 1 and None not in parents:
@@ -742,6 +745,38 @@ class LayersPanel(QWidget):
             menu.addAction("Move to the top level",
                            lambda: self._move_out(ids, to_top=True))
         return menu
+
+    def _add_hatch_menu(self, menu, ids):
+        """The fill a hatch drawn on these layers starts out with.
+
+        A layer is a material and a material has a fill, so this is where
+        Concrete is told it crosses. It lives in the menu rather than in a
+        column of its own because the tree's five columns already fill the
+        panel exactly, and a sixth would come out of the layer name.
+
+        The tick says what the picked layers are set to now, and says
+        nothing at all when they disagree: two materials picked together
+        are not one material.
+        """
+        layers = self.scene.layers
+        have = {layers.get(i).hatch for i in ids}
+        # Built with the menu as its parent, not by addMenu's own name:
+        # a submenu Qt owns lives as long as the menu it hangs off, and
+        # one Python owns is collected while the menu is still open.
+        sub = QMenu("Hatch", menu)
+        menu.addMenu(sub)
+        for pattern in ("", *_layout.HATCH_PATTERNS):
+            action = sub.addAction(pattern.capitalize() if pattern else "None")
+            action.setCheckable(True)
+            action.setChecked(have == {pattern})
+            action.triggered.connect(
+                lambda _checked=False, p=pattern: self._set_hatch(ids, p))
+
+    def _set_hatch(self, ids, pattern):
+        self.history.checkpoint("layer hatch")
+        for layer_id in ids:
+            self.scene.layers.set_hatch(layer_id, pattern)
+        self.scene.notify()
 
     def _move_in_list(self, step):
         """Move every picked layer one place up (-1) or down (1).

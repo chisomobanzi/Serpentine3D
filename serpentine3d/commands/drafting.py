@@ -428,6 +428,27 @@ def cmd_leader(ctx):
     ctx.echo("Leader placed.")
 
 
+def _pattern_choices() -> list[str]:
+    """The fills on offer, spelled the way a prompt spells them.
+
+    Read off the same list a layer is set from, so a fill the app learns
+    to draw is offered here without anybody remembering to come back.
+    """
+    from ..core.layout import HATCH_PATTERNS
+    return [p.capitalize() for p in HATCH_PATTERNS]
+
+
+def _layer_pattern(ctx) -> str:
+    """The Pattern the layer being drawn on wants, as the prompt spells it.
+
+    A layer is a material and a material has a fill, so hatching a wall
+    on the Concrete layer is a click and an Enter rather than the same
+    decision taken again on every region. A layer with nothing to say
+    leaves the command where it has always been, on lines.
+    """
+    return (ctx.scene.layers.current.hatch or "lines").capitalize()
+
+
 @command("hatch", space="paper")
 def cmd_hatch(ctx):
     lay = _active_layout(ctx)
@@ -436,6 +457,8 @@ def cmd_hatch(ctx):
         return
         yield  # pragma: no cover
     from ..core.layout import Hatch
+    choices = _pattern_choices()
+    offered = _layer_pattern(ctx)
     pts = []
     first = yield PointReq("First corner of hatch region "
                            "(or click inside detail linework)",
@@ -446,9 +469,8 @@ def cmd_hatch(ctx):
             ctx.echo("No closed linework region found under that point.")
             return
         poly, holes = found
-        pattern = yield OptionReq("Pattern",
-                                  options=["Lines", "Cross", "Solid"],
-                                  default="Lines")
+        pattern = yield OptionReq("Pattern", options=choices,
+                                  default=offered)
         lay.hatches.append(Hatch(points=[list(p) for p in poly],
                                  holes=[[list(p) for p in ring]
                                         for ring in holes],
@@ -467,8 +489,7 @@ def cmd_hatch(ctx):
         if p is None:
             break
         pts.append([p[0], p[1]])
-    pattern = yield OptionReq("Pattern", options=["Lines", "Cross", "Solid"],
-                              default="Lines")
+    pattern = yield OptionReq("Pattern", options=choices, default=offered)
     spacing = 3.0
     angle = 45.0
     if pattern != "Solid":

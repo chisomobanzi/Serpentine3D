@@ -531,7 +531,7 @@ def cmd_rename(ctx):
 def cmd_layer(ctx):
     action = yield OptionReq(
         "Layer action", options=["New", "Current", "Show", "Hide", "Rename",
-                                 "Weight", "Linetype"],
+                                 "Weight", "Linetype", "Hatch"],
         default="New")
     layers = ctx.scene.layers
     if action == "New":
@@ -576,6 +576,22 @@ def cmd_layer(ctx):
                                     default=layer.linetype)
             layers.set_linetype(layer.id, style)
             ctx.echo(f"Layer '{layer.name}' draws {style} lines.")
+    elif action == "Hatch":
+        from ..core.layout import HATCH_PATTERNS
+        name = yield TextReq("Layer name")
+        layer = layers.find_by_name(name)
+        if layer is None:
+            ctx.echo(f"No layer named '{name}'.")
+        else:
+            # What a hatch drawn on this layer starts out as. "None" is a
+            # material with no fill, which is most of them.
+            fill = yield OptionReq(
+                "Hatch pattern",
+                options=["None", *(p.capitalize() for p in HATCH_PATTERNS)],
+                default=(layer.hatch or "none").capitalize())
+            layers.set_hatch(layer.id, fill)
+            drawn = layers.get(layer.id).hatch or "nothing in particular"
+            ctx.echo(f"Hatches on '{layer.name}' start out {drawn}.")
     elif action == "Rename":
         old = yield TextReq("Layer to rename")
         layer = layers.find_by_name(old)

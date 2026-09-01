@@ -101,12 +101,19 @@ class Leader:
     style: str = ""
 
 
+# Every fill the app can draw, in the order they are offered. A layer
+# names one of these as the material it is hatched with, so the list a
+# layer can be set to and the list the `hatch` command offers are one
+# list and cannot drift apart.
+HATCH_PATTERNS = ("lines", "cross", "solid")
+
+
 @dataclass
 class Hatch:
     id: str = field(default_factory=_uid)
     points: list = field(default_factory=list)   # closed polygon [[x,y],...]
     holes: list = field(default_factory=list)    # rings left empty, same form
-    pattern: str = "lines"                       # solid | lines | cross
+    pattern: str = "lines"                       # one of HATCH_PATTERNS
     angle: float = 45.0
     spacing: float = 3.0                         # mm
 

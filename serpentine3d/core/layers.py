@@ -5,6 +5,8 @@ from __future__ import annotations
 import itertools
 from dataclasses import dataclass, replace
 
+from .layout import HATCH_PATTERNS
+
 DEFAULT_LAYER_ID = "default"
 
 # What a layer path is written with, the separator Rhino uses:
@@ -34,6 +36,7 @@ class Layer:
     lineweight: float = 1.4        # on-screen edge width in pixels
     linetype: str = "Continuous"   # dash-pattern name (core/linetype.py)
     print_width: float = 0.0       # plotted pen width in mm; 0 = device default
+    hatch: str = ""                # material fill (HATCH_PATTERNS); "" = none
     parent: str | None = None      # the layer this one sits under, if any
 
 
@@ -180,6 +183,18 @@ class LayerManager:
     def set_print_width(self, layer_id: str, width: float):
         self._layers[layer_id] = replace(self._layers[layer_id],
                                          print_width=max(0.0, float(width)))
+
+    def set_hatch(self, layer_id: str, pattern: str):
+        """Say what this layer's material is hatched with, or nothing.
+
+        Anything the app cannot draw is nothing: a file can name a
+        pattern this app has never heard of, and a prompt offering a word
+        that fills no region is worse than the prompt offering lines.
+        """
+        name = (pattern or "").strip().lower()
+        self._layers[layer_id] = replace(
+            self._layers[layer_id],
+            hatch=name if name in HATCH_PATTERNS else "")
 
     def move_up(self, layer_id: str) -> bool:
         """Move a layer above the sibling in front of it, branch and all.

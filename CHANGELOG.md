@@ -4,6 +4,16 @@
 
 ### Added
 
+- **A layer says what its material is hatched with.** A drawing is read by
+  its fills, and what a thing is made of belongs to the layer rather than to
+  the afternoon it was drawn on. Set Concrete to cross once and the `hatch`
+  command opens on cross every time it is drawn on Concrete, in Corners mode
+  and in Region mode, so hatching a wall is a click and an Enter. It stays a
+  prompt, so the one region in another material still gets what you type.
+  Set it from the Layers row menu, on every picked layer at once, or with
+  `layer` and its new Hatch action. A layer that says nothing leaves the
+  command where it was, on lines.
+
 - **`section`: draw a line across the model and get the cut back.** Pick
   the objects, then the two points the saw goes through. The plane stands
   on that line and leans with the construction plane, so the same two

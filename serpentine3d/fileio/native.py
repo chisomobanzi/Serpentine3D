@@ -84,6 +84,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "lineweight": layer.lineweight,
                 "linetype": layer.linetype,
                 "print_width": layer.print_width,
+                "hatch": layer.hatch,
                 "parent": layer.parent,
             }
             for layer in scene.layers.all()
@@ -147,6 +148,7 @@ def _load_doc(scene, doc: dict):
             layers.set_lineweight("default", ld.get("lineweight", 1.4))
             layers.set_linetype("default", ld.get("linetype", "Continuous"))
             layers.set_print_width("default", ld.get("print_width", 0.0))
+            layers.set_hatch("default", ld.get("hatch", ""))
             id_map[ld["id"]] = "default"
         else:
             layer = layers.create(ld["name"], tuple(ld["color"]))
@@ -155,6 +157,7 @@ def _load_doc(scene, doc: dict):
             layers.set_linetype(layer.id, ld.get("linetype", "Continuous"))
             layers.set_locked(layer.id, ld.get("locked", False))
             layers.set_print_width(layer.id, ld.get("print_width", 0.0))
+            layers.set_hatch(layer.id, ld.get("hatch", ""))
             id_map[ld["id"]] = layer.id
 
     # The file's order is the user's, arrows and all: Default is not
