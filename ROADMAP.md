@@ -159,6 +159,32 @@ Three commits, each red-green with its own tests: the model
 
 ---
 
+### Drag a layer where it goes, 2026-09-01
+
+- **Qt's own gap between two rows is two pixels.** That is what
+  `QAbstractItemView` leaves at each end of a row for its drop indicator,
+  and no hand can hit it, so the tree reads a row in three bands instead:
+  a quarter at each edge means beside it, the half between them means
+  inside it. Qt's indicator is off and the tree paints its own line, at
+  `visualItemRect(item).left()`, which is already indented by depth, so
+  the line shows the level the layer would land at as well as the gap.
+- **One move covers all three drops.** `place(layer_id, parent_id,
+  before_id)` puts a layer under a parent and in front of one of that
+  parent's layers. A drop onto a row is that parent with nothing in front
+  of it, a drop above a row is the row's parent in front of the row, and
+  a drop below is the next sibling, or nothing if there is none. Coming
+  back out of a branch is a drop whose parent is `None`, so the gesture
+  the user asked for needed no code of its own.
+- **A real mouse found two things a QDropEvent cannot.** A drag only
+  begins once the pointer has left the ten-odd pixels around the press
+  that Qt reads as a click, and the gap between two rows is nearer than
+  that, so the driver moves sideways first. And re-entering
+  `app.exec()` after a `quit()` comes back with the window no longer
+  taking a drag at all: `tests/e2e_layer_drag_between.py` pumps
+  `processEvents()` in a loop instead, and six checks pass.
+
+---
+
 ## Backlog from #6
 
 Triaged by cost. Everything below is still open unless marked.
@@ -168,7 +194,7 @@ Triaged by cost. Everything below is still open unless marked.
 | Item | Notes |
 |---|---|
 | **Array / ArrayPath won't start on Enter** | No code reason found — `array`, `arraypath`, `arraypolar` are registered normally (`commands/transform.py:309,338,358`). Suspect the suggestion list (`array` is a prefix of two others) or a preselection interaction. **Needs a repro from Lourenço.** |
-| **Layer reorder (move up/down)** | ✅ **Done, on `main`, unreleased.** `move_up`/`move_down` on `LayerManager` move a layer among its siblings and carry its branch, the `↑` and `↓` buttons move the whole picked run as a block, and `set_order` makes a file's order the one it comes back in. |
+| **Layer reorder (move up/down)** | ✅ **Done, on `main`, unreleased.** `move_up`/`move_down` on `LayerManager` move a layer among its siblings and carry its branch, the `↑` and `↓` buttons move the whole picked run as a block, and `set_order` makes a file's order the one it comes back in. A layer can also be dropped into the gap between two rows, which is how it goes to either end of the list and how a sublayer comes back out of its branch. |
 
 ### Medium
 

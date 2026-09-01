@@ -194,6 +194,41 @@ class LayerManager:
         """Move a layer below the sibling after it, branch and all."""
         return self._move(layer_id, 1)
 
+    def place(self, layer_id: str, parent_id: str | None,
+              before_id: str | None = None) -> bool:
+        """Put a layer, branch and all, under a parent and in front of one
+        of that parent's layers, which is what a drop in the list means.
+
+        ``before_id`` of None means after everything already under that
+        parent: a drop onto a layer, or on the space below the list, has
+        no layer to land in front of. Says whether anything changed, so a
+        drop that puts a layer back where it was costs no undo.
+        """
+        if before_id == layer_id:
+            return False
+        if before_id is not None and \
+                self._layers[before_id].parent != parent_id:
+            raise ValueError(f"{before_id} is not one of {parent_id}'s layers")
+        was = (list(self._order), self._layers[layer_id].parent)
+        self.set_parent(layer_id, parent_id)
+        block = self._block(layer_id)
+        rest = [i for i in self._order if i not in set(block)]
+        if before_id is not None:
+            at = rest.index(self._block(before_id)[0])
+        else:
+            # last of the layers already there, or, with none, the parent
+            # itself, so a first sublayer lands under the layer it joined
+            kin = [la.id for la in self.children(parent_id)
+                   if la.id != layer_id]
+            if kin:
+                at = rest.index(self._block(kin[-1])[-1]) + 1
+            elif parent_id is not None:
+                at = rest.index(parent_id) + 1
+            else:
+                at = len(rest)
+        self._order = rest[:at] + block + rest[at:]
+        return (self._order, self._layers[layer_id].parent) != was
+
     def _move(self, layer_id: str, step: int) -> bool:
         siblings = [la.id for la in
                     self.children(self._layers[layer_id].parent)]

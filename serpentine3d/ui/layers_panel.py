@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from PySide6.QtCore import QItemSelectionModel, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QColorDialog, QComboBox, QHBoxLayout,
     QHeaderView, QMenu, QPushButton, QStyledItemDelegate, QTreeWidget,
@@ -92,6 +94,22 @@ def _id_of(item) -> str:
     return item.data(_NAME_COL, Qt.ItemDataRole.UserRole)
 
 
+class _Drop(NamedTuple):
+    """Where a layer let go of over the tree would land.
+
+    ``parent`` and ``before`` are what the move needs: the branch it joins
+    and the layer it goes in front of, with None for the top level and for
+    last. ``item`` and ``where`` are what the drawing needs: the row the
+    mark goes on, and whether that is a line above it, a line below it, or
+    the row itself lit up.
+    """
+
+    parent: str | None
+    before: str | None
+    item: object
+    where: str
+
+
 class _LayerTree(QTreeWidget):
     """The layers tree, with a visibility click that leaves the selection be.
 
@@ -105,7 +123,11 @@ class _LayerTree(QTreeWidget):
     stay picked.
     """
 
-    on_drop = None      # the panel's, called with (layer ids, new parent)
+    # the panel's, called with (layer ids, new parent, layer to land before)
+    on_drop = None
+    # of a row's height, at each end, that means beside the row not inside
+    _EDGE = 0.25
+    _drop_at = None     # where the drag over the tree would land, if any
 
     def size_columns(self):
         """Give every column the width its own content asks for, except the
@@ -129,21 +151,102 @@ class _LayerTree(QTreeWidget):
         header.resizeSection(_PRINT_COL, _column_width(
             self, _PRINT_COL, "Default", *_STANDARD_PEN_WIDTHS))
 
+    def _next_sibling(self, item):
+        """The row after this one at its own level, if it has one."""
+        parent = item.parent()
+        if parent is None:
+            i = self.indexOfTopLevelItem(item) + 1
+            return self.topLevelItem(i) if i < self.topLevelItemCount() \
+                else None
+        i = parent.indexOfChild(item) + 1
+        return parent.child(i) if i < parent.childCount() else None
+
+    def _drop_spot(self, point) -> _Drop:
+        """Where a layer let go of at this point would land.
+
+        A row is read in three bands: the quarter at the top means in
+        front of it, the quarter at the bottom means after it, and the
+        half between them means inside it. Qt's own answer is two pixels
+        at each end of the row, which is a target nobody can hit, and
+        between two layers is most of what this panel is dragged for.
+
+        The row under an open branch is that branch's first sublayer, so
+        the gap above it belongs to the branch: letting go there puts the
+        layer inside, at the top, which is where the line is drawn.
+        """
+        item = self.itemAt(point)
+        if item is None:
+            return _Drop(None, None, None, "on")    # bare tree: the top level
+        rect = self.visualItemRect(item)
+        edge = max(3, round(rect.height() * self._EDGE))
+        parent = item.parent()
+        parent_id = None if parent is None else _id_of(parent)
+        if point.y() - rect.top() < edge:
+            return _Drop(parent_id, _id_of(item), item, "above")
+        if rect.bottom() - point.y() < edge:
+            if item.isExpanded() and item.childCount():
+                kid = item.child(0)
+                return _Drop(_id_of(item), _id_of(kid), kid, "above")
+            after = self._next_sibling(item)
+            return _Drop(parent_id, None if after is None else _id_of(after),
+                         item, "below")
+        return _Drop(_id_of(item), None, item, "on")
+
+    def dragMoveEvent(self, event):
+        """Follow the pointer, and mark where the layer would land."""
+        super().dragMoveEvent(event)
+        self._drop_at = self._drop_spot(event.position().toPoint())
+        self.viewport().update()
+        # Whatever Qt made of the position: where a layer can go is this
+        # tree's own to say, and every point over the list is somewhere,
+        # the bare space under the last row included.
+        event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        self._drop_at = None
+        self.viewport().update()
+        super().dragLeaveEvent(event)
+
+    def paintEvent(self, event):
+        """The tree, and then the mark saying where the layer would land.
+
+        Drawn here rather than by Qt, whose indicator answers to its own
+        two-pixel reading of a row and would point somewhere other than
+        where the layer is about to go. The line starts where the row it
+        marks starts, so its indent says which level the layer lands at,
+        which is the only thing that tells a drop beside a branch from a
+        drop into it.
+        """
+        super().paintEvent(event)
+        spot = self._drop_at
+        if spot is None or spot.item is None:
+            return
+        rect = self.visualItemRect(spot.item)
+        painter = QPainter(self.viewport())
+        painter.setPen(QPen(self.palette().highlight().color(), 2))
+        right = self.viewport().width() - 1
+        if spot.where == "on":
+            painter.drawRect(QRect(rect.left(), rect.top() + 1,
+                                   right - rect.left() - 1, rect.height() - 2))
+        else:
+            y = rect.top() + 1 if spot.where == "above" else rect.bottom() - 1
+            painter.drawLine(rect.left(), y, right, y)
+
     def dropEvent(self, event):
         """Where a dragged layer was let go of, handed to the panel.
 
         Never up to QTreeWidget, which would move the rows itself: these
         rows belong to the scene and are redrawn from it the moment the
         move lands, so a tree that had also moved them would show the move
-        twice. Letting go over nothing means the top level.
+        twice.
         """
-        item = self.itemAt(event.position().toPoint())
-        target = None if item is None else _id_of(item)
+        spot = self._drop_spot(event.position().toPoint())
+        self._drop_at = None
         moving = [_id_of(i) for i in self.selectedItems()]
         if not moving and self.currentItem() is not None:
             moving = [_id_of(self.currentItem())]
         if self.on_drop is not None and moving:
-            self.on_drop(moving, target)
+            self.on_drop(moving, spot.parent, spot.before)
         event.accept()
 
     def mouseReleaseEvent(self, event):
@@ -227,7 +330,9 @@ class LayersPanel(QWidget):
         self.tree.setDragEnabled(True)
         self.tree.setAcceptDrops(True)
         self.tree.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.tree.setDropIndicatorShown(True)
+        # not Qt's indicator: the tree draws its own, which agrees
+        # with where the drop is actually going to put the layer
+        self.tree.setDropIndicatorShown(False)
         self.tree.on_drop = self._move_layers
         # several layers can be picked at once, so one click on a visibility
         # box can switch a whole group of them together
@@ -651,12 +756,14 @@ class LayersPanel(QWidget):
             self.history.discard_checkpoint()
         self.scene.notify()
 
-    def _move_layers(self, layer_ids, parent_id):
-        """Put dragged layers under another one, or back at the top level.
+    def _move_layers(self, layer_ids, parent_id, before_id=None):
+        """Put dragged layers where they were let go of.
 
         A layer inside one of the others is left alone: it is already going
         where its parent goes, and moving it too would take it out of the
-        branch the user is dragging.
+        branch the user is dragging. What is left goes down in the order
+        the list had it in, each in front of the same layer, so a group
+        picked up together keeps its own order on landing.
         """
         layers = self.scene.layers
         moving = [i for i in layer_ids if i != parent_id]
@@ -664,6 +771,8 @@ class LayersPanel(QWidget):
         moving = [i for i in moving if i not in inside]
         if not moving:
             return
+        listed = [la.id for la in layers.all()]
+        moving.sort(key=listed.index)
         # Qt is still inside the drop, so the redraw has to wait a turn:
         # the same guard the edited-item handler uses, for the same reason.
         self._in_item_change = True
@@ -672,10 +781,10 @@ class LayersPanel(QWidget):
             moved = False
             for layer_id in moving:
                 try:
-                    layers.set_parent(layer_id, parent_id)
-                    moved = True
+                    moved = layers.place(layer_id, parent_id,
+                                         before_id) or moved
                 except ValueError:
-                    # onto its own child: that branch would have no top
+                    # into its own branch: that branch would have no top
                     pass
             if moved:
                 self.scene.notify()

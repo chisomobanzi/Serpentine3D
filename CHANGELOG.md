@@ -41,6 +41,18 @@
   none. The order is written into both `.s3d` and `.3dm`, the Default layer
   included. Requested by Lourenço Vaz Pinto.
 
+- **Layers can be dragged where they belong.** Dropping a layer on another
+  one has always put it inside; dropping it between two rows now moves it
+  there, and dropping it above the first row or below the last takes it to
+  either end. That is also the way back out of a branch: drag a sublayer into
+  the gap between two top-level layers and it leaves the branch and lands in
+  that gap. A line shows where the layer would land, indented to the level it
+  would land at, so a drop beside a branch reads differently from a drop into
+  it. The quarter of a row at each end means beside it and the half between
+  them means inside it, rather than the two pixels Qt offers. Several layers
+  dragged together land in the order they were in, and one drop is one undo.
+  Requested by Lourenço Vaz Pinto.
+
 ### Fixed
 
 - **`Walls::Interior` and `Roof::Interior` no longer collide on import.**
