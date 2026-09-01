@@ -14,7 +14,10 @@ Last updated when 0.8.0 was cut (2026-09-02).
 
 Version `0.8.0` in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.8.0 section is dated 2026-09-02 and holds the
-drafting work below. Suite on Linux: 2650 passed, nothing skipped.
+drafting work below. **Released on 2026-09-02: pushed, tagged `v0.8.0`,
+published with the AppImage, the Windows `.exe` and the macOS `.dmg` all
+attached.** Suite on Linux: 2650 passed, nothing skipped; on macOS arm64:
+2642 passed, 8 skipped.
 
 The minor bump rather than another patch because the app does something
 it could not do before. `section` is a new modelling command, and a layer
