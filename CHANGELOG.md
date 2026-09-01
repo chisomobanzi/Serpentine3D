@@ -16,6 +16,16 @@
 
 ### Fixed
 
+- **A hatch over a section leaves the holes in it empty.** A cut through
+  a pipe is a ring of wall with a bore down the middle, and hatching it
+  as one outline filled the bore in, so the drawing said "bar" where the
+  model said "pipe". A detail's section cut now comes back as regions,
+  the ring around the outside plus whatever is punched out of it, and
+  `hatch` in Region mode picks that up when you click on the wall. The
+  screen and the plot used to work the hatching out separately and could
+  disagree about the same cut; they now ask one function, so what you
+  see on the sheet is what comes out of the PDF.
+
 - **The Layers panel is as wide as its columns need, not as wide as our
   own font wanted.** The panel opens at a set width and the layer name
   takes whatever the four narrow columns beside it leave, so on a machine

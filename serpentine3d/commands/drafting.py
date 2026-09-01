@@ -441,17 +441,21 @@ def cmd_hatch(ctx):
                            "(or click inside detail linework)",
                            choices={"Mode": ["Corners", "Region"]})
     if ctx.opt("Mode", "Corners") == "Region":
-        poly = _region_at(ctx, lay, first[0], first[1])
-        if poly is None:
+        found = _region_at(ctx, lay, first[0], first[1])
+        if found is None:
             ctx.echo("No closed linework region found under that point.")
             return
+        poly, holes = found
         pattern = yield OptionReq("Pattern",
                                   options=["Lines", "Cross", "Solid"],
                                   default="Lines")
         lay.hatches.append(Hatch(points=[list(p) for p in poly],
+                                 holes=[[list(p) for p in ring]
+                                        for ring in holes],
                                  pattern=pattern.lower()))
         ctx.scene.notify()
-        ctx.echo(f"Region hatched ({len(poly)} vertices).")
+        empty = f", {len(holes)} left empty" if holes else ""
+        ctx.echo(f"Region hatched ({len(poly)} vertices{empty}).")
         return
     pts.append([first[0], first[1]])
     while True:
@@ -640,7 +644,12 @@ def cmd_exportsvg(ctx):
 
 
 def _region_at(ctx, lay, px, py):
-    """Closed HLR linework loop containing a paper point, if any."""
+    """The closed area under a point on the sheet, as (points, holes).
+
+    A section cut is a ring of material with the bore punched out of it,
+    and a hatch dropped on the wall has to leave the bore alone. Any
+    other bit of linework is a single loop with nothing inside it.
+    """
     from ..core.layout import enclosing_polygon
     detail = lay.detail_at(px, py)
     if detail is None or detail.perspective:
@@ -652,11 +661,24 @@ def _region_at(ctx, lay, px, py):
     cx = detail.x + detail.w / 2
     cy = detail.y + detail.h / 2
     s = 1.0 / detail.scale_denom
-    polys = [[(cx + p[0] * s, cy + p[1] * s) for p in poly]
-             for poly in (data["visible"] or [])]
-    polys += [[(cx + p[0] * s, cy + p[1] * s) for p in poly]
-              for poly in (data.get("cut") or [])]
-    return enclosing_polygon(polys, px, py)
+
+    def paper(poly):
+        return [(cx + p[0] * s, cy + p[1] * s) for p in poly]
+
+    regions = [[paper(loop) for loop in region]
+               for region in (data.get("cut") or [])]
+    polys = [paper(poly) for poly in (data["visible"] or [])]
+    polys += [loop for region in regions for loop in region]
+    found = enclosing_polygon(polys, px, py)
+    if found is None:
+        return None
+    # Land in the material of a cut face and its holes are the hatch's
+    # holes. Land in one of the holes and that hole is what you pointed
+    # at, so it is the region and it has nothing punched out of it.
+    for region in regions:
+        if len(region) > 1 and found == region[0][:-1]:
+            return found, [loop[:-1] for loop in region[1:]]
+    return found, []
 
 
 def _layout_view(ctx):

@@ -582,15 +582,15 @@ class LayoutView:
                for o in objs]                               # aligned to shapes
         pws = [vp.scene.print_width_of(o) for o in objs]    # plot pen, aligned
 
-        cut_polys = []
+        cut_regions = []
         if shapes and detail.section_offset is not None \
                 and not detail.perspective:
-            shapes, cut_polys = _section_cut(   # 1:1 with input, keeps order
+            shapes, cut_regions = _section_cut(  # 1:1 with input, keeps order
                 shapes, np.asarray(detail.target, float), d, right, up,
                 detail.section_offset)
 
         if not shapes:
-            data = {"visible": [], "hidden": [], "cut": cut_polys,
+            data = {"visible": [], "hidden": [], "cut": cut_regions,
                     "visible_lt": [], "visible_by_obj": [], "visible_groups": []}
             self._hlr_cache[detail.id] = (key, data)
             return data
@@ -625,7 +625,7 @@ class LayoutView:
         from ..core.layout import merge_line_groups
         data = {"visible": visible,
                 "hidden": hlr.edges_to_polylines(res["hidden"]),
-                "cut": cut_polys,
+                "cut": cut_regions,
                 "visible_lt": [(n, p) for n, p in lt_groups.items()],
                 "visible_by_obj": by_obj,
                 "visible_groups": merge_line_groups(entries)}
@@ -675,24 +675,21 @@ class LayoutView:
                                               to_paper, picked):
             self._draw_segs(paper_mvp, segs, ink, 1.6)
         # section-cut faces: heavy outline + 45-degree hatching
-        cut = data.get("cut") or []
-        if cut:
-            from ..core.layout import hatch_lines
-            hatch_segs = []
-            outline_segs = []
-            for poly in cut:
-                paper = [(cx + px * s, cy + py * s) for px, py in poly]
-                arr = np.asarray([(p[0], p[1], 0.0) for p in paper],
-                                 np.float32)
-                outline_segs.append(np.stack([arr[:-1], arr[1:]], axis=1))
-                for a, b in hatch_lines(paper, 45.0, 2.5):
-                    hatch_segs.append(np.asarray(
-                        [[a[0], a[1], 0], [b[0], b[1], 0]], np.float32))
-            if hatch_segs:
-                self._draw_segs(paper_mvp, np.stack(hatch_segs),
-                                (0.25, 0.27, 0.32, 1.0), 1.0)
-            if outline_segs:
-                self._draw_segs(paper_mvp, np.concatenate(outline_segs),
+        regions = data.get("cut") or []
+        if regions:
+            from ..core.layout import cut_hatching
+            fill, loops = cut_hatching(regions, cx, cy, s)
+            if fill:
+                self._draw_segs(paper_mvp, np.asarray(
+                    [[[a[0], a[1], 0], [b[0], b[1], 0]] for a, b in fill],
+                    np.float32), (0.25, 0.27, 0.32, 1.0), 1.0)
+            outline = []
+            for loop in loops:
+                ring = np.asarray([(x, y, 0.0) for x, y in loop] +
+                                  [(loop[0][0], loop[0][1], 0.0)], np.float32)
+                outline.append(np.stack([ring[:-1], ring[1:]], axis=1))
+            if outline:
+                self._draw_segs(paper_mvp, np.concatenate(outline),
                                 (0.05, 0.05, 0.07, 1.0), 2.2)
         GL.glDisable(GL.GL_SCISSOR_TEST)
 
@@ -1233,10 +1230,11 @@ class LayoutView:
 def _section_cut(shapes, target, d, right, up, offset):
     """Cut shapes with a half-space in front of the section plane.
 
-    Returns (cut_shapes, cut_polygons_2d) — polygons are the section
-    outlines in the detail's projector frame (model units)."""
+    Returns (cut_shapes, regions). A region is one cut face as loops in
+    the detail's projector frame (model units), the ring around the
+    outside first and whatever is punched out of it after, so a hatch can
+    leave a bore alone."""
     from ..core import geometry as g
-    from ..core.occ import gp_Pln
 
     plane_pt = target + d * float(offset)
     # extent large enough to swallow the whole scene
@@ -1253,8 +1251,14 @@ def _section_cut(shapes, target, d, right, up, offset):
     quad = g.make_polyline([tuple(c) for c in corners], closed=True)
     cutter = g.extrude(g.planar_face(quad), tuple(d), L, cap=False)
 
+    def flat(pts):
+        """Model points onto the plane the detail is drawn on."""
+        return [(float(np.dot(np.subtract(p, plane_pt), right)),
+                 float(np.dot(np.subtract(p, plane_pt), up)))
+                for p in pts]
+
     out_shapes = []
-    cut_polys = []
+    regions = []
     for s in shapes:
         kind = g.shape_kind(s)
         try:
@@ -1266,24 +1270,16 @@ def _section_cut(shapes, target, d, right, up, offset):
         except g.GeometryError:
             out_shapes.append(s)
             continue
-        # section outline for hatching
+        # The cut face itself, so hatching has something to fill and knows
+        # which rings to leave empty. Same question the `section` command
+        # asks, asked in the same place.
         try:
-            from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
-            plane = gp_Pln(g._pnt(tuple(plane_pt)), g._dir(tuple(d)))
-            sec = BRepAlgoAPI_Section(s, plane)
-            sec.Build()
-            if sec.IsDone():
-                for wire in g._curve_pieces(g.edges_of(sec.Shape()), []):
-                    pts = g.sample_curve(wire, 96)
-                    poly = [((p[0] - plane_pt[0]) * right[0]
-                             + (p[1] - plane_pt[1]) * right[1]
-                             + (p[2] - plane_pt[2]) * right[2],
-                             (p[0] - plane_pt[0]) * up[0]
-                             + (p[1] - plane_pt[1]) * up[1]
-                             + (p[2] - plane_pt[2]) * up[2])
-                            for p in pts]
-                    if len(poly) >= 3:
-                        cut_polys.append(poly)
-        except Exception:
-            pass
-    return out_shapes, cut_polys
+            faces = g.section_regions(s, tuple(plane_pt), tuple(d))
+        except g.GeometryError:
+            continue
+        for face in faces:
+            loops = [poly for poly in map(flat, g.face_loops(face, 96))
+                     if len(poly) >= 3]
+            if loops:
+                regions.append(loops)
+    return out_shapes, regions

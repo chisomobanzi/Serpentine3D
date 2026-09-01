@@ -7,10 +7,11 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 
-from ..core.layout import DEFAULT_STYLES, hatch_lines, resolve_associative
+from ..core.layout import (DEFAULT_STYLES, hatch_region,
+                           resolve_associative)
 
 INK = QColor(25, 25, 30)
 DIM_INK = QColor(45, 70, 130)
@@ -79,21 +80,33 @@ def draw_hatch(painter, to_dev, k, hatch):
     pts = hatch.points
     if len(pts) < 3:
         return
-    poly = QPolygonF([QPointF(*to_dev(p[0], p[1])) for p in pts])
+    # A hole is drawn like any other edge and filled like no material at
+    # all, which is the whole of the difference between a pipe and a bar.
+    rings = [pts] + [r for r in (getattr(hatch, "holes", None) or [])
+                     if len(r) >= 3]
+    polys = [QPolygonF([QPointF(*to_dev(p[0], p[1])) for p in ring])
+             for ring in rings]
     if hatch.pattern == "solid":
+        from PySide6.QtGui import QPainterPath
+        path = QPainterPath()
+        path.setFillRule(Qt.OddEvenFill)      # the holes stay unpainted
+        for poly in polys:
+            path.addPolygon(poly)
+            path.closeSubpath()
         painter.setPen(QPen(HATCH_INK, 0))
         painter.setBrush(QColor(120, 122, 130, 120))
-        painter.drawPolygon(poly)
+        painter.drawPath(path)
         painter.setBrush(QColor(0, 0, 0, 0))
         return
     painter.setPen(QPen(HATCH_INK, max(0.15 * k, 1.0)))
     painter.setBrush(QColor(0, 0, 0, 0))
-    painter.drawPolygon(poly)
+    for poly in polys:
+        painter.drawPolygon(poly)
     angles = [hatch.angle]
     if hatch.pattern == "cross":
         angles.append(hatch.angle + 90)
     for ang in angles:
-        for a, b in hatch_lines(pts, ang, hatch.spacing):
+        for a, b in hatch_region(rings, ang, hatch.spacing):
             _line(painter, to_dev, a, b)
 
 

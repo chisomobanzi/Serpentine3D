@@ -151,24 +151,24 @@ def _paint_detail_vector(painter, layout_view, detail, layout, k):
         if pattern:
             pen.setDashPattern([max(v, 0.01) / mm for v in pattern])
         draw_polys(polys, pen)
-    cut = data.get("cut") or []
-    if cut:
-        from ..core.layout import hatch_lines
+    regions = data.get("cut") or []
+    if regions:
+        # The same answer the screen draws, so a bore that is open on
+        # screen is open on paper.
+        from ..core.layout import cut_hatching
         from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QPolygonF
+        fill, loops = cut_hatching(regions, cx, cy, s)
         painter.setPen(QPen(QColor(60, 62, 70), 0.15 * k))
-        for poly in cut:
-            paper = [(cx + px * s, cy + py * s) for px, py in poly]
-            for a, b in hatch_lines(paper, 45.0, 2.5):
-                painter.drawLine(
-                    QPointF(a[0] * k, (layout.paper_h - a[1]) * k),
-                    QPointF(b[0] * k, (layout.paper_h - b[1]) * k))
+        for a, b in fill:
+            painter.drawLine(
+                QPointF(a[0] * k, (layout.paper_h - a[1]) * k),
+                QPointF(b[0] * k, (layout.paper_h - b[1]) * k))
         painter.setPen(QPen(QColor(10, 10, 12), 0.5 * k))
-        for poly in cut:
-            pts = [QPointF((cx + px * s) * k,
-                           (layout.paper_h - (cy + py * s)) * k)
-                   for px, py in poly]
-            from PySide6.QtGui import QPolygonF
-            painter.drawPolyline(QPolygonF(pts))
+        for loop in loops:
+            ring = list(loop) + [loop[0]]     # closed, or one side is missing
+            painter.drawPolyline(QPolygonF(
+                [QPointF(x * k, (layout.paper_h - y) * k) for x, y in ring]))
     painter.restore()
 
 

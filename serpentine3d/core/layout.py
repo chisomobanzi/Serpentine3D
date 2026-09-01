@@ -105,6 +105,7 @@ class Leader:
 class Hatch:
     id: str = field(default_factory=_uid)
     points: list = field(default_factory=list)   # closed polygon [[x,y],...]
+    holes: list = field(default_factory=list)    # rings left empty, same form
     pattern: str = "lines"                       # solid | lines | cross
     angle: float = 45.0
     spacing: float = 3.0                         # mm
@@ -233,31 +234,41 @@ def merge_line_groups(entries: list) -> list:
     return [(key[0], key[1], groups[key]) for key in order]
 
 
-def hatch_lines(points: list, angle_deg: float,
-                spacing: float) -> list:
-    """Hatch segments filling a closed polygon (even-odd), as
-    [((x0,y0),(x1,y1)), ...] in the same coordinates as `points`."""
+def hatch_region(loops: list, angle_deg: float, spacing: float) -> list:
+    """Hatch segments filling a region, as [((x0,y0),(x1,y1)), ...].
+
+    `loops` is the ring around the outside followed by the rings punched
+    out of it, in the coordinates the segments come back in. Every ring
+    crosses the scanline, and the crossings are paired off in order, so a
+    line that enters the material at the outer ring leaves it again at
+    the hole and picks up on the far side. That is the whole reason a
+    hatch is asked about a region and not about one closed polygon: a
+    section through a pipe is a ring of wall, and filling the bore in
+    turns it into a bar.
+    """
     import numpy as np
-    if len(points) < 3 or spacing <= 0:
+    rings = [np.asarray(ring, float) for ring in loops if len(ring) >= 3]
+    if not rings or spacing <= 0:
         return []
-    pts = np.asarray(points, float)
     a = math.radians(angle_deg)
     rot = np.array([[math.cos(-a), -math.sin(-a)],
                     [math.sin(-a), math.cos(-a)]])
-    local = pts @ rot.T
-    y0, y1 = local[:, 1].min(), local[:, 1].max()
-    out = []
+    local = [ring @ rot.T for ring in rings]
+    y0 = min(ring[:, 1].min() for ring in local)
+    y1 = max(ring[:, 1].max() for ring in local)
     inv = np.array([[math.cos(a), -math.sin(a)],
                     [math.sin(a), math.cos(a)]])
+    out = []
     y = y0 + spacing / 2
-    n = len(local)
     while y < y1:
         xs = []
-        for i in range(n):
-            p, q = local[i], local[(i + 1) % n]
-            if (p[1] > y) != (q[1] > y):
-                t = (y - p[1]) / (q[1] - p[1])
-                xs.append(p[0] + t * (q[0] - p[0]))
+        for ring in local:
+            n = len(ring)
+            for i in range(n):
+                p, q = ring[i], ring[(i + 1) % n]
+                if (p[1] > y) != (q[1] > y):
+                    t = (y - p[1]) / (q[1] - p[1])
+                    xs.append(p[0] + t * (q[0] - p[0]))
         xs.sort()
         for i in range(0, len(xs) - 1, 2):
             a2 = inv @ np.array([xs[i], y])
@@ -266,6 +277,36 @@ def hatch_lines(points: list, angle_deg: float,
                         (float(b2[0]), float(b2[1]))))
         y += spacing
     return out
+
+
+def hatch_lines(points: list, angle_deg: float,
+                spacing: float) -> list:
+    """Hatch segments filling a closed polygon (even-odd), as
+    [((x0,y0),(x1,y1)), ...] in the same coordinates as `points`."""
+    return hatch_region([points], angle_deg, spacing)
+
+
+def cut_hatching(regions: list, cx: float, cy: float, s: float,
+                 angle: float = 45.0, spacing: float = 2.5) -> tuple:
+    """A detail's section cuts on the paper: what to fill, what to outline.
+
+    `regions` arrive in the detail's projector frame, in model units;
+    `cx`, `cy` and `s` place them on the sheet. Returns the hatch
+    segments for every region and the loops to draw a line around, both
+    in paper millimetres.
+
+    The screen and the plot both draw this, and they used to work it out
+    separately. One of them was always going to be a version behind.
+    """
+    fill, loops = [], []
+    for region in regions:
+        paper = [[(cx + px * s, cy + py * s) for px, py in ring]
+                 for ring in region if len(ring) >= 3]
+        if not paper:
+            continue
+        fill.extend(hatch_region(paper, angle, spacing))
+        loops.extend(paper)
+    return fill, loops
 
 
 DEFAULT_STYLES = {
@@ -541,6 +582,11 @@ def move_annotation(kind: str, obj, dx: float, dy: float):
         obj.y2 += dy
     elif kind in ("leader", "hatch"):
         obj.points = [[p[0] + dx, p[1] + dy] for p in obj.points]
+        # A hole that stayed behind is a hole in the wrong place, and once
+        # the hatch has moved far enough it is a hole in nothing at all.
+        if getattr(obj, "holes", None):
+            obj.holes = [[[p[0] + dx, p[1] + dy] for p in ring]
+                         for ring in obj.holes]
 
 
 def move_sheet_item(kind: str, obj, dx: float, dy: float):
