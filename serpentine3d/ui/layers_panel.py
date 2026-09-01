@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import linetype as _lt
+from . import theme
 
 # tree columns: name, visible check, colour swatch, linetype, print width
 _NAME_COL = 0
@@ -86,6 +87,11 @@ class _ChoiceDelegate(QStyledItemDelegate):
         editor.setGeometry(rect)
 
 
+def _id_of(item) -> str:
+    """The layer a row stands for."""
+    return item.data(_NAME_COL, Qt.ItemDataRole.UserRole)
+
+
 class _LayerTree(QTreeWidget):
     """The layers tree, with a visibility click that leaves the selection be.
 
@@ -98,6 +104,8 @@ class _LayerTree(QTreeWidget):
     column runs with selection switched off: the box still toggles, the rows
     stay picked.
     """
+
+    on_drop = None      # the panel's, called with (layer ids, new parent)
 
     def size_columns(self):
         """Give every column the width its own content asks for, except the
@@ -113,11 +121,30 @@ class _LayerTree(QTreeWidget):
         header.setMinimumSectionSize(24)
         header.setSectionResizeMode(_NAME_COL, QHeaderView.ResizeMode.Stretch)
         header.resizeSection(_VISIBLE_COL, 28)
-        header.resizeSection(_COLOR_COL, 28)
+        # 24, not 28: a filled swatch needs no more, and the four pixels go
+        # to the name column, which is the one an indented sublayer eats.
+        header.resizeSection(_COLOR_COL, 24)
         header.resizeSection(
             _TYPE_COL, _column_width(self, _TYPE_COL, *_lt.LINETYPES))
         header.resizeSection(_PRINT_COL, _column_width(
             self, _PRINT_COL, "Default", *_STANDARD_PEN_WIDTHS))
+
+    def dropEvent(self, event):
+        """Where a dragged layer was let go of, handed to the panel.
+
+        Never up to QTreeWidget, which would move the rows itself: these
+        rows belong to the scene and are redrawn from it the moment the
+        move lands, so a tree that had also moved them would show the move
+        twice. Letting go over nothing means the top level.
+        """
+        item = self.itemAt(event.position().toPoint())
+        target = None if item is None else _id_of(item)
+        moving = [_id_of(i) for i in self.selectedItems()]
+        if not moving and self.currentItem() is not None:
+            moving = [_id_of(self.currentItem())]
+        if self.on_drop is not None and moving:
+            self.on_drop(moving, target)
+        event.accept()
 
     def mouseReleaseEvent(self, event):
         index = self.indexAt(event.position().toPoint())
@@ -177,11 +204,29 @@ class LayersPanel(QWidget):
         # the guards the class docstring describes
         self._updating = False        # the panel is writing to the tree itself
         self._in_item_change = False  # Qt is still inside an edited item
+        # branches the user has closed, so a redraw does not open them again
+        self._collapsed = set()
 
         self.tree = _LayerTree()
         self.tree.setColumnCount(5)
         self.tree.setHeaderLabels(["Layer", "", "", "Type", "Print"])
-        self.tree.setRootIsDecorated(False)
+        # a sublayer is drawn under its parent, so the branch needs its
+        # expander back
+        self.tree.setRootIsDecorated(True)
+        # Tighter than Qt's 20px a level. The dock is 280px wide and four
+        # of the five columns are sized from their own content, so the name
+        # column is what an indent is taken out of: at the default indent a
+        # root layer read "Def..." and a grandchild's name had no room left
+        # at all. At 12 a fresh window's Default still reads in full. Deep
+        # names still run out of room, so every row carries its full path as
+        # a tooltip and the name column takes all of any width the user
+        # gives the dock.
+        self.tree.setIndentation(12)
+        self.tree.setDragEnabled(True)
+        self.tree.setAcceptDrops(True)
+        self.tree.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.tree.setDropIndicatorShown(True)
+        self.tree.on_drop = self._move_layers
         # several layers can be picked at once, so one click on a visibility
         # box can switch a whole group of them together
         self.tree.setSelectionMode(
@@ -201,6 +246,10 @@ class LayersPanel(QWidget):
         btn_add.setStyleSheet(btn_style)
         btn_add.setToolTip("New layer")
         btn_add.clicked.connect(self._new_layer)
+        btn_sub = QPushButton("↳")
+        btn_sub.setStyleSheet(btn_style)
+        btn_sub.setToolTip("New sublayer of the selected layer")
+        btn_sub.clicked.connect(self._new_sublayer)
         btn_del = QPushButton("−")
         btn_del.setStyleSheet(btn_style)
         btn_del.setToolTip("Delete selected layer")
@@ -209,6 +258,7 @@ class LayersPanel(QWidget):
         btns = QHBoxLayout()
         btns.setContentsMargins(4, 2, 4, 4)
         btns.addWidget(btn_add)
+        btns.addWidget(btn_sub)
         btns.addWidget(btn_del)
         btns.addStretch(1)
 
@@ -230,36 +280,67 @@ class LayersPanel(QWidget):
         self._updating = True
         picked = self._remember_picked()
         self.tree.clear()
-        current = self.scene.layers.current_id
         counts = {}
         for obj in self.scene.all():
             counts[obj.layer_id] = counts.get(obj.layer_id, 0) + 1
-        for layer in self.scene.layers.all():
-            n = counts.get(layer.id, 0)
-            label = f"{layer.name}" + (f"  ({n})" if n else "")
-            if layer.id == current:
-                label = "● " + label
-            print_text = ("Default" if layer.print_width == 0
-                          else f"{layer.print_width:g}")
-            item = QTreeWidgetItem([label, "", "", layer.linetype, print_text])
-            item.setData(_NAME_COL, Qt.ItemDataRole.UserRole, layer.id)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(
-                _VISIBLE_COL, Qt.CheckState.Checked if layer.visible
-                else Qt.CheckState.Unchecked)
-            item.setToolTip(_VISIBLE_COL, "Visible")
-            color = QColor.fromRgbF(*layer.color)
-            item.setBackground(_COLOR_COL, color)
-            item.setToolTip(_COLOR_COL, "Double-click name to rename; click "
-                                        "swatch to change colour")
-            item.setToolTip(_TYPE_COL, "Double-click to choose the layer's "
-                                       "linetype")
-            item.setToolTip(_PRINT_COL, "Plotted pen width in mm; double-click "
-                                        "to pick or type one, Default for the "
-                                        "device pen")
-            self.tree.addTopLevelItem(item)
+        layers = self.scene.layers
+        known = {la.id for la in layers.all()}
+        for layer in layers.all():
+            # A parent that is not there is not a parent: a file written by
+            # something else can say so, and the layer has to appear
+            # somewhere rather than nowhere.
+            if layer.parent is None or layer.parent not in known:
+                self._add_row(layer, None, counts)
         self._restore_picked(picked)
         self._updating = False
+
+    def _add_row(self, layer, parent_item, counts):
+        """One layer's row, and every row of the branch under it."""
+        n = counts.get(layer.id, 0)
+        label = f"{layer.name}" + (f"  ({n})" if n else "")
+        if layer.id == self.scene.layers.current_id:
+            label = "● " + label
+        print_text = ("Default" if layer.print_width == 0
+                      else f"{layer.print_width:g}")
+        item = QTreeWidgetItem([label, "", "", layer.linetype, print_text])
+        item.setData(_NAME_COL, Qt.ItemDataRole.UserRole, layer.id)
+        item.setToolTip(_NAME_COL, self.scene.layers.full_path(layer.id))
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        # The layer's own switch, which is what the user set. Whether it is
+        # on screen is another question, and the answer is the grey below.
+        item.setCheckState(
+            _VISIBLE_COL, Qt.CheckState.Checked if layer.visible
+            else Qt.CheckState.Unchecked)
+        item.setToolTip(_VISIBLE_COL, "Visible")
+        if not self.scene.layers.is_visible(layer.id):
+            item.setForeground(_NAME_COL, QColor(theme.TEXT_MUTED))
+        color = QColor.fromRgbF(*layer.color)
+        item.setBackground(_COLOR_COL, color)
+        item.setToolTip(_COLOR_COL, "Double-click name to rename; click "
+                                    "swatch to change colour")
+        item.setToolTip(_TYPE_COL, "Double-click to choose the layer's "
+                                   "linetype")
+        item.setToolTip(_PRINT_COL, "Plotted pen width in mm; double-click "
+                                    "to pick or type one, Default for the "
+                                    "device pen")
+        if parent_item is None:
+            self.tree.addTopLevelItem(item)
+        else:
+            parent_item.addChild(item)
+        for child in self.scene.layers.children(layer.id):
+            self._add_row(child, item, counts)
+        return item
+
+    def _all_rows(self) -> dict:
+        """Every row in the tree by layer id, however deep it sits."""
+        out = {}
+        stack = [self.tree.topLevelItem(i)
+                 for i in range(self.tree.topLevelItemCount())]
+        while stack:
+            item = stack.pop()
+            out[self._layer_id(item)] = item
+            stack.extend(item.child(i) for i in range(item.childCount()))
+        return out
 
     def _remember_picked(self):
         """The selected layers and the current row, by layer id.
@@ -269,14 +350,18 @@ class LayersPanel(QWidget):
         they clicked last.
         """
         current = self.tree.currentItem()
+        # A branch is open unless the user closed it, so a layer that
+        # arrives inside one is on screen without being hunted for.
+        self._collapsed = {
+            layer_id for layer_id, item in self._all_rows().items()
+            if item.childCount() and not item.isExpanded()}
         return (self._selected_layer_ids(),
                 None if current is None else self._layer_id(current))
 
     def _restore_picked(self, picked):
         selected, current = picked
-        for i in range(self.tree.topLevelItemCount()):
-            item = self.tree.topLevelItem(i)
-            layer_id = self._layer_id(item)
+        for layer_id, item in self._all_rows().items():
+            item.setExpanded(layer_id not in self._collapsed)
             if layer_id in selected:
                 item.setSelected(True)
             if layer_id == current:
@@ -378,6 +463,58 @@ class LayersPanel(QWidget):
         layer = self.scene.layers.create()
         self.scene.layers.current_id = layer.id
         self.scene.notify()
+
+    def _new_sublayer(self):
+        """A new layer under the picked one, the way Rhino's panel does it.
+
+        Nothing picked means there is nowhere to put it; the + beside this
+        button is the one that makes a layer of its own.
+        """
+        item = self.tree.currentItem()
+        if item is None:
+            return
+        parent_id = self._layer_id(item)
+        self.history.checkpoint("new sublayer")
+        layer = self.scene.layers.create(parent=parent_id)
+        self.scene.layers.current_id = layer.id
+        # Open the branch on the row itself, not in `_collapsed`, which
+        # the redraw is about to work out again from the tree: a new layer
+        # made inside a closed branch is a new layer nobody can see.
+        item.setExpanded(True)
+        self.scene.notify()
+
+    def _move_layers(self, layer_ids, parent_id):
+        """Put dragged layers under another one, or back at the top level.
+
+        A layer inside one of the others is left alone: it is already going
+        where its parent goes, and moving it too would take it out of the
+        branch the user is dragging.
+        """
+        layers = self.scene.layers
+        moving = [i for i in layer_ids if i != parent_id]
+        inside = {d.id for i in moving for d in layers.descendants(i)}
+        moving = [i for i in moving if i not in inside]
+        if not moving:
+            return
+        # Qt is still inside the drop, so the redraw has to wait a turn:
+        # the same guard the edited-item handler uses, for the same reason.
+        self._in_item_change = True
+        try:
+            self.history.checkpoint("move layer")
+            moved = False
+            for layer_id in moving:
+                try:
+                    layers.set_parent(layer_id, parent_id)
+                    moved = True
+                except ValueError:
+                    # onto its own child: that branch would have no top
+                    pass
+            if moved:
+                self.scene.notify()
+            else:
+                self.history.discard_checkpoint()
+        finally:
+            self._in_item_change = False
 
     def _delete_layer(self):
         item = self.tree.currentItem()

@@ -123,6 +123,15 @@ def test_the_columns_fit_the_dock_of_a_real_window_under_the_real_theme():
                 assert tree.columnWidth(column) >= needed, (
                     f"the {what} column is {tree.columnWidth(column)}px "
                     f"where its rows need {needed}px, so it reads cut short")
+            # The name column is the one that stretches, so it is the one
+            # anything else takes its width out of. Sublayers gave every
+            # row an indent for its expander, which is charged to this
+            # column, and a fresh window's own layer came out as "Defa...".
+            needed = tree.sizeHintForColumn(NAME_COL)
+            assert tree.columnWidth(NAME_COL) >= needed, (
+                f"the Layer column is {tree.columnWidth(NAME_COL)}px where "
+                f"a fresh window's own layer needs {needed}px, so the name "
+                f"of the layer everything is drawn on reads cut short")
         finally:
             win.mark_saved()
             win.close()

@@ -28,6 +28,11 @@ CONTROL_NET = (0.34, 0.44, 0.56, 0.6)
 # control point blue.
 DIRECTION_ARROW = (0.40, 0.95, 0.50, 0.95)
 ACCENT_DIM = "#8a6a2f"
+# Secondary text: a heading, a hint, a row that is switched off.
+# The same grey QSS spells out below for headers and placeholders,
+# named here because a widget that dims a row has to reach for it in
+# code, and Qt's own disabled grey is not what this window paints.
+TEXT_MUTED = "#9a9b9e"
 
 # Shaded-mode lighting. SHADED_AMBIENT mirrors a constant hardcoded in
 # viewport.MESH_FRAG (`uColor * (0.30 + 0.70 * diff)`); a test pins the two

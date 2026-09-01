@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Sublayers.** A layer can now live under another layer, as deep as you
+  like. `Walls` holds `Interior` and `Exterior`, `Exterior` holds
+  `Cladding`, and the layers panel draws each one indented under its
+  parent with a triangle to open and close the branch. The `↳` button
+  below the list makes a new layer under the one you have picked, and a
+  layer can be dragged onto another to move it, along with everything
+  under it. Switching a parent off takes its whole branch off the screen
+  and locking a parent locks the branch, while each layer keeps its own
+  switch: a child under a switched-off parent reads greyed but is still
+  set to on, so switching the parent back on brings the branch back the
+  way you left it. Deleting a parent deletes the branch and moves the
+  objects to Default. Requested by Lourenço Vaz Pinto.
+
+- **A layer tree is saved and loaded.** Both `.s3d` and `.3dm` carry the
+  tree. On the way out to Rhino a layer is written with its parent and
+  with the visible and locked switches Rhino keeps for a layer of its own,
+  so a branch you switched off there comes back switched off here.
+
+### Fixed
+
+- **`Walls::Interior` and `Roof::Interior` no longer collide on import.**
+  Reading a `.3dm` looked only at a layer's own name, so two sublayers
+  named the same under different parents landed on one layer and the
+  objects of both were merged onto it. An imported layer is now matched by
+  its full path, and the parents it hangs from are made as it goes, with
+  the colour, print width and switches the file gives them. Reported by
+  Lourenço Vaz Pinto.
+
 ## 0.7.2 — 2026-09-01
 
 ### Added

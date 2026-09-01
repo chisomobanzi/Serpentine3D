@@ -6,7 +6,7 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.7.2 was cut (2026-09-01).
+Last updated when sublayers landed (2026-09-01).
 
 ---
 
@@ -14,8 +14,13 @@ Last updated when 0.7.2 was cut (2026-09-01).
 
 Version `0.7.2` in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.7.2 section is dated 2026-09-01 and holds batch 1.
-**Committed and tagged `v0.7.2` on 2026-09-01, not yet pushed or
-published as a GitHub release.** Nothing was left on the pre-release list. Suite on Linux: 2413 passed, nothing skipped.
+**Released as `v0.7.2` on 2026-09-01**: pushed, tagged, and published as
+a GitHub release with the AppImage and the macOS `.dmg` attached. Nothing
+was left on the pre-release list.
+
+Since then, on `main` and unreleased: **sublayers**, in three commits
+(the model, the file formats, the panel). Suite on Linux: 2467 passed,
+nothing skipped.
 
 ### Batch 1 — released in 0.7.2
 
@@ -69,6 +74,40 @@ All of it driven test-first and then exercised in the running app:
   test that resizes its own widget proves nothing about the width the app
   gives it: **build `MainWindow` and grab the dock.**
 
+### Sublayers, 2026-09-01
+
+Three commits, each red-green with its own tests: the model
+(`core/layers.py`), the two file formats, then the panel.
+
+- **Each layer keeps its own visible and locked switch, and inheritance is
+  worked out on top.** `LayerManager.is_visible()` is own-and-all-ancestors,
+  `is_locked()` is own-or-any-ancestor. This is Rhino's model, and it is
+  what lets a branch come back the way you left it when its parent is
+  switched on again. `Scene.visible_objects` / `selectable_objects` ask
+  those two, so nothing downstream had to learn about parents.
+- **The layer table cannot be returned from the importer.** The parent
+  process never reads the `.3dm`: a reader process forks converters and
+  only each object's `meta` crosses the pipe. So `meta` carries
+  `layer_chain`, a root-first tuple of appearance dicts, one rung per
+  ancestor. That is also what lets an empty parent be made with the colour
+  and switches the file gave it.
+- **Rhino's persistent visibility is the layer's own switch.**
+  `GetPersistentVisibility()` on the way in, and on the way out both are
+  written: `Visible` gets the effective answer, the persistent bit gets the
+  layer's own. `Layer.PathSeparator` cannot be called from Python in
+  rhino3dm 8.32, so `::` is spelled out in `core/layers.py`.
+- **A synthetic drop crashes `QTreeWidget.dropEvent`.** The panel's tree
+  does the whole move itself and never calls `super().dropEvent`: with
+  empty `QMimeData` and no live drag the base class takes a SIGSEGV, and
+  the rows belong to the scene anyway, which redraws the moment the move
+  lands.
+- **An indent is charged to the name column.** It is the column that
+  stretches, so the expander every row grew turned a fresh window's own
+  layer into "Defa...". Indent is 12px, the colour swatch gave up 4px, and
+  a test now pins the name column against `sizeHintForColumn`. Deep names
+  still run out of room in a 280px dock, so every row carries its full
+  path as a tooltip.
+
 ---
 
 ## Backlog from #6
@@ -80,13 +119,13 @@ Triaged by cost. Everything below is still open unless marked.
 | Item | Notes |
 |---|---|
 | **Array / ArrayPath won't start on Enter** | No code reason found — `array`, `arraypath`, `arraypolar` are registered normally (`commands/transform.py:309,338,358`). Suspect the suggestion list (`array` is a prefix of two others) or a preselection interaction. **Needs a repro from Lourenço.** |
-| **Layer reorder (move up/down)** | Needs layer order to be first-class and persisted. Do it with sublayers — same data change. |
+| **Layer reorder (move up/down)** | Needs layer order to be first-class and persisted. Sublayers went in without it: `LayerManager._order` is already a list and the panel now walks it per branch, so this is a move within `_order` plus two buttons. |
 
 ### Medium
 
 | Item | Notes |
 |---|---|
-| **Sublayers** | The big one for architects, and a latent correctness bug: `fileio/rhino.py:680 read_layers()` reads only `layer.Name`, so `Walls::Interior` and `Roof::Interior` collide on import. **Confirmed viable:** rhino3dm 8.32 exposes `Layer.ParentLayerId` and `Layer.FullPath`. Work: `parent` field on `Layer` (`core/layers.py:24`, frozen dataclass), hierarchy in the panel (already a `QTreeWidget`), inherited visibility/lock, save format, undo snapshot. |
+| **Sublayers** | ✅ **Done, on `main`, unreleased.** `parent` on `Layer`, inherited visibility and locking computed by `is_visible`/`is_locked` (each layer keeps its own switch, Rhino's model), both file formats, and a tree in the panel with a sublayer button and drag-to-reparent. The `Walls::Interior` / `Roof::Interior` import collision went with it, since an imported layer is matched by full path now. Notes below. |
 | **Layer hatch** | A `hatch` field on `Layer`, used as the default by the paper-space `hatch` command (`commands/drafting.py:431`). Machinery exists: `core/layout.py:105 Hatch`, `:236 hatch_lines()`. But "hatch when cut" implies the section tool — do that first. |
 | **ArrayPath orientation** (Freeform, etc.) | `commands/transform.py:338`. Needs a proper frame-along-curve. |
 | **Visual feedback when picking edges** | Lourenço reported none. **It exists** — `ui/viewport.py:1864` draws picked sub-object edges. So this is a *visibility/tuning* problem (colour, width, z-bias), not a missing feature. Look at it on screen before writing code. |
@@ -112,7 +151,7 @@ Triaged by cost. Everything below is still open unless marked.
   chisomobanzi.github.io/Serpentine3D; `assets/logo-256.png`). That is a
   navigation problem, not a missing-feature problem. Link the command
   reference from the site's top nav and the README's first screen.
-- **Donations.** GitHub Sponsors / Ko-fi — a five-minute README + site edit.
+- ~~**Donations.**~~ ✅ Ko-fi, shipped July 2026 (README, site, `FUNDING.yml`).
 
 ### Open questions for Lourenço
 
