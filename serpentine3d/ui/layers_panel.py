@@ -6,7 +6,7 @@ from PySide6.QtCore import QItemSelectionModel, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QColorDialog, QComboBox, QHBoxLayout,
-    QHeaderView, QPushButton, QStyledItemDelegate, QTreeWidget,
+    QHeaderView, QMenu, QPushButton, QStyledItemDelegate, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -236,6 +236,9 @@ class LayersPanel(QWidget):
             _lt.LINETYPES, editable=False, parent=self.tree))
         self.tree.setItemDelegateForColumn(_PRINT_COL, _ChoiceDelegate(
             ("Default", *_STANDARD_PEN_WIDTHS), editable=True, parent=self.tree))
+        self.tree.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._row_menu)
         self.tree.itemChanged.connect(self._item_changed)
         self.tree.itemClicked.connect(self._item_clicked)
         self.tree.itemDoubleClicked.connect(self._edit_item)
@@ -250,6 +253,13 @@ class LayersPanel(QWidget):
         btn_sub.setStyleSheet(btn_style)
         btn_sub.setToolTip("New sublayer of the selected layer")
         btn_sub.clicked.connect(self._new_sublayer)
+        btn_out = QPushButton("↰")
+        btn_out.setStyleSheet(btn_style)
+        btn_out.setToolTip("Move the selected layer out of its parent")
+        # A lambda, not the method: a clicked signal hands its checked
+        # state to any slot that will take an argument, and this one takes
+        # the layers to move.
+        btn_out.clicked.connect(lambda: self._move_out())
         btn_del = QPushButton("−")
         btn_del.setStyleSheet(btn_style)
         btn_del.setToolTip("Delete selected layer")
@@ -259,6 +269,7 @@ class LayersPanel(QWidget):
         btns.setContentsMargins(4, 2, 4, 4)
         btns.addWidget(btn_add)
         btns.addWidget(btn_sub)
+        btns.addWidget(btn_out)
         btns.addWidget(btn_del)
         btns.addStretch(1)
 
@@ -473,14 +484,105 @@ class LayersPanel(QWidget):
         item = self.tree.currentItem()
         if item is None:
             return
-        parent_id = self._layer_id(item)
+        self._new_sublayer_under(self._layer_id(item))
+
+    def _new_sublayer_under(self, parent_id):
+        """A new layer inside the named one."""
+        item = self._all_rows().get(parent_id)
         self.history.checkpoint("new sublayer")
         layer = self.scene.layers.create(parent=parent_id)
         self.scene.layers.current_id = layer.id
         # Open the branch on the row itself, not in `_collapsed`, which
         # the redraw is about to work out again from the tree: a new layer
         # made inside a closed branch is a new layer nobody can see.
-        item.setExpanded(True)
+        if item is not None:
+            item.setExpanded(True)
+        self.scene.notify()
+
+    def _row_menu(self, pos):
+        """The menu a right-click on a row opens.
+
+        The panel spells out every other move a layer can make, and left
+        the way back out of a branch to a drag onto the blank space under
+        the last row, which nobody guesses and which is not there at all
+        once the layers fill the panel.
+        """
+        item = self.tree.itemAt(pos)
+        if item is None:
+            return
+        layer_id = self._layer_id(item)
+        if layer_id not in self._selected_layer_ids():
+            self.tree.setCurrentItem(item)
+        self._menu_for(layer_id).exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _menu_for(self, layer_id) -> QMenu:
+        """The menu for the row under the pointer.
+
+        It acts on the whole selection when that row is one of the picked
+        ones, and on that row alone otherwise: right-clicking one of five
+        picked layers to move only that one is never what was meant.
+        """
+        layers = self.scene.layers
+        picked = self._selected_layer_ids()
+        ids = sorted(picked) if layer_id in picked else [layer_id]
+        parents = {layers.get(i).parent for i in ids}
+        menu = QMenu(self)
+        menu.addAction("New sublayer",
+                       lambda: self._new_sublayer_under(layer_id))
+        menu.addSeparator()
+        # Name the branch when they all sit in the same one, so the entry
+        # says where the layer ends up and not merely that it moves.
+        if len(parents) == 1 and None not in parents:
+            (parent,) = parents
+            text = f"Move out of {layers.get(parent).name}"
+        else:
+            text = "Move out one level"
+        out = menu.addAction(text, lambda: self._move_out(ids))
+        out.setEnabled(bool(parents - {None}))
+        # Only worth offering where it is a different move: for a layer
+        # one level down, out of its branch is the top level already.
+        deep = [i for i in ids if layers.get(i).parent
+                and layers.get(layers.get(i).parent).parent]
+        if deep:
+            menu.addAction("Move to the top level",
+                           lambda: self._move_out(ids, to_top=True))
+        return menu
+
+    def _move_out(self, layer_ids=None, to_top=False):
+        """Take layers out of the branch they sit in.
+
+        Out is one level: a layer that leaves Walls::Exterior lands in
+        Walls, beside the parent it came out of, which is what a user
+        dragging it up the tree by hand would do. `to_top` is the deep
+        case, where climbing out a level at a time is a chore.
+
+        A layer inside another one that is moving is left alone, for the
+        same reason a drag leaves it alone: it is already going where its
+        parent goes.
+        """
+        layers = self.scene.layers
+        if layer_ids is None:
+            layer_ids = self._selected_layer_ids()
+        moving = [i for i in layer_ids if layers.get(i).parent]
+        inside = {d.id for i in moving for d in layers.descendants(i)}
+        moving = [i for i in moving if i not in inside]
+        if not moving:
+            return
+        # Where each one lands, worked out before anything moves: read
+        # afterwards, a layer whose parent has itself just come out would
+        # be measured against a tree that no longer holds it.
+        targets = {i: (None if to_top else layers.get(layers.get(i).parent)
+                       .parent) for i in moving}
+        self.history.checkpoint("move layer out")
+        moved = False
+        for layer_id, parent in targets.items():
+            try:
+                layers.set_parent(layer_id, parent)
+                moved = True
+            except ValueError:
+                pass
+        if not moved:
+            self.history.discard_checkpoint()
         self.scene.notify()
 
     def _move_layers(self, layer_ids, parent_id):

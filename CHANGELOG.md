@@ -10,11 +10,14 @@
   parent with a triangle to open and close the branch. The `↳` button
   below the list makes a new layer under the one you have picked, and a
   layer can be dragged onto another to move it, along with everything
-  under it. Switching a parent off takes its whole branch off the screen
-  and locking a parent locks the branch, while each layer keeps its own
-  switch: a child under a switched-off parent reads greyed but is still
-  set to on, so switching the parent back on brings the branch back the
-  way you left it. Deleting a parent deletes the branch and moves the
+  under it. The `↰` button beside it takes the picked layer back out
+  again, one level at a time, and a right-click on a row offers the same
+  move by name ("Move out of Walls") along with "Move to the top level"
+  for a layer buried deeper. Switching a parent off takes its whole branch
+  off the screen and locking a parent locks the branch, while each layer
+  keeps its own switch: a child under a switched-off parent reads greyed but
+  is still set to on, so switching the parent back on brings the branch back
+  the way you left it. Deleting a parent deletes the branch and moves the
   objects to Default. Requested by Lourenço Vaz Pinto.
 
 - **The layer tree is on the API too.** `scene_info` reports each layer's

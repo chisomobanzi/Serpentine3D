@@ -67,6 +67,18 @@ def main() -> int:
 
     win._layer_dock.grab().save(out)
     print("wrote", out)
+
+    # The way back out of a branch, as the user meets it: the row menu on
+    # the deepest layer, which is the only one offered both moves.
+    clad = layers.find_by_path("Walls::Exterior::Cladding")
+    menu = panel._menu_for(clad.id)
+    menu.show()
+    QApplication.processEvents()
+    print("menu:", [a.text() or "-" for a in menu.actions()])
+    menu_out = out.replace(".png", "-menu.png")
+    menu.grab().save(menu_out)
+    print("wrote", menu_out)
+    menu.hide()
     win.mark_saved()
     return 0
 
