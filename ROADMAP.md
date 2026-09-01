@@ -23,7 +23,7 @@ information that 0.7.x drops on load. Old files still open: `native.py`
 defaults the field to empty, and `FORMAT_VERSION` did not have to move.
 
 0.7.3 was released on 2026-09-01: pushed, tagged, and published with the
-AppImage and the Windows `.exe` attached; the macOS `.dmg` never went up.
+AppImage, the Windows `.exe` and the macOS `.dmg` all attached.
 
 ### Drafting, released in 0.8.0
 
