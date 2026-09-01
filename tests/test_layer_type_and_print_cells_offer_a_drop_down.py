@@ -71,6 +71,22 @@ def _open_editor(panel, item, column):
     return combo
 
 
+def _close_editor(panel, layer_id, column, combo):
+    """End the edit, the way clicking away from the cell would.
+
+    No test may leave an editor open. The panel is dropped when the test
+    returns, but Qt still holds the drop-down as the widget with focus, and
+    the next test to show a panel activates a window, which makes Qt hand
+    the focus on and commit an editor that is no longer there. That crash
+    lands in whichever test opened the next panel, nowhere near the test
+    that actually left the door open.
+    """
+    index = panel.tree.indexFromItem(_item_for(panel, layer_id), column)
+    delegate = panel.tree.itemDelegateForIndex(index)
+    delegate.closeEditor.emit(combo, QAbstractItemDelegate.EndEditHint.NoHint)
+    QApplication.processEvents()
+
+
 def _choose(panel, layer_id, column, combo, text):
     """Pick (or type) a value in the open drop-down and finish the edit."""
     combo.setCurrentText(text)
@@ -78,8 +94,7 @@ def _choose(panel, layer_id, column, combo, text):
     index = panel.tree.indexFromItem(_item_for(panel, layer_id), column)
     delegate = panel.tree.itemDelegateForIndex(index)
     delegate.commitData.emit(combo)
-    delegate.closeEditor.emit(combo, QAbstractItemDelegate.EndEditHint.NoHint)
-    QApplication.processEvents()
+    _close_editor(panel, layer_id, column, combo)
 
 
 def _entries(combo):
@@ -95,6 +110,7 @@ def test_the_type_cell_lists_every_linetype_with_the_current_one_chosen():
     combo = _open_editor(panel, _item_for(panel, DEFAULT_LAYER_ID), TYPE_COL)
     assert _entries(combo) == list(LINETYPES)
     assert combo.currentText() == "Hidden"
+    _close_editor(panel, DEFAULT_LAYER_ID, TYPE_COL, combo)
 
 
 def test_choosing_a_linetype_sets_it_on_the_layer():
@@ -133,6 +149,7 @@ def test_the_print_cell_lists_default_and_the_standard_pen_widths():
     combo = _open_editor(panel, _item_for(panel, DEFAULT_LAYER_ID), PRINT_COL)
     assert _entries(combo) == ["Default"] + STANDARD_PEN_WIDTHS
     assert combo.isEditable(), "a custom width has to be typeable"
+    _close_editor(panel, DEFAULT_LAYER_ID, PRINT_COL, combo)
 
 
 def test_choosing_a_standard_width_sets_it_on_the_layer():

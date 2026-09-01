@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import (QApplication, QStyle,
+                               QStyleOptionViewItem)
 
 from serpentine3d.core.history import History
 from serpentine3d.core.scene import Scene
@@ -55,14 +56,34 @@ def _select(panel, *layer_ids):
     QApplication.processEvents()
 
 
-def _click(panel, layer_id, column):
-    """A real left click - press and release - on the middle of a cell."""
-    tree = panel.tree
-    index = tree.indexFromItem(_item_for(panel, layer_id), column)
+def _click_point(tree, index):
+    """Where a hand would land in a cell.
+
+    A check box is drawn hard against the left edge of its cell, not in the
+    middle of it, and how much of the cell it covers is the style's business:
+    on Fusion the box stops two pixels short of the centre, so a click aimed
+    at the centre lands on bare cell and toggles nothing. Aim at the box when
+    the cell has one, at the middle of the cell when it does not.
+    """
     rect = tree.visualRect(index)
     assert rect.isValid() and not rect.isEmpty(), "the cell is not on screen"
+    item = tree.itemFromIndex(index)
+    if item.data(index.column(), Qt.ItemDataRole.CheckStateRole) is None:
+        return rect.center()
+    option = QStyleOptionViewItem()
+    option.rect = rect
+    option.features |= QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+    box = tree.style().subElementRect(
+        QStyle.SubElement.SE_ItemViewItemCheckIndicator, option, tree)
+    return box.center()
+
+
+def _click(panel, layer_id, column):
+    """A real left click - press and release - where a hand would land."""
+    tree = panel.tree
+    index = tree.indexFromItem(_item_for(panel, layer_id), column)
     QTest.mouseClick(tree.viewport(), Qt.MouseButton.LeftButton,
-                     Qt.KeyboardModifier.NoModifier, rect.center())
+                     Qt.KeyboardModifier.NoModifier, _click_point(tree, index))
     # the panel redraws on a zero-timer after an item change
     QTest.qWait(50)
     QApplication.processEvents()
