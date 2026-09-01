@@ -157,6 +157,12 @@ def _load_doc(scene, doc: dict):
             layers.set_print_width(layer.id, ld.get("print_width", 0.0))
             id_map[ld["id"]] = layer.id
 
+    # The file's order is the user's, arrows and all: Default is not
+    # nailed to the top, and creating the rest around it would put it back
+    # there.
+    layers.set_order([id_map[ld["id"]] for ld in doc.get("layers", [])
+                      if ld["id"] in id_map])
+
     # Parents in a second pass: a file lists its layers in the order they
     # were made, which a move can put out of order, so the parent of the
     # first layer read may be the last one made.

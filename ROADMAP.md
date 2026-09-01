@@ -139,6 +139,24 @@ Three commits, each red-green with its own tests: the model
   first and an assistant had no way to say which one it meant. Verified
   against the packaged AppImage over RPC, not just the checkout.
 
+### Layer reorder, 2026-09-01
+
+- **A branch is not one run of the list.** `_order` is flat and a layer
+  made later can sit between a parent and its child, so a move gathers the
+  branch by id, lifts it out, and puts it down past the whole of the
+  sibling it is passing. Swapping two positions would have left children
+  behind.
+- **The loader was nailing Default to the top.** It renames the file's
+  Default onto the layer a fresh scene already has and creates the rest
+  around it, so a file whose first layer is Roof came back with Default
+  first. `set_order` runs after the first pass and puts the file's order
+  back. `.3dm` needs nothing: it is written parents-first from `all()` and
+  read back in table order.
+- **Picked layers move as a block.** A layer whose neighbour that way is
+  picked too stays put, and the moves run from the end being travelled
+  towards, so a picked run keeps its own order and stops together instead
+  of the front one leapfrogging the rest.
+
 ---
 
 ## Backlog from #6
@@ -150,7 +168,7 @@ Triaged by cost. Everything below is still open unless marked.
 | Item | Notes |
 |---|---|
 | **Array / ArrayPath won't start on Enter** | No code reason found — `array`, `arraypath`, `arraypolar` are registered normally (`commands/transform.py:309,338,358`). Suspect the suggestion list (`array` is a prefix of two others) or a preselection interaction. **Needs a repro from Lourenço.** |
-| **Layer reorder (move up/down)** | Needs layer order to be first-class and persisted. Sublayers went in without it: `LayerManager._order` is already a list and the panel now walks it per branch, so this is a move within `_order` plus two buttons. |
+| **Layer reorder (move up/down)** | ✅ **Done, on `main`, unreleased.** `move_up`/`move_down` on `LayerManager` move a layer among its siblings and carry its branch, the `↑` and `↓` buttons move the whole picked run as a block, and `set_order` makes a file's order the one it comes back in. |
 
 ### Medium
 

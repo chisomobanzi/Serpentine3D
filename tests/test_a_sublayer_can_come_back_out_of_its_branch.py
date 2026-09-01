@@ -148,7 +148,7 @@ def test_the_move_button_stands_apart_from_the_ones_that_make_a_layer():
     deletes it.
     """
     _scene, panel = _panel()
-    assert _row_of_buttons(panel) == "+\u21b3 \u21b0 \u2212 ", \
+    assert _row_of_buttons(panel) == "+\u21b3 \u21b0\u2191\u2193 \u2212 ", \
         "the buttons that make, move and delete a layer all run together"
 
 

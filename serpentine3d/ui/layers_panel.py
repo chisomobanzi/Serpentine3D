@@ -262,6 +262,14 @@ class LayersPanel(QWidget):
         # state to any slot that will take an argument, and this one takes
         # the layers to move.
         btn_out.clicked.connect(lambda: self._move_out())
+        btn_up = QPushButton("↑")
+        btn_up.setStyleSheet(btn_style)
+        btn_up.setToolTip("Move the selected layer up the list")
+        btn_up.clicked.connect(lambda: self._move_in_list(-1))
+        btn_down = QPushButton("↓")
+        btn_down.setStyleSheet(btn_style)
+        btn_down.setToolTip("Move the selected layer down the list")
+        btn_down.clicked.connect(lambda: self._move_in_list(1))
         btn_del = QPushButton("−")
         btn_del.setStyleSheet(btn_style)
         btn_del.setToolTip("Delete selected layer")
@@ -277,6 +285,8 @@ class LayersPanel(QWidget):
         # only moves the picked layer comes as a surprise.
         btns.addSpacing(10)
         btns.addWidget(btn_out)
+        btns.addWidget(btn_up)
+        btns.addWidget(btn_down)
         btns.addSpacing(10)
         btns.addWidget(btn_del)
         btns.addStretch(1)
@@ -572,6 +582,37 @@ class LayersPanel(QWidget):
             menu.addAction("Move to the top level",
                            lambda: self._move_out(ids, to_top=True))
         return menu
+
+    def _move_in_list(self, step):
+        """Move every picked layer one place up (-1) or down (1).
+
+        A layer whose neighbour that way is picked too stays where it is,
+        so a run of picked layers travels as a block, keeps its own order,
+        and stops together when the one in front runs out of room.
+        """
+        layers = self.scene.layers
+        picked = self._selected_layer_ids()
+        if not picked:
+            return
+        # Nearest the end they are heading for goes first, or the picked
+        # layers take each other's places on the way.
+        ids = [la.id for la in layers.all() if la.id in picked]
+        if step > 0:
+            ids.reverse()
+        self.history.checkpoint("move layer")
+        moved = False
+        for layer_id in ids:
+            siblings = [la.id for la in
+                        layers.children(layers.get(layer_id).parent)]
+            i = siblings.index(layer_id) + step
+            if not 0 <= i < len(siblings) or siblings[i] in picked:
+                continue
+            moved = (layers.move_up(layer_id) if step < 0
+                     else layers.move_down(layer_id)) or moved
+        if not moved:
+            self.history.discard_checkpoint()
+            return
+        self.scene.notify()
 
     def _move_out(self, layer_ids=None, to_top=False):
         """Take layers out of the branch they sit in.

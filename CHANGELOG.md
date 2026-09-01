@@ -32,6 +32,15 @@
   with the visible and locked switches Rhino keeps for a layer of its own,
   so a branch you switched off there comes back switched off here.
 
+- **Layers move up and down the list.** Two arrows under the list move the
+  picked layer, so the layers read in the order the drawing wants rather than
+  the order they happened to be made in. A layer moves among its own siblings
+  and takes its branch with it, so one press steps over a whole branch;
+  several picked layers travel as a block and stop as a block at the end of
+  the list; one press is one undo, and a press that can move nothing costs
+  none. The order is written into both `.s3d` and `.3dm`, the Default layer
+  included. Requested by Lourenço Vaz Pinto.
+
 ### Fixed
 
 - **`Walls::Interior` and `Roof::Interior` no longer collide on import.**

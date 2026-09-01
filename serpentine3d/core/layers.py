@@ -181,6 +181,54 @@ class LayerManager:
         self._layers[layer_id] = replace(self._layers[layer_id],
                                          print_width=max(0.0, float(width)))
 
+    def move_up(self, layer_id: str) -> bool:
+        """Move a layer above the sibling in front of it, branch and all.
+
+        Says whether anything moved: the first of its siblings has nowhere
+        to go, and a press that moves nothing must not cost an undo. Up is
+        never out of a branch, which is what ``set_parent`` is for.
+        """
+        return self._move(layer_id, -1)
+
+    def move_down(self, layer_id: str) -> bool:
+        """Move a layer below the sibling after it, branch and all."""
+        return self._move(layer_id, 1)
+
+    def _move(self, layer_id: str, step: int) -> bool:
+        siblings = [la.id for la in
+                    self.children(self._layers[layer_id].parent)]
+        i = siblings.index(layer_id) + step
+        if not 0 <= i < len(siblings):
+            return False
+        # A branch is not one run of the list - a layer made later can sit
+        # between a parent and its child - so the block is gathered by id
+        # and put down again in one piece, past the whole of the sibling
+        # it is passing.
+        block = self._block(layer_id)
+        rest = [i for i in self._order if i not in set(block)]
+        passed = self._block(siblings[i])
+        at = (rest.index(passed[0]) if step < 0
+              else rest.index(passed[-1]) + 1)
+        self._order = rest[:at] + block + rest[at:]
+        return True
+
+    def _block(self, layer_id: str) -> list[str]:
+        """A layer and everything under it, in the order the list has."""
+        branch = {layer_id} | {la.id for la in self.descendants(layer_id)}
+        return [i for i in self._order if i in branch]
+
+    def set_order(self, layer_ids):
+        """Put the layers in the order given, for a file that says so.
+
+        Anything the caller leaves out keeps its place after the rest, so
+        a file that names only some of them cannot lose the others.
+        """
+        wanted = []
+        for layer_id in layer_ids:
+            if layer_id in self._layers and layer_id not in wanted:
+                wanted.append(layer_id)
+        self._order = wanted + [i for i in self._order if i not in set(wanted)]
+
     def set_parent(self, layer_id: str, parent_id: str | None):
         """Move a layer, and everything under it, to sit under another one.
 
