@@ -114,6 +114,16 @@ Three commits, each red-green with its own tests: the model
   a test now pins the name column against `sizeHintForColumn`. Deep names
   still run out of room in a 280px dock, so every row carries its full
   path as a tooltip.
+- **Going in was a drag, coming out was nothing.** A layer only got back
+  out of a branch by being dropped on the blank space under the last row,
+  which is a gesture nobody guesses and which is gone as soon as the
+  layers fill the panel. Lourenço asked outright where he was meant to
+  drag it. So there is an `↰` button beside the `↳` one, and a row menu
+  that names the branch it would leave ("Move out of Walls") with the top
+  level offered only where that is a different move. Right-clicking now
+  reaches the panel, which nothing had tested: a tree hands its
+  context-menu position on in viewport coordinates, and a handler reading
+  them as widget coordinates opens the menu for the wrong row.
 - **The API learned the tree.** `scene_info` reports `path`, `parent` and
   `shown` per layer, `layers` takes a `parent` on create, and a layer can
   be named by path, because `find_by_name` picks whichever Interior comes
