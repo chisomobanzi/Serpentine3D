@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QItemSelectionModel, Qt, QTimer, Signal
+from PySide6.QtCore import QItemSelectionModel, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QColorDialog, QComboBox, QHBoxLayout,
-    QPushButton, QStyledItemDelegate, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QHeaderView, QPushButton, QStyledItemDelegate, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..core import linetype as _lt
@@ -21,6 +21,22 @@ _PRINT_COL = 4
 
 # the ISO pen widths a plotter is set up with, offered in the Print cell
 _STANDARD_PEN_WIDTHS = ("0.13", "0.18", "0.25", "0.35", "0.5", "0.7", "1.0")
+
+def _column_width(tree, column, *choices) -> int:
+    """How wide a column has to be for the longest choice it can hold.
+
+    Measured, not guessed: a hand-picked pixel width fits the font it was
+    picked against and clips the same word under a theme that asks for a
+    bigger one. Only the view knows what a cell costs beyond its text
+    (margins, the focus frame, the padding the stylesheet adds), and it can
+    only say so for the rows it has, so ask it about those and then add
+    however much wider the longest choice would be.
+    """
+    fm = tree.fontMetrics()
+    shown = max((fm.horizontalAdvance(tree.topLevelItem(i).text(column))
+                 for i in range(tree.topLevelItemCount())), default=0)
+    longest = max(fm.horizontalAdvance(c) for c in choices)
+    return tree.sizeHintForColumn(column) + max(0, longest - shown)
 
 
 class _ChoiceDelegate(QStyledItemDelegate):
@@ -49,6 +65,26 @@ class _ChoiceDelegate(QStyledItemDelegate):
     def setModelData(self, editor, model, index):
         model.setData(index, editor.currentText(), Qt.ItemDataRole.EditRole)
 
+    def updateEditorGeometry(self, editor, option, index):
+        """Open the drop-down at the width its own list needs.
+
+        A column is sized for the text it shows, which leaves nothing for
+        the frame and arrow a combo box adds, so an editor held to its cell
+        opens with its own choices cut off: "Continuous" as "Contin".
+        Let it overhang the cells to its right instead, and slide it back
+        inside the view rather than let it run off the edge.
+        """
+        rect = QRect(option.rect)
+        rect.setWidth(max(rect.width(), editor.sizeHint().width()))
+        view = editor.parentWidget()
+        if view is not None:
+            rect.setWidth(min(rect.width(), view.width()))
+            if rect.right() > view.rect().right():
+                rect.moveRight(view.rect().right())
+            if rect.left() < view.rect().left():
+                rect.moveLeft(view.rect().left())
+        editor.setGeometry(rect)
+
 
 class _LayerTree(QTreeWidget):
     """The layers tree, with a visibility click that leaves the selection be.
@@ -62,6 +98,26 @@ class _LayerTree(QTreeWidget):
     column runs with selection switched off: the box still toggles, the rows
     stay picked.
     """
+
+    def size_columns(self):
+        """Give every column the width its own content asks for, except the
+        name, which takes whatever the panel has left.
+
+        A fresh window gives this panel a fixed 280px column, and the four
+        narrow columns each have a width their content needs. The name is
+        the only one that does not, so the name is the one that gives: with
+        it stretched, every other column stays on screen at any panel
+        width, instead of Print sitting off the edge behind a scrollbar.
+        """
+        header = self.header()
+        header.setMinimumSectionSize(24)
+        header.setSectionResizeMode(_NAME_COL, QHeaderView.ResizeMode.Stretch)
+        header.resizeSection(_VISIBLE_COL, 28)
+        header.resizeSection(_COLOR_COL, 28)
+        header.resizeSection(
+            _TYPE_COL, _column_width(self, _TYPE_COL, *_lt.LINETYPES))
+        header.resizeSection(_PRINT_COL, _column_width(
+            self, _PRINT_COL, "Default", *_STANDARD_PEN_WIDTHS))
 
     def mouseReleaseEvent(self, event):
         index = self.indexAt(event.position().toPoint())
@@ -131,11 +187,6 @@ class LayersPanel(QWidget):
         self.tree.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.header().setStretchLastSection(False)
-        self.tree.header().resizeSection(_NAME_COL, 130)
-        self.tree.header().resizeSection(_VISIBLE_COL, 32)
-        self.tree.header().resizeSection(_COLOR_COL, 32)
-        self.tree.header().resizeSection(_TYPE_COL, 78)
-        self.tree.header().resizeSection(_PRINT_COL, 54)
         self.tree.setItemDelegateForColumn(_TYPE_COL, _ChoiceDelegate(
             _lt.LINETYPES, editable=False, parent=self.tree))
         self.tree.setItemDelegateForColumn(_PRINT_COL, _ChoiceDelegate(
@@ -169,6 +220,7 @@ class LayersPanel(QWidget):
 
         scene.add_listener(self.rebuild, kinds=("objects", "layers"))
         self.rebuild()
+        self.tree.size_columns()
 
     def rebuild(self):
         if self._in_item_change:

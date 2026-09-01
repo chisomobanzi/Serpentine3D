@@ -66,6 +66,16 @@
   still holding and take the app down with it; the panel now finishes
   handling a click before it redraws.
 
+- **The layers panel fits the space it is given, and its drop-downs can be
+  read.** Adding the Type and Print columns had made the tree wider than the
+  panel column a fresh window gives it, so Print sat off the right-hand edge
+  behind a sideways scrollbar and Type was cut in half. The layer name column
+  now takes whatever room is left over and the other four keep the width
+  their content needs, so all five are on screen at any panel width. The
+  Type and Print drop-downs open at the width their own list needs rather
+  than the width of the cell, where "Continuous" came up as "Contin", and
+  stay inside the panel when there is nothing to their right.
+
 ## 0.7.1 — 2026-08-18
 
 ### Added
