@@ -49,12 +49,13 @@ class _FakeGpu:
     """The buffer handles `_draw_objects` reads, without a GL context."""
 
     def __init__(self, lines=6, tris=0, isos=0, mesh_key=None,
-                 dash_key="Continuous"):
+                 dash_key="Continuous", anchor=None):
         self.mesh_key, self.dash_key = mesh_key, dash_key
         self.tri_vao, self.tri_count = 1, tris
         self.line_vao, self.line_count = 2, lines
         self.iso_vao, self.iso_count = 3, isos
         self.thick_vao, self.thick_count = 4, 0
+        self.anchor = anchor       # None near home, like the real buffers
 
 
 @pytest.fixture
@@ -159,7 +160,8 @@ def test_a_squashed_shadow_matrix_does_not_linger(gl):
     view.display_mode = "rendered"
     mvp, v = _mvp(view)
     view._draw_objects(mvp, v)
-    assert view._mvp_state.get(view._line_prog) is mvp, (
+    held = view._mvp_state.get(view._line_prog)
+    assert held is not None and np.allclose(held, mvp), (
         "line program left holding the shadow's matrix")
 
 
@@ -747,3 +749,17 @@ def test_a_small_mesh_is_not_queued_for_indexing(gl):
     view._gpu.clear()
     view._sync_gpu()
     assert view._tess_pool.jobs == 0, "queued index jobs for short polylines"
+
+
+def test_far_objects_each_get_their_own_folded_matrix(gl):
+    """Anchored objects cannot share the frame's matrix: the whole fix
+    for far geometry swimming is one fold per anchor, so the uploads
+    must scale with the objects here, where they must not above."""
+    view = _viewport(8)
+    for i, obj in enumerate(view.scene.all()):
+        view._gpu[obj.id].anchor = np.array([2e5 + i, 0.0, 0.0])
+    mvp, v = _mvp(view)
+    view._draw_objects(mvp, v)
+    assert gl.n("glUniformMatrix4fv") >= 8, (
+        f"{gl.n('glUniformMatrix4fv')} matrix uploads for 8 anchored "
+        "objects: anchors are being ignored")

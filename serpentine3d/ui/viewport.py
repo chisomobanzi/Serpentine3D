@@ -461,6 +461,56 @@ def _thick_arrays(segments):
     return verts.reshape(-1, 7), idx
 
 
+# The GPU draws in float32, whose grid is 8mm wide at 100,000 units and
+# 6cm at a million: a survey that far out reads slightly wrong, and the
+# world-to-eye subtraction inside one absolute MVP re-rounds every frame
+# the camera moves, which is the swimming you see when you orbit it. So
+# a far mesh is uploaded relative to an anchor near it, and the anchor
+# is folded back into each matrix in float64, where the subtraction
+# costs nothing, just before the cast. Near the origin the anchor is
+# None and every object shares the frame's one float32 matrix, which is
+# what keeps _set_mvp's one-upload-per-frame behaviour on the scenes
+# that never had the problem.
+ANCHOR_NEAR = 4096.0            # float32 grid out here: half a micron
+
+
+def mesh_anchor(mesh):
+    """Where a mesh's data is uploaded relative to, or None near home."""
+    b = mesh.bounds()
+    if b is None:
+        return None
+    centre = (np.asarray(b[0], float) + np.asarray(b[1], float)) * 0.5
+    if float(np.abs(centre).max()) <= ANCHOR_NEAR:
+        return None
+    return centre
+
+
+def rebased(pts, anchor):
+    """Points minus the anchor, subtracted in float64, cast to float32."""
+    if anchor is None:
+        return np.ascontiguousarray(pts, np.float32)
+    return (np.asarray(pts, np.float64) - anchor).astype(np.float32)
+
+
+def anchored(matrix, anchor):
+    """The matrix with the anchor's translation folded in, as float32."""
+    if anchor is None:
+        return np.asarray(matrix, np.float32)
+    m = np.array(matrix, np.float64)
+    m[:, 3] += m[:, :3] @ anchor
+    return m.astype(np.float32)
+
+
+def anchored_clips(clips, anchor):
+    """Clip planes re-expressed around the anchor the shader dots with."""
+    if anchor is None or not clips:
+        return clips
+    return [np.array([c[0], c[1], c[2],
+                      c[3] + float(np.dot(np.asarray(c[:3], float),
+                                          anchor))], np.float32)
+            for c in clips]
+
+
 class _MeshBuffers:
     """One mesh's vertex data on the GPU, shared by every viewport.
 
@@ -477,12 +527,16 @@ class _MeshBuffers:
         self.iso_vbo = self.iso_count = 0
         self.nbytes = 0                  # what this mesh costs on the GPU
         self._buffers = []
+        # Everything below goes up relative to this, and the draw folds
+        # it back into the matrix; see mesh_anchor above.
+        self.anchor = mesh_anchor(mesh)
         if mesh.has_faces:
             curv = mesh.curvature
             if len(curv) != len(mesh.vertices):
                 curv = np.zeros(len(mesh.vertices), np.float32)
-            inter = np.hstack([mesh.vertices, mesh.normals,
-                               curv[:, None]]).astype(np.float32)
+            inter = np.hstack([rebased(mesh.vertices, self.anchor),
+                               np.asarray(mesh.normals, np.float32),
+                               np.asarray(curv, np.float32)[:, None]])
             self.tri_vbo = self._upload(GL.GL_ARRAY_BUFFER, inter)
             idx = mesh.triangles.astype(np.uint32)
             self.tri_ebo = self._upload(GL.GL_ELEMENT_ARRAY_BUFFER, idx)
@@ -491,15 +545,16 @@ class _MeshBuffers:
         if dash and dash[0]:                          # (pattern, scale)
             edge_segments = _dashed_edge_segments(mesh, dash[0], dash[1])
         if len(edge_segments):
-            pts = edge_segments.reshape(-1, 3).astype(np.float32)
-            self.line_vbo = self._upload(GL.GL_ARRAY_BUFFER, pts)
-            self.line_count = len(pts)
-            flat, idx = _thick_arrays(edge_segments)
+            rel = rebased(edge_segments, self.anchor)
+            self.line_vbo = self._upload(GL.GL_ARRAY_BUFFER,
+                                         rel.reshape(-1, 3))
+            self.line_count = rel.size // 3
+            flat, idx = _thick_arrays(rel)
             self.thick_vbo = self._upload(GL.GL_ARRAY_BUFFER, flat)
             self.thick_ebo = self._upload(GL.GL_ELEMENT_ARRAY_BUFFER, idx)
             self.thick_count = len(idx)
         if len(mesh.iso_segments):
-            pts = mesh.iso_segments.reshape(-1, 3).astype(np.float32)
+            pts = rebased(mesh.iso_segments, self.anchor).reshape(-1, 3)
             self.iso_vbo = self._upload(GL.GL_ARRAY_BUFFER, pts)
             self.iso_count = len(pts)
 
@@ -535,6 +590,7 @@ class _GpuObject:
         self.line_vao = self.line_count = 0
         self.thick_vao = self.thick_count = 0
         self.iso_vao = self.iso_count = 0
+        self.anchor = buf.anchor      # the drawer folds this back in
         if buf.tri_count:
             self.tri_vao = self._vertex_array(buf.tri_vbo, _WIDE_ATTRS,
                                               ebo=buf.tri_ebo)
@@ -959,7 +1015,8 @@ class Viewport(QOpenGLWidget):
 
         self._refresh_camera_bounds()
         view = self.camera.view_matrix()
-        mvp = (self.camera.proj_matrix(w, h) @ view).astype(np.float32)
+        mvp64 = self.camera.proj_matrix(w, h) @ view
+        mvp = mvp64.astype(np.float32)
 
         if self.display_mode == "technical":
             self._paint_technical(w, h)
@@ -971,7 +1028,7 @@ class Viewport(QOpenGLWidget):
             self._draw_grid(mvp)
         self._draw_image_planes(mvp)
         self._sync_gpu()
-        self._draw_objects(mvp, view)
+        self._draw_objects(mvp64, view)
         self._draw_pending(mvp)
         self._draw_control_points(mvp)
         self._draw_combs(mvp)
@@ -1161,9 +1218,9 @@ class Viewport(QOpenGLWidget):
             # fast wireframe preview while navigating
             self._sync_gpu()
             view = cam.view_matrix()
-            mvp = (cam.proj_matrix(w, h) @ view).astype(np.float32)
+            mvp64 = cam.proj_matrix(w, h) @ view
             GL.glEnable(GL.GL_DEPTH_TEST)
-            self._draw_objects(mvp, view, mode_override="wireframe",
+            self._draw_objects(mvp64, view, mode_override="wireframe",
                                light_background=True)
             GL.glDisable(GL.GL_DEPTH_TEST)
             return
@@ -1293,6 +1350,21 @@ class Viewport(QOpenGLWidget):
             return
         GL.glUniformMatrix4fv(self._uloc(prog, "uMVP"), 1, GL.GL_TRUE, mvp)
         self._mvp_state[prog] = mvp
+
+    def _set_view(self, prog: int, view):
+        """uView, cached the way uMVP is.
+
+        It moved out of the once-per-frame block when far geometry got
+        anchors — lighting works in eye space, so the anchor has to be
+        folded into this matrix too — and the identity check keeps it
+        to one upload per frame while every object is near the origin.
+        """
+        key = (prog, "uView")
+        if self._mvp_state.get(key) is view:
+            return
+        GL.glUniformMatrix4fv(self._uloc(prog, "uView"), 1, GL.GL_TRUE,
+                              view)
+        self._mvp_state[key] = view
 
     def _set_line_uniforms(self, mvp, color):
         self._use(self._line_prog)
@@ -1728,6 +1800,13 @@ class Viewport(QOpenGLWidget):
 
     def _draw_objects(self, mvp, view, mode_override=None,
                       light_background=False):
+        # The matrices arrive float64 and stay that way until each
+        # object's anchor is folded in: the fold is the whole fix for
+        # far geometry swimming, and it only works before the cast.
+        mvp = np.asarray(mvp, np.float64)
+        view = np.asarray(view, np.float64)
+        flat = mvp.astype(np.float32)     # shared by all unanchored draws
+        flat_view = view.astype(np.float32)
         mode = mode_override or self.display_mode
         fill_alpha = {"shaded": 1.0, "ghosted": 0.35, "wireframe": 0.0,
                       "zebra": 1.0, "curvature": 1.0, "draft": 1.0,
@@ -1741,6 +1820,7 @@ class Viewport(QOpenGLWidget):
         objects = sorted(self.scene.visible_objects(),
                          key=lambda o: -getattr(o, "draw_order", 0))
         clips = self._clip_vectors() if self.space == "model" else []
+        clips_dirty = False           # True while anchored clips are bound
         for i in range(len(clips)):
             GL.glEnable(GL.GL_CLIP_DISTANCE0 + i)
         for prog in (self._mesh_prog, self._line_prog, self._thick_prog):
@@ -1758,14 +1838,12 @@ class Viewport(QOpenGLWidget):
             # shadow that is inside it
             self._draw_ground_shadow(mvp, objects)
         objects = self._cull(mvp, objects)
-        # Uniform state belongs to the program, not the draw call, and these
-        # are the same for every object in the frame — the camera and the
-        # display mode. Only the colour and the material change per object.
+        # Uniform state belongs to the program, not the draw call. The
+        # display-mode uniforms are the same for every object in the
+        # frame, so they are set once here; the matrices moved into the
+        # loop when anchors arrived, where _set_mvp still collapses
+        # them to one upload per frame while everything is near home.
         self._use(self._mesh_prog)
-        GL.glUniformMatrix4fv(self._uloc(self._mesh_prog, "uMVP"), 1,
-                              GL.GL_TRUE, mvp)
-        GL.glUniformMatrix4fv(self._uloc(self._mesh_prog, "uView"), 1,
-                              GL.GL_TRUE, view.astype(np.float32))
         GL.glUniform1i(self._uloc(self._mesh_prog, "uZebra"),
                        1 if mode == "zebra" else 0)
         GL.glUniform1i(self._uloc(self._mesh_prog, "uDraft"),
@@ -1783,11 +1861,23 @@ class Viewport(QOpenGLWidget):
                 if pend is not None and len(pend):
                     self._preview.update(pend)
                     self._set_line_uniforms(
-                        mvp, (*self.scene.color_of(obj), 0.5))
+                        flat, (*self.scene.color_of(obj), 0.5))
                     self._line_width(1.0)
                     GL.glBindVertexArray(self._preview.vao)
                     GL.glDrawArrays(GL.GL_LINES, 0, len(pend))
                 continue
+            omvp = flat if gpu.anchor is None else anchored(mvp, gpu.anchor)
+            oview = flat_view if gpu.anchor is None \
+                else anchored(view, gpu.anchor)
+            oclips = anchored_clips(clips, gpu.anchor)
+            if clips and (gpu.anchor is not None or clips_dirty):
+                # The GPU dots the planes with the rebased pos, so an
+                # anchored object needs them re-expressed around its
+                # anchor, and the next unanchored one needs them back.
+                for prog in (self._mesh_prog, self._line_prog,
+                             self._thick_prog):
+                    self._set_clip_uniforms(prog, oclips)
+                clips_dirty = gpu.anchor is not None
             selected = self.selection.is_selected(obj.id)
             color = theme.SELECTION_COLOR if selected else self.scene.color_of(obj)
             if obj.locked and not selected:
@@ -1815,6 +1905,8 @@ class Viewport(QOpenGLWidget):
                 fill_alpha_obj = fill_alpha
             if fill_alpha_obj > 0 and gpu.tri_count:
                 self._use(self._mesh_prog)
+                self._set_mvp(self._mesh_prog, omvp)
+                self._set_view(self._mesh_prog, oview)
                 GL.glUniform3f(
                     self._uloc(self._mesh_prog, "uColor"),
                     *fill_color)
@@ -1858,7 +1950,7 @@ class Viewport(QOpenGLWidget):
                     edge_color = (line_color[0] * 0.35, line_color[1] * 0.35,
                                   line_color[2] * 0.35, 1.0)
                 lw = self.scene.layers.get(obj.layer_id).lineweight
-                self._draw_edges(gpu, mvp, edge_color,
+                self._draw_edges(gpu, omvp, edge_color,
                                  2.2 if selected else lw)
 
             subs = self.selection.subobjects_of(obj.id, "edge") \
@@ -1867,8 +1959,8 @@ class Viewport(QOpenGLWidget):
                 mask = np.isin(obj.mesh.edge_of_segment, subs)
                 if mask.any():
                     segs = obj.mesh.edge_segments[mask].reshape(-1, 3)
-                    self._preview.update(segs.astype(np.float32))
-                    self._set_line_uniforms(mvp,
+                    self._preview.update(rebased(segs, gpu.anchor))
+                    self._set_line_uniforms(omvp,
                                             (*theme.SELECTION_COLOR, 1.0))
                     self._line_width(3.0)
                     GL.glDisable(GL.GL_DEPTH_TEST)
@@ -1882,15 +1974,15 @@ class Viewport(QOpenGLWidget):
                 if mask.any():
                     tris = obj.mesh.triangles[mask]
                     pts = obj.mesh.vertices[tris.ravel()]
-                    self._preview.update(pts.astype(np.float32))
-                    self._set_line_uniforms(mvp,
+                    self._preview.update(rebased(pts, gpu.anchor))
+                    self._set_line_uniforms(omvp,
                                             (*theme.SELECTION_COLOR, 0.45))
                     GL.glBindVertexArray(self._preview.vao)
                     GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
             if obj.clip_plane is not None and clips:
                 for prog in (self._mesh_prog, self._line_prog,
                              self._thick_prog):
-                    self._set_clip_uniforms(prog, clips)
+                    self._set_clip_uniforms(prog, oclips)
             if gpu.iso_count and show_isos:
                 if selected:
                     iso_color = (*theme.SELECTION_COLOR, 0.55)
@@ -1899,22 +1991,24 @@ class Viewport(QOpenGLWidget):
                 else:
                     iso_color = (color[0] * 0.30, color[1] * 0.30,
                                  color[2] * 0.30, 0.8)
-                self._set_line_uniforms(mvp, iso_color)
+                self._set_line_uniforms(omvp, iso_color)
                 self._line_width(1.0)
                 GL.glBindVertexArray(gpu.iso_vao)
                 GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
             if len(obj.mesh.points) and not obj.annotation:
-                self._draw_point_markers(mvp, obj.mesh.points,
-                                         (*line_color, 1.0), selected)
+                self._draw_point_markers(omvp, obj.mesh.points,
+                                         (*line_color, 1.0), selected,
+                                         anchor=gpu.anchor)
         self._line_width(1.0)
         self._end_clips(clips)
 
-    def _draw_point_markers(self, mvp, points, color, selected: bool):
+    def _draw_point_markers(self, mvp, points, color, selected: bool,
+                            anchor=None):
         """Point objects as fixed-ish size crosses (always visible)."""
         size = self.camera.distance * (0.009 if selected else 0.007)
         segs = []
         axes = np.eye(3, dtype=np.float32) * size
-        for p in np.asarray(points, np.float32):
+        for p in rebased(points, anchor):
             for axis in axes:
                 segs.append(np.stack([p - axis, p + axis]))
         self._preview.update(np.concatenate(segs).astype(np.float32))
@@ -1933,15 +2027,18 @@ class Viewport(QOpenGLWidget):
 
     def _draw_ground_shadow(self, mvp, objects):
         """Flatten object triangles onto z=0 as a soft dark stamp."""
-        squash = np.eye(4, dtype=np.float32)
+        squash = np.eye(4)
         squash[2, 2] = 0.0
         squash[2, 3] = 0.01                 # hair above the plane
-        smvp = (mvp @ squash).astype(np.float32)
+        # squash flattens in world space, so it goes on before each
+        # object's anchor is folded back in — the anchor's own z has to
+        # flatten with the geometry's.
+        base = np.asarray(mvp, np.float64) @ squash
+        smvp = base.astype(np.float32)
         self._use(self._line_prog)
         # through _set_mvp, so the squashed matrix is recorded as what the
         # program holds — the edge pass after this one has to know to put the
         # real one back
-        self._set_mvp(self._line_prog, smvp)
         self._set_color4(self._line_prog, (0.02, 0.02, 0.03, 0.30))
         GL.glDepthMask(False)
         for obj in objects:
@@ -1951,6 +2048,9 @@ class Viewport(QOpenGLWidget):
             b = obj.mesh.bounds() if obj.mesh_ready else None
             if b is None or b[0][2] < -1e-6:
                 continue                    # below the plane: no stamp
+            self._set_mvp(self._line_prog,
+                          smvp if gpu.anchor is None
+                          else anchored(base, gpu.anchor))
             GL.glBindVertexArray(gpu.tri_vao)
             GL.glDrawElements(GL.GL_TRIANGLES, gpu.tri_count,
                               GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
@@ -2846,8 +2946,8 @@ class Viewport(QOpenGLWidget):
             self._sync_gpu()
             proj = camera.proj_matrix(px_w, px_h)
             view = camera.view_matrix()
-            mvp = (proj @ view).astype(np.float32)
-            self._draw_objects(mvp, view)
+            mvp64 = proj @ view
+            self._draw_objects(mvp64, view)
             img = fbo.toImage()
             fbo.release()
             ratio = self.devicePixelRatioF()
@@ -2875,8 +2975,8 @@ class Viewport(QOpenGLWidget):
             self._reset_gl_state()        # a different target, a fresh start
             self._sync_gpu()
             proj, view = self.layout_view.detail_matrices(detail, px_w, px_h)
-            mvp = (proj @ view).astype(np.float32)
-            self._draw_objects(mvp, view,
+            mvp64 = proj @ view
+            self._draw_objects(mvp64, view,
                                mode_override=detail.display_mode,
                                light_background=True)
             img = fbo.toImage()

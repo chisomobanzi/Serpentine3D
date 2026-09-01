@@ -1,4 +1,12 @@
-"""Small numpy 3D-math helpers for the viewport (column-major GL matrices)."""
+"""Small numpy 3D-math helpers for the viewport (column-major GL matrices).
+
+Matrices are built and returned in float64. The world-to-eye translation
+in look_at is the difference of two coordinates that can both be hundreds
+of thousands of units, and a float32 container rounds it to a 3cm grid
+out there, which is what used to make far geometry swim. Whoever hands a
+matrix to the GPU casts it to float32 at the last moment, after any
+anchor has been folded in (see ui.viewport.anchored).
+"""
 
 from __future__ import annotations
 
@@ -15,7 +23,7 @@ def normalize(v: np.ndarray) -> np.ndarray:
 def perspective(fov_y_deg: float, aspect: float, near: float,
                 far: float) -> np.ndarray:
     f = 1.0 / math.tan(math.radians(fov_y_deg) / 2.0)
-    m = np.zeros((4, 4), np.float32)
+    m = np.zeros((4, 4))
     m[0, 0] = f / max(aspect, 1e-6)
     m[1, 1] = f
     m[2, 2] = (far + near) / (near - far)
@@ -26,7 +34,7 @@ def perspective(fov_y_deg: float, aspect: float, near: float,
 
 def ortho(left: float, right: float, bottom: float, top: float,
           near: float, far: float) -> np.ndarray:
-    m = np.eye(4, dtype=np.float32)
+    m = np.eye(4)
     m[0, 0] = 2.0 / (right - left)
     m[1, 1] = 2.0 / (top - bottom)
     m[2, 2] = -2.0 / (far - near)
@@ -40,7 +48,7 @@ def look_at(eye: np.ndarray, target: np.ndarray, up: np.ndarray) -> np.ndarray:
     f = normalize(target - eye)
     s = normalize(np.cross(f, up))
     u = np.cross(s, f)
-    m = np.eye(4, dtype=np.float32)
+    m = np.eye(4)
     m[0, :3] = s
     m[1, :3] = u
     m[2, :3] = -f

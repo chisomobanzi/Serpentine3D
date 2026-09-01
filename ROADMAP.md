@@ -28,6 +28,23 @@ defaults the field to empty, and `FORMAT_VERSION` did not have to move.
 0.7.3 was released on 2026-09-01: pushed, tagged, and published with the
 AppImage, the Windows `.exe` and the macOS `.dmg` all attached.
 
+### Far geometry, unreleased
+
+The last open item on Jonas's list (#5): geometry past ~100,000 units
+swam as the camera orbited, because vertices and the one MVP were both
+absolute float32 and the world-to-eye subtraction re-rounded every
+frame. Fixed with a per-mesh anchor: far meshes upload relative to
+their bounding-box centre and every matrix folds the anchor back in
+via float64 (`mesh_anchor`/`rebased`/`anchored` in `ui/viewport.py`;
+`utils/math3d.py` now builds float64 matrices). Near the origin the
+anchor is None and the draw loop keeps its old single shared matrix,
+so the cave scene's one-upload-per-frame behaviour is untouched.
+Measured on Xephyr: frame-to-frame pixel churn at 500k units dropped
+0.052 to 0.014 under a slow orbit, the remainder being the orbit
+itself. Overlays (grid, gumball, control-point display, previews) are
+still absolute float32; nobody has reported them and each is a small
+follow-up on the same helpers.
+
 ### Drafting, released in 0.8.0
 
 Sections and hatching, driven test-first and then looked at in the

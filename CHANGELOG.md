@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Geometry far from the origin holds still while you orbit.** The GPU
+  works in float32, whose grid is 8mm wide at 100,000 units, and both
+  the vertices and the one camera matrix were handed over absolute, so
+  the world-to-eye subtraction happened in float32 and re-rounded every
+  frame the camera moved: a georeferenced survey swam on screen while
+  standing perfectly still. Far geometry now goes to the GPU relative
+  to an anchor near it, and the anchor is folded back into the matrix
+  in double precision, where the subtraction is exact, just before the
+  cast. Everything rides along: shading, clipping planes, the ground
+  shadow, dashed linetypes, sub-object highlights, point markers,
+  details on layouts, and the PDF's raster fallback. Scenes near the
+  origin keep the exact single-matrix path they always had.
+
 ## 0.8.0 — 2026-09-02
 
 ### Added

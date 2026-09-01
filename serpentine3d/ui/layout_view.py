@@ -258,9 +258,11 @@ class LayoutView:
         w, h = self.vp.width(), self.vp.height()
         half_w = w / 2 / self.px_per_mm
         half_h = h / 2 / self.px_per_mm
+        # float32 on purpose: paper coordinates are small, and _set_mvp
+        # hands this straight to the GPU.
         return ortho(self.pan[0] - half_w, self.pan[0] + half_w,
                      self.pan[1] - half_h, self.pan[1] + half_h,
-                     -10, 10)
+                     -10, 10).astype(np.float32)
 
     # -------------------------------------------------------------- zooming
 
@@ -560,8 +562,8 @@ class LayoutView:
         GL.glClearColor(0.98, 0.98, 0.97, 1.0)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
         proj, view = self.detail_matrices(detail, pw, ph)
-        mvp = (proj @ view).astype(np.float32)
-        vp._draw_objects(mvp, view, mode_override=mode,
+        mvp64 = proj @ view
+        vp._draw_objects(mvp64, view, mode_override=mode,
                          light_background=True)
         GL.glDisable(GL.GL_SCISSOR_TEST)
         GL.glViewport(0, 0, int(vp.width() * ratio),
