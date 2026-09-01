@@ -84,6 +84,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "lineweight": layer.lineweight,
                 "linetype": layer.linetype,
                 "print_width": layer.print_width,
+                "parent": layer.parent,
             }
             for layer in scene.layers.all()
         ],
@@ -155,6 +156,14 @@ def _load_doc(scene, doc: dict):
             layers.set_locked(layer.id, ld.get("locked", False))
             layers.set_print_width(layer.id, ld.get("print_width", 0.0))
             id_map[ld["id"]] = layer.id
+
+    # Parents in a second pass: a file lists its layers in the order they
+    # were made, which a move can put out of order, so the parent of the
+    # first layer read may be the last one made.
+    for ld in doc.get("layers", []):
+        parent = ld.get("parent")
+        if parent:
+            layers.set_parent(id_map[ld["id"]], id_map.get(parent))
 
     current = doc.get("current_layer", "default")
     layers.current_id = id_map.get(current, "default")

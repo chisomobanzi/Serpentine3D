@@ -180,33 +180,7 @@ def _import_file(scene, path: str, ext: str, report) -> int:
         count = len(items) or 1
         layer_map = {}
         for done, (name, shape, meta) in enumerate(items, 1):
-            layer_id = None
-            lname = meta.get("layer")
-            if lname:
-                if lname not in layer_map:
-                    existing = scene.layers.find_by_name(lname)
-                    fresh = existing is None or not any(
-                        o.layer_id == existing.id for o in scene.all())
-                    if existing is None:
-                        existing = scene.layers.create(
-                            lname, meta.get("layer_color"))
-                    # A reference layer arrives switched off, the way the
-                    # file keeps it (GitHub #5). Also when the layer is one
-                    # the scene already had: every scene starts with an
-                    # empty Default, and a file whose own Default is off
-                    # would otherwise have it drawn. Only while that layer
-                    # is empty, though — importing into a drawing must not
-                    # hide work that is already on it.
-                    if fresh:
-                        if not meta.get("layer_visible", True):
-                            scene.layers.set_visible(existing.id, False)
-                        if meta.get("layer_locked"):
-                            scene.layers.set_locked(existing.id, True)
-                        if meta.get("layer_print_width"):
-                            scene.layers.set_print_width(
-                                existing.id, meta["layer_print_width"])
-                    layer_map[lname] = existing.id
-                layer_id = layer_map[lname]
+            layer_id = _layer_for(scene, meta, layer_map)
             # Not `obj`: that name is the .obj importer, one branch above.
             added = scene.add(shape, name=name, layer_id=layer_id)
             # An override only: leaving it None keeps the object following its
@@ -220,6 +194,61 @@ def _import_file(scene, path: str, ext: str, report) -> int:
             adding.tick(done / count, f"Adding object {done} of {count}")
         return len(items)
     raise ValueError(f"Unsupported import format: {ext}")
+
+
+def _layer_for(scene, meta: dict, made: dict) -> str | None:
+    """The layer an imported object belongs on, made if it is not there.
+
+    Keyed by the layer's whole path, not its name: Walls::Interior and
+    Roof::Interior are two different layers, and reading only the name
+    landed half a drawing on the wrong one, wearing the wrong colour (#6).
+
+    The branch is walked from the top down, so a parent that holds no
+    objects itself is still made, with the colour and the switches the
+    file gives it. Older meta, and any file whose layer index points at
+    nothing, has no branch to walk and falls back to the plain name.
+    """
+    chain = meta.get("layer_chain")
+    if not chain:
+        name = meta.get("layer")
+        if not name:
+            return None
+        chain = ({"name": name, "path": name,
+                  "color": meta.get("layer_color"),
+                  "visible": meta.get("layer_visible", True),
+                  "locked": meta.get("layer_locked", False),
+                  "print_width": meta.get("layer_print_width", 0.0)},)
+
+    layer_id = None
+    for rung in chain:
+        path = rung["path"]
+        if path not in made:
+            made[path] = _make_layer(scene, rung, layer_id)
+        layer_id = made[path]
+    return layer_id
+
+
+def _make_layer(scene, rung: dict, parent_id: str | None) -> str:
+    """One layer of a branch, found by its path or made under its parent."""
+    existing = scene.layers.find_by_path(rung["path"])
+    # A reference layer arrives switched off, the way the file keeps it
+    # (GitHub #5). Also when the layer is one the scene already had: every
+    # scene starts with an empty Default, and a file whose own Default is
+    # off would otherwise have it drawn. Only while that layer is empty,
+    # though — importing into a drawing must not hide work already on it.
+    fresh = existing is None or not any(
+        o.layer_id == existing.id for o in scene.all())
+    if existing is None:
+        existing = scene.layers.create(rung["name"], rung.get("color"),
+                                       parent=parent_id)
+    if fresh:
+        if not rung.get("visible", True):
+            scene.layers.set_visible(existing.id, False)
+        if rung.get("locked"):
+            scene.layers.set_locked(existing.id, True)
+        if rung.get("print_width"):
+            scene.layers.set_print_width(existing.id, rung["print_width"])
+    return existing.id
 
 
 def export_file(scene, path: str, only_ids: list | None = None,

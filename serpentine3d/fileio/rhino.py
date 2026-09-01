@@ -20,6 +20,7 @@ from OCP.GeomAPI import GeomAPI_ProjectPointOnSurf
 
 from ..core import geometry, occ
 from ..core.deferred import DeferredShape
+from ..core.layers import PATH_SEPARATOR
 from ..core.occ import (
     BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace, Geom_BSplineCurve,
     TColStd_Array1OfInteger, TColStd_Array1OfReal, TColgp_Array1OfPnt,
@@ -677,15 +678,33 @@ def _worth_parallelising(path: str) -> bool:
         return False
 
 
+# What the appearance of one layer amounts to, and all a reader needs to
+# make it: everything in a row bar the working out about the branch.
+_APPEARANCE = ("name", "path", "color", "visible", "locked", "print_width")
+
+
 def read_layers(model) -> dict:
-    """{layer index: {name, color, material, visible, locked}} — plain data,
-    so it can cross a pipe.
+    """{layer index: {name, path, color, material, visible, locked, chain}} —
+    plain data, so it can cross a pipe.
 
     Visible and Locked ride along because a working Rhino file keeps its
     reference and construction layers switched off; ignoring the flags put
-    everything on show (GitHub #5).
+    everything on show (GitHub #5). They are each layer's *own* switch,
+    not the one it is currently showing: Rhino switches a parent off by
+    switching its children off with it and keeps what each layer would be
+    on its own, and it is that which has to come back, or switching the
+    parent on again leaves its children off.
+
+    `path` is what the file really calls a layer, "Walls::Interior", and
+    `chain` is that path as appearances, the top of the branch first and
+    the layer itself last. A name on its own cannot say which layer is
+    meant, because two branches may each hold an Interior (#6), and the
+    chain is what lets a reader make a parent that carries no objects of
+    its own and so would never otherwise be mentioned.
     """
     layers = {}
+    index_of = {}
+    parent_of = {}
     for i in range(len(model.Layers)):
         layer = model.Layers[i]
         c = layer.Color
@@ -693,13 +712,33 @@ def read_layers(model) -> dict:
             "name": layer.Name,
             "color": (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0),
             "material": layer.RenderMaterialIndex,
-            "visible": bool(layer.Visible),
-            "locked": bool(layer.Locked),
+            "visible": bool(layer.GetPersistentVisibility()),
+            "locked": bool(layer.GetPersistentLocking()),
             # Rhino's PlotWeight is mm; 0 is the device default and a negative
             # is a pen that does not plot, neither of which we carry, so both
             # land on our own default of 0.
             "print_width": max(0.0, float(layer.PlotWeight)),
         }
+        index_of[str(layer.Id)] = layer.Index
+        parent_of[layer.Index] = str(layer.ParentLayerId)
+
+    branches = {}
+    for index in layers:
+        branch = [index]
+        up = index_of.get(parent_of[index])
+        # `not in branch` rather than trusting the file: a parent chain
+        # that comes round on itself would hang the read, and a short
+        # answer is a better one than none.
+        while up is not None and up not in branch:
+            branch.append(up)
+            up = index_of.get(parent_of[up])
+        branch.reverse()
+        branches[index] = branch
+        layers[index]["path"] = PATH_SEPARATOR.join(
+            layers[i]["name"] for i in branch)
+    for index, branch in branches.items():
+        layers[index]["chain"] = tuple(
+            {k: layers[i][k] for k in _APPEARANCE} for i in branch)
     return layers
 
 
@@ -776,6 +815,10 @@ def object_appearance(attrs, layers: dict, materials: dict,
         visible = visible and parent.get("visible", True)
 
     return {"layer": layer.get("name"), "layer_color": layer.get("color"),
+            # The branch the layer sits in, so a reader can make the whole
+            # of it. Two layers may share a name (#6); only the path says
+            # which one an object is on.
+            "layer_chain": layer.get("chain", ()),
             "layer_visible": layer.get("visible", True),
             "layer_locked": layer.get("locked", False),
             "layer_print_width": layer.get("print_width", 0.0),
@@ -1116,20 +1159,49 @@ def _write_material(model, seen: dict, material: dict) -> int:
     return seen[key]
 
 
+def _parents_first(layers) -> list:
+    """The layers, every parent ahead of the children under it.
+
+    Layers come back in the order they were made, and moving one under a
+    layer made after it does not change that. Writing a child first would
+    leave it pointing at a parent that has no guid yet, and the branch
+    would come out flat.
+    """
+    out, seen = [], set()
+    for layer in layers.all():
+        for la in [*reversed(layers.ancestors(layer.id)), layer]:
+            if la.id not in seen:
+                seen.add(la.id)
+                out.append(la)
+    return out
+
+
 def export_3dm(scene, path: str, only_ids: list | None = None,
                version: int = 8):
     model = r3.File3dm()
     layer_index = {}
-    for layer in scene.layers.all():
+    layer_guid = {}
+    for layer in _parents_first(scene.layers):
         rl = r3.Layer()
         rl.Name = layer.name
         rl.Color = (int(layer.color[0] * 255), int(layer.color[1] * 255),
                     int(layer.color[2] * 255), 255)
-        rl.Visible = bool(layer.visible)
-        rl.Locked = bool(layer.locked)
+        # The layer's own switch, and the one it is showing with its
+        # parents counted. Rhino reads Visible as the second and keeps the
+        # first on the side, which is how switching a parent back on knows
+        # what to leave off.
+        rl.Visible = bool(scene.layers.is_visible(layer.id))
+        rl.SetPersistentVisibility(bool(layer.visible))
+        rl.Locked = bool(scene.layers.is_locked(layer.id))
+        rl.SetPersistentLocking(bool(layer.locked))
         rl.PlotWeight = float(layer.print_width)   # mm; 0 = device default
+        if layer.parent in layer_guid:
+            rl.ParentLayerId = layer_guid[layer.parent]
         idx = model.Layers.Add(rl)
         layer_index[layer.id] = idx
+        # Add is what gives a layer its guid, and a child needs its
+        # parent's, which is why the parents go in first.
+        layer_guid[layer.id] = model.Layers[idx].Id
 
     objs = scene.all()
     if only_ids:
