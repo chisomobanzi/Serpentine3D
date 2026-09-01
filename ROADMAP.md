@@ -33,10 +33,20 @@ All of it driven test-first and then exercised in the running app:
 
 ### Needs a human before release
 
-- **Ctrl + right-drag zoom is unverified by hand.** It has a passing test
-  through the real viewport event path, but on the Windows box synthetic
-  Ctrl never reached the app (Shift did — some global hook ate it), so it
-  was never driven end-to-end. Try it once on Linux.
+- **Ctrl + right-drag zoom is still unverified on real input.** There is a
+  passing unit test through the viewport event path, and now an e2e script
+  (`tests/e2e_ctrl_zoom.py`), but the script has never had a real run: it
+  needs Xephyr and xdotool, and the Windows box it was written on has
+  neither. Running it is the first job on Linux:
+
+      tests/run_e2e.sh tests/e2e_ctrl_zoom.py
+
+  Its logic is not guesswork — 7 of its 10 checks were validated against
+  the live app on Windows by swapping xdotool for `SendInput`. What could
+  not be validated is the chord itself: **Windows drops a lone synthetic
+  Ctrl** (a Ctrl-only drag orbits instead of zooming), while delivering it
+  when Shift is also held. So `ctrl-shift-orbits-out-of-a-parallel-view`
+  *is* verified on real input; the three Ctrl-alone zoom checks are not.
 - **Cosmetic:** the layers panel Type/Print combo editors are clipped by the
   narrow columns ("Contin ⌄"). Widen the columns or the editor.
 - `tests/test_layer_type_and_print_cells_offer_a_drop_down.py` is
@@ -136,6 +146,13 @@ Two routes:
   See `tests/e2e_*.py`. This is the repo's native path and it only works on
   Linux; on Windows it had to be hand-rolled with `SendInput`, which is why
   Ctrl+RMB is still unverified.
+
+  ⚠️ These scripts assume the **shipped** mouse defaults, so batch 1's flip
+  to a right-button orbit made three of them stale (they dragged button 2).
+  `e2e_alt_swipe`, `e2e_dod` and `e2e_view_history` were updated to button
+  3, and `run_e2e.sh`'s header comment — which claimed a clean config meant
+  a middle-button orbit — was corrected. **Any change to a default input
+  binding must sweep `tests/e2e_*.py`**, because nothing in CI runs them.
 - **RPC / MCP:** the same socket the MCP server uses. `serpentine3d/api.py`
   is the surface — `command`, `scene_info`, `viewport_info`, `layers`,
   `select`, `undo`, `screenshot`. Launch with `SERP3D_RPC_PORT=5777` and a

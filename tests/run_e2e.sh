@@ -2,10 +2,12 @@
 # Full E2E run: Xephyr + clean-config app + tests/e2e_dod.py (24 checks).
 # Pass another script to run that one against the same app instead.
 #
-# The app MUST be launched with a clean SERP3D_CONFIG — the developer's real
-# config remaps mouse buttons (RMB orbit) and shortcuts (F1=Delete), which
-# breaks the suite's Rhino-default input assumptions. Stuck synthetic
-# modifiers from earlier xdotool runs are cleared first for the same reason.
+# The app MUST be launched with a clean SERP3D_CONFIG, so these scripts can
+# assume the shipped defaults — the right button orbits, Shift pans, Ctrl
+# zooms (Rhino's chords, since 0.7.2) — rather than whatever the developer
+# has remapped for themselves (a middle-button orbit, F1=Delete). Stuck
+# synthetic modifiers from earlier xdotool runs are cleared first, for the
+# same reason: a held Ctrl would turn every later orbit into a zoom.
 set -euo pipefail
 
 DISPLAY_NUM="${E2E_DISPLAY:-:2}"

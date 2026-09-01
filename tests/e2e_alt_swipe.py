@@ -1,4 +1,4 @@
-"""Hold Alt, swipe the middle button: does the view turn? Real mouse events.
+"""Hold Alt, swipe the orbit button: does the view turn? Real mouse events.
 
 Not a pytest test. A hand-built QMouseEvent carries whatever modifier you
 put in it, which proves nothing about the one thing this gesture can lose:
@@ -30,15 +30,19 @@ def xdo(*args, pause=0.15):
     time.sleep(pause)
 
 
-def middle_drag(cx, cy, dx, alt: bool):
-    """A press, a few moves and a release, as a hand would make them."""
+def nav_drag(cx, cy, dx, alt: bool):
+    """A press, a few moves and a release, as a hand would make them.
+
+    Button 3: the right button orbits on a clean config since 0.7.2, and
+    the swipe follows whichever button orbits.
+    """
     xdo("mousemove", str(cx), str(cy))
     if alt:
         xdo("keydown", "alt")
-    xdo("mousedown", "2")
+    xdo("mousedown", "3")
     for step in (0.3, 0.7, 1.0):
         xdo("mousemove", str(int(cx + dx * step)), str(cy), pause=0.08)
-    xdo("mouseup", "2")
+    xdo("mouseup", "3")
     if alt:
         xdo("keyup", "alt")
     time.sleep(0.3)
@@ -59,7 +63,7 @@ def main() -> int:
     w, h = vp["size"]
     cx, cy = int(ox + w / 2), int(oy + h / 2)
 
-    middle_drag(cx, cy, 160, alt=True)
+    nav_drag(cx, cy, 160, alt=True)
     az, el = pose(c)
     landed = (abs(az - LEFT[0]) < 1e-9 and abs(el - LEFT[1]) < 1e-9)
     print(f"[{'PASS' if landed else 'FAIL'}] alt-swipe-lands-on-left "
@@ -68,7 +72,7 @@ def main() -> int:
     # Still a perspective pane, which is the point of it: a plain drag
     # orbits away again. In a parallel pane the same drag would pan and
     # leave the angles exactly where the swipe put them.
-    middle_drag(cx, cy, 60, alt=False)
+    nav_drag(cx, cy, 60, alt=False)
     az2 = pose(c)[0]
     orbited = abs(az2 - az) > 1e-6
     print(f"[{'PASS' if orbited else 'FAIL'}] still-perspective-after "

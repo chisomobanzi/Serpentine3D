@@ -159,16 +159,16 @@ def main():
     sel = c.call("viewport_info")["selected"]
     check("click-empty-deselect", sel == [], f"selected={sel}")
 
-    # orbit: middle-drag changes azimuth/elevation
+    # orbit: a right-drag changes azimuth/elevation (RMB orbits since 0.7.2)
     cam0 = c.call("viewport_info")["camera"]
     cx, cy = int(ox + vp["size"][0] / 2), int(oy + vp["size"][1] / 2)
     xdo("mousemove", str(cx), str(cy))
-    xdo("mousedown", "2")
+    xdo("mousedown", "3")
     for i in range(1, 9):
         xdo("mousemove", str(cx + i * 12), str(cy + i * 5))
-    xdo("mouseup", "2")
+    xdo("mouseup", "3")
     cam1 = c.call("viewport_info")["camera"]
-    check("orbit (MMB drag)",
+    check("orbit (RMB drag)",
           abs(cam1["azimuth"] - cam0["azimuth"]) > 0.05,
           f"dAz={cam1['azimuth']-cam0['azimuth']:.3f}")
 
@@ -179,17 +179,17 @@ def main():
     check("zoom (wheel)", cam2["distance"] < cam1["distance"],
           f"{cam1['distance']:.1f} -> {cam2['distance']:.1f}")
 
-    # pan: shift+middle-drag moves target
+    # pan: shift + the orbit button moves target
     xdo("keydown", "shift")
-    xdo("mousedown", "2")
+    xdo("mousedown", "3")
     for i in range(1, 7):
         xdo("mousemove", str(cx + i * 15), str(cy))
-    xdo("mouseup", "2")
+    xdo("mouseup", "3")
     xdo("keyup", "shift")
     cam3 = c.call("viewport_info")["camera"]
     dt = sum((a - b) ** 2 for a, b in
              zip(cam3["target"], cam2["target"])) ** 0.5
-    check("pan (Shift+MMB)", dt > 0.1, f"target moved {dt:.2f}")
+    check("pan (Shift+RMB)", dt > 0.1, f"target moved {dt:.2f}")
     shot(c, "06_after_nav")
 
     # --- item 8b: delete selected ------------------------------------------

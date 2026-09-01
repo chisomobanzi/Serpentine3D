@@ -1,7 +1,7 @@
 """Orbit with a real mouse, then take the view back.
 
 The unit tests (tests/test_view_history.py) drive the history by hand. This
-one drives it the way it is actually used: a middle-button drag across the
+one drives it the way it is actually used: an orbit-button drag across the
 pane inside Xephyr, a burst of wheel zooms, and `undoview` after each. What
 it is really checking is that a whole gesture is one step back rather than
 a hundred, which no unit test can see because the frames come from Qt.
@@ -61,13 +61,16 @@ def centre(c):
 
 
 def drag_orbit(c):
-    """One middle-button drag, in several steps, like a hand would."""
+    """One orbit-button drag, in several steps, like a hand would.
+
+    Button 3: the right button orbits on a clean config since 0.7.2.
+    """
     x, y = centre(c)
     xdo("mousemove", str(x), str(y), pause=0.1)
-    xdo("mousedown", "2", pause=0.15)
+    xdo("mousedown", "3", pause=0.15)
     for i in range(1, 9):
         xdo("mousemove", str(x + i * 14), str(y + i * 5), pause=0.05)
-    xdo("mouseup", "2", pause=0.5)
+    xdo("mouseup", "3", pause=0.5)
 
 
 def to_screen(c, world):
