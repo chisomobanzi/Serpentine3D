@@ -19,6 +19,7 @@ buried deeper.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtWidgets import QApplication, QPushButton
 
 from serpentine3d.core.history import History
@@ -181,6 +182,36 @@ def test_the_layer_stays_picked_after_it_comes_out():
         "the layer lost its selection, so a second press moves something else"
 
 
+def _right_click(panel, layer_id):
+    """A real right-click on a row, and the menu it puts up.
+
+    The menu is opened with exec, which would sit in its own event loop
+    until somebody clicked it, so the one this raises is stubbed to go up
+    and come straight back down.
+    """
+    tree = panel.tree
+    pos = tree.visualItemRect(_rows(panel)[layer_id]).center()
+    opened = []
+    build = panel._menu_for
+
+    def spy(clicked_id):
+        menu = build(clicked_id)
+        menu.exec = lambda *a, **kw: None
+        opened.append((clicked_id, menu))
+        return menu
+
+    panel._menu_for = spy
+    try:
+        QApplication.sendEvent(tree.viewport(), QContextMenuEvent(
+            QContextMenuEvent.Reason.Mouse, pos,
+            tree.viewport().mapToGlobal(pos)))
+        QApplication.processEvents()
+    finally:
+        panel._menu_for = build
+    assert opened, "a right-click on a layer row put up no menu at all"
+    return opened[-1]
+
+
 # -- the right-click menu --
 
 def test_a_right_click_on_the_tree_opens_the_panels_own_menu():
@@ -188,6 +219,16 @@ def test_a_right_click_on_the_tree_opens_the_panels_own_menu():
     assert panel.tree.contextMenuPolicy() == \
         Qt.ContextMenuPolicy.CustomContextMenu, \
         "a right-click on a layer offers nothing"
+
+
+def test_a_right_click_lands_on_the_row_under_the_pointer():
+    scene, panel = _panel()
+    _walls, _inner, _outer, clad, _roof = _house(scene)
+    clicked, menu = _right_click(panel, clad.id)
+    assert clicked == clad.id, \
+        "the menu came up for a different layer than the one right-clicked"
+    assert any(t.startswith("Move out of Exterior")
+               for t in _menu_texts(menu)), _menu_texts(menu)
 
 
 def test_the_menu_on_a_sublayer_names_the_branch_it_would_leave():
