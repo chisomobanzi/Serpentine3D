@@ -75,6 +75,16 @@
   layer, the one that moves it, the one that deletes it. Reported by
   Lourenço Vaz Pinto.
 
+- **The + button makes a layer beside the one you picked.** It used to add a
+  top-level layer at the bottom of the panel however deep the picked row was,
+  so pressing it with a sublayer picked gave that layer an uncle rather than
+  a sibling, nowhere near the row being looked at. The new layer now lands
+  directly under the picked one, at the picked one's level: `+` makes a layer
+  beside it, `↳` makes one inside it. With nothing picked it still goes at
+  the end of the top level. Either button leaves the new row picked too, so a
+  second press works from the layer just made and a name typed straight away
+  lands on it. Reported by Lourenço Vaz Pinto.
+
 ## 0.7.2 — 2026-09-01
 
 ### Added

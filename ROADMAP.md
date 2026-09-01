@@ -139,6 +139,14 @@ Three commits, each red-green with its own tests: the model
   first and an assistant had no way to say which one it meant. Verified
   against the packaged AppImage over RPC, not just the checkout.
 
+- **The + button had not heard about sublayers.** It made a top-level
+  layer at the end of the list however deep the picked row was, so a
+  sublayer's sibling came out as its uncle, off the bottom of the panel.
+  It now makes a layer beside the picked one, at the picked one's level,
+  which is the pair to `↳` making one inside it, and both leave the new
+  row picked, so a second press works from the layer just made. Reported
+  by Lourenço Vaz Pinto, verified with a real click on the AppImage.
+
 ### Layer reorder, 2026-09-01
 
 - **A branch is not one run of the list.** `_order` is flat and a layer

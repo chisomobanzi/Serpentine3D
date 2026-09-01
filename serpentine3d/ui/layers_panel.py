@@ -606,11 +606,50 @@ class LayersPanel(QWidget):
             self._updating = False
         self.tree.editItem(item, _NAME_COL)
 
+    def _pick_row(self, layer_id):
+        """Put the picked row on a layer that has just been made.
+
+        The tree is redrawn from the scene, which puts back whatever was
+        picked before, so a new layer would otherwise arrive with the row
+        above it still picked: the next press of the button would work
+        from that one, and a name typed straight away would rename it.
+        """
+        item = self._all_rows().get(layer_id)
+        if item is None:
+            return
+        self.tree.setCurrentItem(item)
+        self.tree.clearSelection()
+        item.setSelected(True)
+
     def _new_layer(self):
+        """A new layer beside the picked one, at the level it is on.
+
+        Beside, not at the bottom of the list: the `↳` button next to
+        this one makes a layer inside the picked one, so this one making
+        its sibling is the pair of them, and either way the new layer
+        turns up on the row the user is already looking at. A sublayer
+        picked here gets a sublayer of the same parent, not a top-level
+        layer at the end of the panel. Nothing picked means the end of
+        the top level, since there is no row to be beside.
+        """
+        item = self.tree.currentItem()
+        beside = None if item is None else self._layer_id(item)
+        layers = self.scene.layers
+        parent_id = None if beside is None else layers.get(beside).parent
         self.history.checkpoint("new layer")
-        layer = self.scene.layers.create()
-        self.scene.layers.current_id = layer.id
+        layer = layers.create(parent=parent_id)
+        if beside is not None:
+            # In front of whatever was under it, or nothing if it was the
+            # last of its parent's layers. The new layer is already one
+            # of them, at the end, so it is left out of the count.
+            kin = [la.id for la in layers.children(parent_id)
+                   if la.id != layer.id]
+            after = kin.index(beside) + 1
+            layers.place(layer.id, parent_id,
+                         kin[after] if after < len(kin) else None)
+        layers.current_id = layer.id
         self.scene.notify()
+        self._pick_row(layer.id)
 
     def _new_sublayer(self):
         """A new layer under the picked one, the way Rhino's panel does it.
@@ -635,6 +674,7 @@ class LayersPanel(QWidget):
         if item is not None:
             item.setExpanded(True)
         self.scene.notify()
+        self._pick_row(layer.id)
 
     def _row_menu(self, pos):
         """The menu a right-click on a row opens.
