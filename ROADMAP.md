@@ -6,17 +6,18 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated after batch 1 (commit `7841794`, 2026-08-27).
+Last updated when 0.7.2 was cut (2026-09-01).
 
 ---
 
 ## Where things stand
 
-Version `0.7.1` in `pyproject.toml`; `CHANGELOG.md` has an unreleased
-`0.7.2` section holding batch 1. **The version bump and release have not
-been cut.** Suite: 2392 passed, 9 skipped.
+Version `0.7.2` in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.7.2 section is dated 2026-09-01 and holds batch 1.
+**Committed and tagged `v0.7.2` on 2026-09-01, not yet pushed or
+published as a GitHub release.** Nothing was left on the pre-release list. Suite on Linux: 2413 passed, nothing skipped.
 
-### Batch 1 — shipped, unreleased
+### Batch 1 — released in 0.7.2
 
 All of it driven test-first and then exercised in the running app:
 
@@ -25,33 +26,48 @@ All of it driven test-first and then exercised in the running app:
   orbits out of a parallel view
 - `Scene.update_many()` — 15 bulk commands now notify the scene once instead
   of once per object (isolate on 300 objects: one rebuild, not 300)
-- Layer Type and Print are drop-downs, not click-to-cycle
+- Layer Type and Print are drop-downs, not click-to-cycle, and the panel
+  now fits all five columns into the dock width the app gives it
 - Multi-select layers; one checkbox toggles all selected, one undo step
 - A detail's scale is editable in the Properties panel
 - Enter in a Properties field no longer re-runs the last command
 - Two use-after-free crashes in the layers panel
 
-### Needs a human before release
+### Cleared on Linux, 2026-09-01
 
-- **Ctrl + right-drag zoom is still unverified on real input.** There is a
-  passing unit test through the viewport event path, and now an e2e script
-  (`tests/e2e_ctrl_zoom.py`), but the script has never had a real run: it
-  needs Xephyr and xdotool, and the Windows box it was written on has
-  neither. Running it is the first job on Linux:
-
-      tests/run_e2e.sh tests/e2e_ctrl_zoom.py
-
-  Its logic is not guesswork — 7 of its 10 checks were validated against
-  the live app on Windows by swapping xdotool for `SendInput`. What could
-  not be validated is the chord itself: **Windows drops a lone synthetic
-  Ctrl** (a Ctrl-only drag orbits instead of zooming), while delivering it
-  when Shift is also held. So `ctrl-shift-orbits-out-of-a-parallel-view`
-  *is* verified on real input; the three Ctrl-alone zoom checks are not.
-- **Cosmetic:** the layers panel Type/Print combo editors are clipped by the
-  narrow columns ("Contin ⌄"). Widen the columns or the editor.
-- `tests/test_layer_type_and_print_cells_offer_a_drop_down.py` is
-  timing-sensitive: it relies on a zero-timer redraw plus `qWait`. It passes
-  clean but flaked once under heavy CPU contention (two suites at once).
+- **Ctrl + right-drag zoom is verified on real input.**
+  `tests/run_e2e.sh tests/e2e_ctrl_zoom.py` passes 10 of 10 under Xephyr,
+  the three Ctrl-alone zoom checks included, the ones Windows could not
+  answer, because it drops a lone synthetic Ctrl while delivering it when
+  Shift is held. `e2e_alt_swipe`, `e2e_view_history` and `e2e_dod` (24
+  checks) were run too, since batch 1's move of orbit to the right button
+  had made them stale and nothing in CI runs them.
+- **Two batch-1 layers-panel test files were failing on Linux**, not on
+  Windows: they aimed a click at the middle of a check box cell, and Fusion
+  draws the box hard against the left edge, so the click landed on bare cell
+  and toggled nothing. They now aim at the box the style actually draws.
+  Worth knowing that these passed on Windows for a style-dependent reason.
+- **`test_layer_type_and_print_cells_offer_a_drop_down.py` was not flaky
+  under load.** It was leaving a drop-down open. Two of its tests read the
+  list and returned without ending the edit, so the panel was collected
+  while Qt still held the drop-down as the focus widget; the next test to
+  show a panel activated a window, Qt handed the focus on and committed an
+  editor that was no longer there, and the run took a SIGSEGV. It landed in
+  whichever test opened the next panel, which is why it read as a flake.
+  Both tests now close the editor. Reproduced 10 times out of 10 with
+  `pytest tests/test_config_snaps.py tests/test_layer_type_and_print_cells_offer_a_drop_down.py`,
+  and 0 out of 10 after. **No test may leave a cell editor open.**
+- **The clipped Type/Print drop-downs were the smaller half of the problem.**
+  Rendering the dock as the app actually builds it showed the tree wanted
+  336px of the 280px `PANEL_WIDTH` column, so Print was off the edge behind a
+  sideways scrollbar and Type was cut in half. The panel had outgrown its
+  column when batch 1 added the two columns. The name column now stretches
+  and the other four keep a width measured from their own content (a
+  hand-picked pixel width clips the same word on a desktop set to a bigger
+  font), and `_ChoiceDelegate.updateEditorGeometry` opens a drop-down at the
+  width its list needs, clamped inside the view. Worth repeating: a panel
+  test that resizes its own widget proves nothing about the width the app
+  gives it: **build `MainWindow` and grab the dock.**
 
 ---
 
