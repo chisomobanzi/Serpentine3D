@@ -17,6 +17,13 @@
   way you left it. Deleting a parent deletes the branch and moves the
   objects to Default. Requested by Lourenço Vaz Pinto.
 
+- **The layer tree is on the API too.** `scene_info` reports each layer's
+  `path` and `parent`, plus `shown`, which is whether the branch above it
+  lets it onto the screen as against the layer's own switch. The `layers`
+  call takes a `parent` to make a sublayer with, and a layer can be named
+  by its path, so an assistant asked to work on `Walls::Interior` no
+  longer has to guess which Interior was meant. Same on the MCP server.
+
 - **A layer tree is saved and loaded.** Both `.s3d` and `.3dm` carry the
   tree. On the way out to Rhino a layer is written with its parent and
   with the visible and locked switches Rhino keeps for a layer of its own,

@@ -53,15 +53,37 @@ class SerpApi:
 
     # ------------------------------------------------------------------ info
 
+    def _layer(self, ref: str | None):
+        """The layer a caller means, by path or by plain name.
+
+        Two layers can be called Interior once layers nest, so a name on
+        its own no longer says which one: `Walls::Interior` picks one of
+        them. A plain name is still taken, because most scenes have no
+        two layers sharing one and every caller written before sublayers
+        passes one.
+        """
+        mgr = self.scene.layers
+        layer = mgr.find_by_path(ref or "") or mgr.find_by_name(ref or "")
+        if layer is None:
+            raise ApiError(f"No layer named '{ref}'")
+        return layer
+
     def scene_info(self) -> dict:
         objs = self.scene.all()
         bounds = self.scene.bbox()
         return {
             "object_count": len(objs),
             "objects": [self._obj_info(o) for o in objs],
+            # `path` is what tells one Interior from another once layers
+            # nest, and `visible` is the layer's own switch while `shown`
+            # is whether the branch above it lets it onto the screen.
             "layers": [
                 {"name": layer.name, "color": list(layer.color),
+                 "path": self.scene.layers.full_path(layer.id),
+                 "parent": (self.scene.layers.full_path(layer.parent)
+                            if layer.parent else None),
                  "visible": layer.visible,
+                 "shown": self.scene.layers.is_visible(layer.id),
                  "current": layer.id == self.scene.layers.current_id,
                  "object_count": sum(1 for o in objs
                                      if o.layer_id == layer.id)}
@@ -324,18 +346,19 @@ class SerpApi:
     def layers(self, action: str = "list", name: str | None = None,
                new_name: str | None = None, color: list | None = None,
                visible: bool | None = None,
-               objects: list[str] | None = None) -> dict:
+               objects: list[str] | None = None,
+               parent: str | None = None) -> dict:
         mgr = self.scene.layers
         if action == "list":
             return {"layers": self.scene_info()["layers"]}
         if action == "create":
+            under = self._layer(parent) if parent else None
             self.history.checkpoint("create layer")
-            layer = mgr.create(name, tuple(color) if color else None)
+            layer = mgr.create(name, tuple(color) if color else None,
+                               parent=under.id if under else None)
             self.scene.notify()
-            return {"created": layer.name}
-        layer = mgr.find_by_name(name or "")
-        if layer is None:
-            raise ApiError(f"No layer named '{name}'")
+            return {"created": mgr.full_path(layer.id)}
+        layer = self._layer(name)
         if action == "rename":
             self.history.checkpoint("rename layer")
             mgr.rename(layer.id, new_name)

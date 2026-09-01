@@ -101,12 +101,24 @@ Three commits, each red-green with its own tests: the model
   empty `QMimeData` and no live drag the base class takes a SIGSEGV, and
   the rows belong to the scene anyway, which redraws the moment the move
   lands.
+- **The drag was verified with a real pointer.**
+  `tests/e2e_sublayer_drag.py` brings its own window on a Xephyr, works
+  out where the rows are, and drives xdotool from a **second process**:
+  a drag runs a nested event loop inside the mouse-move handler that
+  started it, so a driver thread in the same process is the one that loop
+  is waiting on and both hang. The panel's own tests hand `dropEvent` a
+  QDropEvent, which proves the handler works but not that a drag starts.
 - **An indent is charged to the name column.** It is the column that
   stretches, so the expander every row grew turned a fresh window's own
   layer into "Defa...". Indent is 12px, the colour swatch gave up 4px, and
   a test now pins the name column against `sizeHintForColumn`. Deep names
   still run out of room in a 280px dock, so every row carries its full
   path as a tooltip.
+- **The API learned the tree.** `scene_info` reports `path`, `parent` and
+  `shown` per layer, `layers` takes a `parent` on create, and a layer can
+  be named by path, because `find_by_name` picks whichever Interior comes
+  first and an assistant had no way to say which one it meant. Verified
+  against the packaged AppImage over RPC, not just the checkout.
 
 ---
 

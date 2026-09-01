@@ -193,13 +193,15 @@ def serp_command(command: str, inputs: list[str] | None = None) -> str:
 @mcp.tool()
 def serp_layers(action: str = "list", name: str = "", new_name: str = "",
                 color: list[float] | None = None, visible: bool = True,
-                objects: list[str] | None = None) -> str:
+                objects: list[str] | None = None, parent: str = "") -> str:
     """Manage layers. action: 'list', 'create', 'rename', 'visible',
     'current', 'color' (color as [r,g,b] 0-1), 'assign' (move objects to
-    layer), 'delete'."""
+    layer), 'delete'. A layer can live under another: pass parent to
+    'create', and name a layer by its path ('Walls::Interior') where two
+    layers share a name."""
     return _call("layers", action=action, name=name or None,
                  new_name=new_name or None, color=color, visible=visible,
-                 objects=objects)
+                 objects=objects, parent=parent or None)
 
 
 @mcp.tool()
