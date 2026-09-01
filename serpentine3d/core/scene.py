@@ -15,7 +15,7 @@ import numpy as np
 
 from . import geometry
 from .deferred import DeferredShape
-from .layers import LayerManager
+from .layers import DEFAULT_LAYER_ID, LayerManager
 from .tessellate import DisplayMesh, tessellate
 
 
@@ -337,6 +337,20 @@ class Scene:
                 self.realise(obj_id)
         return len(pending)
 
+    def remove_layer(self, layer_id: str) -> list[str]:
+        """Delete a layer and the layers under it. Returns what went.
+
+        Whatever was drawn on any of them moves to the default layer
+        first. The work is still the user's, and an object pointing at a
+        layer that is gone is a crash on the next redraw.
+        """
+        going = {layer_id,
+                 *(la.id for la in self.layers.descendants(layer_id))}
+        orphans = [o.id for o in self.all() if o.layer_id in going]
+        if orphans:
+            self.update_many(orphans, layer_id=DEFAULT_LAYER_ID)
+        return self.layers.remove(layer_id)
+
     def remove(self, obj_id: str):
         if obj_id in self.objects:
             del self.objects[obj_id]
@@ -429,18 +443,20 @@ class Scene:
         return [self.objects[i] for i in self._order]
 
     def visible_objects(self) -> list[SceneObject]:
+        # is_visible, not the layer's own switch: a layer under a parent
+        # that is off is off, whatever its own switch says.
         return [o for o in self.all()
-                if o.visible and self.layers.get(o.layer_id).visible]
+                if o.visible and self.layers.is_visible(o.layer_id)]
 
     def selectable_objects(self) -> list[SceneObject]:
         return [o for o in self.visible_objects()
-                if not o.locked and not self.layers.get(o.layer_id).locked]
+                if not o.locked and not self.layers.is_locked(o.layer_id)]
 
     def is_selectable(self, obj_id: str) -> bool:
         obj = self.get(obj_id)
         return (obj is not None and obj.visible and not obj.locked
-                and self.layers.get(obj.layer_id).visible
-                and not self.layers.get(obj.layer_id).locked)
+                and self.layers.is_visible(obj.layer_id)
+                and not self.layers.is_locked(obj.layer_id))
 
     def expand_group_ids(self, ids: list[str]) -> list[str]:
         """Grow a selection to whole groups."""

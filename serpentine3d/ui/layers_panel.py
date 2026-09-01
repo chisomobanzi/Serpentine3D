@@ -386,11 +386,8 @@ class LayersPanel(QWidget):
         layer_id = self._layer_id(item)
         try:
             self.history.checkpoint("delete layer")
-            # objects on the deleted layer move to default
-            for obj in self.scene.all():
-                if obj.layer_id == layer_id:
-                    self.scene.update(obj.id, layer_id="default")
-            self.scene.layers.remove(layer_id)
+            # takes the layers under it, and moves their objects to default
+            self.scene.remove_layer(layer_id)
         except ValueError:
             self.history.discard_checkpoint()
         self.scene.notify()

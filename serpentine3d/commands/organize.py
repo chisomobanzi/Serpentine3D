@@ -181,13 +181,17 @@ def cmd_purge(ctx):
     """Remove empty layers and unused block definitions."""
     from ..core.layers import DEFAULT_LAYER_ID
     used_layers = {o.layer_id for o in ctx.scene.all()}
+    layers = ctx.scene.layers
+    keep = used_layers | {DEFAULT_LAYER_ID, layers.current_id}
+    # A layer goes only if nothing in its whole branch is wanted: deleting
+    # a parent takes its children with it, and an empty Walls with a busy
+    # Walls::Interior under it is not an empty layer.
+    doomed = {la.id for la in layers.all()
+              if not ({la.id, *(d.id for d in layers.descendants(la.id))}
+                      & keep)}
     removed_layers = 0
-    for layer in list(ctx.scene.layers.all()):
-        if (layer.id not in used_layers
-                and layer.id != DEFAULT_LAYER_ID
-                and layer.id != ctx.scene.layers.current_id):
-            ctx.scene.layers.remove(layer.id)
-            removed_layers += 1
+    for layer_id in [i for i in doomed if layers.get(i).parent not in doomed]:
+        removed_layers += len(layers.remove(layer_id))
     used_blocks = {o.block_id for o in ctx.scene.all() if o.block_id}
     removed_blocks = 0
     for bid in list(ctx.scene.block_defs):
