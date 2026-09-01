@@ -14,9 +14,9 @@ Last updated when 0.7.3 was cut (2026-09-01).
 
 Version `0.7.3` in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.7.3 section is dated 2026-09-01 and holds the
-layers work below. **Committed and tagged `v0.7.3` on 2026-09-01, not yet
-pushed or published as a GitHub release.** Suite on Linux: 2543 passed,
-nothing skipped.
+layers work below. **Released on 2026-09-01: pushed, tagged `v0.7.3`,
+published with the AppImage and the Windows `.exe` attached; the macOS
+`.dmg` is still to come.** Suite on Linux: 2544 passed, nothing skipped.
 
 0.7.2 before it was released on 2026-09-01: pushed, tagged, and published
 with the AppImage and the macOS `.dmg` attached.

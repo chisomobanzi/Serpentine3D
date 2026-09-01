@@ -406,6 +406,21 @@ class LayersPanel(QWidget):
         self.rebuild()
         self.tree.size_columns()
 
+    def width_short_by(self) -> int:
+        """How many pixels the panel is short of showing every column.
+
+        The four narrow columns take the width their own content needs
+        and the name takes whatever is left, so the panel width the
+        window hands over decides whether the name fits. 280px is this
+        machine's font's number: measured against a wider sans-serif the
+        same five columns want more, there is nothing left for the name,
+        and the layer everything is drawn on reads "Defa...". The window
+        asks after it has set that width, and gives back the difference.
+        """
+        tree = self.tree
+        return max(0, tree.sizeHintForColumn(_NAME_COL)
+                   - tree.columnWidth(_NAME_COL))
+
     def rebuild(self):
         if self._in_item_change:
             # Qt is still inside the item; redraw on the next turn instead

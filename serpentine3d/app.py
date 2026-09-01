@@ -336,6 +336,14 @@ class MainWindow(QMainWindow):
             # the command strip spans the bottom full-width: resize it alone
             self.resizeDocks([self._cmd_dock], [96], Qt.Orientation.Vertical)
             self._set_panel_width(PANEL_WIDTH)
+            # 280 is the width our own font's columns need. A machine
+            # whose sans-serif is wider needs more, and the layers panel
+            # is the one that can say how much: its name column is what
+            # runs out of room, and a cut-short layer name is worse than
+            # a few pixels off the drawing.
+            short = self.layers_panel.width_short_by()
+            if short:
+                self._set_panel_width(PANEL_WIDTH + short)
         else:
             saved = self._keep_panel_width()
             kept = clamp_panel_width(saved, self.width())

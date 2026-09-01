@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **The Layers panel is as wide as its columns need, not as wide as our
+  own font wanted.** The panel opens at a set width and the layer name
+  takes whatever the four narrow columns beside it leave, so on a machine
+  whose sans-serif is wider than the one this was measured on there was
+  nothing left and the layer you draw on read `Defa...`. The panel now
+  says how many pixels short it is and the window hands them over. A width
+  you have set yourself is left alone.
+
 ## 0.7.3 — 2026-09-01
 
 ### Added

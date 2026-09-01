@@ -137,3 +137,45 @@ def test_the_columns_fit_the_dock_of_a_real_window_under_the_real_theme():
             win.close()
     finally:
         app.setStyleSheet(was)
+
+
+def test_the_columns_fit_on_a_machine_whose_font_is_wider_than_ours():
+    """280px is our font's number, not everyone's.
+
+    The columns are measured, but the dock they go in was a constant, and
+    the two only just fit here: the name column comes out two pixels wider
+    than the name needs. On the CI runner, whose sans-serif is a different
+    one, the same five columns wanted seven pixels more than the dock had
+    and the layer everything is drawn on read "Defa...". A bigger tree
+    font stands in for that font here, since the panel cannot pick which
+    fonts a Linux box has installed. The dock has to give.
+    """
+    app = QApplication.instance()
+    was = app.styleSheet()
+    app.setStyleSheet(theme.QSS + "\nQTreeWidget { font-size: 15px; }\n")
+    try:
+        win = MainWindow()
+        win.resize(1600, 900)
+        win.show()
+        QApplication.processEvents()
+        panel = win.layers_panel
+        panel.scene.layers.set_linetype(DEFAULT_LAYER_ID,
+                                        max(LINETYPES, key=len))
+        panel.scene.notify()
+        QApplication.processEvents()
+        tree = panel.tree
+        try:
+            for column, what in ((NAME_COL, "Layer"), (TYPE_COL, "Type"),
+                                 (PRINT_COL, "Print")):
+                needed = tree.sizeHintForColumn(column)
+                assert tree.columnWidth(column) >= needed, (
+                    f"the {what} column is {tree.columnWidth(column)}px "
+                    f"where its rows need {needed}px, so a wider font "
+                    f"reads cut short")
+            assert not tree.horizontalScrollBar().isVisible(), \
+                "a wider font puts the Layers dock behind a scrollbar"
+        finally:
+            win.mark_saved()
+            win.close()
+    finally:
+        app.setStyleSheet(was)
