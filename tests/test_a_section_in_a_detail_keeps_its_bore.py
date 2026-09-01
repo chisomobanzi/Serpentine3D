@@ -24,11 +24,17 @@ def _pipe():
 
 
 def _cut(shapes, offset=0.0, target=(0.0, 0.0, 15.0)):
-    """The cut a top-down detail makes, plane through the target."""
-    return _section_cut(shapes, np.asarray(target, float),
-                        np.array([0.0, 0.0, 1.0]),
-                        np.array([1.0, 0.0, 0.0]),
-                        np.array([0.0, 1.0, 0.0]), offset)
+    """The cut a top-down detail makes, plane through the target.
+
+    The shapes and the faces; what each face was cut from is asked about
+    elsewhere, where the fill it gets is what is being decided.
+    """
+    shapes, regions, _owners = _section_cut(
+        shapes, np.asarray(target, float),
+        np.array([0.0, 0.0, 1.0]),
+        np.array([1.0, 0.0, 0.0]),
+        np.array([0.0, 1.0, 0.0]), offset)
+    return shapes, regions
 
 
 def _reach(loop):

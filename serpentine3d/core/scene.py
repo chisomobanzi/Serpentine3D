@@ -481,6 +481,15 @@ class Scene:
         """
         return self.layers.get(obj.layer_id).print_width
 
+    def hatch_of(self, obj: SceneObject) -> str:
+        """The fill a cut through this object is drawn with, or nothing.
+
+        Taken off the layer, the way the print width is: what a thing is
+        made of belongs to the layer it is on, so a section through it
+        reads as concrete or as steel without anybody hatching it by hand.
+        """
+        return self.layers.get(obj.layer_id).hatch
+
     def render_color_of(self, obj: SceneObject) -> tuple[float, float, float]:
         """The colour rendered mode draws the object's surfaces in.
 

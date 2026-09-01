@@ -40,7 +40,7 @@ def _sheet(monkeypatch, *, cut=(), visible=()):
 
 def test_a_click_in_the_wall_takes_the_bore_along_as_a_hole(monkeypatch):
     lay = _sheet(monkeypatch, cut=[[SQUARE, HOLE]])
-    points, holes = drafting._region_at(None, lay, 57.0, 50.0)
+    points, holes, _material = drafting._region_at(None, lay, 57.0, 50.0)
     assert len(holes) == 1, "the wall was hatched as though it were solid"
     assert min(x for x, _y in points) == 40.0, "picked up the wrong loop"
     assert min(x for x, _y in holes[0]) == 46.0
@@ -49,14 +49,14 @@ def test_a_click_in_the_wall_takes_the_bore_along_as_a_hole(monkeypatch):
 def test_a_click_in_the_bore_hatches_the_bore_you_pointed_at(monkeypatch):
     """You pointed at the hole, so the hole is the region."""
     lay = _sheet(monkeypatch, cut=[[SQUARE, HOLE]])
-    points, holes = drafting._region_at(None, lay, 50.0, 50.0)
+    points, holes, _material = drafting._region_at(None, lay, 50.0, 50.0)
     assert holes == []
     assert min(x for x, _y in points) == 46.0
 
 
 def test_plain_linework_has_nothing_punched_out_of_it(monkeypatch):
     lay = _sheet(monkeypatch, visible=[SQUARE])
-    points, holes = drafting._region_at(None, lay, 50.0, 50.0)
+    points, holes, _material = drafting._region_at(None, lay, 50.0, 50.0)
     assert holes == [] and len(points) == 4
 
 

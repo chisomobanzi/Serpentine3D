@@ -73,8 +73,9 @@ def test_the_cut_is_placed_on_the_paper_and_every_ring_is_outlined():
     region and the loops to draw round it. Asking twice in two places is
     how the plot and the screen came to disagree about a bore.
     """
-    fill, loops = cut_hatching([[SQUARE, HOLE]], cx=100.0, cy=50.0, s=0.5,
-                               angle=0.0, spacing=1.0)
+    fill, loops, _solid = cut_hatching([[SQUARE, HOLE]], cx=100.0, cy=50.0,
+                                       s=0.5, angle=0.0,
+                                       spacing=1.0)
     assert len(loops) == 2, "the hole was not outlined, only the ring"
     assert loops[0][0] == pytest.approx((100.0, 50.0)), \
         "the cut is not where the detail puts it on the paper"
@@ -87,8 +88,9 @@ def test_the_cut_is_placed_on_the_paper_and_every_ring_is_outlined():
 def test_two_separate_cuts_do_not_shadow_each_other():
     """Even-odd is per region: two bars are two fills, not a checkerboard."""
     far = [(40.0, 0.0), (60.0, 0.0), (60.0, 20.0), (40.0, 20.0)]
-    fill, loops = cut_hatching([[SQUARE], [far]], cx=0.0, cy=0.0, s=1.0,
-                               angle=0.0, spacing=2.0)
+    fill, loops, _solid = cut_hatching([[SQUARE], [far]], cx=0.0, cy=0.0,
+                                       s=1.0, angle=0.0,
+                                       spacing=2.0)
     assert len(loops) == 2
     assert _by_row(fill)[1.0] == [(0.0, 20.0), (40.0, 60.0)], \
         "the gap between two separate cuts was hatched as if it were solid"

@@ -68,7 +68,7 @@ def _flip(seg):
 
 def test_the_plot_hatches_exactly_what_the_screen_hatches():
     rec = _plot([[SQUARE, HOLE]])
-    fill, _loops = cut_hatching([[SQUARE, HOLE]], 50.0, 50.0, 1.0)
+    fill, _loops, _solid = cut_hatching([[SQUARE, HOLE]], 50.0, 50.0, 1.0)
     assert fill, "nothing to compare: the cut produced no hatching at all"
     assert rec.lines == [_flip(seg) for seg in fill], \
         "the plot worked the hatching out for itself and got another answer"

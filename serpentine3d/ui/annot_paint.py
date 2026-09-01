@@ -16,6 +16,9 @@ from ..core.layout import (DEFAULT_STYLES, hatch_region,
 INK = QColor(25, 25, 30)
 DIM_INK = QColor(45, 70, 130)
 HATCH_INK = QColor(70, 72, 80)
+# Solid is drawn see-through so the linework under it still reads:
+# a poched wall on a section is meant to sit behind its own edges.
+SOLID_FILL = QColor(120, 122, 130, 120)
 
 
 def style_of(scene, name: str) -> dict:
@@ -76,6 +79,36 @@ def draw_leader(painter, to_dev, k, leader):
     painter.drawText(int(tx), int(ty), leader.text)
 
 
+def fill_cut_solid(painter, to_dev, regions):
+    """Flood the cut faces of a section that name a solid material.
+
+    `regions` are the solid rings `cut_hatching` hands back, in paper
+    millimetres: for each face the ring round the outside first and
+    whatever is punched out of it after. The rest of a cut is line
+    segments and goes out with the linework; this is the part only a
+    painter can draw, so the screen and the plot both come here.
+
+    One path per face, not one for the lot: cut faces overlap on the
+    page all the time, and even-odd across two of them would leave the
+    overlap unpainted. Nothing is outlined here, because the cut draws
+    its own outline, heavier than a hairline.
+    """
+    from PySide6.QtGui import QPainterPath
+    if not regions:
+        return
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(SOLID_FILL)
+    for rings in regions:
+        path = QPainterPath()
+        path.setFillRule(Qt.OddEvenFill)      # the bore stays unpainted
+        for ring in rings:
+            path.addPolygon(QPolygonF([QPointF(*to_dev(x, y))
+                                       for x, y in ring]))
+            path.closeSubpath()
+        painter.drawPath(path)
+    painter.setBrush(QColor(0, 0, 0, 0))
+
+
 def draw_hatch(painter, to_dev, k, hatch):
     pts = hatch.points
     if len(pts) < 3:
@@ -94,7 +127,7 @@ def draw_hatch(painter, to_dev, k, hatch):
             path.addPolygon(poly)
             path.closeSubpath()
         painter.setPen(QPen(HATCH_INK, 0))
-        painter.setBrush(QColor(120, 122, 130, 120))
+        painter.setBrush(SOLID_FILL)
         painter.drawPath(path)
         painter.setBrush(QColor(0, 0, 0, 0))
         return

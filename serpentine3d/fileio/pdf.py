@@ -155,10 +155,11 @@ def _paint_detail_vector(painter, layout_view, detail, layout, k):
     if regions:
         # The same answer the screen draws, so a bore that is open on
         # screen is open on paper.
-        from ..core.layout import cut_hatching
+        from ..core.layout import cut_hatching, cut_patterns
         from PySide6.QtCore import QPointF
         from PySide6.QtGui import QPolygonF
-        fill, loops = cut_hatching(regions, cx, cy, s)
+        fill, loops, solid = cut_hatching(regions, cx, cy, s,
+                                          patterns=cut_patterns(data))
         painter.setPen(QPen(QColor(60, 62, 70), 0.15 * k))
         for a, b in fill:
             painter.drawLine(
@@ -169,6 +170,11 @@ def _paint_detail_vector(painter, layout_view, detail, layout, k):
             ring = list(loop) + [loop[0]]     # closed, or one side is missing
             painter.drawPolyline(QPolygonF(
                 [QPointF(x * k, (layout.paper_h - y) * k) for x, y in ring]))
+        # Over the outline, the way the hatching goes over it: what is
+        # poched on a section is drawn behind its own edges.
+        from ..ui import annot_paint
+        annot_paint.fill_cut_solid(
+            painter, lambda x, y: (x * k, (layout.paper_h - y) * k), solid)
     painter.restore()
 
 

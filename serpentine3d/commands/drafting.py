@@ -468,9 +468,12 @@ def cmd_hatch(ctx):
         if found is None:
             ctx.echo("No closed linework region found under that point.")
             return
-        poly, holes = found
+        poly, holes, material = found
+        # The face is already drawn in its material, so that is what the
+        # prompt opens on: hatching a cut for real should not change what
+        # the cut is made of. Off a cut, the layer answers as it always did.
         pattern = yield OptionReq("Pattern", options=choices,
-                                  default=offered)
+                                  default=material.capitalize() or offered)
         lay.hatches.append(Hatch(points=[list(p) for p in poly],
                                  holes=[[list(p) for p in ring]
                                         for ring in holes],
@@ -665,13 +668,18 @@ def cmd_exportsvg(ctx):
 
 
 def _region_at(ctx, lay, px, py):
-    """The closed area under a point on the sheet, as (points, holes).
+    """The closed area under a point, as (points, holes, material).
 
     A section cut is a ring of material with the bore punched out of it,
     and a hatch dropped on the wall has to leave the bore alone. Any
     other bit of linework is a single loop with nothing inside it.
+
+    The material is the fill the face is already drawn in, off the layer
+    it was cut from, so hatching a cut face for real does not change
+    what it is made of. Linework that is not a cut has none, and neither
+    has the bore: a hole is not made of anything.
     """
-    from ..core.layout import enclosing_polygon
+    from ..core.layout import cut_patterns, enclosing_polygon
     detail = lay.detail_at(px, py)
     if detail is None or detail.perspective:
         return None
@@ -696,10 +704,12 @@ def _region_at(ctx, lay, px, py):
     # Land in the material of a cut face and its holes are the hatch's
     # holes. Land in one of the holes and that hole is what you pointed
     # at, so it is the region and it has nothing punched out of it.
-    for region in regions:
-        if len(region) > 1 and found == region[0][:-1]:
-            return found, [loop[:-1] for loop in region[1:]]
-    return found, []
+    patterns = cut_patterns(data)
+    for i, region in enumerate(regions):
+        if found == region[0][:-1]:
+            return (found, [loop[:-1] for loop in region[1:]],
+                    patterns[i] if i < len(patterns) else "")
+    return found, [], ""
 
 
 def _layout_view(ctx):

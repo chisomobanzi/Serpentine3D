@@ -293,27 +293,54 @@ def hatch_lines(points: list, angle_deg: float,
     return hatch_region([points], angle_deg, spacing)
 
 
+def cut_patterns(data: dict) -> list:
+    """What a detail's cut faces are made of, in the order they come in.
+
+    The hidden-line pass carries the object every cut face was cut from
+    along beside the face; this is the half of that a fill needs. A
+    detail with no such record, an old cache or a caller that never had
+    one, gets an empty list and is hatched the way it always was.
+    """
+    return [pattern
+            for _oid, pattern, _region in (data.get("cut_by_obj") or [])]
+
+
 def cut_hatching(regions: list, cx: float, cy: float, s: float,
-                 angle: float = 45.0, spacing: float = 2.5) -> tuple:
+                 angle: float = 45.0, spacing: float = 2.5,
+                 patterns: list | None = None) -> tuple:
     """A detail's section cuts on the paper: what to fill, what to outline.
 
     `regions` arrive in the detail's projector frame, in model units;
     `cx`, `cy` and `s` place them on the sheet. Returns the hatch
-    segments for every region and the loops to draw a line around, both
-    in paper millimetres.
+    segments for every region, the loops to draw a line around, and the
+    regions to flood rather than line, all in paper millimetres.
+
+    `patterns` is aligned with `regions` and says what each cut face is
+    made of, off the layer it was cut from: "cross" goes over the face a
+    second time square to the first, "solid" fills it in instead, and
+    anything else (a layer with nothing to say, or a pattern out of a
+    file this build cannot draw) gets the plain lines it always got.
+    Solid comes back on its own because it is not a set of segments: it
+    is the rings themselves, holes and all, for a painter to flood.
 
     The screen and the plot both draw this, and they used to work it out
     separately. One of them was always going to be a version behind.
     """
-    fill, loops = [], []
-    for region in regions:
+    fill, loops, solid = [], [], []
+    for i, region in enumerate(regions):
         paper = [[(cx + px * s, cy + py * s) for px, py in ring]
                  for ring in region if len(ring) >= 3]
         if not paper:
             continue
-        fill.extend(hatch_region(paper, angle, spacing))
+        pattern = patterns[i] if patterns and i < len(patterns) else ""
+        if pattern == "solid":
+            solid.append(paper)
+        else:
+            fill.extend(hatch_region(paper, angle, spacing))
+            if pattern == "cross":
+                fill.extend(hatch_region(paper, angle + 90.0, spacing))
         loops.extend(paper)
-    return fill, loops
+    return fill, loops, solid
 
 
 DEFAULT_STYLES = {

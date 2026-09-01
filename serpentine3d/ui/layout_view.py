@@ -27,6 +27,10 @@ LINE_HIDDEN = (0.45, 0.45, 0.5, 1.0)
 DIM_COLOR = (0.20, 0.30, 0.55, 1.0)
 POINT_MARK_PX = 4.0                     # half a point's cross, on screen
 ZOOM_PAD = 1.05                         # air around what a zoom was asked for
+# The modes that draw the model itself rather than a hidden-line pass over
+# it. Named, because anything that wants what the hidden-line pass worked
+# out has to skip the same details, or it makes the pass happen anyway.
+MODES_3D = ("wireframe", "shaded", "ghosted")
 
 
 def point_marks(points, size: float) -> np.ndarray:
@@ -479,9 +483,8 @@ class LayoutView:
 
     def _paint_detail_body(self, detail, paper_mvp):
         """The view inside a detail's rectangle, however it is drawn."""
-        mode = detail.display_mode
-        if mode in ("wireframe", "shaded", "ghosted"):
-            self._paint_detail_3d(detail, mode)
+        if detail.display_mode in MODES_3D:
+            self._paint_detail_3d(detail, detail.display_mode)
         else:
             self._paint_detail_hlr(detail, paper_mvp)
 
@@ -583,14 +586,21 @@ class LayoutView:
         pws = [vp.scene.print_width_of(o) for o in objs]    # plot pen, aligned
 
         cut_regions = []
+        cut_by_obj = []
         if shapes and detail.section_offset is not None \
                 and not detail.perspective:
-            shapes, cut_regions = _section_cut(  # 1:1 with input, keeps order
+            shapes, cut_regions, owners = _section_cut(
                 shapes, np.asarray(detail.target, float), d, right, up,
-                detail.section_offset)
+                detail.section_offset)   # shapes 1:1 with input, keeps order
+            # What each cut face is made of, carried out beside it: a cut
+            # is filled with the material of the thing it went through,
+            # and this is the only place that still knows which that was.
+            cut_by_obj = [(objs[i].id, vp.scene.hatch_of(objs[i]), region)
+                          for i, region in zip(owners, cut_regions)]
 
         if not shapes:
             data = {"visible": [], "hidden": [], "cut": cut_regions,
+                    "cut_by_obj": cut_by_obj,
                     "visible_lt": [], "visible_by_obj": [], "visible_groups": []}
             self._hlr_cache[detail.id] = (key, data)
             return data
@@ -626,6 +636,7 @@ class LayoutView:
         data = {"visible": visible,
                 "hidden": hlr.edges_to_polylines(res["hidden"]),
                 "cut": cut_regions,
+                "cut_by_obj": cut_by_obj,
                 "visible_lt": [(n, p) for n, p in lt_groups.items()],
                 "visible_by_obj": by_obj,
                 "visible_groups": merge_line_groups(entries)}
@@ -677,8 +688,12 @@ class LayoutView:
         # section-cut faces: heavy outline + 45-degree hatching
         regions = data.get("cut") or []
         if regions:
-            from ..core.layout import cut_hatching
-            fill, loops = cut_hatching(regions, cx, cy, s)
+            from ..core.layout import cut_hatching, cut_patterns
+            # Solid comes back on its own and is flooded by the painter
+            # afterwards, in `_paint_cut_fills`: GL has lines, and a face
+            # with a bore in it is not a thing lines can fill.
+            fill, loops, _solid = cut_hatching(regions, cx, cy, s,
+                                               patterns=cut_patterns(data))
             if fill:
                 self._draw_segs(paper_mvp, np.asarray(
                     [[[a[0], a[1], 0], [b[0], b[1], 0]] for a, b in fill],
@@ -701,6 +716,7 @@ class LayoutView:
         if lay is None:
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self._paint_cut_fills(painter)
         # detail scale labels
         for detail in lay.details:
             if not detail.show_label:
@@ -728,6 +744,42 @@ class LayoutView:
         # take hold of, so a detail's own linework must not cover it.
         self.gumball.paint(painter)
         self._paint_box(painter)        # last: the band sits over everything
+
+    def _paint_cut_fills(self, painter):
+        """Cut faces whose material is solid, flooded rather than lined.
+
+        The rest of a cut goes out with the detail in GL, which draws
+        lines; a face with a bore in it is not something lines can fill,
+        so it comes back over here to the painter. Under the labels and
+        the annotations, the way a detail's own ink is.
+        """
+        from ..core.layout import cut_hatching, cut_patterns
+        from . import annot_paint
+        lay = self.layout
+        details = list(lay.details)
+        if self.ghost_detail is not None:
+            details.append(self.ghost_detail)
+        for detail in details:
+            # Same test the GL pass makes, so asking a shaded detail what
+            # it cut does not set a hidden-line pass going for nothing.
+            if detail.display_mode in MODES_3D or detail.perspective \
+                    or detail.section_offset is None:
+                continue
+            data = self._detail_hlr(detail)
+            patterns = cut_patterns(data)
+            if "solid" not in patterns:
+                continue
+            _fill, _loops, solid = cut_hatching(
+                data.get("cut") or [], detail.x + detail.w / 2,
+                detail.y + detail.h / 2, 1.0 / detail.scale_denom,
+                patterns=patterns)
+            x0, y0 = self.paper_to_screen(detail.x, detail.y + detail.h)
+            x1, y1 = self.paper_to_screen(detail.x + detail.w, detail.y)
+            painter.save()
+            painter.setClipRect(int(x0), int(y0),
+                                int(x1 - x0), int(y1 - y0))
+            annot_paint.fill_cut_solid(painter, self.paper_to_screen, solid)
+            painter.restore()
 
     def _pools(self, lay) -> dict:
         """Where each kind of pickable thing lives on a sheet."""
@@ -1230,10 +1282,13 @@ class LayoutView:
 def _section_cut(shapes, target, d, right, up, offset):
     """Cut shapes with a half-space in front of the section plane.
 
-    Returns (cut_shapes, regions). A region is one cut face as loops in
-    the detail's projector frame (model units), the ring around the
-    outside first and whatever is punched out of it after, so a hatch can
-    leave a bore alone."""
+    Returns (cut_shapes, regions, owners). A region is one cut face as
+    loops in the detail's projector frame (model units), the ring around
+    the outside first and whatever is punched out of it after, so a hatch
+    can leave a bore alone. `owners` is aligned with `regions` and holds
+    the index into `shapes` of the thing each face was cut from, which is
+    what says whether a face is concrete or steel: one shape can be cut
+    in several places, and most shapes are not cut at all."""
     from ..core import geometry as g
 
     plane_pt = target + d * float(offset)
@@ -1259,7 +1314,8 @@ def _section_cut(shapes, target, d, right, up, offset):
 
     out_shapes = []
     regions = []
-    for s in shapes:
+    owners = []
+    for i, s in enumerate(shapes):
         kind = g.shape_kind(s)
         try:
             if kind == "solid":
@@ -1282,4 +1338,5 @@ def _section_cut(shapes, target, d, right, up, offset):
                      if len(poly) >= 3]
             if loops:
                 regions.append(loops)
-    return out_shapes, regions
+                owners.append(i)
+    return out_shapes, regions, owners

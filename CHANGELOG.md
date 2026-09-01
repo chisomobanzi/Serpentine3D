@@ -4,6 +4,19 @@
 
 ### Added
 
+- **A section cut is hatched by what it cut through.** A detail with a
+  section on it drew every cut face the same, so a drawing of a concrete
+  wall with a steel pipe through it read as one material. The cut now
+  carries the object it came from, and each face is drawn in the hatch
+  of that object's layer: cross for the concrete, solid for the steel,
+  plain lines for a layer that says nothing. Solid is a flood and not a
+  line pattern, so a cut face keeps its bores open where a set of lines
+  could not. Screen and plot ask the same two functions, so the sheet
+  and the PDF cannot disagree. Clicking a cut face with `hatch` in
+  Region mode opens the prompt on the material that was cut, so
+  dropping a real hatch into a face does not quietly change what the
+  face is made of.
+
 - **A layer says what its material is hatched with.** A drawing is read by
   its fills, and what a thing is made of belongs to the layer rather than to
   the afternoon it was drawn on. Set Concrete to cross once and the `hatch`
