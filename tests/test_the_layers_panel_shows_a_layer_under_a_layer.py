@@ -14,8 +14,8 @@ happens inside Qt's own handling, so the redraw has to wait a turn.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QDropEvent
+from PySide6.QtCore import QEvent, QMimeData, QPointF, Qt
+from PySide6.QtGui import QColor, QDropEvent, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -286,14 +286,20 @@ def test_deleting_a_parent_takes_its_branch_out_of_the_tree():
     assert roof.id in rows
 
 
-def test_a_click_on_a_sublayer_makes_it_the_current_layer():
+def test_a_double_click_on_a_sublayer_makes_it_the_current_layer():
+    """The indent must not put the row out of the pointer's reach."""
     scene, panel = _panel()
     _walls, inner, _roof = _walls_and_roof(scene, panel)
     tree = panel.tree
     rect = tree.visualRect(tree.indexFromItem(_rows(panel)[inner.id],
                                               _NAME_COL))
-    QTest.mouseClick(tree.viewport(), Qt.MouseButton.LeftButton,
-                     Qt.KeyboardModifier.NoModifier,
-                     QPoint(rect.center().x(), rect.center().y()))
+    point = QPointF(rect.center())
+    for typ in (QEvent.Type.MouseButtonPress,
+                QEvent.Type.MouseButtonRelease,
+                QEvent.Type.MouseButtonDblClick,
+                QEvent.Type.MouseButtonRelease):
+        QApplication.sendEvent(tree.viewport(), QMouseEvent(
+            typ, point, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier))
     _settle()
     assert scene.layers.current_id == inner.id

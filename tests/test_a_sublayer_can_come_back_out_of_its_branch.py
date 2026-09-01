@@ -95,6 +95,19 @@ def _out_button(panel):
         "the panel has no button for taking a layer out of its branch")
 
 
+def _row_of_buttons(panel):
+    """What the row under the tree reads like, gaps and all."""
+    row = None
+    for i in range(panel.layout().count()):
+        row = panel.layout().itemAt(i).layout() or row
+    assert row is not None, "the panel has no row of buttons"
+    out = []
+    for i in range(row.count()):
+        widget = row.itemAt(i).widget()
+        out.append(widget.text() if widget is not None else " ")
+    return "".join(out)
+
+
 def _click_out(panel):
     _out_button(panel).click()
     QApplication.processEvents()
@@ -123,6 +136,20 @@ def test_the_panel_offers_a_button_for_taking_a_layer_out_of_its_branch():
     _scene, panel = _panel()
     btn = _out_button(panel)
     assert btn.isVisible(), "the way out is there but the user cannot see it"
+
+
+def test_the_move_button_stands_apart_from_the_ones_that_make_a_layer():
+    """Three jobs in that row, so three groups of buttons.
+
+    The user who found the way out read the row and stopped: "i think its
+    a little odd that one button creates a new layer, and the other just
+    moves the layer". They do different things, so a gap says so: the two
+    that make a layer, then the one that moves it, then the one that
+    deletes it.
+    """
+    _scene, panel = _panel()
+    assert _row_of_buttons(panel) == "+\u21b3 \u21b0 \u2212 ", \
+        "the buttons that make, move and delete a layer all run together"
 
 
 def test_the_button_lifts_a_sublayer_out_to_the_top_level():

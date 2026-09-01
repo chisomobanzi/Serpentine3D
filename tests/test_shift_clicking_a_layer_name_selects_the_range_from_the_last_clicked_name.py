@@ -4,13 +4,13 @@ before it, and nothing more.
 Seen in the live app: with layers Default, A, B and C, a user clicks A's
 name, then Shift-clicks C's name expecting A, B and C to be selected. What
 they get is Default, A, B and C - and a click on B's visibility box then
-switches Default off too, which nobody asked for. Clicking a name makes
-that layer current (by design), the scene notifies, and the panel redraws
-its tree in the middle of the click, so the tree forgets which row the
-user clicked last; a click that lands right after such a redraw can even
-be swallowed entirely. The tree should remember the row the user clicked,
-just as it does in any other list, while a click on a name still makes
-that layer current.
+switches Default off too, which nobody asked for. Clicking a name used to
+make that layer current, so the scene notified and the panel redrew its
+tree in the middle of the click, and the tree forgot which row the user
+clicked last; a click that lands right after such a redraw can even be
+swallowed entirely. The tree should remember the row the user clicked,
+just as it does in any other list, and a plain click should pick the layer
+and nothing else: choosing the layer to draw on is a double-click.
 """
 
 from __future__ import annotations
@@ -112,8 +112,8 @@ def test_clicking_a_name_then_shift_clicking_another_selects_just_that_range():
         "the shift-click did not select exactly the range A..C"
     assert default not in _selected_ids(panel), \
         "the default layer was pulled into the selection"
-    assert scene.layers.current_id == a, \
-        "clicking A's name no longer makes A the current layer"
+    assert scene.layers.current_id == default, \
+        "picking A moved the layer new geometry lands on"
 
 
 def test_hiding_the_shift_selected_range_leaves_the_default_layer_on():
@@ -146,4 +146,4 @@ def test_clicking_one_name_then_another_selects_only_the_second():
     _click(panel, c, NAME_COL)
     assert _selected_ids(panel) == {c}, \
         "a plain click on a second name did not pick just that layer"
-    assert scene.layers.current_id == c
+    assert scene.layers.current_id == default

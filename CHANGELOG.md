@@ -42,6 +42,18 @@
   the colour, print width and switches the file gives them. Reported by
   Lourenço Vaz Pinto.
 
+### Changed
+
+- **The layer you draw on is chosen with a double-click.** A single click
+  on a layer's name used to make it the current layer, so clicking three
+  layers in turn to switch them off left the last one current and the next
+  curve landed there. A click now only picks the row; a double-click on
+  the name says which layer to draw on. Renaming a layer, which that
+  double-click used to do, is on the row's right-click menu, and the
+  buttons under the list are grouped by what they do: the two that make a
+  layer, the one that moves it, the one that deletes it. Reported by
+  Lourenço Vaz Pinto.
+
 ## 0.7.2 — 2026-09-01
 
 ### Added

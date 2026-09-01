@@ -124,6 +124,15 @@ Three commits, each red-green with its own tests: the model
   reaches the panel, which nothing had tested: a tree hands its
   context-menu position on in viewport coordinates, and a handler reading
   them as widget coordinates opens the menu for the wrong row.
+- **A click that picks was also a click that chose.** Clicking a name made
+  that layer current, so picking three layers to switch them off left the
+  last one holding the next curve, and the redraw that followed the click
+  emptied the tree mid-gesture: `pressedIndex` went stale, Qt refused the
+  double-click that came after it, and the rename it should have opened
+  never fired. Now a click only picks, so nothing redraws under Qt, the
+  double-click lands, and it is what says where geometry goes. Rename
+  moved to the row menu (F2 is already View > Front), and the button row
+  is grouped: make, move, delete.
 - **The API learned the tree.** `scene_info` reports `path`, `parent` and
   `shown` per layer, `layers` takes a `parent` on create, and a layer can
   be named by path, because `find_by_name` picks whichever Interior comes

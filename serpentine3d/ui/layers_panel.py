@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QItemSelectionModel, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QColorDialog, QComboBox, QHBoxLayout,
+    QAbstractItemView, QColorDialog, QComboBox, QHBoxLayout,
     QHeaderView, QMenu, QPushButton, QStyledItemDelegate, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -189,8 +189,10 @@ class LayersPanel(QWidget):
       makes ``rebuild()`` wait for the next turn;
     - the redraw drops the selection and the current row: ``rebuild()``
       remembers both by layer id and puts them back;
-    - a shift- or ctrl-click on a name is a selection gesture, so
-      ``_item_clicked`` leaves the scene alone and nothing redraws under it.
+    - a click on a name is a selection gesture and nothing more, so
+      ``_item_clicked`` leaves the scene alone and nothing redraws under
+      it. Saying which layer to draw on is a double-click, and renaming
+      one, which that double-click used to do, is in the row menu.
 
     A click on a visibility box has a trouble of its own, in ``_LayerTree``.
     """
@@ -269,7 +271,13 @@ class LayersPanel(QWidget):
         btns.setContentsMargins(4, 2, 4, 4)
         btns.addWidget(btn_add)
         btns.addWidget(btn_sub)
+        # Three jobs in this row, so three groups: two buttons that make a
+        # layer, one that moves one, one that throws one away. Without the
+        # gaps they read as four ways to make a layer, and the one that
+        # only moves the picked layer comes as a surprise.
+        btns.addSpacing(10)
         btns.addWidget(btn_out)
+        btns.addSpacing(10)
         btns.addWidget(btn_del)
         btns.addStretch(1)
 
@@ -390,13 +398,7 @@ class LayersPanel(QWidget):
 
     def _item_clicked(self, item, column):
         layer_id = self._layer_id(item)
-        if column == _NAME_COL:
-            # a modifier-click is a selection gesture, not a change of layer
-            if QApplication.keyboardModifiers() != Qt.KeyboardModifier.NoModifier:
-                return
-            self.scene.layers.current_id = layer_id
-            self.scene.notify()
-        elif column == _COLOR_COL:
+        if column == _COLOR_COL:
             layer = self.scene.layers.get(layer_id)
             color = QColorDialog.getColor(
                 QColor.fromRgbF(*layer.color), self, "Layer colour")
@@ -454,20 +456,40 @@ class LayersPanel(QWidget):
             self.scene.notify()
 
     def _edit_item(self, item, column):
-        if column not in (_NAME_COL, _TYPE_COL, _PRINT_COL):
+        """A double-click: on the name it chooses the layer, else it edits."""
+        if column == _NAME_COL:
+            self.scene.layers.current_id = self._layer_id(item)
+            self.scene.notify()
+            return
+        if column not in (_TYPE_COL, _PRINT_COL):
             return
         # making a cell editable is one of the panel's own writes; Type and
         # Print already show the layer's value, their delegates seed the
         # drop-down from it
         self._updating = True
         try:
-            if column == _NAME_COL:
-                layer = self.scene.layers.get(self._layer_id(item))
-                item.setText(_NAME_COL, layer.name)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         finally:
             self._updating = False
         self.tree.editItem(item, column)
+
+    def _rename(self, layer_id):
+        """Open a layer's name for typing, from the row menu.
+
+        The row shows more than the name - the count of what is on the
+        layer, and the dot on the active one - so the cell is written back
+        to the bare name first, or the user would be editing the label.
+        """
+        item = self._all_rows().get(layer_id)
+        if item is None:
+            return
+        self._updating = True
+        try:
+            item.setText(_NAME_COL, self.scene.layers.get(layer_id).name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        finally:
+            self._updating = False
+        self.tree.editItem(item, _NAME_COL)
 
     def _new_layer(self):
         self.history.checkpoint("new layer")
@@ -527,6 +549,9 @@ class LayersPanel(QWidget):
         ids = sorted(picked) if layer_id in picked else [layer_id]
         parents = {layers.get(i).parent for i in ids}
         menu = QMenu(self)
+        # The double-click that used to open a rename now says which layer
+        # to draw on, so this is the way in to a layer's name.
+        menu.addAction("Rename", lambda: self._rename(layer_id))
         menu.addAction("New sublayer",
                        lambda: self._new_sublayer_under(layer_id))
         menu.addSeparator()
