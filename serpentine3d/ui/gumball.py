@@ -935,6 +935,7 @@ class Gumball:
             "ref": ref, "last_label": "", "offset": np.zeros(3),
             "typed": "", "armed": False, "moved": False,
         }
+        vp.selection.rebuilding = self.rebuilding_id()
         return True
 
     def drag_to(self, px, py, modifiers) -> str:
@@ -1245,6 +1246,25 @@ class Gumball:
                 raise
             return g.extrude(source["src"], tuple(axis), value, cap=False)
 
+    def rebuilding_id(self):
+        """The object a live drag is rebuilding, or None.
+
+        A fillet, push/pull or multi-face drag calls replace_shape on
+        every mouse move, so the picked edge or face indices refer to
+        the shape the drag started from, not to whatever is on screen
+        this frame. The viewport quiets that object's sub-object
+        highlight until the drag settles; end_drag then drops or
+        re-points the picks (_clear_filleted_edges, _resync_face).
+        """
+        d = self.drag
+        if not d:
+            return None
+        for key in ("fillet", "pp", "multiface"):
+            v = d.get(key)
+            if v:
+                return v[0]
+        return None
+
     def end_drag(self):
         d = self.drag
         if d is not None and float(np.linalg.norm(d["offset"])) > 1e-9:
@@ -1259,6 +1279,7 @@ class Gumball:
                         if self.vp.scene.get(i) is not None]
                 if made:
                     self.vp.selection.set(made)
+        self.vp.selection.rebuilding = None
         self.drag = None
 
     def _clear_filleted_edges(self, d):
@@ -1318,6 +1339,7 @@ class Gumball:
             if vp.scene.get(obj_id) is not None:
                 vp.scene.replace_shape(obj_id, original)
         self.vp.window_discard_checkpoint()
+        self.vp.selection.rebuilding = None
         self.drag = None
 
 

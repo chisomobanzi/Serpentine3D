@@ -120,3 +120,79 @@ def test_details_on_sheets_share_the_same_highlight():
     src = inspect.getsource(vp_mod.Viewport._draw_objects)
     assert "_draw_thick_segments(" in src
     assert "glLineWidth(3.0)" not in src
+
+
+# -- and it goes quiet while a drag rebuilds the solid --------------------
+
+def test_a_live_fillet_drag_quiets_the_stale_highlight(rig):
+    """Dragging the fillet handle rebuilds the solid every move, and the
+    picked index then names a random edge of the new topology. The
+    highlight for that object goes quiet until the drag settles; the
+    growing fillet is the feedback."""
+    rec, view, obj = rig
+    view.selection.toggle_subobject(obj.id, "edge", 0)
+    view.selection.rebuilding = obj.id     # what begin_drag publishes
+    mvp, v = _mvp(view)
+    view._draw_objects(mvp, v)
+    assert not view._preview_thick.uploads, \
+        "mid-fillet the highlight still draws from stale edge indices"
+
+
+def test_someone_elses_pick_stays_lit_during_the_drag(rig):
+    rec, view, obj = rig
+    other = view.scene.add(
+        g.make_polyline([(0.0, 5.0, 0.0), (10.0, 5.0, 0.0)]))
+    view._gpu[other.id] = _FakeGpu(mesh_key=other.mesh.uid, tris=0)
+    view.selection.toggle_subobject(other.id, "edge", 0)
+    view.selection.rebuilding = obj.id     # rebuilding obj, not other
+    mvp, v = _mvp(view)
+    view._draw_objects(mvp, v)
+    assert view._preview_thick.uploads, \
+        "an unrelated object's pick vanished during someone else's drag"
+
+
+def test_the_highlight_returns_when_the_drag_settles(rig):
+    rec, view, obj = rig
+    view.selection.toggle_subobject(obj.id, "edge", 0)
+    view.selection.rebuilding = None
+    mvp, v = _mvp(view)
+    view._draw_objects(mvp, v)
+    assert view._preview_thick.uploads
+
+
+def test_rebuilding_id_names_the_dragged_object(rig):
+    _rec, view, obj = rig
+    gb = view.gumball
+    gb.drag = None
+    assert gb.rebuilding_id() is None
+    gb.drag = {"fillet": (obj.id, [0])}
+    assert gb.rebuilding_id() == obj.id
+    gb.drag = {"fillet": None, "pp": (obj.id, 2)}
+    assert gb.rebuilding_id() == obj.id
+    gb.drag = {"fillet": None, "pp": None, "multiface": (obj.id, [1, 2])}
+    assert gb.rebuilding_id() == obj.id
+    gb.drag = {"fillet": None, "pp": None, "multiface": None}
+    assert gb.rebuilding_id() is None
+
+
+def test_every_pane_learns_of_the_drag_through_the_selection(rig):
+    """The drag lives in one pane; the highlight is drawn in four. So
+    begin_drag publishes on the shared selection, and both ways a drag
+    can end take the flag away with it."""
+    _rec, view, obj = rig
+    import numpy as _np
+    gb = view.gumball
+    src = inspect.getsource(gb.begin_drag)
+    assert "selection.rebuilding = self.rebuilding_id()" in src
+    view.selection.rebuilding = obj.id
+    gb.drag = {"fillet": (obj.id, [0]), "originals": {},
+               "offset": _np.zeros(3), "made": {}}
+    gb.end_drag()
+    assert view.selection.rebuilding is None
+    view.selection.rebuilding = obj.id
+    gb.drag = {"fillet": (obj.id, [0]), "originals": {},
+               "offset": _np.zeros(3), "made": {}}
+    gb.cancel_drag() if hasattr(gb, "cancel_drag") else None
+    src = inspect.getsource(type(gb))
+    assert src.count("selection.rebuilding = None") >= 2, \
+        "one of the two drag exits leaves the flag behind"

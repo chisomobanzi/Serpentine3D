@@ -14,6 +14,11 @@ class SelectionManager:
         self._index: set[str] = set()
         self.previous_ids: list[str] = []   # last non-empty selection
         self.subobjects: list = []     # [(obj_id, "edge"|"face", index)]
+        # The object a live gumball drag is rebuilding, or None. Shared
+        # here rather than kept on a pane's gumball because every pane
+        # draws the sub-object highlight, and mid-drag the picked indices
+        # point into topology that replace_shape has already replaced.
+        self.rebuilding: str | None = None
         self._listeners: list = []
         self.filter_kinds: set = set()   # e.g. {"curve"}; empty = any
         self.filter_active = False       # F6-style master toggle

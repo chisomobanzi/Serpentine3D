@@ -2025,8 +2025,14 @@ class Viewport(QOpenGLWidget):
                 self._draw_edges(gpu, omvp, edge_color,
                                  2.2 if selected else lw)
 
+            # A drag that rebuilds this object every move (fillet,
+            # push/pull) leaves the picked indices pointing into the
+            # old topology, so its highlight goes quiet until release.
+            # Off the shared selection, not this pane's gumball: the
+            # drag lives in one pane and every pane draws highlights.
+            rebuilding = self.selection.rebuilding == obj.id
             subs = self.selection.subobjects_of(obj.id, "edge") \
-                if self.selection.subobjects else []
+                if self.selection.subobjects and not rebuilding else []
             if subs and len(obj.mesh.edge_of_segment):
                 mask = np.isin(obj.mesh.edge_of_segment, subs)
                 if mask.any():
@@ -2044,7 +2050,7 @@ class Viewport(QOpenGLWidget):
                         EDGE_PICK_PX)
                     GL.glEnable(GL.GL_DEPTH_TEST)
             fsubs = self.selection.subobjects_of(obj.id, "face") \
-                if self.selection.subobjects else []
+                if self.selection.subobjects and not rebuilding else []
             if fsubs and len(obj.mesh.face_of_triangle):
                 mask = np.isin(obj.mesh.face_of_triangle, fsubs)
                 if mask.any():

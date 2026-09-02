@@ -21,6 +21,15 @@
   the control-point markers, on every driver and in details on sheets
   as well. Reported by Lourenço.
 
+- **A live fillet drag no longer lights up a random edge.** Dragging
+  the gumball's fillet handle rebuilds the solid on every mouse move,
+  and the picked edge's index then names some unrelated edge of the
+  new topology, so the highlight wandered while you dragged and could
+  stay on the wrong edge after. The highlight now goes quiet for the
+  object being rebuilt, in every pane, until the drag settles; the
+  growing fillet is the feedback. Push/pull and multi-face drags had
+  the same latent wander and are covered by the same flag.
+
 - **Zoom Selected reaches what you are holding.** Pick a control
   point (or an edge, or a face) and ask for Zoom Selected, and the
   command said "Nothing selected": it only ever asked about whole
