@@ -485,6 +485,19 @@ def mesh_anchor(mesh):
     return centre
 
 
+def view_anchor(target):
+    """The overlay anchor: where the camera looks, when that is far.
+
+    Overlays — the gumball, the rubber band, control points, ghosts —
+    re-upload every frame, so unlike a mesh they can share one moving
+    anchor, and everything worth overlaying is near the target.
+    """
+    t = np.asarray(target, float)
+    if float(np.abs(t).max()) <= ANCHOR_NEAR:
+        return None
+    return t
+
+
 def rebased(pts, anchor):
     """Points minus the anchor, subtracted in float64, cast to float32."""
     if anchor is None:
@@ -771,6 +784,7 @@ class Viewport(QOpenGLWidget):
         self._view_last = self.camera.state()
         self._view_moved_at = 0.0
         self._cv_drag = None                # (obj_id, index, plane_pt, normal)
+        self._frame_anchor = None   # overlays rebase by this; see view_anchor
         self._swipe_press = None            # where an Alt view-swipe started
         self._flight = None                 # (from, to, name, t0, secs)
         self._flight_tick = QTimer(self)
@@ -990,6 +1004,7 @@ class Viewport(QOpenGLWidget):
         w, h = self.width(), self.height()
 
         if self.space != "model":
+            self._frame_anchor = None      # paper coordinates are small
             from PySide6.QtGui import QPainter
             painter = QPainter(self)
             painter.beginNativePainting()
@@ -1016,7 +1031,11 @@ class Viewport(QOpenGLWidget):
         self._refresh_camera_bounds()
         view = self.camera.view_matrix()
         mvp64 = self.camera.proj_matrix(w, h) @ view
-        mvp = mvp64.astype(np.float32)
+        self._frame_anchor = view_anchor(self.camera.target)
+        # One float32 matrix for every overlay, the frame anchor folded
+        # in, and each overlay rebases what it uploads to match, so the
+        # gumball and the rubber band hold as still as the meshes do.
+        mvp = anchored(mvp64, self._frame_anchor)
 
         if self.display_mode == "technical":
             self._paint_technical(w, h)
@@ -1025,7 +1044,7 @@ class Viewport(QOpenGLWidget):
             return
 
         if self.grid_visible:
-            self._draw_grid(mvp)
+            self._draw_grid(mvp64)
         self._draw_image_planes(mvp)
         self._sync_gpu()
         self._draw_objects(mvp64, view)
@@ -1461,7 +1480,8 @@ class Viewport(QOpenGLWidget):
             tex, _ = self._texture_for(plane["path"])
             if not tex:
                 continue
-            o = np.asarray(plane["origin"], np.float32)
+            o = rebased(np.asarray(plane["origin"], float)[None],
+                        self._frame_anchor)[0]
             u = np.asarray(plane["u"], np.float32)
             v = np.asarray(plane["v"], np.float32)
             quad = np.array([
@@ -1488,9 +1508,14 @@ class Viewport(QOpenGLWidget):
             GL.glDepthMask(True)
 
     def _draw_grid(self, mvp):
-        # grid geometry lives in plane-local XY; transform by the CPlane
+        # Grid geometry lives in plane-local XY, so the cplane's basis is
+        # this pass's anchor: folded in float64 before the cast, or a
+        # construction plane out at survey coordinates swims like the
+        # meshes used to.
+        mvp = np.asarray(mvp, np.float64)
         if not self.cplane.is_world_xy():
-            mvp = (mvp @ self.cplane.basis_matrix()).astype(np.float32)
+            mvp = mvp @ self.cplane.basis_matrix()
+        mvp = mvp.astype(np.float32)
         GL.glDepthMask(False)
         self._draw_lines(self._grid["minor"], mvp, theme.GRID_MINOR)
         self._draw_lines(self._grid["major"], mvp, theme.GRID_MAJOR)
@@ -2197,13 +2222,14 @@ class Viewport(QOpenGLWidget):
         if held is not None:
             # under everything else, and faint: it is the rule being drawn
             # against, not a thing being drawn
-            self._preview.update(
-                _axis_guide(held[0], held[1], self.camera.distance * 4.0))
+            self._preview.update(rebased(
+                _axis_guide(held[0], held[1], self.camera.distance * 4.0),
+                self._frame_anchor))
             self._draw_lines(self._preview, mvp,
                              (*theme.SELECTION_COLOR, 0.35), 1.0)
         if segs:
-            allpts = np.concatenate(segs).astype(np.float32)
-            self._preview.update(allpts)
+            allpts = np.concatenate(segs)
+            self._preview.update(rebased(allpts, self._frame_anchor))
             self._draw_lines(self._preview, mvp,
                              (*theme.SELECTION_COLOR, 0.9), 1.6)
         if snap is not None:
@@ -2218,7 +2244,7 @@ class Viewport(QOpenGLWidget):
                 at = np.asarray(snap[0], np.float32)
                 axes = self.camera.right_up()
             segs = _snap_marker(snap[1], at, *axes, size * 0.95)
-            self._preview.update(segs)
+            self._preview.update(rebased(segs, self._frame_anchor))
             self._draw_lines(self._preview, mvp, (1.0, 1.0, 1.0, 0.95), 2.0)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
@@ -2248,7 +2274,7 @@ class Viewport(QOpenGLWidget):
                 for j in range(nv):
                     segs.append(np.stack([net[:-1, j], net[1:, j]], axis=1))
             poly = np.concatenate(segs).reshape(-1, 3)
-            self._preview.update(poly.astype(np.float32))
+            self._preview.update(rebased(poly, self._frame_anchor))
             self._draw_lines(self._preview, mvp, theme.CONTROL_NET, 1.0)
             # Each point is a small square facing the screen, at the same size
             # on the glass wherever it is, with a dark border round it so it
@@ -2266,12 +2292,12 @@ class Viewport(QOpenGLWidget):
                 fill = (theme.SELECTION_COLOR + (1.0,) if held
                         else theme.CONTROL_POINT + (1.0,))
                 quads = cv_marker_quads(at, right, up, half)
-                self._preview.update(quads.astype(np.float32))
+                self._preview.update(rebased(quads, self._frame_anchor))
                 self._set_line_uniforms(mvp, fill)
                 GL.glBindVertexArray(self._preview.vao)
                 GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(quads))
                 edge = cv_marker_outline(at, right, up, half)
-                self._preview.update(edge.astype(np.float32))
+                self._preview.update(rebased(edge, self._frame_anchor))
                 self._draw_lines(self._preview, mvp,
                                  theme.CONTROL_POINT_EDGE, 1.5)
         GL.glEnable(GL.GL_DEPTH_TEST)
@@ -2323,7 +2349,8 @@ class Viewport(QOpenGLWidget):
                     (quills, (0.9, 0.45, 0.85, 0.55), 1.0),
                     (envelope, (0.9, 0.45, 0.85, 0.9), 1.4)):
                 if segs:
-                    arr = np.concatenate(segs).astype(np.float32)
+                    arr = rebased(np.concatenate(segs),
+                                  self._frame_anchor)
                     self._preview.update(arr)
                     self._set_line_uniforms(mvp, color)
                     self._line_width(width)
@@ -2355,7 +2382,7 @@ class Viewport(QOpenGLWidget):
             at = arrows[:, 0]
             length = cv_marker_size(at, self.camera, w, h, ARROW_PX)
             segs = arrow_segments(at, arrows[:, 1], fwd, right, length)
-            self._preview.update(segs.astype(np.float32))
+            self._preview.update(rebased(segs, self._frame_anchor))
             self._draw_lines(self._preview, mvp, theme.DIRECTION_ARROW, 1.5)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
@@ -2552,7 +2579,7 @@ class Viewport(QOpenGLWidget):
         if flat:
             GL.glDisable(GL.GL_DEPTH_TEST)
         if tris is not None:
-            pts = tris.astype(np.float32)
+            pts = rebased(tris, self._frame_anchor)
             self._preview.update(pts)
             self._set_line_uniforms(mvp, (*gold, 0.22))
             GL.glDepthMask(False)
@@ -2560,7 +2587,7 @@ class Viewport(QOpenGLWidget):
             GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
             GL.glDepthMask(True)
         if segs is not None:
-            segs = segs.astype(np.float32)
+            segs = rebased(segs, self._frame_anchor)
             self._preview.update(segs)
             self._set_line_uniforms(mvp, (*gold, 0.85))
             self._line_width(1.6)

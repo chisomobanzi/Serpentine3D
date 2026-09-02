@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **The gumball and friends hold still far from the origin too.** The
+  0.8.0 follow-up fix anchored the geometry, but everything drawn over
+  it, the gumball, the control-point display, the rubber band, ghosts,
+  curvature combs, direction arrows, image planes and the grid of a
+  far construction plane, still went to the GPU absolute and trembled
+  against the now solid model. Overlays redraw every frame, so they
+  all share one anchor now: where the camera is looking. Near the
+  origin the frame is bit-for-bit what it was.
+
 - **Zoom Selected reaches what you are holding.** Pick a control
   point (or an edge, or a face) and ask for Zoom Selected, and the
   command said "Nothing selected": it only ever asked about whole

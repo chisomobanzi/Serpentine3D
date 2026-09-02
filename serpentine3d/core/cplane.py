@@ -45,7 +45,10 @@ class CPlane:
 
     def basis_matrix(self) -> np.ndarray:
         """4x4 model matrix mapping plane-local coords to world."""
-        m = np.eye(4, dtype=np.float32)
+        # float64: a plane out at survey coordinates would otherwise have
+        # its origin rounded to float32's 3cm grid at birth, before the
+        # viewport's own float64 fold could do anything about it.
+        m = np.eye(4)
         m[:3, 0] = self.xdir
         m[:3, 1] = self.ydir
         m[:3, 2] = self.normal

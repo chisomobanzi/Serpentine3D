@@ -683,18 +683,23 @@ class Gumball:
         return pts if eye is None else eye.to_paper(pts)
 
     def _lines(self, mvp, pts, color, width):
+        from .viewport import rebased
         vp = self.vp
+        # On paper the anchor is None and rebased is a plain cast; in the
+        # model it is the frame anchor already folded into `mvp`, so far
+        # handles hold as still as the geometry they stand on.
         pts = self._paper(pts)
-        vp._preview.update(pts.reshape(-1, 3).astype(np.float32))
+        vp._preview.update(rebased(pts.reshape(-1, 3), vp._frame_anchor))
         vp._set_line_uniforms(mvp, color)
         vp._line_width(width)
         GL.glBindVertexArray(vp._preview.vao)
         GL.glDrawArrays(GL.GL_LINES, 0, len(pts.reshape(-1, 3)))
 
     def _tris(self, mvp, pts, color):
+        from .viewport import rebased
         vp = self.vp
         pts = self._paper(pts)
-        vp._preview.update(pts.astype(np.float32))
+        vp._preview.update(rebased(pts, vp._frame_anchor))
         vp._set_line_uniforms(mvp, color)
         GL.glBindVertexArray(vp._preview.vao)
         GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
