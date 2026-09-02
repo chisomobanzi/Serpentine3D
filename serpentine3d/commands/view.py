@@ -266,9 +266,10 @@ def cmd_spacemouse(ctx):
 def cmd_zoom(ctx):
     """Zoom the active view: Selected, Extents, a picked Window, In, Out."""
     vp = _vp(ctx)
+    held = ctx.selection.ids or getattr(ctx.selection, "subobjects", None)
     mode = yield OptionReq(
         "Zoom", options=["Selected", "Extents", "Window", "In", "Out"],
-        default="Selected" if ctx.selection.ids else "Extents")
+        default="Selected" if held else "Extents")
     if mode == "Window":
         p1 = yield PointReq("First corner of zoom window")
         p2 = yield PointReq("Opposite corner", rubber_from=p1)

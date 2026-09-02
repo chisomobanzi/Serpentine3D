@@ -2836,16 +2836,55 @@ class Viewport(QOpenGLWidget):
         self.camera.zoom_extents(self.scene.bbox(), self._aspect())
         self.update()
 
+    def _subobject_points(self):
+        """World positions of the held sub-objects, or None.
+
+        A held control point, edge or face is a selection the way a whole
+        object is, and Zoom Selected used to answer "Nothing selected"
+        over the top of a gumball standing on one. Control points follow
+        the gumball's rule: only points a pane is showing count, because
+        PointsOff leaves the selection as it found it.
+        """
+        out = []
+        for oid, kind, idx in getattr(self.selection, "subobjects", []):
+            obj = self.scene.get(oid)
+            if obj is None:
+                continue
+            if kind == "cv":
+                if oid not in self.cv_enabled:
+                    continue
+                pts = self._cv_points(obj)
+                if pts is not None and 0 <= idx < len(pts):
+                    out.append(np.asarray(pts[idx], float).reshape(1, 3))
+            elif kind == "edge":
+                mask = obj.mesh.edge_of_segment == idx
+                if mask.any():
+                    out.append(np.asarray(
+                        obj.mesh.edge_segments[mask], float).reshape(-1, 3))
+            elif kind == "face":
+                tris = obj.mesh.triangles[obj.mesh.face_of_triangle == idx]
+                if len(tris):
+                    out.append(np.asarray(
+                        obj.mesh.vertices[tris.ravel()], float))
+        return np.concatenate(out) if out else None
+
     def selected_bbox(self):
-        """The selection's model-space bounds, None when nothing is picked."""
+        """The selection's model-space bounds, None when nothing is picked.
+
+        Whole objects and held sub-objects both count, framed together.
+        """
         objs = [o for i in self.selection.ids
                 if (o := self.scene.get(i)) is not None]
-        if not objs:
-            return None
         # o.bbox(), not geometry.bbox(o.shape): objects remember their own
         # bounds, and zooming to a whole drawing would otherwise measure
         # every one of them again.
-        boxes = np.array([o.bbox() for o in objs], float)
+        corners = [np.array(o.bbox(), float) for o in objs]
+        held = self._subobject_points()
+        if held is not None:
+            corners.append(np.array([held.min(axis=0), held.max(axis=0)]))
+        if not corners:
+            return None
+        boxes = np.array(corners)
         return (tuple(boxes[:, 0].min(axis=0)),
                 tuple(boxes[:, 1].max(axis=0)))
 

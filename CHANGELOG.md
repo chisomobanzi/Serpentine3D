@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **Zoom Selected reaches what you are holding.** Pick a control
+  point (or an edge, or a face) and ask for Zoom Selected, and the
+  command said "Nothing selected": it only ever asked about whole
+  objects. A held sub-object now counts, framed together with any
+  objects selected beside it, and `zoom` opens on Selected when one is
+  held. A single point has no size, so the camera stands off it the
+  way it already did for point objects. Control points follow the
+  gumball's rule: only points a pane is showing are held.
+
 - **Geometry far from the origin holds still while you orbit.** The GPU
   works in float32, whose grid is 8mm wide at 100,000 units, and both
   the vertices and the one camera matrix were handed over absolute, so
