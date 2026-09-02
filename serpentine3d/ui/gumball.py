@@ -362,7 +362,15 @@ class Gumball:
         k = tuple(round(float(v), 6) for v in direction)
         hit = self._sweep_axes.get(k)
         if hit is None:
-            hit = any(not g.sweep_adds_nothing(s["src"], k) for s in sources)
+            try:
+                hit = any(not g.sweep_adds_nothing(s["src"], k)
+                          for s in sources)
+            except g.GeometryError:
+                # This runs inside paint, once per axis. A shape the
+                # geometry cannot measure is not worth a pane that stops
+                # drawing for the rest of the session: draw the handle and
+                # let the extrude itself say what is wrong with it.
+                hit = True
             self._sweep_axes[k] = hit
         return hit
 

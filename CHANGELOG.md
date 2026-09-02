@@ -21,6 +21,24 @@
   construction plane you are working on, so an array laid out in the Front
   pane stands on that plane rather than on the world's floor.
 
+### Fixed
+
+- **Deleting the curves `make2d` drew no longer kills a viewport.**
+  Reported by a user: select the drawing, press Delete, and one of the four
+  panes stops redrawing for the rest of the session while the other three
+  carry on. The cause is nowhere near `make2d`. A single object can hold
+  many separate curves, and the gumball asks, once per axis and from inside
+  the paint, whether pulling them along that axis would sweep out anything
+  worth an extrude handle. That question was only ever answered for one
+  curve, so on a bundle of them it raised "Not a curve", the error came out
+  through `paintGL`, and the pane was finished.
+
+  Both halves are fixed. The geometry now asks each curve in the bundle
+  separately, so the answer is honest for exploded linework and imported DXF
+  drawings as well. And the gumball treats a shape it cannot measure as
+  extrudable and draws the handle anyway: being wrong about a handle costs
+  one box that does nothing, and being wrong the other way costs a viewport.
+
 ## 0.8.2 — 2026-09-03
 
 ### Fixed

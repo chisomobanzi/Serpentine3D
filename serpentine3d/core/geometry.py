@@ -480,6 +480,23 @@ def extrude(shape, direction: Point, distance: float,
     return result.Shape()
 
 
+def _loose_curves_of(shape):
+    """The separate curves inside a compound, or None if this is a single
+    curve that can answer for itself. A compound holding exactly one wire or
+    edge is that curve, so it answers directly rather than by recursion."""
+    if shape.ShapeType() != occ.COMPOUND:
+        return None
+    from OCP.TopoDS import TopoDS_Iterator
+    kids = []
+    it = TopoDS_Iterator(shape)
+    while it.More():
+        kids.append(it.Value())
+        it.Next()
+    if len(kids) == 1 and kids[0].ShapeType() in (occ.WIRE, occ.EDGE):
+        return None
+    return kids
+
+
 def sweep_adds_nothing(shape, direction: Point) -> bool:
     """Would extruding this shape that way leave it as flat as it started?
 
@@ -500,6 +517,14 @@ def sweep_adds_nothing(shape, direction: Point) -> bool:
     d = [v / reach for v in d]
     kind = shape_kind(shape)
     if kind == "curve":
+        # One object can hold many separate curves: make2d hands back a
+        # dozen loose edges in one, and so does exploding linework out of a
+        # DXF. `shape_kind` rightly calls that a curve, but there is no one
+        # pair of endpoints to measure, so ask each piece. Nothing is added
+        # only if nothing any of them does adds anything.
+        pieces = _loose_curves_of(shape)
+        if pieces is not None:
+            return all(sweep_adds_nothing(p, direction) for p in pieces)
         a, b = curve_endpoints(shape)
         span = [b[i] - a[i] for i in range(3)]
         chord = math.sqrt(sum(v * v for v in span))
