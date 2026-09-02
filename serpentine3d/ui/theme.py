@@ -27,6 +27,18 @@ CONTROL_NET = (0.34, 0.44, 0.56, 0.6)
 # both have to stand out against a drawing that is already white, gold and
 # control point blue.
 DIRECTION_ARROW = (0.40, 0.95, 0.50, 0.95)
+
+# The arrow on a clipping plane, pointing at the half of the model it takes
+# away. Magenta because it is the one colour left: the drawing is white, the
+# selection gold, control points blue and direction arrows green, and this
+# arrow has to be readable while sitting on top of a plane that is often
+# selected and being dragged. PAUSED is the same arrow on a plane that has
+# been switched off: half strength reads as a plan rather than a cut, and
+# any fainter than this disappears entirely against a pale face, which is
+# where a paused plane usually sits.
+CLIP_NORMAL = (0.95, 0.40, 0.85, 0.95)
+CLIP_NORMAL_PAUSED = (0.95, 0.40, 0.85, 0.55)
+
 ACCENT_DIM = "#8a6a2f"
 # Secondary text: a heading, a hint, a row that is switched off.
 # The same grey QSS spells out below for headers and placeholders,

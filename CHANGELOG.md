@@ -21,6 +21,18 @@
   construction plane you are working on, so an array laid out in the Front
   pane stands on that plane rather than on the world's floor.
 
+- **A clipping plane shows which way it faces.** Asked for by a user. A
+  clipping plane is a rectangle, and a rectangle looks the same from both
+  sides, so nothing on screen said which half of the model the plane was
+  about to take away: you found out by dragging something across it and
+  watching the thing vanish. There is now an arrow at the middle of the
+  plane pointing along its normal, at the half that goes. It turns when you
+  turn the plane, it is a fixed size on the glass so a plane at the far end
+  of a big model stays readable, and a paused plane keeps a fainter one,
+  because deciding which way round a plane goes is mostly something you do
+  while it is switched off. The arrow and the cut are read from the same
+  place, so they cannot come to disagree.
+
 ### Fixed
 
 - **Deleting the curves `make2d` drew no longer kills a viewport.**

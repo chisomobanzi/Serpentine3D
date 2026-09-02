@@ -128,6 +128,10 @@ VIEW_SETTLE = 0.5
 # ARROW_COUNT is how many go on a curve, and roughly how many on each face of
 # a surface: enough to see the run at a glance, few enough to see through.
 ARROW_PX = 22.0
+# A clipping plane's own arrow, longer than a direction arrow so it reads as
+# a property of the whole plane rather than of the edge it happens to start
+# near, and fixed on the glass for the same reason theirs is.
+CLIP_ARROW_PX = 52.0
 ARROW_COUNT = 12
 ARROW_HEAD = 0.34
 ARROW_BARB = 0.17
@@ -500,6 +504,72 @@ def anchored(matrix, anchor):
     m = np.array(matrix, np.float64)
     m[:, 3] += m[:, :3] @ anchor
     return m.astype(np.float32)
+
+
+def clip_plane_frames(objects):
+    """Where each clipping plane sits and which way it faces.
+
+    One `(origin, normal, enabled)` per clipping plane, the origin at the
+    middle of its rectangle and the normal pointing at the half of the model
+    it takes away. Paused planes come back too, marked paused: pausing one is
+    what you do while you are still deciding which way round it goes, so that
+    is the moment you most want to see the answer.
+
+    A plane the geometry cannot be read from is skipped rather than guessed
+    at. This runs inside the paint.
+    """
+    from ..core import geometry as g
+    frames = []
+    for obj in objects:
+        if not obj.clip_plane:
+            continue
+        try:
+            face = next(iter(g.faces_of(obj.shape)))
+            n = np.asarray(g.face_normal(face), float)
+            o = np.asarray(g.centroid(obj.shape), float)
+        except Exception:                                  # noqa: BLE001
+            continue
+        frames.append((tuple(o), tuple(n),
+                       bool(obj.clip_plane.get("enabled"))))
+    return frames
+
+
+def clip_equation(origin, normal):
+    """The plane as the vec4 the shader dots with each vertex.
+
+    It keeps what comes out positive, and the half behind the normal is the
+    half that comes out positive, so the normal is the direction things
+    disappear in. The arrow drawn on the plane is that same normal, which is
+    why the two cannot end up telling different stories.
+    """
+    n = np.asarray(normal, float)
+    o = np.asarray(origin, float)
+    return np.array([-n[0], -n[1], -n[2], float(np.dot(n, o))], np.float32)
+
+
+def clip_normal_arrows(frames, camera, width, height):
+    """The arrows for a set of clipping planes, as (segments, colour) passes.
+
+    Paused planes are one pass and live ones another, paused first, so where
+    two planes lie on top of each other the live arrow is the one you see.
+    Like the direction arrows, the length is fixed on the glass rather than
+    in the model, so a plane far away is still readable and a near one does
+    not throw a spike across the whole viewport.
+    """
+    right, up = camera.right_up()
+    fwd = np.cross(right, up)
+    passes = []
+    for enabled in (False, True):
+        here = [f for f in frames if f[2] is enabled]
+        if not here:
+            continue
+        at = np.array([f[0] for f in here], float)
+        dirs = np.array([f[1] for f in here], float)
+        length = cv_marker_size(at, camera, width, height, CLIP_ARROW_PX)
+        passes.append((arrow_segments(at, dirs, fwd, right, length),
+                       theme.CLIP_NORMAL if enabled
+                       else theme.CLIP_NORMAL_PAUSED))
+    return passes
 
 
 def anchored_clips(clips, anchor):
@@ -1085,6 +1155,7 @@ class Viewport(QOpenGLWidget):
         self._draw_control_points(mvp)
         self._draw_combs(mvp)
         self._draw_direction_arrows(mvp)
+        self._draw_clip_normals(mvp)
         self.gumball.paint(mvp)
         self._draw_axis_triad(view, w, h)
         self._draw_frame_guides(w, h)
@@ -2449,6 +2520,26 @@ class Viewport(QOpenGLWidget):
             self._draw_lines(self._preview, mvp, theme.DIRECTION_ARROW, 1.5)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
+    def _draw_clip_normals(self, mvp):
+        """One arrow per clipping plane, pointing the way things vanish.
+
+        A clipping plane is a rectangle and a rectangle looks the same from
+        both sides, so until this was drawn there was nothing on screen that
+        said which half of the model the plane was about to take. Drawn over
+        the top of everything, because a plane lying flat against a face is
+        exactly when you need to be told.
+        """
+        frames = clip_plane_frames(self.scene.visible_objects())
+        if not frames:
+            return
+        passes = clip_normal_arrows(frames, self.camera,
+                                    self.width(), self.height())
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        for segs, color in passes:
+            self._preview.update(rebased(segs, self._frame_anchor))
+            self._draw_lines(self._preview, mvp, color, 2.0)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+
     def _draw_selection_box(self, w, h):
         if not self._box_active or self._press_pos is None \
                 or self._box_end is None:
@@ -2583,21 +2674,11 @@ class Viewport(QOpenGLWidget):
         cache = getattr(self, "_clip_cache", None)
         if cache is not None and cache[0] == self.scene.revision:
             return cache[1]
-        from ..core import geometry as g
-        vecs = []
-        for obj in self.scene.visible_objects():
-            if not (obj.clip_plane and obj.clip_plane.get("enabled")):
-                continue
-            try:
-                face = next(iter(g.faces_of(obj.shape)))
-                n = np.asarray(g.face_normal(face), float)
-                o = np.asarray(g.centroid(obj.shape), float)
-                vecs.append(np.array([-n[0], -n[1], -n[2],
-                                      float(np.dot(n, o))], np.float32))
-            except Exception:                              # noqa: BLE001
-                continue
-            if len(vecs) == 4:
-                break
+        # Same frames the arrows are drawn from, so what the arrow promises
+        # is what the shader does. Four is all the hardware guarantees.
+        vecs = [clip_equation(o, n)
+                for o, n, on in clip_plane_frames(self.scene.visible_objects())
+                if on][:4]
         self._clip_cache = (self.scene.revision, vecs)
         return vecs
 
