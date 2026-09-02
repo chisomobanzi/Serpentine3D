@@ -33,6 +33,18 @@
   while it is switched off. The arrow and the cut are read from the same
   place, so they cannot come to disagree.
 
+- **Delete takes out a face you are holding.** Asked for by a user:
+  Ctrl+Shift-click a face and press Delete, and the face should go. Holding
+  a face was already how you aim `pushpull` and `extractsrf`, so Delete
+  ignoring it and asking you to pick a whole object instead was the odd
+  behaviour, not the request. A solid that loses a face becomes an open
+  shell, which is the point of doing it: it is how you get at the inside of
+  something, or lift a lid off to put it on a different shape. The command
+  line says which objects stopped being closed, since that is what changes
+  what you can do with them next. Delete already worked this way for held
+  control points; this is the same rule applied to the other thing you can
+  hold.
+
 ### Fixed
 
 - **Deleting the curves `make2d` drew no longer kills a viewport.**

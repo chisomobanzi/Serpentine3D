@@ -43,6 +43,59 @@ def _delete_held_points(ctx) -> bool:
     return True
 
 
+def _delete_held_faces(ctx) -> bool:
+    """Take out any Ctrl+Shift-picked faces. True if that is what Delete
+    meant.
+
+    A face is already something you can hold: it is how `pushpull` and
+    `extractsrf` are aimed. Holding one and pressing Delete plainly means
+    that face, so it goes, and the solid it came off is a shell afterwards.
+    That is the useful half of the operation, not a side effect: it is how
+    you open something up to get at the inside of it.
+    """
+    faces = [(oid, i) for (oid, kind, i) in ctx.selection.subobjects
+             if kind == "face"]
+    if not faces:
+        return False
+    by_obj: dict[str, list[int]] = {}
+    for oid, i in faces:
+        by_obj.setdefault(oid, []).append(i)
+    done = 0
+    opened = []
+    for oid, indices in by_obj.items():
+        obj = ctx.scene.get(oid)
+        if obj is None:
+            continue
+        was_solid = g.shape_kind(obj.shape) == "solid"
+        try:
+            # All of them at once. Taking one out renumbers the rest, so a
+            # face at a time would delete whatever had shuffled into the
+            # index rather than the face that was picked.
+            rest = g.remove_faces(obj.shape, indices)
+        except g.GeometryError as exc:
+            ctx.echo(f"{obj.name}: {exc}")
+            continue
+        done += len(set(indices))
+        if rest is None:
+            ctx.scene.remove(oid)
+            ctx.echo(f"{obj.name}: every face deleted, "
+                     "so the object went with it.")
+            continue
+        ctx.scene.replace_shape(oid, rest)
+        if was_solid and g.shape_kind(rest) != "solid":
+            opened.append(obj.name)
+    # The gap is visible, but which objects stopped being solid is the thing
+    # that changes what the next command can do with them.
+    ctx.selection.set_subobjects([e for e in ctx.selection.subobjects
+                                  if e[1] != "face"])
+    if done:
+        ctx.echo(f"Deleted {done} face(s)."
+                 + (f" {', '.join(opened)} is open now."
+                    if len(opened) == 1 else
+                    f" {len(opened)} objects are open now." if opened else ""))
+    return True
+
+
 @command("delete", aliases=("del", "erase"), space="any", repeatable=False)
 def cmd_delete(ctx):
     lv = ctx.sheet_view()
@@ -56,15 +109,16 @@ def cmd_delete(ctx):
             return
         ctx.echo(f"Deleted {count} sheet item(s).")
         return
-    # held control points are the picked thing when no object is
-    if not ctx.selection.ids and _delete_held_points(ctx):
+    # held control points or faces are the picked thing when no object is
+    if not ctx.selection.ids and (_delete_held_points(ctx)
+                                  or _delete_held_faces(ctx)):
         return
     # min_count=0: a bare Enter comes back here, where clicking a control
     # point during the wait (which bypasses the request) can still answer
     objs = yield SelectReq("Select objects or control points to delete",
                            min_count=0)
     if not objs:
-        if _delete_held_points(ctx):
+        if _delete_held_points(ctx) or _delete_held_faces(ctx):
             return
         ctx.echo("Nothing selected to delete.")
         return

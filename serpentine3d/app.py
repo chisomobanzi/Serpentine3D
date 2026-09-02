@@ -1205,9 +1205,11 @@ class MainWindow(QMainWindow):
                 self.viewport.update()
                 self._update_status()
             return
-        held_cvs = any(kind == "cv"
-                       for (_, kind, _) in self.selection.subobjects)
-        if (self.selection.ids or held_cvs) and not self.processor.busy:
+        # A held control point or face is as much a pick as a whole object,
+        # and Delete means whichever of them you are holding.
+        held = any(kind in ("cv", "face")
+                   for (_, kind, _) in self.selection.subobjects)
+        if (self.selection.ids or held) and not self.processor.busy:
             self.run_command("delete")
 
     def _copy_selected(self):
