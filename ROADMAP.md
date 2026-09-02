@@ -6,18 +6,22 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.8.0 was cut (2026-09-02).
+Last updated when 0.8.1 was cut (2026-09-02).
 
 ---
 
 ## Where things stand
 
-Version `0.8.0` in `pyproject.toml`, the lockfile and the three packaging
-files; `CHANGELOG.md`'s 0.8.0 section is dated 2026-09-02 and holds the
-drafting work below. **Released on 2026-09-02: pushed, tagged `v0.8.0`,
-published with the AppImage, the Windows `.exe` and the macOS `.dmg` all
-attached.** Suite on Linux: 2650 passed, nothing skipped; on macOS arm64:
-2642 passed, 8 skipped.
+Version `0.8.1` in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.8.1 section is dated 2026-09-02. A patch of fixes
+cut the same day as 0.8.0: far geometry and its overlays hold still
+(the float32 anchors), Zoom Selected reaches held sub-objects, a picked
+edge is visibly wide on every driver, and a live fillet drag no longer
+lights a random edge. Suite on Linux: 2697 passed, nothing skipped.
+
+0.8.0 was released on 2026-09-02: pushed, tagged, and published with the
+AppImage, the Windows `.exe` and the macOS `.dmg` all attached. Its
+suite stood at 2650 on Linux; macOS arm64 ran 2642 passed, 8 skipped.
 
 The minor bump rather than another patch because the app does something
 it could not do before. `section` is a new modelling command, and a layer
@@ -28,7 +32,7 @@ defaults the field to empty, and `FORMAT_VERSION` did not have to move.
 0.7.3 was released on 2026-09-01: pushed, tagged, and published with the
 AppImage, the Windows `.exe` and the macOS `.dmg` all attached.
 
-### Far geometry, unreleased
+### Far geometry, released in 0.8.1
 
 The last open item on Jonas's list (#5): geometry past ~100,000 units
 swam as the camera orbited, because vertices and the one MVP were both
