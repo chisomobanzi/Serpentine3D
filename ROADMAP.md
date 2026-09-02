@@ -6,21 +6,25 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.8.1 was cut (2026-09-02).
+Last updated when 0.8.2 was cut (2026-09-03).
 
 ---
 
 ## Where things stand
 
-Version `0.8.1` in `pyproject.toml`, the lockfile and the three packaging
-files; `CHANGELOG.md`'s 0.8.1 section is dated 2026-09-02. A patch of fixes
-cut the same day as 0.8.0: far geometry and its overlays hold still
-(the float32 anchors), Zoom Selected reaches held sub-objects, a picked
-edge is visibly wide on every driver, and a live fillet drag no longer
-lights a random edge. **Released on 2026-09-02: pushed, tagged `v0.8.1`,
-and published with the AppImage, the Windows `.exe` and the macOS `.dmg`
-all attached.** Suite on Linux: 2697 passed, nothing skipped; on macOS
-arm64: 2689 passed, 8 skipped.
+Version `0.8.2` in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.8.2 section is dated 2026-09-03. One fix, for
+the first bug reported by someone who could not start the app at all
+(#7, Manjaro/KDE Wayland on an RTX 3080): Serpentine3D now starts on
+drivers reached through EGL, not just X11's GLX. Suite on Linux: 2709
+passed, nothing skipped.
+
+0.8.1 was a patch of fixes cut the same day as 0.8.0: far geometry and
+its overlays hold still (the float32 anchors), Zoom Selected reaches
+held sub-objects, a picked edge is visibly wide on every driver, and a
+live fillet drag no longer lights a random edge. Released on 2026-09-02:
+pushed, tagged `v0.8.1`, and published with the AppImage, the Windows
+`.exe` and the macOS `.dmg` all attached.
 
 0.8.0 was released on 2026-09-02: pushed, tagged, and published with the
 AppImage, the Windows `.exe` and the macOS `.dmg` all attached. Its
@@ -34,6 +38,31 @@ defaults the field to empty, and `FORMAT_VERSION` did not have to move.
 
 0.7.3 was released on 2026-09-01: pushed, tagged, and published with the
 AppImage, the Windows `.exe` and the macOS `.dmg` all attached.
+
+### Wayland, released in 0.8.2
+
+The first report from someone who could not start the app at all (#7,
+Manjaro/KDE Plasma Wayland on an RTX 3080): a welcome window over a
+stream of `QEGLPlatformContext: Failed to create context: 3009`, and
+New Model doing nothing. Two things assumed X11's GLX. The surface
+format asked for a 3.3 core profile without setting `renderableType`,
+so on EGL Qt bound OpenGL ES, which has no core profile, and every
+context was refused with EGL_BAD_MATCH including Qt's own backing
+store. Behind that, Qt and PyOpenGL each pick GLX or EGL independently,
+Qt by asking the driver and PyOpenGL by reading the session type, and
+when they disagree the viewport's first GL call raises "Attempt to
+retrieve context when no valid context" from inside `initializeGL`.
+Both now live in `utils/glsetup.py`, which measures the binding Qt
+actually got and pins PyOpenGL to it either way, since the mismatch
+happens in both directions (a Wayland session falling back to XWayland
+and GLX is the mirror image, and crashes identically). Reproduced with
+`QT_XCB_GL_INTEGRATION=xcb_egl` and verified as a screenshot: EGL and
+GLX now render the same window.
+
+Worth remembering that this stayed hidden through eight releases
+because every machine it was tested on was X11. The AppImage is the
+front door for a Linux user, and Wayland is the default on most
+desktops shipping today.
 
 ### Far geometry, released in 0.8.1
 
