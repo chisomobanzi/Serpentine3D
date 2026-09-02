@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`arraypath` turns the copies to follow the path.** It used to translate
+  and nothing else, so a row of chairs set out along a curving path all
+  faced the way the first one did, and a bolt arrayed around a bent pipe
+  went on pointing at the ceiling. There is now an Orientation option with
+  Rhino's two answers and the old behaviour: *Freeform* turns each copy with
+  the curve in all three axes, *Roadlike* swings it round to follow the path
+  in plan but keeps it standing upright, and *None* is the plain translation
+  that was there before. Freeform is the default.
+
+  The frames come from `geometry.sample_curve_frames`, which is a
+  rotation-minimising frame rather than the textbook Frenet one: Frenet's
+  normal points wherever the curve is bending, so it is undefined on a
+  straight stretch and flips end over end at an inflection, and every copy
+  standing on it somersaults at that point. Roadlike's idea of up is the
+  construction plane you are working on, so an array laid out in the Front
+  pane stands on that plane rather than on the world's floor.
+
 ## 0.8.2 — 2026-09-03
 
 ### Fixed

@@ -341,18 +341,80 @@ def cmd_array_path(ctx):
     paths = yield SelectReq("Select path curve", kinds=("curve",),
                             max_count=1, allow_preselected=False)
     count = yield IntReq("Number of items", default=6, minimum=2)
+    how = yield OptionReq("Orientation",
+                          options=["Freeform", "Roadlike", "None"],
+                          default="Freeform")
     base = yield PointReq("Base point on the object(s)")
-    samples = g.sample_curve(paths[0].shape, count)
+    frames = g.sample_curve_frames(paths[0].shape, count)
+    # Roadlike's idea of up is the plane you are working on, so a path
+    # arrayed in the Front pane keeps its copies standing on that plane
+    # rather than on the world's floor.
+    up = tuple(float(a) for a in ctx.cplane.normal)
     n = 0
     with ctx.scene.batched():           # one notification, not one a copy
-        for target in samples:
-            offset = tuple(t - b for t, b in zip(target, base))
-            if all(abs(c) < 1e-12 for c in offset):
+        for frame in frames:
+            placement = _path_placement(frames[0], frame, base, how, up)
+            if placement is None:       # the copy that lands on the original
                 continue
             for o in objs:
-                ctx.scene.add_from(g.translate(o.shape, offset), o)
+                ctx.scene.add_from(g.apply_matrix(o.shape, placement), o)
                 n += 1
     ctx.echo(f"Placed {n} object(s) along {paths[0].name}.")
+
+
+def _path_placement(first, frame, base, how, up):
+    """Where one arrayed copy goes, as a 4x4, or None if it would not move.
+
+    Turn it from the frame at the head of the path to the frame here, about
+    the base point, then set the base point down on the curve. Doing it in
+    that order is what keeps the base point exactly on its sample: the
+    rotation happens around the base, so it cannot drag the object off.
+    """
+    import numpy as np
+
+    if how == "Freeform":
+        rot = _axes(frame[1], frame[2]) @ _axes(first[1], first[2]).T
+    elif how == "Roadlike":
+        rot = _yaw_between(first[1], frame[1], up)
+    else:
+        rot = np.eye(3)
+    m = np.eye(4)
+    m[:3, :3] = rot
+    m[:3, 3] = np.asarray(frame[0], float) - rot @ np.asarray(base, float)
+    if np.allclose(m, np.eye(4), atol=1e-12):
+        return None
+    return m
+
+
+def _axes(tangent, up):
+    """The frame as a rotation matrix: its columns are where x, y and z end
+    up, so B_here @ B_start.T is the turn from one frame to the other."""
+    import numpy as np
+
+    t = np.asarray(tangent, float)
+    u = np.asarray(up, float)
+    return np.column_stack([t, u, np.cross(t, u)])
+
+
+def _yaw_between(t0, t1, up):
+    """The part of the turn that happens in plan. Both tangents are flattened
+    onto the plane `up` is normal to, and what is left is a rotation about
+    `up` alone: the copy swings to follow the path but never leans with it.
+    A tangent pointing straight up has no plan direction to follow, so that
+    stretch of the path leaves the copy facing the way it was."""
+    import numpy as np
+
+    n = np.asarray(up, float)
+    n = n / np.linalg.norm(n)
+    flat = []
+    for t in (t0, t1):
+        v = np.asarray(t, float)
+        v = v - float(np.dot(v, n)) * n
+        norm = np.linalg.norm(v)
+        if norm < 1e-9:
+            return np.eye(3)
+        flat.append(v / norm)
+    return _rotation_between(flat[0], flat[1])
 
 
 @command("array")

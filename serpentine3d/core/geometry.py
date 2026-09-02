@@ -1907,6 +1907,98 @@ def sample_curve(shape, count: int) -> list[Point]:
     return pts
 
 
+def sample_curve_frames(shape, count: int) -> list[tuple]:
+    """`count` frames spaced uniformly by arc length: (origin, tangent, up).
+
+    The obvious frame to hand back is the Frenet one, and it is the wrong
+    one. Frenet's normal points wherever the curve is bending, so on a
+    straight stretch it is undefined and at an inflection it flips end over
+    end; anything carried along the curve somersaults at that point. This is
+    a rotation-minimising frame instead (Wang's double reflection): each
+    frame is the previous one carried forward by the smallest rotation that
+    lines up the tangents, so it only ever turns as much as the curve does.
+
+    `up` is perpendicular to `tangent`, and the third axis is their cross
+    product. Where the curve is flat the seed is chosen to be world up, so a
+    path drawn on the ground gives frames a person would have drawn.
+    """
+    import numpy as np
+    from OCP.BRepAdaptor import BRepAdaptor_CompCurve
+    from OCP.GCPnts import GCPnts_UniformAbscissa
+    from OCP.gp import gp_Pnt, gp_Vec
+    if count < 2:
+        raise GeometryError("Need at least 2 sample points")
+    st = shape.ShapeType()
+    if st == occ.WIRE:
+        adaptor = BRepAdaptor_CompCurve(occ.to_wire(shape))
+    elif st == occ.EDGE:
+        adaptor = occ.edge_adaptor(occ.to_edge(shape))
+    else:
+        raise GeometryError("Not a curve")
+    ua = GCPnts_UniformAbscissa(adaptor, int(count))
+    if not ua.IsDone():
+        raise GeometryError("Could not sample curve")
+
+    origins, tangents = [], []
+    for i in range(1, ua.NbPoints() + 1):
+        p, d = gp_Pnt(), gp_Vec()
+        adaptor.D1(ua.Parameter(i), p, d)
+        t = np.array([d.X(), d.Y(), d.Z()], float)
+        n = np.linalg.norm(t)
+        # A zero derivative happens at a cusp or a degenerate segment. The
+        # direction to the next sample is the honest answer there.
+        if n < 1e-12:
+            t = np.array([1.0, 0.0, 0.0]) if not tangents else tangents[-1]
+        else:
+            t = t / n
+        origins.append(np.array([p.X(), p.Y(), p.Z()], float))
+        tangents.append(t)
+
+    up = _seed_up(tangents[0])
+    ups = [up]
+    for i in range(len(origins) - 1):
+        ups.append(_carry_up(origins[i], tangents[i], ups[i],
+                             origins[i + 1], tangents[i + 1]))
+    return [(tuple(o), tuple(t), tuple(u))
+            for o, t, u in zip(origins, tangents, ups)]
+
+
+def _seed_up(tangent):
+    """World up, leaned off the tangent so it is perpendicular to it. If the
+    curve starts pointing straight up there is no such lean, so use world X
+    instead — any perpendicular will do, and the frame carries on from
+    whichever one it is given."""
+    import numpy as np
+    for world in ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]):
+        u = np.asarray(world) - float(np.dot(world, tangent)) * tangent
+        n = np.linalg.norm(u)
+        if n > 1e-9:
+            return u / n
+    return np.array([0.0, 1.0, 0.0])
+
+
+def _carry_up(p0, t0, u0, p1, t1):
+    """One step of the double reflection: reflect the frame through the plane
+    between the two points, then through the plane between the two tangents.
+    Two reflections make a rotation, and this is the one that carries t0 onto
+    t1 without spinning anything about it."""
+    import numpy as np
+    v1 = p1 - p0
+    c1 = float(np.dot(v1, v1))
+    u, t = u0, t0
+    if c1 > 1e-24:                       # coincident samples: nothing to do
+        u = u - (2.0 / c1) * float(np.dot(v1, u)) * v1
+        t = t - (2.0 / c1) * float(np.dot(v1, t)) * v1
+    v2 = t1 - t
+    c2 = float(np.dot(v2, v2))
+    if c2 > 1e-24:
+        u = u - (2.0 / c2) * float(np.dot(v2, u)) * v2
+    # Rounding drifts it off the tangent over a long curve; put it back.
+    u = u - float(np.dot(u, t1)) * t1
+    n = np.linalg.norm(u)
+    return _seed_up(t1) if n < 1e-9 else u / n
+
+
 def rebuild_curve(shape, point_count: int = 10,
                   degree: int = 3) -> TopoDS_Shape:
     """Rebuild a curve through `point_count` arc-length samples.
