@@ -41,9 +41,9 @@ anchor is None and the draw loop keeps its old single shared matrix,
 so the cave scene's one-upload-per-frame behaviour is untouched.
 Measured on Xephyr: frame-to-frame pixel churn at 500k units dropped
 0.052 to 0.014 under a slow orbit, the remainder being the orbit
-itself. Overlays (grid, gumball, control-point display, previews) are
-still absolute float32; nobody has reported them and each is a small
-follow-up on the same helpers.
+itself. Overlays followed on 2026-09-02: one shared anchor at the camera
+target covers the gumball, control points, previews, combs, arrows,
+image planes and the grid of a far cplane, byte-identical near home.
 
 ### Drafting, released in 0.8.0
 
@@ -263,7 +263,7 @@ Triaged by cost. Everything below is still open unless marked.
 | **Sublayers** | ✅ **Done, released in 0.7.3.** `parent` on `Layer`, inherited visibility and locking computed by `is_visible`/`is_locked` (each layer keeps its own switch, Rhino's model), both file formats, and a tree in the panel with a sublayer button and drag-to-reparent. The `Walls::Interior` / `Roof::Interior` import collision went with it, since an imported layer is matched by full path now. Notes below. |
 | **Layer hatch** | ✅ **Done.** `hatch` on `Layer` (`core/layers.py`), one of `core/layout.py HATCH_PATTERNS`, empty for none. The paper-space `hatch` command opens its Pattern prompt on it in both Corners and Region mode, `layer` has a Hatch action, and the Layers panel sets it from the row menu, on the whole selection at once. It is a submenu and not a column because the tree's five columns already fill the 280px dock exactly; a sixth comes straight out of the layer name. A section cut is drawn in the hatch of the layer of the object it cut: `Scene.hatch_of`, threaded through `_section_cut` as an owner per region and out as `cut_by_obj`. `solid` is flooded by the painter (`annot_paint.fill_cut_solid`) rather than lined, so a cut face keeps its bores open, and Region mode opens its prompt on the material under the pointer. |
 | **ArrayPath orientation** (Freeform, etc.) | `commands/transform.py:338`. Needs a proper frame-along-curve. |
-| **Visual feedback when picking edges** | Lourenço reported none. **It exists** — `ui/viewport.py:1864` draws picked sub-object edges. So this is a *visibility/tuning* problem (colour, width, z-bias), not a missing feature. Look at it on screen before writing code. |
+| **Visual feedback when picking edges** | ✅ **Fixed 2026-09-02.** The highlight asked `glLineWidth` for 3px and the driver cap made it a hairline; it now rides the screen-space thick shader, gold over a dark halo. Previously: Lourenço reported none. **It exists** — `ui/viewport.py:1864` draws picked sub-object edges. So this is a *visibility/tuning* problem (colour, width, z-bias), not a missing feature. Look at it on screen before writing code. |
 
 ### Big
 
