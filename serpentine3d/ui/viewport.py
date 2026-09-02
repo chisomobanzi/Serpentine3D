@@ -12,7 +12,7 @@ import traceback
 import numpy as np
 from OpenGL import GL
 from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QCursor, QSurfaceFormat
+from PySide6.QtGui import QCursor
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -20,6 +20,9 @@ from ..core import linetype as _lt
 from ..core import spatial
 from ..utils import config as _cfg
 from ..utils import units as _units
+# Lives in utils so the launcher can set it without importing this
+# module (and the kernel behind it); re-exported here for old callers.
+from ..utils.glsetup import set_default_gl_format  # noqa: F401
 from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
 from . import gpu_share, theme
 from .camera import (
@@ -348,23 +351,6 @@ uniform vec3 uBottom;
 out vec4 frag;
 void main() { frag = vec4(mix(uBottom, uTop, vY), 1.0); }
 """
-
-
-def set_default_gl_format():
-    """GL settings that are only read when the QApplication is built.
-
-    Call this before constructing one. The launcher repeats it inline rather
-    than importing this module early, so the two have to agree.
-    """
-    fmt = QSurfaceFormat()
-    fmt.setVersion(3, 3)
-    fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
-    fmt.setSamples(4)
-    fmt.setDepthBufferSize(24)
-    QSurfaceFormat.setDefaultFormat(fmt)
-    # One share group for every viewport's context: a mesh is then uploaded
-    # once however many views show it. See ui.gpu_share.
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
 
 def _compile(vert_src: str, frag_src: str) -> int:

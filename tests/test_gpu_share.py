@@ -122,16 +122,24 @@ def test_share_contexts_is_set_before_the_application_exists():
     share group, and it is only read when QApplication is constructed. Set it
     late and the buffers handed between viewports are not valid in the
     context that draws them — which shows up as an empty viewport, not as an
-    error, so it is worth a test rather than a comment."""
+    error, so it is worth a test rather than a comment.
+
+    It is set in utils.glsetup, alongside the surface format, because
+    the two have the same deadline and the launcher will not import the
+    viewport this early. So there are two halves to check: that the
+    helper sets it, and that the launcher calls the helper in time."""
     import inspect
 
     from serpentine3d import launcher
+    from serpentine3d.utils import glsetup
+
+    helper = inspect.getsource(glsetup.set_default_gl_format)
+    assert "AA_ShareOpenGLContexts" in helper
 
     src = inspect.getsource(launcher)
-    assert "AA_ShareOpenGLContexts" in src
-    flag = src.index("AA_ShareOpenGLContexts")
-    made = src.index("QApplication(")
-    assert flag < made, "share group set after the application was created"
+    called = src.index("set_default_gl_format()")
+    made = src.index("QApplication(sys.argv)")
+    assert called < made, "share group set after the application was created"
 
 
 # --- dropping a viewport's arrays without dropping the claim ---------------

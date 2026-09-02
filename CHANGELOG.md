@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **The app starts on Wayland.** Reported from Manjaro/KDE on an RTX
+  3080: the welcome window came up over a stream of
+  `QEGLPlatformContext: Failed to create context: 3009`, and New Model
+  did nothing. Two assumptions that only ever held on X11's GLX. The
+  first was the surface format, which asked for an OpenGL 3.3 core
+  profile without saying it meant desktop OpenGL; on EGL that leaves Qt
+  binding OpenGL ES, which has no core profile, so every context was
+  refused with EGL_BAD_MATCH, ours and the one Qt's own window backing
+  store needs. The second was PyOpenGL, which chooses GLX or EGL by
+  reading the session type while Qt chooses by asking the driver, and
+  when the two disagree PyOpenGL cannot see the context it has been
+  handed and the viewport's first drawing call fails. It is now asked
+  of Qt and told to PyOpenGL rather than guessed twice, which also
+  covers the reverse mismatch, a Wayland session that falls back to
+  XWayland and GLX.
+
 ## 0.8.1 — 2026-09-02
 
 ### Fixed

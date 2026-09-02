@@ -56,25 +56,22 @@ def main() -> int:
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-    # The default surface format must be set before the QApplication; do it
-    # here (cheap, QtGui only) rather than import it from the viewport, which
-    # would drag the kernel in early.
-    from PySide6.QtGui import QSurfaceFormat
-    fmt = QSurfaceFormat()
-    fmt.setVersion(3, 3)
-    fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
-    fmt.setSamples(4)
-    fmt.setDepthBufferSize(24)
-    QSurfaceFormat.setDefaultFormat(fmt)
+    # Both the surface format and the share-group attribute are only read
+    # as the QApplication is built, so they have to be set before one
+    # exists: set the share group late and a second viewport draws
+    # nothing, silently. Its own module rather than the viewport's, which
+    # would drag the kernel in ahead of the splash.
+    from .utils.glsetup import match_pyopengl_to_qt, set_default_gl_format
+    set_default_gl_format()
 
-    # Every viewport's context in one share group, so a mesh is uploaded once
-    # however many views show it. Only read when the QApplication is built, so
-    # it has to be set here — set it late and a second viewport draws nothing,
-    # silently.
-    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication.instance() or QApplication(sys.argv)
+
+    # Now that there is a context to ask about, and while PyOpenGL is
+    # still unimported: point it at whichever driver binding Qt got. It
+    # guesses GLX, and on Wayland the guess is wrong in a way that only
+    # shows up as the viewport's first GL call raising.
+    match_pyopengl_to_qt()
 
     splash = None
     from .ui.splash import SplashScreen, should_show
