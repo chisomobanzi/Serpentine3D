@@ -22,6 +22,7 @@ import pytest
 from serpentine3d.core import geometry as g
 from serpentine3d.core.scene import Scene
 from serpentine3d.core.selection import SelectionManager
+from serpentine3d.ui import gumball as gb_mod
 from serpentine3d.ui import viewport as vp_mod
 from tests.test_viewport_perf import _GLRecorder
 
@@ -46,7 +47,12 @@ class _Bucket:
 
 @pytest.fixture
 def view(monkeypatch):
-    monkeypatch.setattr(vp_mod, "GL", _GLRecorder())
+    # Every module that draws holds its own `GL`, and an unpatched one
+    # is a real call into a context an offscreen test does not have:
+    # llvmpipe shrugs it off, macOS segfaults the whole run.
+    rec = _GLRecorder()
+    monkeypatch.setattr(vp_mod, "GL", rec)
+    monkeypatch.setattr(gb_mod, "GL", rec)
     scene = Scene()
     sel = SelectionManager(scene)
     v = vp_mod.Viewport(scene, sel)
