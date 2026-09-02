@@ -17,7 +17,10 @@ files; `CHANGELOG.md`'s 0.8.1 section is dated 2026-09-02. A patch of fixes
 cut the same day as 0.8.0: far geometry and its overlays hold still
 (the float32 anchors), Zoom Selected reaches held sub-objects, a picked
 edge is visibly wide on every driver, and a live fillet drag no longer
-lights a random edge. Suite on Linux: 2697 passed, nothing skipped.
+lights a random edge. **Released on 2026-09-02: pushed, tagged `v0.8.1`,
+and published with the AppImage, the Windows `.exe` and the macOS `.dmg`
+all attached.** Suite on Linux: 2697 passed, nothing skipped; on macOS
+arm64: 2689 passed, 8 skipped.
 
 0.8.0 was released on 2026-09-02: pushed, tagged, and published with the
 AppImage, the Windows `.exe` and the macOS `.dmg` all attached. Its
