@@ -16,8 +16,12 @@ Version `0.8.2` in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.8.2 section is dated 2026-09-03. One fix, for
 the first bug reported by someone who could not start the app at all
 (#7, Manjaro/KDE Wayland on an RTX 3080): Serpentine3D now starts on
-drivers reached through EGL, not just X11's GLX. Suite on Linux: 2709
-passed, nothing skipped.
+drivers reached through EGL, not just X11's GLX. **Released on
+2026-09-03: pushed, tagged `v0.8.2`, and published with the AppImage,
+the Windows `.exe` and the macOS `.dmg` all attached.** The packaged
+AppImage was checked on the EGL path before publishing: New Model
+opens, a box draws, and not one 3009 in the log. Suite on Linux: 2709
+passed, nothing skipped; on macOS arm64: 2701 passed, 8 skipped.
 
 0.8.1 was a patch of fixes cut the same day as 0.8.0: far geometry and
 its overlays hold still (the float32 anchors), Zoom Selected reaches
