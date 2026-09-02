@@ -13,6 +13,14 @@
   all share one anchor now: where the camera is looking. Near the
   origin the frame is bit-for-bit what it was.
 
+- **A picked edge is drawn wide enough to actually see.** The
+  highlight was there all along, but it asked `glLineWidth` for its
+  pixels and plenty of drivers cap lines at one, so the pick came back
+  as a gold hairline. It now goes through the same screen-space wide
+  line shader the object edges already use, gold over a dark rim like
+  the control-point markers, on every driver and in details on sheets
+  as well. Reported by Lourenço.
+
 - **Zoom Selected reaches what you are holding.** Pick a control
   point (or an edge, or a face) and ask for Zoom Selected, and the
   command said "Nothing selected": it only ever asked about whole

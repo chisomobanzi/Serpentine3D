@@ -67,6 +67,8 @@ _BOX_CORNERS = np.array([(x, y, z) for x in (False, True)
 # vanishes under the middle of it.
 CV_MARK_PX = 4.0
 CV_HELD_PX = 5.5
+EDGE_PICK_PX = 4.5        # a picked edge, wide enough to call feedback
+EDGE_PICK_HALO_PX = 7.0   # the dark rim under it
 
 
 def cv_marker_size(points, eye, width, height, half_px):
@@ -685,6 +687,50 @@ class _LineBatch:
         GL.glDeleteBuffers(1, [self.vbo])
 
 
+class _ThickBatch:
+    """Dynamic screen-space wide lines, for the picked-edge highlight.
+
+    glLineWidth is capped at 1 on plenty of drivers, so a highlight that
+    asks it for pixels is a hairline exactly where it most needs to be
+    seen. This is the quad shader the object edges already fall back to,
+    fed fresh segments instead of a mesh's static buffer.
+    """
+
+    def __init__(self):
+        self.count = 0
+        self.vao = GL.glGenVertexArrays(1)
+        GL.glBindVertexArray(self.vao)
+        self.vbo = GL.glGenBuffers(1)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, 28, None, GL.GL_DYNAMIC_DRAW)
+        for loc, size, stride, off in _WIDE_ATTRS:
+            GL.glEnableVertexAttribArray(loc)
+            GL.glVertexAttribPointer(loc, size, GL.GL_FLOAT, False, stride,
+                                     ctypes.c_void_p(off))
+        self.ebo = GL.glGenBuffers(1)   # binds into the VAO's state
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, self.ebo)
+        GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, 4, None,
+                        GL.GL_DYNAMIC_DRAW)
+        GL.glBindVertexArray(0)
+
+    def update(self, segments):
+        """(K, 2, 3) float32 world segments, quadded for the shader."""
+        flat, idx = _thick_arrays(segments)
+        GL.glBindVertexArray(self.vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, max(flat.nbytes, 28), flat,
+                        GL.GL_DYNAMIC_DRAW)
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, self.ebo)
+        GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, max(idx.nbytes, 4),
+                        idx, GL.GL_DYNAMIC_DRAW)
+        GL.glBindVertexArray(0)
+        self.count = len(idx)
+
+    def release(self):
+        GL.glDeleteVertexArrays(1, [self.vao])
+        GL.glDeleteBuffers(2, [self.vbo, self.ebo])
+
+
 class Viewport(QOpenGLWidget):
     objectClicked = Signal(str, object)     # object id, modifiers
     emptyClicked = Signal(object)           # modifiers
@@ -898,6 +944,7 @@ class Viewport(QOpenGLWidget):
         self._build_grid(extent=self._grid_params[0],
                          major=self._grid_params[1])
         self._preview = _LineBatch(np.zeros((0, 3), np.float32), dynamic=True)
+        self._preview_thick = _ThickBatch()
         # forward-compatible core contexts reject widths > 1.0 regardless of
         # the advertised range, so probe rather than trust the query
         self._max_line_width = 1.0
@@ -1983,14 +2030,18 @@ class Viewport(QOpenGLWidget):
             if subs and len(obj.mesh.edge_of_segment):
                 mask = np.isin(obj.mesh.edge_of_segment, subs)
                 if mask.any():
-                    segs = obj.mesh.edge_segments[mask].reshape(-1, 3)
-                    self._preview.update(rebased(segs, gpu.anchor))
-                    self._set_line_uniforms(omvp,
-                                            (*theme.SELECTION_COLOR, 1.0))
-                    self._line_width(3.0)
+                    segs = rebased(obj.mesh.edge_segments[mask],
+                                   gpu.anchor)
+                    # Gold over a dark halo, the control-point markers'
+                    # trick, through the screen-space quad shader: a
+                    # width glLineWidth cannot cap to a hairline.
                     GL.glDisable(GL.GL_DEPTH_TEST)
-                    GL.glBindVertexArray(self._preview.vao)
-                    GL.glDrawArrays(GL.GL_LINES, 0, len(segs))
+                    self._draw_thick_segments(
+                        segs, omvp, theme.CONTROL_POINT_EDGE,
+                        EDGE_PICK_HALO_PX)
+                    self._draw_thick_segments(
+                        segs, omvp, (*theme.SELECTION_COLOR, 1.0),
+                        EDGE_PICK_PX)
                     GL.glEnable(GL.GL_DEPTH_TEST)
             fsubs = self.selection.subobjects_of(obj.id, "face") \
                 if self.selection.subobjects else []
@@ -2080,6 +2131,26 @@ class Viewport(QOpenGLWidget):
             GL.glDrawElements(GL.GL_TRIANGLES, gpu.tri_count,
                               GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
         GL.glDepthMask(True)
+
+    def _draw_thick_segments(self, segments, mvp, color, width: float):
+        """Fresh segments at an honest pixel width, capped drivers or not.
+
+        The same uniforms _draw_edges sets on the thick program, minus
+        the static mesh buffer.
+        """
+        if not len(segments):
+            return
+        self._preview_thick.update(np.asarray(segments, np.float32))
+        prog = self._thick_prog
+        self._use(prog)
+        self._set_mvp(prog, np.asarray(mvp, np.float32))
+        self._set_uniform(prog, "uViewport", GL.glUniform2f,
+                          float(self.width()), float(self.height()))
+        self._set_uniform(prog, "uWidthPx", GL.glUniform1f, float(width))
+        self._set_color4(prog, color)
+        GL.glBindVertexArray(self._preview_thick.vao)
+        GL.glDrawElements(GL.GL_TRIANGLES, self._preview_thick.count,
+                          GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
 
     def _draw_edges(self, gpu, mvp, color, width: float):
         """Object edges at a given pixel width. Wide lines fall back to a
