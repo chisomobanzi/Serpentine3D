@@ -345,13 +345,24 @@ class Gumball:
         return ft[0], ft[1][0]
 
     def handles(self) -> set:
-        """Every handle on offer right now, by id. A held planar face gets
-        the arrow, the two rings that tilt it and the box that grows it;
-        anything that could not change a plane (sliding it within itself,
-        turning it about its own normal, scaling it) is not drawn rather
-        than drawn and inert. A held edge keeps its fillet arrow and box,
+        """Every handle on offer right now, by id.
+
+        A held flat face gets everything that can change the solid: the
+        arrow along its normal moves it and the box on that arrow grows
+        it; the arrows and pads in its plane slide it and the faces
+        beside it lean to keep hold of its edges; the scale boxes taper
+        it the same way; the two rings tilt it. The ring about its own
+        normal and the box that would scale it along that normal could
+        not change a plane, so they are not drawn. A curved face only
+        knows how to offset. A held edge keeps its fillet arrow and box,
         and gains an arrow along each face it sits between when it is a
-        straight edge between two flat faces."""
+        straight edge between two flat faces.
+        """
+        d = self.drag
+        if d is not None and d.get("pp"):
+            return self._face_handles(bool(d.get("pp_planar", True)))
+        if d is not None and d.get("multiface"):
+            return {("move", 2)}
         if self._face_mode():
             pp = self._pushpull_target()
             return self._face_handles(pp is not None and pp[4])
@@ -360,14 +371,46 @@ class Gumball:
             if self._edge_move_target() is not None:
                 out |= {("move", 0), ("move", 1)}
             return out
-        return {(kind, i) for kind in ("move", "pad", "rot", "scale", "ext")
-                for i in range(3)}
+        out = {(kind, i) for kind in ("move", "pad", "rot", "scale")
+               for i in range(3)}
+        state = self.anchor_and_axes()
+        if state is not None:
+            out |= {("ext", i) for i in range(3)
+                    if self._can_extrude(state[1][i])}
+        return out
+
+    @staticmethod
+    def _face_verb(handle, grow: bool) -> str:
+        kind, i = handle
+        if grow:
+            return "extrude face"
+        if kind == "rot":
+            return "tilt face"
+        if kind == "scale":
+            return "scale face"
+        if kind == "pad" or i != 2:
+            return "slide face"
+        return "move face"
 
     @staticmethod
     def _face_handles(planar: bool) -> set:
         if planar:
-            return {("move", 2), ("rot", 0), ("rot", 1), ("ext", 2)}
+            return {("move", 0), ("move", 1), ("move", 2),
+                    ("pad", 0), ("pad", 1), ("pad", 2),
+                    ("rot", 0), ("rot", 1),
+                    ("scale", 0), ("scale", 1), ("ext", 2)}
         return {("move", 2)}
+
+    def _two_way_axes(self) -> set:
+        """Axes whose arrow has a head at each end: a held face's normal,
+        because in and out are both something (carve, or extrude)."""
+        return {2} if self._face_mode() else set()
+
+    def _axis_colours(self):
+        """Red, green and blue say world axes. A held face's frame is its
+        own, so its handles are all the one brand gold."""
+        return (PP_COLOR, PP_COLOR, PP_COLOR) if self._face_mode() \
+            else AXIS_COLORS
 
     def _sweep_sources(self) -> list:
         """Everything held that a filled box could sweep, or an empty list.
@@ -599,9 +642,6 @@ class Gumball:
     def paint(self, mvp):
         if not self.active():
             return
-        if self._face_mode():
-            self._paint_pushpull(mvp)
-            return
         if self._fillet_mode():
             self._paint_fillet(mvp)
             return
@@ -611,32 +651,18 @@ class Gumball:
         anchor, axes = state
         s = self._size_world(anchor)
         vdir = self._view_dir(anchor)
+        on = self.handles()
+        two_way = self._two_way_axes()
+        colours = self._axis_colours()
         GL.glDisable(GL.GL_DEPTH_TEST)
 
-        def color_for(handle, base):
-            if self.hover == handle or (
-                    self.drag and self.drag["handle"] == handle):
-                return HOVER_COLOR
-            return base
+        for i in range(3):                    # rings
+            if ("rot", i) in on and self._usable("rot", i, axes, vdir):
+                self._ring(mvp, anchor, axes[(i + 1) % 3], axes[(i + 2) % 3],
+                           s, (*self._colour(("rot", i), colours[i]), 0.85))
 
-        # rotation circles
-        for i in range(3):
-            if not self._usable("rot", i, axes, vdir):
-                continue
-            u, v = axes[(i + 1) % 3], axes[(i + 2) % 3]
-            pts = []
-            for k in range(49):
-                a = k / 48 * 2 * math.pi
-                pts.append(anchor + ARC_R * s
-                           * (u * math.cos(a) + v * math.sin(a)))
-            arr = np.asarray(pts, np.float32)
-            segs = np.stack([arr[:-1], arr[1:]], axis=1).reshape(-1, 3)
-            self._lines(mvp, segs, (*color_for(("rot", i), AXIS_COLORS[i]),
-                                    0.85), 1.6)
-
-        # plane pads
-        for i in range(3):
-            if not self._usable("pad", i, axes, vdir):
+        for i in range(3):                    # pads
+            if ("pad", i) not in on or not self._usable("pad", i, axes, vdir):
                 continue
             u, v = axes[(i + 1) % 3], axes[(i + 2) % 3]
             c0 = anchor + (u + v) * PAD0 * s
@@ -644,67 +670,39 @@ class Gumball:
             c2 = anchor + (u + v) * PAD1 * s
             c3 = anchor + u * PAD0 * s + v * PAD1 * s
             tris = np.asarray([c0, c1, c2, c0, c2, c3], np.float32)
-            self._tris(mvp, tris, (*color_for(("pad", i), AXIS_COLORS[i]),
+            self._tris(mvp, tris, (*self._colour(("pad", i), colours[i]),
                                    PAD_ALPHA))
 
-        # shafts + cones + the two boxes
-        for i in range(3):
-            if not self._usable("move", i, axes, vdir):
-                continue
+        for i in range(3):                    # arrows and the two boxes
             axis = axes[i]
-            color = color_for(("move", i), AXIS_COLORS[i])
-            a0 = anchor + axis * SHAFT0 * s
-            a1 = anchor + axis * SHAFT1 * s
-            self._lines(mvp, np.asarray([a0, a1], np.float32),
-                        (*color, 1.0), 2.4)
-            self._cone(mvp, anchor, axis, axes[(i + 1) % 3],
-                       axes[(i + 2) % 3], s, (*color, 1.0))
-            kc = color_for(("scale", i), AXIS_COLORS[i])
-            self._leader(mvp, anchor, axis, s, (*kc, 0.85))
-            self._knob(mvp, anchor - axis * SCALE_POS * s, s,
-                       (*kc, 1.0), fill=False)
-            if self._can_extrude(axis):
+            if ("move", i) in on and self._usable("move", i, axes, vdir):
+                color = self._colour(("move", i), colours[i])
+                if i in two_way:
+                    self._double_arrow(mvp, anchor, axis, s, color)
+                else:
+                    a0 = anchor + axis * SHAFT0 * s
+                    a1 = anchor + axis * SHAFT1 * s
+                    self._lines(mvp, np.asarray([a0, a1], np.float32),
+                                (*color, 1.0), 2.4)
+                    self._cone(mvp, anchor, axis, axes[(i + 1) % 3],
+                               axes[(i + 2) % 3], s, (*color, 1.0))
+            if ("scale", i) in on and self._usable("scale", i, axes, vdir):
+                kc = self._colour(("scale", i), colours[i])
+                self._leader(mvp, anchor, axis, s, (*kc, 0.85))
+                self._knob(mvp, anchor - axis * SCALE_POS * s, s,
+                           (*kc, 1.0), fill=False)
+            if ("ext", i) in on and self._usable("ext", i, axes, vdir):
                 self._knob(mvp, anchor + axis * EXT_POS * s, s,
-                           (*color_for(("ext", i), AXIS_COLORS[i]), 1.0))
-        GL.glEnable(GL.GL_DEPTH_TEST)
-        self.vp._line_width(1.0)
+                           (*self._colour(("ext", i), colours[i]), 1.0))
 
-    def _paint_pushpull(self, mvp):
-        """A single double-headed arrow along the face normal (in = carve,
-        out = extrude), plus a faint square marking the face plane."""
-        state = self._draw_anchor()
-        if state is None:
-            return
-        anchor, axes = state
-        s = self._size_world(anchor)
-        u, v, n = axes[0], axes[1], axes[2]
-        GL.glDisable(GL.GL_DEPTH_TEST)
-        hot = (self.hover == ("move", 2)
-               or (self.drag is not None
-                   and self.drag["handle"] == ("move", 2)))
-        col = HOVER_COLOR if hot else PP_COLOR
-        self._lines(mvp, np.asarray(
-            [anchor - n * SHAFT1 * s, anchor + n * SHAFT1 * s], np.float32),
-            (*col, 1.0), 2.6)
-        self._cone(mvp, anchor, n, u, v, s, (*col, 1.0))
-        self._cone(mvp, anchor, -n, u, v, s, (*col, 1.0))
-        r = PAD0 * s                          # face-plane marker
-        c0, c1 = anchor + (u + v) * r, anchor + (u - v) * r
-        c2, c3 = anchor - (u + v) * r, anchor - (u - v) * r
-        self._lines(mvp, np.asarray([c0, c1, c1, c2, c2, c3, c3, c0],
-                                    np.float32), (*col, 0.5), 1.4)
-        if self._face_is_planar():
-            # Two rings tilt the face about its own edges, and the filled
-            # box on the arrow grows it with new walls where the arrow
-            # itself lets the old walls stretch.
-            vdir = self._view_dir(anchor)
-            for i in (0, 1):
-                if not self._usable("rot", i, axes, vdir):
-                    continue
-                self._ring(mvp, anchor, axes[(i + 1) % 3], axes[(i + 2) % 3],
-                           s, (*self._colour(("rot", i), PP_COLOR), 0.8))
-            self._knob(mvp, anchor + n * EXT_POS * s, s,
-                       (*self._colour(("ext", 2), PP_COLOR), 1.0))
+        if self._face_mode():                 # a faint square in the plane
+            u, v = axes[0], axes[1]
+            r = PAD0 * s
+            c0, c1 = anchor + (u + v) * r, anchor + (u - v) * r
+            c2, c3 = anchor - (u + v) * r, anchor - (u - v) * r
+            self._lines(mvp, np.asarray([c0, c1, c1, c2, c2, c3, c3, c0],
+                                        np.float32),
+                        (*self._colour(("move", 2), PP_COLOR), 0.5), 1.4)
         GL.glEnable(GL.GL_DEPTH_TEST)
         self.vp._line_width(1.0)
 
@@ -920,30 +918,19 @@ class Gumball:
             return best < 7
 
         def on_arrow(i, both_ways):
-            a = scr(anchor - axes[i] * (CONE1 if both_ways else 0.0) * s)
+            a = scr(anchor - axes[i] * (CONE1 if both_ways else -SHAFT0) * s)
             b = scr(anchor + axes[i] * CONE1 * s)
             return (a is not None and b is not None
                     and _seg_dist(cursor, a, b) < 8)
-
-        if self._face_mode():                 # the arrow, and on a flat
-            n = axes[2]                       # face the rings and the box
-            if self._face_is_planar():
-                p = scr(anchor + n * EXT_POS * s)
-                if p is not None and np.linalg.norm(p - cursor) < 6.5:
-                    return ("ext", 2)
-                for i in (0, 1):
-                    if self._usable("rot", i, axes, vdir) and on_ring(i):
-                        return ("rot", i)
-            if on_arrow(2, True):
-                return ("move", 2)
-            return None
 
         if self._fillet_mode():               # radius arrow, the box on it,
             n = axes[2]                       # and the two that move the edge
             p = scr(anchor + n * EXT_POS * s)
             if p is not None and np.linalg.norm(p - cursor) < 6.5:
                 return ("ext", 2)
-            if on_arrow(2, False):
+            a = scr(anchor)
+            b = scr(anchor + n * CONE1 * s)
+            if a is not None and b is not None and _seg_dist(cursor, a, b) < 8:
                 return ("move", 2)
             if self._edge_move_target() is not None:
                 for i in (0, 1):
@@ -952,20 +939,20 @@ class Gumball:
                         return ("move", i)
             return None
 
+        on = self.handles()
+        two_way = self._two_way_axes()
         # the boxes (smallest targets first, and the filled one sits on the
         # shaft, so it has to be asked about before the arrow it lies along)
         for kind, along in (("ext", EXT_POS), ("scale", -SCALE_POS)):
             for i in range(3):
-                if not self._usable(kind, i, axes, vdir):
-                    continue
-                if kind == "ext" and not self._can_extrude(axes[i]):
+                if ((kind, i) not in on
+                        or not self._usable(kind, i, axes, vdir)):
                     continue
                 p = scr(anchor + axes[i] * along * s)
                 if p is not None and np.linalg.norm(p - cursor) < 6.5:
                     return (kind, i)
-        # pads
-        for i in range(3):
-            if not self._usable("pad", i, axes, vdir):
+        for i in range(3):                    # pads
+            if ("pad", i) not in on or not self._usable("pad", i, axes, vdir):
                 continue
             u, v = axes[(i + 1) % 3], axes[(i + 2) % 3]
             corners = [anchor + (u * a + v * b) * s
@@ -974,30 +961,14 @@ class Gumball:
             pts = [scr(c) for c in corners]
             if all(p is not None for p in pts) and _in_poly(cursor, pts):
                 return ("pad", i)
-        # arrows (shaft + cone)
-        for i in range(3):
-            if not self._usable("move", i, axes, vdir):
-                continue
-            a = scr(anchor + axes[i] * SHAFT0 * s)
-            b = scr(anchor + axes[i] * CONE1 * s)
-            if a is None or b is None:
-                continue
-            if _seg_dist(cursor, a, b) < 7:
-                return ("move", i)
-        # rotation circles
-        for i in range(3):
-            if not self._usable("rot", i, axes, vdir):
-                continue
-            u, v = axes[(i + 1) % 3], axes[(i + 2) % 3]
-            best = np.inf
-            for k in range(36):
-                ang = k / 36 * 2 * math.pi
-                p = scr(anchor + ARC_R * s
-                        * (u * math.cos(ang) + v * math.sin(ang)))
-                if p is not None:
-                    best = min(best, float(np.linalg.norm(p - cursor)))
-            if best < 7:
-                return ("rot", i)
+        for i in range(3):                    # arrows
+            if ("move", i) in on and self._usable("move", i, axes, vdir):
+                if on_arrow(i, i in two_way):
+                    return ("move", i)
+        for i in range(3):                    # rings
+            if ("rot", i) in on and self._usable("rot", i, axes, vdir):
+                if on_ring(i):
+                    return ("rot", i)
         return None
 
     def update_hover(self, px, py) -> bool:
@@ -1049,10 +1020,9 @@ class Gumball:
             originals = {pp[0]: obj.shape}
             # The box grows the face with new walls; so does Ctrl and the
             # arrow, the shortcut the rest of the gumball already answers.
-            grow = planar and (handle[0] == "ext" or _ctrl_held(modifiers))
-            self.vp.window_checkpoint(
-                "extrude face" if grow else
-                "tilt face" if handle[0] == "rot" else "move face")
+            grow = planar and (handle[0] == "ext" or (
+                handle == ("move", 2) and _ctrl_held(modifiers)))
+            self.vp.window_checkpoint(self._face_verb(handle, grow))
         elif mf is not None:                  # multi-face offset mode
             if handle != ("move", 2):
                 return False
@@ -1134,7 +1104,7 @@ class Gumball:
             "edge_dir": (np.asarray(self._edge_dir(em), float)
                          if em is not None else None),
             "face_grow": grow,
-            "turned": 0.0,
+            "turned": 0.0, "reshaped": False,
             "extrude": ex, "made": {},
             "ref": ref, "last_label": "", "offset": np.zeros(3),
             "typed": "", "armed": False, "moved": False,
@@ -1161,6 +1131,15 @@ class Gumball:
                 return d["last_label"]
             delta = hit - d["ref"]
             d["offset"] = np.asarray(delta, float)
+            if d.get("pp"):                   # a held face: lift, then slide
+                oid, fidx = d["pp"]
+                orig = d["originals"].get(oid)
+                self._rebuild(oid, orig, float(np.linalg.norm(delta)),
+                              lambda _v: self._face_slid(orig, fidx, delta))
+                d["reshaped"] = True
+                d["last_label"] = ("slide face " + vp.scene.format_length(
+                    float(np.linalg.norm(delta))))
+                return d["last_label"]
             self._move_by(delta)
             d["last_label"] = ("move "
                                + vp.scene.format_length(float(
@@ -1210,6 +1189,13 @@ class Gumball:
                 self._extrude_by(axes[i], float(value))
                 d["offset"] = np.asarray(axes[i] * value, float)
                 label = "extrude " + vp.scene.format_length(float(value))
+            elif d.get("pp") and i != 2:      # a held face, along itself
+                oid, fidx = d["pp"]
+                orig = d["originals"].get(oid)
+                self._rebuild(oid, orig, value, lambda v: g.slide_face(
+                    orig, fidx, tuple(axes[i] * v)))
+                d["offset"] = np.asarray(axes[i] * value, float)
+                label = "slide face " + vp.scene.format_length(float(value))
             elif d.get("pp"):                 # a held face, in or out
                 oid, fidx = d["pp"]
                 orig = d["originals"].get(oid)
@@ -1279,6 +1265,17 @@ class Gumball:
         elif kind == "rot":
             self._turn_by(anchor, axes[i], value)
             label = f"rotate {value:.1f}°"
+        elif kind == "scale" and d.get("pp"):  # taper a held face
+            if abs(value) < 1e-4:
+                return d["last_label"]
+            oid, fidx = d["pp"]
+            orig = d["originals"].get(oid)
+            self._rebuild(oid, orig, value - 1.0, lambda _v: g.scale_face(
+                orig, fidx, float(value),
+                axis=None if uniform else tuple(axes[i])))
+            d["reshaped"] = True
+            label = f"scale face {value:.3f}" + (" (uniform)" if uniform
+                                                 else "")
         elif kind == "scale":
             if abs(value) < 1e-4:
                 return d["last_label"]
@@ -1415,6 +1412,49 @@ class Gumball:
         except g.GeometryError:
             return g.push_pull(orig, fidx, value)
 
+    def _face_slid(self, orig, fidx, delta):
+        """A held face carried by a pad's vector: out along its normal
+        first, with the old walls stretching, then along itself, with the
+        faces beside it leaning. Either part alone is fine."""
+        normal = np.asarray(self.drag["axes"][2], float)
+        delta = np.asarray(delta, float)
+        out = float(np.dot(delta, normal))
+        flat = delta - normal * out
+        shape, idx = orig, fidx
+        if abs(out) > 1e-9:
+            shape = self._face_moved(orig, fidx, out, True, False)
+            idx = self._face_like(shape, normal,
+                                  np.asarray(self.drag["anchor"], float)
+                                  + normal * out)
+            if idx is None:
+                raise g.GeometryError("Lost the face")
+        if np.linalg.norm(flat) > 1e-9:
+            shape = g.slide_face(shape, idx, tuple(flat))
+        return shape
+
+    @staticmethod
+    def _face_like(shape, normal, near):
+        """Index of the flat face of `shape` facing `normal` nearest to
+        `near`, or None."""
+        best_i, best = None, np.inf
+        try:
+            faces = g.faces_of(shape)
+        except g.GeometryError:
+            return None
+        for i, f in enumerate(faces):
+            try:
+                fn = np.asarray(g.face_normal(f), float)
+                c = np.asarray(g.centroid(f), float)
+            except g.GeometryError:
+                continue
+            fn = fn / (np.linalg.norm(fn) or 1.0)
+            if np.dot(fn, normal) < 0.9:
+                continue
+            score = float(np.linalg.norm(c - near))
+            if score < best:
+                best, best_i = score, i
+        return best_i
+
     def _edge_dir(self, em):
         oid, eidx = em
         obj = self.vp.scene.get(oid)
@@ -1527,7 +1567,8 @@ class Gumball:
         d = self.drag
         changed = d is not None and (
             float(np.linalg.norm(d["offset"])) > 1e-9
-            or abs(float(d.get("turned", 0.0))) > 1e-9)
+            or abs(float(d.get("turned", 0.0))) > 1e-9
+            or bool(d.get("reshaped")))
         if changed:
             if d.get("pp") and d.get("pp_planar", True):
                 self._resync_face(d)         # curved offsets keep their index

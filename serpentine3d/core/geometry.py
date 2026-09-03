@@ -1013,6 +1013,127 @@ def _face_on_plane(shape, normal, point, near):
     return best
 
 
+def _unit(v):
+    length = math.sqrt(sum(x * x for x in v))
+    if length < tight():
+        raise GeometryError("Distance is zero")
+    return tuple(x / length for x in v)
+
+
+def _refit_outline(shape, face_index: int, moved) -> TopoDS_Shape:
+    """Carry every edge of a planar face to `moved(point)` of itself, and
+    turn each face beside it until it holds the edge's new line.
+
+    `moved` must keep straight edges straight (a translation or a scale
+    does). A neighbour keeps the corner of itself farthest from the edge
+    where it is, so its far side stays put and its near side follows: the
+    mesh modeller's rule, where the faces beside a dragged face lean to
+    keep hold of it. Two neighbours cannot share one draft, so they are
+    turned one after the other, each found again on the solid the last
+    one left behind by the plane it is still in.
+    """
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+    faces = faces_of(shape)
+    if not (0 <= face_index < len(faces)):
+        raise GeometryError("Face index out of range")
+    face = faces[face_index]
+    _planar_frame(face)                       # raises for a curved face
+    amap = TopTools_IndexedDataMapOfShapeListOfShape()
+    TopExp.MapShapesAndAncestors_s(shape, occ.EDGE, occ.FACE, amap)
+    plan, seen = [], []
+    for edge in edges_of(face):
+        mid, direction = edge_line(edge)      # raises for a curved edge
+        p0, p1 = curve_endpoints(edge)
+        q0, q1 = moved(p0), moved(p1)
+        new_dir = _unit(tuple(b - a for a, b in zip(q0, q1)))
+        beside = [f for f in amap.FindFromKey(edge) if not f.IsSame(face)]
+        if len(beside) != 1:
+            raise GeometryError("The face is not part of a closed solid")
+        other = occ.to_face(beside[0])      # the map hands back plain shapes
+        if any(other.IsSame(s) for s in seen):
+            raise GeometryError("A face beside this one touches it twice")
+        seen.append(other)
+        n, _ = _planar_frame(other)           # raises for a curved neighbour
+        hinge = _face_hinge(other, mid, direction)
+        span = tuple(h - q for h, q in zip(hinge, q0))
+        n2 = (new_dir[1] * span[2] - new_dir[2] * span[1],
+              new_dir[2] * span[0] - new_dir[0] * span[2],
+              new_dir[0] * span[1] - new_dir[1] * span[0])
+        try:
+            n2 = _unit(n2)
+        except GeometryError:
+            raise GeometryError("The edge would land on the far side of the "
+                                "face beside it") from None
+        if sum(a * b for a, b in zip(n2, n)) < 0:
+            n2 = tuple(-v for v in n2)
+        if sum(a * b for a, b in zip(n2, n)) > 1.0 - 1e-10:
+            continue                          # already holds the new line
+        axis = _unit((n[1] * n2[2] - n[2] * n2[1], n[2] * n2[0] - n[0] * n2[2],
+                      n[0] * n2[1] - n[1] * n2[0]))
+        near = tuple((a + b) / 2 for a, b in zip(q0, q1))
+        plan.append((n, hinge, axis, n2, near))
+    if not plan:
+        raise GeometryError("Distance is zero")
+    out = shape
+    for n, hinge, axis, n2, near in plan:
+        other = _face_on_plane(out, n, hinge, near=near)
+        out, _ = _draft(out, other, hinge, axis, n2)
+    return out
+
+
+def slide_face(shape, face_index: int, delta: Point) -> TopoDS_Shape:
+    """Slide a planar face of a solid within its own plane by `delta`; the
+    faces beside it lean to keep hold of its edges, so a box shears. The
+    part of `delta` along the normal is refused rather than dropped: that
+    is a move, and the arrow along the normal does it."""
+    faces = faces_of(shape)
+    if not (0 <= face_index < len(faces)):
+        raise GeometryError("Face index out of range")
+    n, _ = _planar_frame(faces[face_index])
+    d = tuple(float(v) for v in delta)
+    out_of_plane = sum(a * b for a, b in zip(d, n))
+    if abs(out_of_plane) > tight():
+        raise GeometryError("A face slides within its own plane; the arrow "
+                            "along the normal moves it out of it")
+    _unit(d)                                  # "Distance is zero" for nothing
+    return _refit_outline(shape, face_index,
+                          lambda p: tuple(a + b for a, b in zip(p, d)))
+
+
+def scale_face(shape, face_index: int, factor: float,
+               axis: Point | None = None) -> TopoDS_Shape:
+    """Scale a planar face of a solid about its own centre, within its own
+    plane, every way or along `axis` only; the faces beside it lean to keep
+    hold of its edges, so a box tapers to a frustum or flares."""
+    faces = faces_of(shape)
+    if not (0 <= face_index < len(faces)):
+        raise GeometryError("Face index out of range")
+    face = faces[face_index]
+    n, c = _planar_frame(face)
+    k = float(factor)
+    if k <= tight():
+        raise GeometryError("Factor must be positive")
+    if abs(k - 1.0) < 1e-9:
+        raise GeometryError("Distance is zero")
+    if axis is None:
+        def moved(p):
+            return tuple(c[i] + (p[i] - c[i]) * k for i in range(3))
+    else:
+        a = tuple(float(v) for v in axis)
+        along = sum(x * y for x, y in zip(a, n))
+        try:
+            a = _unit(tuple(a[i] - along * n[i] for i in range(3)))
+        except GeometryError:
+            raise GeometryError("Scaling a face along its own normal changes "
+                                "nothing") from None
+
+        def moved(p):
+            t = sum((p[i] - c[i]) * a[i] for i in range(3)) * (k - 1.0)
+            return tuple(p[i] + a[i] * t for i in range(3))
+    return _refit_outline(shape, face_index, moved)
+
+
 def face_long_direction(face) -> Point | None:
     """Unit direction of the longest straight edge of a face, or None when
     it has no straight edges."""

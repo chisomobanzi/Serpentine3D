@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Every handle on a held face does something.** The 0.8.3 gumball hid
+  the handles that could not change a plane. They are back, and they
+  follow the rule a person dragging a face expects: the face's edges go
+  with it and the faces beside it lean to keep hold of them. The arrows
+  and pads in the face's plane slide it, so a box shears; the scale boxes
+  taper it, so a box becomes a truncated pyramid (Shift tapers every
+  way); a pad drag that also lifts the face does the lift first. The
+  arrow along the normal still moves the face with its neighbours
+  stretching, since that also works beside curved faces, and the box on
+  it still extrudes. Only the ring about the normal and the scale box
+  along it are left out, because a plane spun or stretched along its own
+  normal is the same plane.
+
 ## 0.8.3 — 2026-09-03
 
 ### Added
