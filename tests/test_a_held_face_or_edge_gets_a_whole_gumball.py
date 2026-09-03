@@ -71,7 +71,7 @@ class _Cam:
     def ray_through(self, px, py, w, h):
         return np.array([px, 100.0, py]), np.array([0.0, -1.0, 0.0])
 
-    def project(self, pts, w, h):
+    def project(self, pts, w, h, clipped=True):
         pts = np.asarray(pts, float)
         out = np.zeros((len(pts), 3))
         out[:, 0] = pts[:, 0]

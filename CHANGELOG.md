@@ -4,6 +4,17 @@
 
 ### Added
 
+- **The gumball can be aligned to the world, the CPlane or the object.**
+  A small tag on a leader off the gumball opens a menu with the three.
+  Whole objects follow the CPlane as they always have; a held face or
+  edge follows itself. Under world or CPlane axes a held face still does
+  everything: an arrow along a leaning axis lifts the face by the part of
+  the drag along its normal and slides it by the rest, a ring tilts it
+  about the axis laid into its plane, a scale box tapers it along that
+  line, and the extrude box only appears on an axis that runs straight
+  out of the face. The colours say whose axes they are: red, green and
+  blue are the world's or the CPlane's, gold is the face's own. The
+  choice is remembered.
 - **Every handle on a held face does something.** The 0.8.3 gumball hid
   the handles that could not change a plane. They are back, and they
   follow the rule a person dragging a face expects: the face's edges go

@@ -66,6 +66,10 @@ EXT_POS = 0.6
 DASH0, SCALE_POS = 0.18, 1.66
 ARC_R = 0.82
 PAD0, PAD1 = 0.28, 0.5
+TAG_AT = 1.42                # the alignment tag, up and right of the pivot
+TAG_R = 0.07
+ALIGNMENTS = ("object", "cplane", "world")
+TAG_COLOR = (0.62, 0.63, 0.68)
 
 # handle ids: ("move",axis) ("pad",axis) ("rot",axis) ("scale",axis)
 #             ("ext",axis) — the filled box, where there is something to grow
@@ -85,6 +89,106 @@ class Gumball:
         self._sweep_cache: list = []
         self._sweep_axes: dict = {}
         self._memo: dict = {}          # sub-object targets, per scene state
+        self._align = None             # only when there is no config to ask
+        self._menu = None              # the alignment menu while it is open
+
+    # ------------------------------------------------------------ alignment
+
+    @property
+    def align(self) -> str:
+        """Which axes the handles follow: "object" (a held face or edge's
+        own frame; the CPlane for a whole object, which has no frame of its
+        own), "cplane" or "world"."""
+        cfg = self.vp.config
+        if cfg is not None and hasattr(cfg, "set"):
+            value = cfg.get("gumball", "align", default="object")
+        else:
+            value = self._align
+        return value if value in ALIGNMENTS else "object"
+
+    def set_align(self, value: str):
+        if value not in ALIGNMENTS:
+            raise ValueError(f"align must be one of {ALIGNMENTS}")
+        cfg = self.vp.config
+        if cfg is not None and hasattr(cfg, "set"):
+            cfg.set("gumball", "align", value)
+        self._align = value
+        self._memo.clear()
+        panes = getattr(getattr(self.vp, "window", lambda: None)(),
+                        "all_viewports", None)
+        for pane in (panes() if panes else [self.vp]):
+            if hasattr(pane, "update"):
+                pane.update()
+
+    def _own_frame_held(self) -> bool:
+        """Is something held that brings a frame of its own?"""
+        subs = getattr(self.vp.selection, "subobjects", None)
+        return bool(subs) and any(k in ("face", "edge") for (_, k, _) in subs)
+
+    def menu_rows(self) -> list:
+        """(label, value, on, offered) for the alignment menu."""
+        current = self.align
+        own = self._own_frame_held()
+        return [("Align to object", "object", current == "object", own),
+                ("Align to CPlane", "cplane", current == "cplane", True),
+                ("Align to world", "world", current == "world", True)]
+
+    def tag_position(self):
+        """Where the alignment tag sits: up and right of the pivot on the
+        glass, clear of the rings and most arrows, at the end of a short
+        leader."""
+        state = self._draw_anchor()
+        if state is None:
+            return None
+        anchor = np.asarray(state[0], float)
+        s = self._size_world(anchor)
+        right, up = self.vp._eye().right_up()
+        d = right * 0.72 + up * 0.72
+        return anchor + d * TAG_AT * s
+
+    def open_menu(self, px, py):
+        """The alignment menu, at the cursor. Rows the selection cannot
+        use are shown but greyed, so the menu reads the same every time."""
+        from PySide6.QtCore import QPoint
+        from PySide6.QtGui import QAction, QActionGroup
+        from PySide6.QtWidgets import QMenu
+        vp = self.vp
+        if not hasattr(vp, "mapToGlobal"):
+            return None
+        from .object_chooser import ObjectChooser
+        menu = QMenu(vp)
+        menu.setStyleSheet(ObjectChooser.STYLE + """
+            QMenu::item { padding: 5px 22px 5px 26px; color: #e8e8ea; }
+            QMenu::item:selected { background: #4a3f28; color: #f0d9a8; }
+            QMenu::item:disabled { color: #6b6c72; }
+            QMenu::indicator { width: 12px; height: 12px; left: 8px; }
+        """)
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        for label, value, on, offered in self.menu_rows():
+            act = QAction(label, menu)
+            act.setCheckable(True)
+            act.setChecked(on)
+            act.setEnabled(offered)
+            act.setData(value)
+            group.addAction(act)
+            menu.addAction(act)
+        menu.triggered.connect(lambda a: self.set_align(a.data()))
+        menu.aboutToHide.connect(lambda: setattr(self, "_menu", None))
+        self._menu = menu
+        menu.popup(vp.mapToGlobal(QPoint(int(px), int(py))))
+        return menu
+
+    def _foreign_axes(self):
+        """The world or CPlane axes when those are asked for, else None."""
+        if self.align == "world":
+            return (np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]),
+                    np.array([0.0, 0.0, 1.0]))
+        if self.align == "cplane":
+            cp = self._plane()
+            return (np.asarray(cp.xdir, float), np.asarray(cp.ydir, float),
+                    np.asarray(cp.normal, float))
+        return None
 
     # ----------------------------------------------------------- state
 
@@ -360,12 +464,17 @@ class Gumball:
         """
         d = self.drag
         if d is not None and d.get("pp"):
-            return self._face_handles(bool(d.get("pp_planar", True)))
+            return self._face_handles(bool(d.get("pp_planar", True)),
+                                      d["axes"])
         if d is not None and d.get("multiface"):
             return {("move", 2)}
         if self._face_mode():
             pp = self._pushpull_target()
-            return self._face_handles(pp is not None and pp[4])
+            if pp is None:                    # several faces: one arrow
+                return {("move", 2)}
+            state = self.anchor_and_axes()
+            return self._face_handles(bool(pp[4]),
+                                      state[1] if state else pp[3])
         if self._fillet_mode():
             out = {("move", 2), ("ext", 2)}
             if self._edge_move_target() is not None:
@@ -380,37 +489,72 @@ class Gumball:
         return out
 
     @staticmethod
-    def _face_verb(handle, grow: bool) -> str:
-        kind, i = handle
+    def _face_verb(handle, grow: bool, out_of_face: bool) -> str:
+        kind, _ = handle
         if grow:
             return "extrude face"
         if kind == "rot":
             return "tilt face"
         if kind == "scale":
             return "scale face"
-        if kind == "pad" or i != 2:
+        if kind == "pad" or not out_of_face:
             return "slide face"
         return "move face"
 
-    @staticmethod
-    def _face_handles(planar: bool) -> set:
-        if planar:
-            return {("move", 0), ("move", 1), ("move", 2),
-                    ("pad", 0), ("pad", 1), ("pad", 2),
-                    ("rot", 0), ("rot", 1),
-                    ("scale", 0), ("scale", 1), ("ext", 2)}
-        return {("move", 2)}
+    def _face_handles(self, planar: bool, axes) -> set:
+        """A flat face's handles for these axes: the box that extrudes,
+        and the two-way arrow, only on an axis straight out of the face;
+        no ring or scale box on such an axis, since those could not change
+        the plane; everything on every other axis, which slides, lifts,
+        tilts or tapers by however much of it lies in the plane. A curved
+        face only knows how to offset, so it keeps one arrow."""
+        if not planar:
+            return {("move", 2)}
+        out_of = self._along_normal(axes)
+        on = {("move", i) for i in range(3)} | {("pad", i) for i in range(3)}
+        on |= {("rot", i) for i in range(3) if i not in out_of}
+        on |= {("scale", i) for i in range(3) if i not in out_of}
+        on |= {("ext", i) for i in out_of}
+        return on
+
+    def _face_normal(self):
+        """The held face's outward normal, or None when no face is held."""
+        d = self.drag
+        if d is not None and d.get("face_normal") is not None:
+            return np.asarray(d["face_normal"], float)
+        pp = self._pushpull_target()
+        if pp is not None:
+            return np.asarray(pp[3][2], float)
+        mf = self._multiface_target()
+        if mf is not None:
+            return np.asarray(mf[3][2], float)
+        return None
+
+    def _along_normal(self, axes) -> set:
+        """Indices of the axes that run straight out of the held face."""
+        n = self._face_normal()
+        if n is None:
+            return set()
+        return {i for i in range(3)
+                if abs(float(np.dot(np.asarray(axes[i], float), n)))
+                > 1.0 - 1e-6}
 
     def _two_way_axes(self) -> set:
-        """Axes whose arrow has a head at each end: a held face's normal,
-        because in and out are both something (carve, or extrude)."""
-        return {2} if self._face_mode() else set()
+        """Axes whose arrow has a head at each end: the one along a held
+        face's normal, because in and out are both something (carve, or
+        extrude)."""
+        if not self._face_mode():
+            return set()
+        state = self._draw_anchor()
+        return self._along_normal(state[1]) if state is not None else set()
 
     def _axis_colours(self):
-        """Red, green and blue say world axes. A held face's frame is its
-        own, so its handles are all the one brand gold."""
-        return (PP_COLOR, PP_COLOR, PP_COLOR) if self._face_mode() \
-            else AXIS_COLORS
+        """Red, green and blue say world or CPlane axes. A held face's own
+        frame is nobody's axes but its own, so those handles are all the
+        one brand gold."""
+        if self._face_mode() and self.align == "object":
+            return (PP_COLOR, PP_COLOR, PP_COLOR)
+        return AXIS_COLORS
 
     def _sweep_sources(self) -> list:
         """Everything held that a filled box could sweep, or an empty list.
@@ -537,9 +681,10 @@ class Gumball:
                 return cv[1], (np.asarray(cp.xdir), np.asarray(cp.ydir),
                                np.asarray(cp.normal))
             pp = self._pushpull_target()
-            if pp is not None:               # face push/pull takes priority
-                _, _, centroid, basis, _ = pp
-                return centroid, basis
+            if pp is not None:               # a held face: its own frame,
+                _, _, centroid, basis, _ = pp   # unless told otherwise
+                foreign = self._foreign_axes()
+                return centroid, (foreign if foreign is not None else basis)
             mf = self._multiface_target()
             if mf is not None:               # then multi-face offset
                 _, _, anchor, basis = mf
@@ -558,6 +703,10 @@ class Gumball:
         # drawing costs more than the measuring used to.
         boxes = np.array([o.bbox() for o in objs], float)
         anchor = (boxes[:, 0].min(axis=0) + boxes[:, 1].max(axis=0)) / 2
+        if self.align == "world" and self.vp._detail_eye() is None:
+            return anchor, (np.array([1.0, 0.0, 0.0]),
+                            np.array([0.0, 1.0, 0.0]),
+                            np.array([0.0, 0.0, 1.0]))
         cp = self._plane()
         return anchor, (np.asarray(cp.xdir), np.asarray(cp.ydir),
                         np.asarray(cp.normal))
@@ -695,8 +844,18 @@ class Gumball:
                 self._knob(mvp, anchor + axis * EXT_POS * s, s,
                            (*self._colour(("ext", i), colours[i]), 1.0))
 
+        if self.drag is None:                 # the alignment tag
+            tag = self.tag_position()
+            if tag is not None:
+                d = (tag - anchor) / (np.linalg.norm(tag - anchor) or 1.0)
+                col = self._colour(("menu", 0), TAG_COLOR)
+                self._lines(mvp, np.asarray(
+                    [anchor + d * 0.92 * s, tag - d * TAG_R * 1.6 * s],
+                    np.float32), (*col, 0.75), 1.2)
+                self._ring_at(mvp, tag, TAG_R * s, (*col, 1.0))
         if self._face_mode():                 # a faint square in the plane
-            u, v = axes[0], axes[1]
+            n = self._face_normal()
+            u, v = _frame(n if n is not None else axes[2])
             r = PAD0 * s
             c0, c1 = anchor + (u + v) * r, anchor + (u - v) * r
             c2, c3 = anchor - (u + v) * r, anchor - (u - v) * r
@@ -727,6 +886,16 @@ class Gumball:
         arr = np.asarray(pts, np.float32)
         segs = np.stack([arr[:-1], arr[1:]], axis=1).reshape(-1, 3)
         self._lines(mvp, segs, color, 1.6)
+
+    def _ring_at(self, mvp, centre, radius, color):
+        """A small circle facing you: the alignment tag."""
+        right, up = self.vp._eye().right_up()
+        pts = [centre + radius * (right * math.cos(k / 20 * 2 * math.pi)
+                                  + up * math.sin(k / 20 * 2 * math.pi))
+               for k in range(21)]
+        arr = np.asarray(pts, np.float32)
+        segs = np.stack([arr[:-1], arr[1:]], axis=1).reshape(-1, 3)
+        self._lines(mvp, segs, color, 1.4)
 
     def _double_arrow(self, mvp, anchor, axis, s, color):
         """An arrow with a head at each end, for a handle that goes both
@@ -939,6 +1108,11 @@ class Gumball:
                         return ("move", i)
             return None
 
+        if self.drag is None:
+            tag = self.tag_position()
+            t = scr(tag) if tag is not None else None
+            if t is not None and np.linalg.norm(t - cursor) < 8:
+                return ("menu", 0)
         on = self.handles()
         two_way = self._two_way_axes()
         # the boxes (smallest targets first, and the filled one sits on the
@@ -981,6 +1155,11 @@ class Gumball:
     # ----------------------------------------------------------- dragging
 
     def begin_drag(self, handle, px, py, modifiers) -> bool:
+        if handle == ("menu", 0):
+            # A press, not a drag: the menu takes the release. True so the
+            # press is spent here and does not go on to pick something.
+            self.open_menu(px, py)
+            return True
         state = self.anchor_and_axes()
         if state is None:
             return False
@@ -1012,7 +1191,7 @@ class Gumball:
             self.vp.window_checkpoint("gumball " + handle[0])
         elif pp is not None:                  # a held face
             planar = bool(pp[4])
-            if handle not in self._face_handles(planar):
+            if handle not in self._face_handles(planar, axes):
                 return False
             obj = vp.scene.get(pp[0])
             if obj is None:
@@ -1020,9 +1199,12 @@ class Gumball:
             originals = {pp[0]: obj.shape}
             # The box grows the face with new walls; so does Ctrl and the
             # arrow, the shortcut the rest of the gumball already answers.
+            out_of = self._along_normal(axes)
             grow = planar and (handle[0] == "ext" or (
-                handle == ("move", 2) and _ctrl_held(modifiers)))
-            self.vp.window_checkpoint(self._face_verb(handle, grow))
+                handle[0] == "move" and handle[1] in out_of
+                and _ctrl_held(modifiers)))
+            self.vp.window_checkpoint(
+                self._face_verb(handle, grow, handle[1] in out_of))
         elif mf is not None:                  # multi-face offset mode
             if handle != ("move", 2):
                 return False
@@ -1104,7 +1286,9 @@ class Gumball:
             "edge_dir": (np.asarray(self._edge_dir(em), float)
                          if em is not None else None),
             "face_grow": grow,
-            "turned": 0.0, "reshaped": False,
+            "face_normal": (np.asarray(pp[3][2], float) if pp is not None
+                            else None),
+            "turned": 0.0, "reshaped": False, "tilt_axis": None,
             "extrude": ex, "made": {},
             "ref": ref, "last_label": "", "offset": np.zeros(3),
             "typed": "", "armed": False, "moved": False,
@@ -1189,11 +1373,11 @@ class Gumball:
                 self._extrude_by(axes[i], float(value))
                 d["offset"] = np.asarray(axes[i] * value, float)
                 label = "extrude " + vp.scene.format_length(float(value))
-            elif d.get("pp") and i != 2:      # a held face, along itself
-                oid, fidx = d["pp"]
-                orig = d["originals"].get(oid)
-                self._rebuild(oid, orig, value, lambda v: g.slide_face(
-                    orig, fidx, tuple(axes[i] * v)))
+            elif d.get("pp") and i not in self._along_normal(axes):
+                oid, fidx = d["pp"]           # a held face, along an axis
+                orig = d["originals"].get(oid)   # that lies in it, or leans
+                self._rebuild(oid, orig, value, lambda v: self._face_slid(
+                    orig, fidx, axes[i] * v))
                 d["offset"] = np.asarray(axes[i] * value, float)
                 label = "slide face " + vp.scene.format_length(float(value))
             elif d.get("pp"):                 # a held face, in or out
@@ -1201,8 +1385,11 @@ class Gumball:
                 orig = d["originals"].get(oid)
                 planar = d.get("pp_planar", True)
                 grow = bool(d.get("face_grow"))
+                n = d.get("face_normal")
+                sign = (1.0 if n is None
+                        else float(np.sign(np.dot(axes[i], n)) or 1.0))
                 self._rebuild(oid, orig, value, lambda v: self._face_moved(
-                    orig, fidx, v, planar, grow))
+                    orig, fidx, v * sign, planar, grow))
                 d["offset"] = np.asarray(axes[i] * value, float)
                 verb = ("extrude face" if grow else "move face" if planar
                         else "offset")
@@ -1258,8 +1445,14 @@ class Gumball:
         elif kind == "rot" and d.get("pp"):   # tilt a held face
             oid, fidx = d["pp"]
             orig = d["originals"].get(oid)
+            n = d.get("face_normal")
+            axis = np.asarray(axes[i], float)
+            if n is not None:                 # about the axis laid into it
+                axis = axis - n * float(np.dot(axis, n))
+                axis = axis / (np.linalg.norm(axis) or 1.0)
+            d["tilt_axis"] = axis
             self._rebuild(oid, orig, value, lambda v: g.tilt_face(
-                orig, fidx, tuple(anchor), tuple(axes[i]), v))
+                orig, fidx, tuple(anchor), tuple(axis), v))
             d["turned"] = float(value)
             label = f"tilt {value:.1f}°"
         elif kind == "rot":
@@ -1416,7 +1609,7 @@ class Gumball:
         """A held face carried by a pad's vector: out along its normal
         first, with the old walls stretching, then along itself, with the
         faces beside it leaning. Either part alone is fine."""
-        normal = np.asarray(self.drag["axes"][2], float)
+        normal = np.asarray(self.drag["face_normal"], float)
         delta = np.asarray(delta, float)
         out = float(np.dot(delta, normal))
         flat = delta - normal * out
@@ -1605,10 +1798,13 @@ class Gumball:
         obj = self.vp.scene.get(oid)
         if obj is None:
             return
-        normal = np.asarray(d["axes"][2], float)
+        normal = np.asarray(d.get("face_normal") if d.get("face_normal")
+                            is not None else d["axes"][2], float)
         if d.get("turned"):                  # tilted: it faces a new way now
-            normal = _turned(normal, np.zeros(3), d["axes"][d["handle"][1]],
-                             float(d["turned"]))
+            axis = d.get("tilt_axis")
+            if axis is None:
+                axis = d["axes"][d["handle"][1]]
+            normal = _turned(normal, np.zeros(3), axis, float(d["turned"]))
         target = np.asarray(d["anchor"], float) + np.asarray(d["offset"], float)
         try:
             faces = g.faces_of(obj.shape)
