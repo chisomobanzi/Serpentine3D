@@ -605,7 +605,9 @@ def cmd_orient3pt(ctx):
 
 @command("rotate3d", aliases=("ro3",))
 def cmd_rotate3d(ctx):
-    """Rotate around an arbitrary axis picked as two points."""
+    """Rotate around an arbitrary axis picked as two points: type an
+    angle, or point at a reference direction and swing it round to where
+    it should end up (live preview)."""
     import math
 
     import numpy as np
@@ -616,16 +618,47 @@ def cmd_rotate3d(ctx):
     if float(np.linalg.norm(axis)) < 1e-12:
         ctx.echo("Zero-length axis — cancelled.")
         return
+    unit = np.asarray(axis, float)
+    unit /= np.linalg.norm(unit)
 
-    def _preview(a):
-        if not isinstance(a, float):
-            return None
-        return _preview_of(ctx, held, objs,
-                           lambda s: g.rotate(s, p1, axis, a))
+    def _round_the_axis(p):
+        """The part of the direction p1 -> p that goes round the axis.
 
-    angle = yield NumberReq("Angle in degrees",
-                            choices={"Copy": ["No", "Yes"]},
+        `rotate` can skip this: it turns about the construction plane
+        normal and its reference points are picked on that plane, so they
+        are square to the axis already. Here the axis is any two points in
+        space, so a reference picked well along it is mostly naming the
+        axis itself, and the leftover would report a turn of almost
+        nothing however far round the second pick went.
+        """
+        v = np.subtract(p, p1)
+        return v - np.dot(v, unit) * unit
+
+    ref = yield PointReq("Angle in degrees, or first reference point",
+                         rubber_from=p1, allow_number=True,
+                         choices={"Copy": ["No", "Yes"]})
+    if isinstance(ref, float):
+        angle = ref
+    else:
+        v1 = _round_the_axis(ref)
+        if float(np.linalg.norm(v1)) < 1e-9:
+            ctx.echo("Reference point is on the axis — cancelled.")
+            return
+
+        def _angle(p):
+            v2 = _round_the_axis(p)
+            return math.degrees(math.atan2(
+                float(np.dot(np.cross(v1, v2), unit)), float(np.dot(v1, v2))))
+
+        def _preview(p):
+            a = p if isinstance(p, float) else _angle(p)
+            return _preview_of(ctx, held, objs,
+                               lambda s: g.rotate(s, p1, axis, a))
+
+        p3 = yield PointReq("Angle, or second reference point",
+                            rubber_from=p1, allow_number=True,
                             preview_fn=_preview)
+        angle = p3 if isinstance(p3, float) else _angle(p3)
     copy = ctx.opt("Copy", "No") == "Yes"
     if held:
         # As with mirror, nothing to copy: a corner belongs to its curve.

@@ -45,6 +45,23 @@
   control points; this is the same rule applied to the other thing you can
   hold.
 
+- **`rotate3d` lets you drag the angle.** Asked for by a user: it would be
+  much more usable if the mouse set the angle, the way plain `rotate`
+  already does. It asked for the two points of the axis and then demanded a
+  number, so you had to know the answer before you started. It now asks for
+  a reference direction and for where that direction should end up, turning
+  the objects live as you swing the second pick round. Typing an angle
+  still works: the reference prompt takes a bare number, so the old
+  keystrokes are unchanged.
+
+  The angle is measured square to the picked axis rather than between the
+  raw picks. `rotate` can skip that step because it turns about the
+  construction plane normal and its reference points are picked on that
+  plane, so they are already square to it. rotate3d's axis runs anywhere,
+  so a reference point picked well along it is mostly naming the axis
+  itself, and without projecting that part out a full quarter turn would
+  report as a fraction of a degree.
+
 ### Fixed
 
 - **Deleting the curves `make2d` drew no longer kills a viewport.**
