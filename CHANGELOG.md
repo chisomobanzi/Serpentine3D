@@ -4,6 +4,18 @@
 
 ### Added
 
+- **A held face or edge gets a whole gumball.** Asked for by a user:
+  Ctrl+Shift-click a face and the gumball shrank to one arrow. A flat face
+  now gets the arrow, two rings and the filled box. The arrow moves the
+  face and lets the faces beside it stretch to meet it, so a chamfer stays
+  a chamfer and a leaning wall keeps leaning; the rings tilt the face about
+  its own edges (a lid propped open, a draft angle; Shift snaps to 15
+  degrees); the box, or Ctrl and the arrow, extrudes it with new walls on
+  the old outline. A held edge keeps its fillet arrow and gains an arrow
+  along each face it sits between, which moves the edge and lets that face
+  lean to keep hold of it: lift the top-front edge of a box and the top
+  tilts while the front just gets taller. Typed values work on all of them,
+  and a drag the kernel cannot build keeps the last good shape.
 - **Getting at the object behind the one in front.** A click has always
   taken the nearest thing under the cursor, so an object inside or behind
   another one could only be reached by hiding whatever was in the way. Hold

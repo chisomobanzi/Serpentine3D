@@ -804,6 +804,232 @@ def offset_face(shape, face_index: int, distance: float) -> TopoDS_Shape:
     return offset_faces(shape, {face_index: distance})
 
 
+def _planar_frame(face):
+    """(unit normal, a point on the face) for a planar face, oriented
+    outward; GeometryError for anything curved."""
+    n = face_normal(face)
+    length = math.sqrt(n[0] ** 2 + n[1] ** 2 + n[2] ** 2)
+    if length < tight():
+        raise GeometryError("Face has no normal")
+    n = (n[0] / length, n[1] / length, n[2] / length)
+    return n, centroid(face)
+
+
+def _draft(shape, face, hinge_point, hinge_dir, new_normal):
+    """`face` turned about the line (hinge_point, hinge_dir), which lies in
+    it, until its normal is `new_normal`; the faces beside it extend or
+    trim to meet it. The kernel's draft-angle operation, which is exactly
+    this with the words changed: the neutral plane is the one through the
+    hinge that stands square to the face, and the draft direction is the
+    way the normal leans.
+
+    Returns (result, the face's new index)."""
+    from OCP.BRepCheck import BRepCheck_Analyzer
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_DraftAngle
+    from OCP.gp import gp_Pln
+    n, _ = _planar_frame(face)
+    n2 = tuple(float(v) for v in new_normal)
+    cosang = max(-1.0, min(1.0, sum(a * b for a, b in zip(n, n2))))
+    angle = math.acos(cosang)
+    if angle < 1e-9:
+        raise GeometryError("Distance is zero")
+    # which way the normal leans, within the face's own plane
+    lean = tuple(n2[k] - cosang * n[k] for k in range(3))
+    ll = math.sqrt(sum(v * v for v in lean))
+    if ll < tight():
+        raise GeometryError("The face would be turned right over")
+    lean = tuple(v / ll for v in lean)
+    a = hinge_dir
+    neutral_n = (n[1] * a[2] - n[2] * a[1], n[2] * a[0] - n[0] * a[2],
+                 n[0] * a[1] - n[1] * a[0])
+    da = BRepOffsetAPI_DraftAngle(shape)
+    try:
+        da.Add(face, _dir(lean), angle, gp_Pln(_pnt(hinge_point),
+                                              _dir(neutral_n)))
+        da.Build()
+    except Exception as exc:                 # noqa: BLE001
+        raise GeometryError("The face cannot be turned that way") from exc
+    if not da.IsDone() or da.Shape().IsNull():
+        raise GeometryError("Turning the face that far breaks the solid")
+    out = unwrap_compound(da.Shape())
+    if abs(volume(out)) < tight() or not BRepCheck_Analyzer(out).IsValid():
+        raise GeometryError("Turning the face that far breaks the solid")
+    moved = da.ModifiedShape(face)
+    idx = next((i for i, f in enumerate(faces_of(out)) if f.IsSame(moved)),
+               None)
+    return out, idx
+
+
+def _rotated(v, axis, degrees):
+    """`v` turned about `axis` (unit) by `degrees`: Rodrigues, in tuples."""
+    k = axis
+    c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    kv = (k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2],
+          k[0] * v[1] - k[1] * v[0])
+    kd = k[0] * v[0] + k[1] * v[1] + k[2] * v[2]
+    return tuple(v[i] * c + kv[i] * s + k[i] * kd * (1 - c) for i in range(3))
+
+
+def tilt_face(shape, face_index: int, point: Point, axis: Point,
+              degrees: float) -> TopoDS_Shape:
+    """Turn a planar face of a solid about the line through `point` along
+    `axis`, which must lie in the face; the faces beside it stretch or trim
+    to meet it, the way they do when the face is moved. A draft angle, a
+    lid propped open, a wall leaned back: all this."""
+    faces = faces_of(shape)
+    if not (0 <= face_index < len(faces)):
+        raise GeometryError("Face index out of range")
+    face = faces[face_index]
+    n, _ = _planar_frame(face)                # raises for a curved face
+    a = tuple(float(v) for v in axis)
+    la = math.sqrt(sum(v * v for v in a))
+    if la < tight():
+        raise GeometryError("No axis to turn about")
+    a = (a[0] / la, a[1] / la, a[2] / la)
+    if abs(sum(x * y for x, y in zip(a, n))) > 1.0 - 1e-6:
+        raise GeometryError("Turning a face about its own normal changes "
+                            "nothing")
+    if abs(float(degrees)) < 1e-9:
+        raise GeometryError("Distance is zero")
+    out, _ = _draft(shape, face, point, a, _rotated(n, a, float(degrees)))
+    return out
+
+
+def edge_faces(shape, edge_index: int) -> list:
+    """Indices of the faces an edge sits between."""
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+    edges = edges_of(shape)
+    if not (0 <= edge_index < len(edges)):
+        raise GeometryError("Edge index out of range")
+    amap = TopTools_IndexedDataMapOfShapeListOfShape()
+    TopExp.MapShapesAndAncestors_s(shape, occ.EDGE, occ.FACE, amap)
+    beside = list(amap.FindFromKey(edges[edge_index]))
+    return [i for i, f in enumerate(faces_of(shape))
+            if any(f.IsSame(b) for b in beside)]
+
+
+def edge_line(edge):
+    """(midpoint, unit direction) of a straight edge; GeometryError for a
+    curve."""
+    from OCP.GeomAbs import GeomAbs_CurveType
+    if occ.edge_adaptor(occ.to_edge(edge)).GetType() \
+            != GeomAbs_CurveType.GeomAbs_Line:
+        raise GeometryError("Only a straight edge can be moved")
+    p0, p1 = curve_endpoints(edge)
+    d = tuple(b - a for a, b in zip(p0, p1))
+    ld = math.sqrt(sum(v * v for v in d))
+    if ld < tight():
+        raise GeometryError("Edge has no length")
+    return (tuple((a + b) / 2 for a, b in zip(p0, p1)),
+            (d[0] / ld, d[1] / ld, d[2] / ld))
+
+
+def _face_hinge(face, mid, edge_dir):
+    """Where a face turns when an edge of it is moved: the line parallel to
+    the edge through the corner of the face farthest from it, so the far
+    side of the face stays put and the near side follows the edge."""
+    best, best_d = None, -1.0
+    exp = TopExp_Explorer(face, occ.VERTEX)
+    while exp.More():
+        p = pnt_tuple(occ.point_of_vertex(occ.to_vertex(exp.Current())))
+        exp.Next()
+        v = tuple(a - b for a, b in zip(p, mid))
+        along = sum(a * b for a, b in zip(v, edge_dir))
+        perp = tuple(v[k] - along * edge_dir[k] for k in range(3))
+        d = math.sqrt(sum(x * x for x in perp))
+        if d > best_d:
+            best, best_d = p, d
+    if best is None or best_d < tight():
+        raise GeometryError("The face has no far side to turn about")
+    return best
+
+
+def move_edge(shape, edge_index: int, delta: Point) -> TopoDS_Shape:
+    """Move a straight edge of a solid by `delta`. Each of the two planar
+    faces it sits between turns about its own far side until it holds the
+    edge's new line, so the faces beside them stretch or trim to suit.
+    Lift the top-front edge of a box and the top tilts while the front just
+    gets taller; push it outward and it is the front that leans.
+
+    A move along the edge's own line is refused: the line is the same line
+    and nothing would change."""
+    edges = edges_of(shape)
+    if not (0 <= edge_index < len(edges)):
+        raise GeometryError("Edge index out of range")
+    mid, e = edge_line(edges[edge_index])
+    d = tuple(float(v) for v in delta)
+    along = sum(a * b for a, b in zip(d, e))
+    across = tuple(d[k] - along * e[k] for k in range(3))
+    if math.sqrt(sum(v * v for v in across)) < tight():
+        raise GeometryError("Distance is zero")
+    target = tuple(mid[k] + d[k] for k in range(3))
+    beside = edge_faces(shape, edge_index)
+    if len(beside) != 2:
+        raise GeometryError("The edge does not sit between two faces")
+    faces = faces_of(shape)
+    plan = []                                 # (normal, hinge, new normal)
+    for fi in beside:
+        n, _ = _planar_frame(faces[fi])       # raises for a curved face
+        hinge = _face_hinge(faces[fi], mid, e)
+        span = tuple(target[k] - hinge[k] for k in range(3))
+        n2 = (span[1] * e[2] - span[2] * e[1], span[2] * e[0] - span[0] * e[2],
+              span[0] * e[1] - span[1] * e[0])
+        ln = math.sqrt(sum(v * v for v in n2))
+        if ln < tight():
+            raise GeometryError("The edge cannot be moved into its own face")
+        n2 = tuple(v / ln for v in n2)
+        if sum(a * b for a, b in zip(n2, n)) < 0:
+            n2 = tuple(-v for v in n2)
+        plan.append((n, hinge, n2))
+    out = shape
+    for n, hinge, n2 in plan:
+        if abs(sum(a * b for a, b in zip(n, n2))) > 1.0 - 1e-12:
+            continue                      # this face already holds the line
+        face = _face_on_plane(out, n, hinge, near=target)
+        out, _ = _draft(out, face, hinge, e, n2)
+    return out
+
+
+def _face_on_plane(shape, normal, point, near):
+    """The planar face of `shape` lying in the plane (point, normal), the
+    one nearest `near` if the plane carries more than one."""
+    best, best_d = None, math.inf
+    for f in faces_of(shape):
+        try:
+            n, c = _planar_frame(f)
+        except GeometryError:
+            continue
+        if sum(a * b for a, b in zip(n, normal)) < 1.0 - 1e-6:
+            continue
+        off = sum((c[k] - point[k]) * normal[k] for k in range(3))
+        if abs(off) > tol() * 10:
+            continue
+        d = math.dist(c, near)
+        if d < best_d:
+            best, best_d = f, d
+    if best is None:
+        raise GeometryError("The face beside the edge has gone")
+    return best
+
+
+def face_long_direction(face) -> Point | None:
+    """Unit direction of the longest straight edge of a face, or None when
+    it has no straight edges."""
+    from OCP.GeomAbs import GeomAbs_CurveType
+    best, best_len = None, 0.0
+    for e in edges_of(face):
+        if occ.edge_adaptor(occ.to_edge(e)).GetType() \
+                != GeomAbs_CurveType.GeomAbs_Line:
+            continue
+        p0, p1 = curve_endpoints(e)
+        d = tuple(b - a for a, b in zip(p0, p1))
+        ld = math.sqrt(sum(v * v for v in d))
+        if ld > best_len:
+            best, best_len = (d[0] / ld, d[1] / ld, d[2] / ld), ld
+    return best
+
+
 def cap_holes(shape) -> TopoDS_Shape:
     """Close planar openings of a surface/shell and solidify if possible."""
     from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds

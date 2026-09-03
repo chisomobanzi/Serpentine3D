@@ -84,6 +84,7 @@ class Gumball:
         self._sweep_key = None    # what _sweep_sources was last asked about
         self._sweep_cache: list = []
         self._sweep_axes: dict = {}
+        self._memo: dict = {}          # sub-object targets, per scene state
 
     # ----------------------------------------------------------- state
 
@@ -144,7 +145,24 @@ class Gumball:
         faces = [(oid, idx) for (oid, kind, idx) in subs if kind == "face"]
         if len(faces) != 1:                  # v1: one face at a time
             return None
-        oid, fidx = faces[0]
+        return self._remembered(("face", faces[0]),
+                                lambda: self._face_target(*faces[0]))
+
+    def _remembered(self, key, compute):
+        """`compute()` once per scene state and selection, for the targets
+        paint, hover and hit-testing all ask for several times a frame.
+        Each one walks the solid's faces; the walk is the same every time
+        until something changes, and the memo forgets on its own then."""
+        state = (getattr(self.vp.scene, "revision", 0),
+                 tuple(getattr(self.vp.selection, "subobjects", ())))
+        hit = self._memo.get(key)
+        if hit is not None and hit[0] == state:
+            return hit[1]
+        value = compute()
+        self._memo[key] = (state, value)
+        return value
+
+    def _face_target(self, oid, fidx):
         obj = self.vp.scene.get(oid)
         if obj is None:
             return None
@@ -162,15 +180,26 @@ class Gumball:
                 centroid = np.asarray(pt, float)
                 axis = np.asarray(nrm, float)
                 planar = False
+            along = g.face_long_direction(face) if planar else None
         except g.GeometryError:
             return None
         length = float(np.linalg.norm(axis))
         if length < 1e-9:
             return None
         axis = axis / length
-        ref = (np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9
-               else np.array([0.0, 1.0, 0.0]))
-        t1 = np.cross(axis, ref)
+        # The rings turn the face about t1 and t2, so those want to run
+        # with the face's edges: a lid propped along its hinge, not about
+        # some line the world axes happened to suggest.
+        t1 = None
+        if along is not None:
+            t1 = np.asarray(along, float)
+            t1 = t1 - axis * float(np.dot(t1, axis))
+            if np.linalg.norm(t1) < 1e-6:
+                t1 = None
+        if t1 is None:
+            ref = (np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9
+                   else np.array([0.0, 1.0, 0.0]))
+            t1 = np.cross(axis, ref)
         t1 = t1 / (np.linalg.norm(t1) or 1.0)
         t2 = np.cross(axis, t1)
         return oid, fidx, centroid, (t1, t2, axis), planar
@@ -264,12 +293,81 @@ class Gumball:
         out = anchor - solid_c
         length = float(np.linalg.norm(out))
         out = out / length if length > 1e-9 else np.array([0.0, 0.0, 1.0])
+        beside = self._edge_axes(oid, idxs)
+        if beside is not None:
+            # the arrows that move the edge run along the faces it sits
+            # between, so t1 and t2 are those faces' normals
+            return oid, idxs, anchor, (beside[0], beside[1], out)
         ref = (np.array([1.0, 0.0, 0.0]) if abs(out[0]) < 0.9
                else np.array([0.0, 1.0, 0.0]))
         t1 = np.cross(out, ref)
         t1 = t1 / (np.linalg.norm(t1) or 1.0)
         t2 = np.cross(out, t1)
         return oid, idxs, anchor, (t1, t2, out)
+
+    def _edge_axes(self, oid, idxs):
+        """The unit normals of the two planar faces a lone straight edge
+        sits between, or None when the held edges are not that: several,
+        curved, or beside a curved face. Those are what make an edge
+        movable, and the directions the move arrows point."""
+        if len(idxs) != 1:
+            return None
+        return self._remembered(("edge", oid, idxs[0]),
+                                lambda: self._edge_axes_of(oid, idxs[0]))
+
+    def _edge_axes_of(self, oid, eidx):
+        obj = self.vp.scene.get(oid)
+        if obj is None:
+            return None
+        try:
+            elist = g.edges_of(obj.shape)
+            if not (0 <= eidx < len(elist)):
+                return None
+            g.edge_line(elist[eidx])                # straight, or raises
+            beside = g.edge_faces(obj.shape, eidx)
+            if len(beside) != 2:
+                return None
+            flist = g.faces_of(obj.shape)
+            axes = [np.asarray(g.face_normal(flist[i]), float)
+                    for i in beside]
+        except g.GeometryError:
+            return None
+        axes = [a / (np.linalg.norm(a) or 1.0) for a in axes]
+        return axes[0], axes[1]
+
+    def _edge_move_target(self):
+        """(obj_id, edge_index) when the held edge can be moved; None."""
+        if self.drag is not None:
+            return self.drag.get("edge_move")
+        ft = self._fillet_target()
+        if ft is None or self._edge_axes(ft[0], ft[1]) is None:
+            return None
+        return ft[0], ft[1][0]
+
+    def handles(self) -> set:
+        """Every handle on offer right now, by id. A held planar face gets
+        the arrow, the two rings that tilt it and the box that grows it;
+        anything that could not change a plane (sliding it within itself,
+        turning it about its own normal, scaling it) is not drawn rather
+        than drawn and inert. A held edge keeps its fillet arrow and box,
+        and gains an arrow along each face it sits between when it is a
+        straight edge between two flat faces."""
+        if self._face_mode():
+            pp = self._pushpull_target()
+            return self._face_handles(pp is not None and pp[4])
+        if self._fillet_mode():
+            out = {("move", 2), ("ext", 2)}
+            if self._edge_move_target() is not None:
+                out |= {("move", 0), ("move", 1)}
+            return out
+        return {(kind, i) for kind in ("move", "pad", "rot", "scale", "ext")
+                for i in range(3)}
+
+    @staticmethod
+    def _face_handles(planar: bool) -> set:
+        if planar:
+            return {("move", 2), ("rot", 0), ("rot", 1), ("ext", 2)}
+        return {("move", 2)}
 
     def _sweep_sources(self) -> list:
         """Everything held that a filled box could sweep, or an empty list.
@@ -384,7 +482,7 @@ class Gumball:
     def _fillet_mode(self) -> bool:
         """Is the gumball acting as an edge fillet handle right now?"""
         if self.drag is not None:
-            return bool(self.drag.get("fillet"))
+            return bool(self.drag.get("fillet") or self.drag.get("edge_move"))
         return (self._pushpull_target() is None
                 and self._fillet_target() is not None)
 
@@ -595,8 +693,52 @@ class Gumball:
         c2, c3 = anchor - (u + v) * r, anchor - (u - v) * r
         self._lines(mvp, np.asarray([c0, c1, c1, c2, c2, c3, c3, c0],
                                     np.float32), (*col, 0.5), 1.4)
+        if self._face_is_planar():
+            # Two rings tilt the face about its own edges, and the filled
+            # box on the arrow grows it with new walls where the arrow
+            # itself lets the old walls stretch.
+            vdir = self._view_dir(anchor)
+            for i in (0, 1):
+                if not self._usable("rot", i, axes, vdir):
+                    continue
+                self._ring(mvp, anchor, axes[(i + 1) % 3], axes[(i + 2) % 3],
+                           s, (*self._colour(("rot", i), PP_COLOR), 0.8))
+            self._knob(mvp, anchor + n * EXT_POS * s, s,
+                       (*self._colour(("ext", 2), PP_COLOR), 1.0))
         GL.glEnable(GL.GL_DEPTH_TEST)
         self.vp._line_width(1.0)
+
+    def _face_is_planar(self) -> bool:
+        if self.drag is not None:
+            return bool(self.drag.get("pp")) and self.drag.get("pp_planar",
+                                                               True)
+        pp = self._pushpull_target()
+        return pp is not None and bool(pp[4])
+
+    def _colour(self, handle, base):
+        """`base`, or the hover colour while this handle is hot."""
+        if self.hover == handle or (self.drag is not None
+                                    and self.drag["handle"] == handle):
+            return HOVER_COLOR
+        return base
+
+    def _ring(self, mvp, anchor, u, v, s, color):
+        pts = [anchor + ARC_R * s * (u * math.cos(k / 48 * 2 * math.pi)
+                                     + v * math.sin(k / 48 * 2 * math.pi))
+               for k in range(49)]
+        arr = np.asarray(pts, np.float32)
+        segs = np.stack([arr[:-1], arr[1:]], axis=1).reshape(-1, 3)
+        self._lines(mvp, segs, color, 1.6)
+
+    def _double_arrow(self, mvp, anchor, axis, s, color):
+        """An arrow with a head at each end, for a handle that goes both
+        ways from where it stands."""
+        u, v = _frame(axis)
+        self._lines(mvp, np.asarray(
+            [anchor - axis * SHAFT1 * s, anchor + axis * SHAFT1 * s],
+            np.float32), (*color, 1.0), 2.4)
+        self._cone(mvp, anchor, axis, u, v, s, (*color, 1.0))
+        self._cone(mvp, anchor, -axis, u, v, s, (*color, 1.0))
 
     def _paint_fillet(self, mvp):
         """A single outward arrow at the selected edges' midpoint whose length
@@ -630,6 +772,14 @@ class Gumball:
         # off, the box pulls a surface out of it.
         ext = (HOVER_COLOR if self.hover == ("ext", 2) else PP_COLOR)
         self._knob(mvp, anchor + n * EXT_POS * s, s, (*ext, 1.0))
+        if self._edge_move_target() is not None:
+            # and an arrow along each face the edge sits between, which
+            # moves the edge and lets that face lean to keep hold of it
+            vdir = self._view_dir(anchor)
+            for i in (0, 1):
+                if self._usable("move", i, axes, vdir):
+                    self._double_arrow(mvp, anchor, axes[i], s,
+                                       self._colour(("move", i), PP_COLOR))
         GL.glEnable(GL.GL_DEPTH_TEST)
         self.vp._line_width(1.0)
 
@@ -758,23 +908,48 @@ class Gumball:
 
         cursor = np.array([px, py])
 
-        if self._face_mode():                 # only the push/pull arrow
-            n = axes[2]
-            a = scr(anchor - n * CONE1 * s)
-            b = scr(anchor + n * CONE1 * s)
-            if a is not None and b is not None and _seg_dist(cursor, a, b) < 8:
+        def on_ring(i):
+            u, v = axes[(i + 1) % 3], axes[(i + 2) % 3]
+            best = np.inf
+            for k in range(36):
+                ang = k / 36 * 2 * math.pi
+                p = scr(anchor + ARC_R * s * (u * math.cos(ang)
+                                              + v * math.sin(ang)))
+                if p is not None:
+                    best = min(best, float(np.linalg.norm(p - cursor)))
+            return best < 7
+
+        def on_arrow(i, both_ways):
+            a = scr(anchor - axes[i] * (CONE1 if both_ways else 0.0) * s)
+            b = scr(anchor + axes[i] * CONE1 * s)
+            return (a is not None and b is not None
+                    and _seg_dist(cursor, a, b) < 8)
+
+        if self._face_mode():                 # the arrow, and on a flat
+            n = axes[2]                       # face the rings and the box
+            if self._face_is_planar():
+                p = scr(anchor + n * EXT_POS * s)
+                if p is not None and np.linalg.norm(p - cursor) < 6.5:
+                    return ("ext", 2)
+                for i in (0, 1):
+                    if self._usable("rot", i, axes, vdir) and on_ring(i):
+                        return ("rot", i)
+            if on_arrow(2, True):
                 return ("move", 2)
             return None
 
-        if self._fillet_mode():               # radius arrow, and the box on it
-            n = axes[2]
+        if self._fillet_mode():               # radius arrow, the box on it,
+            n = axes[2]                       # and the two that move the edge
             p = scr(anchor + n * EXT_POS * s)
             if p is not None and np.linalg.norm(p - cursor) < 6.5:
                 return ("ext", 2)
-            a = scr(anchor)
-            b = scr(anchor + n * CONE1 * s)
-            if a is not None and b is not None and _seg_dist(cursor, a, b) < 8:
+            if on_arrow(2, False):
                 return ("move", 2)
+            if self._edge_move_target() is not None:
+                for i in (0, 1):
+                    if (self._usable("move", i, axes, vdir)
+                            and on_arrow(i, True)):
+                        return ("move", i)
             return None
 
         # the boxes (smallest targets first, and the filled one sits on the
@@ -849,10 +1024,12 @@ class Gumball:
                                        axes[handle[1]]))
         ft = (None if (cv is not None or pp is not None or mf is not None
                        or ex is not None) else self._fillet_target())
-        if handle[0] == "ext" and ex is None:
+        if handle[0] == "ext" and ex is None and pp is None:
             # Nothing here grows. Doing nothing beats quietly moving the
             # thing you were trying to grow.
             return False
+        grow = False                          # a face growing new walls
+        em = None                             # a held edge being moved
         if cv is not None:                    # held control points
             originals = {}
             for oid in cv[0]:
@@ -862,14 +1039,20 @@ class Gumball:
             if not originals:
                 return False
             self.vp.window_checkpoint("gumball " + handle[0])
-        elif pp is not None:                  # face push/pull mode
-            if handle != ("move", 2):
+        elif pp is not None:                  # a held face
+            planar = bool(pp[4])
+            if handle not in self._face_handles(planar):
                 return False
             obj = vp.scene.get(pp[0])
             if obj is None:
                 return False
             originals = {pp[0]: obj.shape}
-            self.vp.window_checkpoint("push/pull")
+            # The box grows the face with new walls; so does Ctrl and the
+            # arrow, the shortcut the rest of the gumball already answers.
+            grow = planar and (handle[0] == "ext" or _ctrl_held(modifiers))
+            self.vp.window_checkpoint(
+                "extrude face" if grow else
+                "tilt face" if handle[0] == "rot" else "move face")
         elif mf is not None:                  # multi-face offset mode
             if handle != ("move", 2):
                 return False
@@ -885,14 +1068,21 @@ class Gumball:
             originals = {s["into"]: vp.scene.get(s["into"]).shape
                          for s in ex if s["into"] is not None}
             self.vp.window_checkpoint("gumball extrude")
-        elif ft is not None:                  # edge fillet mode
-            if handle != ("move", 2):
-                return False
+        elif ft is not None:                  # a held edge
             obj = vp.scene.get(ft[0])
             if obj is None:
                 return False
-            originals = {ft[0]: obj.shape}
-            self.vp.window_checkpoint("fillet")
+            if handle == ("move", 2):         # the radius arrow
+                originals = {ft[0]: obj.shape}
+                self.vp.window_checkpoint("fillet")
+            elif handle in (("move", 0), ("move", 1)):
+                em = self._edge_move_target()
+                if em is None:
+                    return False
+                originals = {ft[0]: obj.shape}
+                self.vp.window_checkpoint("move edge")
+            else:
+                return False
         else:
             objs = vp.selection.objects()
             if not objs:
@@ -937,8 +1127,14 @@ class Gumball:
             "pp": (pp[0], pp[1]) if pp is not None else None,
             "pp_planar": bool(pp[4]) if pp is not None else True,
             "multiface": (mf[0], list(mf[1])) if mf is not None else None,
-            "fillet": (ft[0], list(ft[1])) if ft is not None else None,
-            "chamfer": ft is not None and _alt_held(modifiers),
+            "fillet": ((ft[0], list(ft[1]))
+                       if ft is not None and em is None else None),
+            "chamfer": ft is not None and em is None and _alt_held(modifiers),
+            "edge_move": em,
+            "edge_dir": (np.asarray(self._edge_dir(em), float)
+                         if em is not None else None),
+            "face_grow": grow,
+            "turned": 0.0,
             "extrude": ex, "made": {},
             "ref": ref, "last_label": "", "offset": np.zeros(3),
             "typed": "", "armed": False, "moved": False,
@@ -1014,20 +1210,25 @@ class Gumball:
                 self._extrude_by(axes[i], float(value))
                 d["offset"] = np.asarray(axes[i] * value, float)
                 label = "extrude " + vp.scene.format_length(float(value))
-            elif d.get("pp"):                 # face push/pull or offset
+            elif d.get("pp"):                 # a held face, in or out
                 oid, fidx = d["pp"]
                 orig = d["originals"].get(oid)
                 planar = d.get("pp_planar", True)
-                if orig is not None and vp.scene.get(oid) is not None:
-                    try:
-                        new = (g.push_pull(orig, fidx, value) if planar
-                               else g.offset_face(orig, fidx, value))
-                        vp.scene.replace_shape(oid, new)
-                    except g.GeometryError:
-                        pass
+                grow = bool(d.get("face_grow"))
+                self._rebuild(oid, orig, value, lambda v: self._face_moved(
+                    orig, fidx, v, planar, grow))
                 d["offset"] = np.asarray(axes[i] * value, float)
-                verb = "push/pull" if planar else "offset"
+                verb = ("extrude face" if grow else "move face" if planar
+                        else "offset")
                 label = verb + " " + vp.scene.format_length(float(value))
+            elif d.get("edge_move"):          # a held edge, along a face
+                oid, eidx = d["edge_move"]
+                orig = d["originals"].get(oid)
+                delta = np.asarray(axes[i] * value, float)
+                self._rebuild(oid, orig, value,
+                              lambda v: g.move_edge(orig, eidx, tuple(delta)))
+                d["offset"] = delta
+                label = "move edge " + vp.scene.format_length(float(value))
             elif d.get("multiface"):          # offset every selected face
                 oid, idxs = d["multiface"]
                 orig = d["originals"].get(oid)
@@ -1068,6 +1269,13 @@ class Gumball:
                 d["offset"] = np.asarray(delta, float)
                 self._move_by(delta)
                 label = "move " + vp.scene.format_length(float(value))
+        elif kind == "rot" and d.get("pp"):   # tilt a held face
+            oid, fidx = d["pp"]
+            orig = d["originals"].get(oid)
+            self._rebuild(oid, orig, value, lambda v: g.tilt_face(
+                orig, fidx, tuple(anchor), tuple(axes[i]), v))
+            d["turned"] = float(value)
+            label = f"tilt {value:.1f}°"
         elif kind == "rot":
             self._turn_by(anchor, axes[i], value)
             label = f"rotate {value:.1f}°"
@@ -1173,6 +1381,48 @@ class Gumball:
             self._apply(lambda s: g.scale_along_axis(
                 s, tuple(anchor), tuple(axis), value))
 
+    def _rebuild(self, oid, orig, value, make):
+        """Show `make(value)` in place of the held solid, or the original
+        at zero. A value the kernel cannot build keeps whatever was showing:
+        too far is not an error worth losing the drag over."""
+        vp = self.vp
+        if orig is None or vp.scene.get(oid) is None:
+            return
+        if abs(float(value)) < 1e-9:
+            vp.scene.replace_shape(oid, orig)
+            return
+        try:
+            vp.scene.replace_shape(oid, make(float(value)))
+        except (g.GeometryError, IndexError):
+            pass
+
+    @staticmethod
+    def _face_moved(orig, fidx, value, planar, grow):
+        """The solid with one face carried `value` along its normal.
+
+        Growing puts new walls under the face on its old outline. Moving
+        lets the faces beside it stretch to meet it instead, so a chamfer
+        stays a chamfer and a leaning wall keeps leaning; when the kernel
+        cannot manage that for a flat face, new walls are still better
+        than nothing. A curved face only knows how to offset.
+        """
+        if not planar:
+            return g.offset_face(orig, fidx, value)
+        if grow:
+            return g.push_pull(orig, fidx, value)
+        try:
+            return g.offset_faces(orig, {fidx: value})
+        except g.GeometryError:
+            return g.push_pull(orig, fidx, value)
+
+    def _edge_dir(self, em):
+        oid, eidx = em
+        obj = self.vp.scene.get(oid)
+        try:
+            return g.edge_line(g.edges_of(obj.shape)[eidx])[1]
+        except (g.GeometryError, IndexError, AttributeError):
+            return (0.0, 0.0, 0.0)
+
     def _apply_cvs(self, at):
         """Put each held control point where `at` says it goes.
 
@@ -1267,7 +1517,7 @@ class Gumball:
         d = self.drag
         if not d:
             return None
-        for key in ("fillet", "pp", "multiface"):
+        for key in ("fillet", "pp", "multiface", "edge_move"):
             v = d.get(key)
             if v:
                 return v[0]
@@ -1275,9 +1525,14 @@ class Gumball:
 
     def end_drag(self):
         d = self.drag
-        if d is not None and float(np.linalg.norm(d["offset"])) > 1e-9:
+        changed = d is not None and (
+            float(np.linalg.norm(d["offset"])) > 1e-9
+            or abs(float(d.get("turned", 0.0))) > 1e-9)
+        if changed:
             if d.get("pp") and d.get("pp_planar", True):
                 self._resync_face(d)         # curved offsets keep their index
+            elif d.get("edge_move"):
+                self._resync_edge(d)
             elif d.get("fillet"):
                 self._clear_filleted_edges(d)
             elif d.get("made"):
@@ -1310,6 +1565,9 @@ class Gumball:
         if obj is None:
             return
         normal = np.asarray(d["axes"][2], float)
+        if d.get("turned"):                  # tilted: it faces a new way now
+            normal = _turned(normal, np.zeros(3), d["axes"][d["handle"][1]],
+                             float(d["turned"]))
         target = np.asarray(d["anchor"], float) + np.asarray(d["offset"], float)
         try:
             faces = g.faces_of(obj.shape)
@@ -1336,6 +1594,39 @@ class Gumball:
         if (oid, "face", best_i) not in sel.subobjects:
             sel.toggle_subobject(oid, "face", best_i)
 
+    def _resync_edge(self, d):
+        """Moving an edge rebuilds the solid and the picked index goes
+        stale, so find the edge again: the straight one running the same
+        way, nearest to where the drag put it."""
+        oid, old = d["edge_move"]
+        obj = self.vp.scene.get(oid)
+        if obj is None:
+            return
+        want = np.asarray(d["anchor"], float) + np.asarray(d["offset"], float)
+        along = np.asarray(d["edge_dir"], float)
+        try:
+            edges = g.edges_of(obj.shape)
+        except g.GeometryError:
+            return
+        best_i, best_score = None, np.inf
+        for i, e in enumerate(edges):
+            try:
+                mid, direction = g.edge_line(e)
+            except g.GeometryError:
+                continue
+            if abs(float(np.dot(direction, along))) < 0.999:
+                continue
+            score = float(np.linalg.norm(np.asarray(mid) - want))
+            if score < best_score:
+                best_score, best_i = score, i
+        if best_i is None or best_i == old:
+            return
+        sel = self.vp.selection
+        if (oid, "edge", old) in sel.subobjects:
+            sel.toggle_subobject(oid, "edge", old)
+        if (oid, "edge", best_i) not in sel.subobjects:
+            sel.toggle_subobject(oid, "edge", best_i)
+
     def cancel_drag(self):
         d = self.drag
         if d is None:
@@ -1349,6 +1640,16 @@ class Gumball:
         self.vp.window_discard_checkpoint()
         self.vp.selection.rebuilding = None
         self.drag = None
+
+
+def _frame(axis):
+    """Two unit vectors square to `axis` and to each other."""
+    axis = np.asarray(axis, float)
+    ref = (np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9
+           else np.array([0.0, 1.0, 0.0]))
+    u = np.cross(axis, ref)
+    u = u / (np.linalg.norm(u) or 1.0)
+    return u, np.cross(axis, u)
 
 
 def _seg_dist(p, a, b) -> float:
