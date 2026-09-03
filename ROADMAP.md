@@ -6,16 +6,27 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.8.2 was cut (2026-09-03).
+Last updated when 0.8.3 was cut (2026-09-03).
 
 ---
 
 ## Where things stand
 
-Version `0.8.2` in `pyproject.toml`, the lockfile and the three packaging
-files; `CHANGELOG.md`'s 0.8.2 section is dated 2026-09-03. One fix, for
-the first bug reported by someone who could not start the app at all
-(#7, Manjaro/KDE Wayland on an RTX 3080): Serpentine3D now starts on
+Version `0.8.3` in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.8.3 section is dated 2026-09-03. Jonas's second
+list, all six of it, plus `arraypath` turning its copies to follow the
+path: deleting a `make2d` drawing no longer kills a viewport, a clipping
+plane shows which way it faces, `rotate3d` takes its angle from the
+mouse, Delete takes out a held face, holding the button still (or
+Alt+click) offers everything under the cursor nearest first, and a held
+face or edge gets a whole gumball (arrow, two tilt rings and the extrude
+box on a flat face; move arrows along each neighbouring face on a
+straight edge). Suite on Linux: 2810 passed, nothing skipped. Cut off
+`main` before the point-cloud branch, whose `.serp` version 3 files
+refuse to open in anything older than 0.9.0.
+
+0.8.2 was one fix, for the first bug reported by someone who could not
+start the app at all (#7, Manjaro/KDE Wayland on an RTX 3080): Serpentine3D now starts on
 drivers reached through EGL, not just X11's GLX. **Released on
 2026-09-03: pushed, tagged `v0.8.2`, and published with the AppImage,
 the Windows `.exe` and the macOS `.dmg` all attached.** The packaged
@@ -67,6 +78,31 @@ Worth remembering that this stayed hidden through eight releases
 because every machine it was tested on was X11. The AppImage is the
 front door for a Linux user, and Wayland is the default on most
 desktops shipping today.
+
+### A held face or edge gets a whole gumball, released in 0.8.3
+
+Jonas's fifth item. A flat face gets the normal arrow, two rings and
+the filled box. The arrow *moves* the face and lets its neighbours
+stretch to meet it (`offset_faces`, so a chamfer stays a chamfer); the
+box, or Ctrl and the arrow, *extrudes* it with new walls (`push_pull`);
+the rings tilt it about its own edges through the kernel's draft-angle
+operation (`geometry.tilt_face`, `BRepOffsetAPI_DraftAngle`), with the
+first ring axis along the face's longest straight edge. A straight edge
+between two flat faces gains an arrow along each of those faces' normals
+that moves the edge and lets the face it leaves lean about its far side
+(`geometry.move_edge`, two drafts in sequence, since adjacent faces
+cannot share one). Handles that could not change a plane are not drawn.
+
+Two things left open. In-plane moves and scales of a face do nothing
+under these Rhino-style semantics (the plane is the plane); the SketchUp
+rule, where the face's edges go with it and the neighbours lean, is what
+`move_edge` already does for one edge and generalises to shear and taper.
+That, plus a World/CPlane/Object alignment picker for both gumballs, is
+the 0.8.4 work. And a cosmetic one: after a tilt-ring drag the gold face
+tint is not visible until the camera moves, though the face stays held
+and the gumball sits on it; it is a depth tie in the shaded pass that a
+fresh hold of the same shape wins, and the state-level probes all came
+back clean, so the next step is a GL-level bisect.
 
 ### Far geometry, released in 0.8.1
 
