@@ -23,7 +23,14 @@ face or edge gets a whole gumball (arrow, two tilt rings and the extrude
 box on a flat face; move arrows along each neighbouring face on a
 straight edge). Suite on Linux: 2810 passed, nothing skipped. Cut off
 `main` before the point-cloud branch, whose `.serp` version 3 files
-refuse to open in anything older than 0.9.0.
+refuse to open in anything older than 0.9.0. **Released on 2026-09-03:
+pushed, tagged `v0.8.3`, and published with the AppImage and the
+Windows `.exe` attached.** The macOS `.dmg` was built on the Mac mini
+from the tag (two `SELFTEST OK`, sha256 `587acd1e…`) but is not attached
+yet: that machine's network would not carry it that night, neither to
+GitHub (every upload over about 1 MB came back 400, from `gh` and from
+`curl` over either IP family) nor over the LAN (under 1 KB/s). Attach it
+with `gh release upload v0.8.3` once the Mac can move a file again.
 
 0.8.2 was one fix, for the first bug reported by someone who could not
 start the app at all (#7, Manjaro/KDE Wayland on an RTX 3080): Serpentine3D now starts on
