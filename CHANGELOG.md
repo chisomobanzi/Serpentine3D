@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Getting at the object behind the one in front.** A click has always
+  taken the nearest thing under the cursor, so an object inside or behind
+  another one could only be reached by hiding whatever was in the way. Hold
+  the left button still for a moment, or Alt+click if you already know what
+  you are after, and everything under the cursor is offered as a short list
+  instead, nearest first, each row carrying the object's colour, its name
+  and its kind. Pointing at a row lights that object in every pane, so you
+  can see which one you are about to take; the arrow keys walk the list,
+  Enter picks and Esc cancels. A plain click is unchanged, and a hold over
+  a single object still just picks it.
 - **`arraypath` turns the copies to follow the path.** It used to translate
   and nothing else, so a row of chairs set out along a curving path all
   faced the way the first one did, and a bolt arrayed around a bent pipe

@@ -11,7 +11,7 @@ import traceback
 
 import numpy as np
 from OpenGL import GL
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import QPoint, QTimer, Qt, Signal
 from PySide6.QtGui import QCursor
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -37,6 +37,10 @@ from .camera import (
 )
 
 PICK_RADIUS_PX = 7.0
+# How long the left button has to sit still before the objects under it are
+# offered as a list instead of picked. Long enough that no ordinary click
+# ever reaches it, short enough that you do not wonder whether it is coming.
+HOLD_TO_CHOOSE_MS = 350
 # How long turning to a named view takes, in milliseconds. Long enough to
 # see which way the model went, short enough that nobody waits for it.
 # Settable as display.view_transition_ms; 0 turns it off.
@@ -853,6 +857,13 @@ class Viewport(QOpenGLWidget):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._draw_span = None              # (from, to) of the open leg
         self._draw_frame = None             # (sides, corner) when it is a box
+        self._choice_hover = None           # row the object chooser is on
+        self._chooser = None                # the open chooser, if there is one
+        self._hold_mods = None              # modifiers it went down with
+        self._hold_timer = QTimer(self)     # how long the button has been still
+        self._hold_timer.setSingleShot(True)
+        self._hold_timer.setInterval(HOLD_TO_CHOOSE_MS)
+        self._hold_timer.timeout.connect(self._offer_the_stack)
         self._readout_wanted = True         # only the pane under the cursor
         # The view/display chips that used to float here have moved to the
         # pane's title bar, where they no longer sit on top of the drawing.
@@ -2007,7 +2018,7 @@ class Viewport(QOpenGLWidget):
                              self._thick_prog):
                     self._set_clip_uniforms(prog, oclips)
                 clips_dirty = gpu.anchor is not None
-            selected = self.selection.is_selected(obj.id)
+            selected = self._looks_selected(obj.id)
             color = theme.SELECTION_COLOR if selected else self.scene.color_of(obj)
             if obj.locked and not selected:
                 grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
@@ -3402,11 +3413,49 @@ class Viewport(QOpenGLWidget):
         return ((mesh.edge_segments if sub is None
                  else mesh.edge_segments[sub]), sub)
 
+    def _looks_selected(self, obj_id: str) -> bool:
+        """Drawn in the selection colour: either it is selected, or it is
+        the row the object chooser is sitting on. Pointing at a row has to
+        light the object itself, because a list of names does not tell you
+        which of the things on screen is which."""
+        return (self.selection.is_selected(obj_id)
+                or obj_id == self._choice_hover)
+
+    def set_choice_hover(self, obj_id: str | None):
+        """Light one object as if it were selected, or nothing for None.
+
+        In every pane, not just this one. The row you are pointing at is
+        very often the object hidden behind the one in front, which in this
+        view is exactly the object you cannot see: the Front pane is where
+        it shows up, and lighting it there is the whole point.
+        """
+        for view in self._sibling_views():
+            if obj_id != view._choice_hover:
+                view._choice_hover = obj_id
+                view.update()
+
+    def _sibling_views(self) -> list:
+        """Every pane in this window, this one included, or just this one
+        when there is no window to ask."""
+        panes = getattr(self.window(), "all_viewports", None)
+        views = panes() if panes is not None else [self]
+        return views if self in views else [*views, self]
+
     def pick_object(self, px: float, py: float) -> str | None:
+        hits = self.pick_objects(px, py)
+        return hits[0] if hits else None
+
+    def pick_objects(self, px: float, py: float) -> list[str]:
+        """Every object under the pixel, nearest first.
+
+        A click takes the first of these and always has. Holding the button
+        still offers the whole list instead, so the thing behind the thing
+        in front is reachable without hiding half the scene first.
+        """
         w, h = self.width(), self.height()
         eye = self._eye()
         origin, direction = eye.ray_through(px, py, w, h)
-        best_id, best_depth = None, np.inf
+        found: list[tuple[float, str]] = []
 
         r = PICK_RADIUS_PX
         selectable = [obj for obj in self.scene.visible_objects()
@@ -3457,10 +3506,11 @@ class Viewport(QOpenGLWidget):
                         if pt_depth < depth:
                             depth = pt_depth
                         hit = True
-            if hit and depth < best_depth:
-                best_depth = depth
-                best_id = obj.id
-        return best_id
+            if hit:
+                found.append((depth, obj.id))
+        # by depth alone, so objects at the same distance keep scene order
+        found.sort(key=lambda d: d[0])
+        return [obj_id for _, obj_id in found]
 
     def pick_subobject(self, px: float, py: float):
         """(obj_id, "edge"|"face", index) under the pixel, or None."""
@@ -3626,8 +3676,7 @@ class Viewport(QOpenGLWidget):
                 # model window is: held until release, which is what tells a
                 # pick from the start of a band.
                 if self.layout_view._entered() is not None:
-                    self._press_pos = pos
-                    self._box_active = False
+                    self._begin_hold(pos, ev.modifiers())
                     return
                 add = bool(ev.modifiers() & (
                     Qt.KeyboardModifier.ShiftModifier
@@ -3657,8 +3706,12 @@ class Viewport(QOpenGLWidget):
                 self._cv_drag = (obj_id, index, np.asarray(world), fwd)
                 self.cvEditBegan.emit()
                 return
-            self._press_pos = pos
-            self._box_active = False
+            self._begin_hold(pos, ev.modifiers())
+            if ev.modifiers() & Qt.KeyboardModifier.AltModifier:
+                # Alt is the same question asked out loud: show me what is
+                # under here, now, without the holding still.
+                self._hold_timer.stop()
+                self._offer_the_stack()
 
     def mouseMoveEvent(self, ev):
         pos = ev.position()
@@ -3805,9 +3858,57 @@ class Viewport(QOpenGLWidget):
         a sweep rather than a click."""
         if (abs(pos.x() - self._press_pos.x()) > 4
                 or abs(pos.y() - self._press_pos.y()) > 4):
+            self._hold_timer.stop()       # moving is not holding still
             self._box_active = True
             self._box_end = pos
             self.update()
+
+    # ------------------------------------------- choosing between overlaps
+
+    def _begin_hold(self, pos, mods):
+        """Remember a left press, and start counting how long it sits there.
+
+        Held still long enough and the objects under it are offered as a
+        list instead of picked. Everything about letting go early is what
+        it always was: a pick, or the start of a selection band.
+        """
+        self._press_pos = pos
+        self._box_active = False
+        self._hold_mods = mods
+        if not self.point_mode:
+            self._hold_timer.start()
+
+    def _offer_the_stack(self):
+        """Open the object chooser, if there is anything to choose between.
+
+        One object under the cursor is not a choice, so nothing happens and
+        the release picks it the way it always did. That is what keeps a
+        slow, deliberate click on a single object identical to a quick one.
+        """
+        pos, mods = self._press_pos, self._hold_mods
+        if pos is None or self._box_active or self.point_mode:
+            return
+        ids = self.pick_objects(pos.x(), pos.y())
+        if len(ids) < 2:
+            return
+        from .object_chooser import ObjectChooser, chooser_rows
+        rows = chooser_rows(self.scene, ids)
+        if len(rows) < 2:
+            return
+        self._press_pos = None        # the release must not pick as well
+        menu = ObjectChooser(rows, self)
+        self._chooser = menu
+        menu.rowHovered.connect(self.set_choice_hover)
+        menu.objectChosen.connect(
+            lambda obj_id: self.objectClicked.emit(obj_id, mods))
+        menu.aboutToHide.connect(self._chooser_closed)
+        # Down and to the right of the cursor, so that letting the button up
+        # without moving lands in the gap rather than on the first row.
+        menu.popup(self.mapToGlobal(pos.toPoint()) + QPoint(13, 11))
+
+    def _chooser_closed(self):
+        self._chooser = None
+        self.set_choice_hover(None)
 
     def _fire_chord(self, ev) -> bool:
         """Run the command bound to this button-and-modifiers, if any.
@@ -3838,6 +3939,7 @@ class Viewport(QOpenGLWidget):
         return True
 
     def mouseReleaseEvent(self, ev):
+        self._hold_timer.stop()
         if self._finish_swipe(ev):
             return
         if ev.button() == Qt.MouseButton.RightButton:
