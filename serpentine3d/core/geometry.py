@@ -480,6 +480,68 @@ def extrude(shape, direction: Point, distance: float,
     return result.Shape()
 
 
+def _planar_region_items(shapes: list) -> list[tuple[int, TopoDS_Shape]]:
+    """Filled regions described by closed planar boundary curves.
+
+    A boundary inside another boundary is a hole.  A boundary inside that
+    hole is material again, following the usual even-odd profile rule.  The
+    source index keeps independently extruded regions in selection order.
+    """
+    faces = [planar_face(shape) for shape in shapes]
+    areas = [surface_area(face) for face in faces]
+    containers = [[] for _ in faces]
+
+    for inner, inner_face in enumerate(faces):
+        for outer, outer_face in enumerate(faces):
+            if inner == outer or areas[outer] <= areas[inner] * (1.0 + 1e-9):
+                continue
+            try:
+                common = boolean_intersection(inner_face, outer_face)
+            except GeometryError:
+                continue
+            if math.isclose(surface_area(common), areas[inner],
+                            rel_tol=1e-7, abs_tol=tol() ** 2):
+                containers[inner].append(outer)
+
+    parents = [min(cs, key=areas.__getitem__) if cs else None
+               for cs in containers]
+    regions = []
+    for index, face in enumerate(faces):
+        if len(containers[index]) % 2:
+            continue
+        region = face
+        for child, parent in enumerate(parents):
+            if parent == index:
+                region = boolean_difference(region, faces[child])
+        regions.append((index, region))
+    return regions
+
+
+def planar_regions(shapes: list) -> list[TopoDS_Shape]:
+    """Planar faces bounded by one or more closed curves, including holes."""
+    return [face for _index, face in _planar_region_items(shapes)]
+
+
+def extrude_profiles(shapes: list, direction: Point, distance: float,
+                     cap: bool = False) -> list[TopoDS_Shape]:
+    """Extrude several curves, treating nested capped curves as one profile."""
+    if not cap:
+        return [extrude(shape, direction, distance, cap=False)
+                for shape in shapes]
+
+    closed = [(index, shape) for index, shape in enumerate(shapes)
+              if is_closed_curve(shape)]
+    outputs = [(index, extrude(shape, direction, distance, cap=False))
+               for index, shape in enumerate(shapes)
+               if not is_closed_curve(shape)]
+    if closed:
+        positions, closed_shapes = zip(*closed)
+        outputs.extend(
+            (positions[index], extrude(face, direction, distance, cap=False))
+            for index, face in _planar_region_items(list(closed_shapes)))
+    return [shape for _index, shape in sorted(outputs, key=lambda item: item[0])]
+
+
 def _loose_curves_of(shape):
     """The separate curves inside a compound, or None if this is a single
     curve that can answer for itself. A compound holding exactly one wire or
