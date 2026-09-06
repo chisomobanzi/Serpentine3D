@@ -25,6 +25,11 @@ def _rebuild_record(rec: dict, shapes: list):
     if op == "loft":
         return geometry.loft(shapes, ruled=bool(p.get("ruled")))
     if op == "extrude":
+        if "result_index" in p:
+            results = geometry.extrude_profiles(
+                shapes, tuple(p["direction"]), float(p["dist"]),
+                cap=bool(p.get("cap")))
+            return results[int(p["result_index"])]
         return geometry.extrude(shapes[0], tuple(p["direction"]),
                                 float(p["dist"]), cap=bool(p.get("cap")))
     if op == "revolve":

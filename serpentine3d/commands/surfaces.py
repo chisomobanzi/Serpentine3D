@@ -12,15 +12,15 @@ def cmd_extrude(ctx):
 
     def _make(dist, cap):
         both = ctx.opt("BothSides", "No") == "Yes"
-        out = []
+        shapes = []
         for c in curves:
             shape = c.shape
             if both:
                 shape = g.translate(shape,
                                     tuple(-d * dist for d in direction))
-            out.append(g.extrude(shape, direction,
-                                 dist * (2 if both else 1), cap=cap))
-        return out
+            shapes.append(shape)
+        return g.extrude_profiles(shapes, direction,
+                                  dist * (2 if both else 1), cap=cap)
 
     choices = {"BothSides": ["No", "Yes"]}
     if closed:
@@ -49,10 +49,11 @@ def cmd_extrude(ctx):
     both = ctx.opt("BothSides", "No") == "Yes"
     made = [ctx.scene.add(s) for s in _make(dist, cap)]
     if ctx.scene.record_history and not both:
-        for c, o in zip(curves, made):
-            ctx.scene.add_record("extrude", [c.id], o.id,
+        for result_index, o in enumerate(made):
+            ctx.scene.add_record("extrude", [c.id for c in curves], o.id,
                                  direction=list(direction),
-                                 dist=float(dist), cap=cap)
+                                 dist=float(dist), cap=cap,
+                                 result_index=result_index)
     ctx.echo(f"Extruded {len(made)} object(s): "
              + ", ".join(o.name for o in made))
 
