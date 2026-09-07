@@ -6,30 +6,21 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.8.3 was cut (2026-09-03).
+Last updated when 0.8.4 was cut (2026-09-08).
 
 ---
 
 ## Where things stand
 
-Version `0.8.3` in `pyproject.toml`, the lockfile and the three packaging
-files; `CHANGELOG.md`'s 0.8.3 section is dated 2026-09-03. Jonas's second
-list, all six of it, plus `arraypath` turning its copies to follow the
-path: deleting a `make2d` drawing no longer kills a viewport, a clipping
-plane shows which way it faces, `rotate3d` takes its angle from the
-mouse, Delete takes out a held face, holding the button still (or
-Alt+click) offers everything under the cursor nearest first, and a held
-face or edge gets a whole gumball (arrow, two tilt rings and the extrude
-box on a flat face; move arrows along each neighbouring face on a
-straight edge). Suite on Linux: 2810 passed, nothing skipped. Cut off
-`main` before the point-cloud branch, whose `.serp` version 3 files
-refuse to open in anything older than 0.9.0. **Released on 2026-09-03:
-pushed, tagged `v0.8.3`, and published with the AppImage, the Windows
-`.exe` and the macOS `.dmg` all attached** (the `.dmg` a day late: the
-Mac mini's upstream to the internet was crawling at about 8 KB/s that
-night, so every upload over 1 MB hit GitHub's 120 second cut-off and
-came back 400; it went over the LAN to the Linux box on 2026-09-04 and
-up from there).
+Version `0.8.4` is in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.8.4 section is dated 2026-09-08. This release adds
+native point-cloud objects and `.ply` interchange, makes held-face gumballs
+use the same red/green/blue axis colours as whole-object gumballs, and moves
+or rotates the selected planar face as one piece while its neighbours adapt.
+Rejected intermediate drags keep the gumball at the last valid shape. Nested
+closed profiles now extrude as material with holes, and the AppImage pins and
+self-tests its bundled geometry kernel before replacing the dock copy. Release
+validation on Linux: 2882 passed, nothing skipped.
 
 0.8.2 was one fix, for the first bug reported by someone who could not
 start the app at all (#7, Manjaro/KDE Wayland on an RTX 3080): Serpentine3D now starts on
