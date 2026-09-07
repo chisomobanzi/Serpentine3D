@@ -9,9 +9,9 @@ faces beside it lean to keep hold of them. Slide a box top sideways and
 the box shears. Shrink it and the box tapers to a truncated pyramid.
 
 So the in-plane arrows, the pads and the scale boxes come back, and they
-do that. The arrow along the normal keeps the first rule (a chamfer stays
-a chamfer, and it works beside curved faces), because for a box the two
-rules agree there and the first one reaches further.
+do that. The arrow along the normal follows the same rule: the held face
+moves rigidly and its neighbours adapt. A box cannot show the difference,
+but a tapered solid can because re-trimming its sides would resize the cap.
 """
 
 from __future__ import annotations
@@ -43,6 +43,41 @@ def _slab():
     """A 20 x 10 x 10 box, and the index of its top."""
     box = g.make_box((0, 0, 0), 20, 10, 10)
     return box, _face_where(box, lambda n: n[2] > 0.9)
+
+
+# --- moving a face along its normal -----------------------------------------
+
+def test_moving_a_frustum_cap_along_its_normal_keeps_the_cap_rigid():
+    box, top = _slab()
+    frustum = g.scale_face(box, top, 0.5)
+    faces = g.faces_of(frustum)
+    top = _face_where(frustum, lambda n: n[2] > 0.999)
+    bottom = _face_where(frustum, lambda n: n[2] < -0.999)
+    lid_before, floor_before = faces[top], faces[bottom]
+    lid_center = np.asarray(g.centroid(lid_before))
+    lid_lo, lid_hi = g.bbox(lid_before)
+    floor_center = np.asarray(g.centroid(floor_before))
+    floor_lo, floor_hi = g.bbox(floor_before)
+
+    out = g.offset_face(frustum, top, 3.0)
+
+    assert g.shape_kind(out) == "solid"
+    assert len(g.faces_of(out)) == len(faces)
+    lid = g.faces_of(out)[_face_where(out, lambda n: n[2] > 0.999)]
+    assert np.asarray(g.centroid(lid)) == pytest.approx(
+        lid_center + (0, 0, 3), abs=1e-6)
+    lid_after_lo, lid_after_hi = g.bbox(lid)
+    assert np.asarray(lid_after_hi) - lid_after_lo == pytest.approx(
+        np.asarray(lid_hi) - lid_lo, abs=1e-6)
+    assert g.surface_area(lid) == pytest.approx(
+        g.surface_area(lid_before), abs=1e-6)
+
+    floor = g.faces_of(out)[_face_where(out, lambda n: n[2] < -0.999)]
+    assert np.asarray(g.centroid(floor)) == pytest.approx(floor_center,
+                                                          abs=1e-6)
+    floor_after_lo, floor_after_hi = g.bbox(floor)
+    assert np.asarray(floor_after_hi) - floor_after_lo == pytest.approx(
+        np.asarray(floor_hi) - floor_lo, abs=1e-6)
 
 
 # --- sliding a face in its own plane ----------------------------------------

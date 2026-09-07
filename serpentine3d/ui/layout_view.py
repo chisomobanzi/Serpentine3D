@@ -579,8 +579,9 @@ class LayoutView:
             return cached[1]
         d, right, up = detail_direction(detail)
         from ..core.mesh import MeshShape
+        from ..core.pointcloud import PointCloudShape
         objs = [o for o in vp.scene.visible_objects()
-                if not isinstance(o.shape, MeshShape)]
+                if not isinstance(o.shape, (MeshShape, PointCloudShape))]
         shapes = [o.shape for o in objs]
         layer_types = vp._layer_linetypes()                 # once, not per object
         lts = [vp._effective_linetype(o, layer_types)

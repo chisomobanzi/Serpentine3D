@@ -269,9 +269,11 @@ def cmd_make2d(ctx):
                 if not ctx.scene.layers.get(o.layer_id).name.startswith(
                     "Make2D")]
     from ..core.mesh import MeshShape
-    objs = [o for o in objs if not isinstance(o.shape, MeshShape)]
+    from ..core.pointcloud import PointCloudShape
+    objs = [o for o in objs
+            if not isinstance(o.shape, (MeshShape, PointCloudShape))]
     if not objs:
-        ctx.echo("Nothing to project (meshes are skipped — "
+        ctx.echo("Nothing to project (meshes and point clouds are skipped — "
                  "use meshtobrep first).")
         return
     from ..core import hlr

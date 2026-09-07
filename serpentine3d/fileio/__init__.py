@@ -19,6 +19,7 @@ IMPORT_FORMATS = [
     ("STL", (".stl",)),
     ("DXF", (".dxf",)),
     ("SVG", (".svg",)),
+    ("PLY point cloud", (".ply",)),
 ]
 
 EXPORT_FORMATS = [
@@ -37,6 +38,7 @@ EXPORT_FORMATS = [
     ("DXF", (".dxf",)),
     ("glTF binary", (".glb",)),
     ("USD", (".usda", ".usd")),
+    ("PLY point cloud", (".ply",)),
 ]
 
 IMPORT_EXTS = {e for _, exts in IMPORT_FORMATS for e in exts}
@@ -170,6 +172,12 @@ def _import_file(scene, path: str, ext: str, report) -> int:
     if ext == ".svg":
         from . import svg as svg_mod
         return svg_mod.import_svg(scene, path)
+    if ext == ".ply":
+        from . import ply
+        named = ply.import_ply(path)
+        for name, shape in named:
+            scene.add(shape, name=name)
+        return len(named)
     if ext == ".3dm":
         from . import rhino
         items = rhino.import_3dm(path, progress=report.part(0.0, 0.95))
@@ -266,6 +274,30 @@ def export_file(scene, path: str, only_ids: list | None = None,
     if ext == ".serp":
         native.save_scene(scene, path, thumbnail=thumbnail)
         return
+    if ext == ".ply":
+        from . import ply
+        clouds = [(o.name, o.shape) for o in objs if o.kind == "pointcloud"]
+        ply.export_ply(clouds, path)
+        left = len(objs) - len(clouds)
+        return (f"{left} object(s) left out: PLY carries point clouds only"
+                if left else None)
+    # Every format below carries curves, surfaces and meshes; none of them
+    # has a place for a scan's points, so those are set aside and said so.
+    clouds = [o for o in objs if o.kind == "pointcloud"]
+    if clouds:
+        objs = [o for o in objs if o.kind != "pointcloud"]
+        only_ids = [o.id for o in objs]
+        left_note = (f"{len(clouds)} point cloud(s) left out: {ext[1:]} "
+                     "cannot carry them (export them as PLY)")
+        note = _export_shapes(scene, path, ext, objs, only_ids, thumbnail,
+                              stl_quality, rhino_version)
+        return f"{note}; {left_note}" if note else left_note
+    return _export_shapes(scene, path, ext, objs, only_ids, thumbnail,
+                          stl_quality, rhino_version)
+
+
+def _export_shapes(scene, path, ext, objs, only_ids, thumbnail, stl_quality,
+                   rhino_version):
     if ext in (".step", ".stp"):
         n = step.export_step([o.shape for o in objs], path)
         return (f"{n} mesh object(s) left out: STEP cannot carry them"

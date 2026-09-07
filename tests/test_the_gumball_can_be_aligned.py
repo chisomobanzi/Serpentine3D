@@ -10,8 +10,8 @@ its own frame: an arrow along a leaning axis lifts the face by the part
 of the drag along its normal and slides it by the rest, a ring tilts it
 about the axis laid into its plane, a scale box tapers it along that
 same line, and the box that extrudes only appears on an axis that runs
-straight out of the face. The colours say which is which: red, green and
-blue are world or CPlane axes, gold is the face's own.
+straight out of the face. The colours say which axis is which in every
+frame: red is X, green is Y and blue is Z.
 """
 
 from __future__ import annotations
@@ -94,14 +94,14 @@ def test_a_held_edge_always_keeps_its_own_frame():
     assert sorted(_axes(gb)[:2]) == [(0, 0, 1), (1, 0, 0)]
 
 
-def test_the_colours_say_whose_axes_they_are():
+def test_a_held_face_uses_xyz_colours_in_every_alignment():
     box = g.make_box((0, 0, 0), 20, 10, 10)
     gb, _, _ = _holding(box, "face", _face_where(box, lambda n: n[2] > 0.9))
-    from serpentine3d.ui.gumball import AXIS_COLORS, PP_COLOR
+    from serpentine3d.ui.gumball import AXIS_COLORS
 
-    assert gb._axis_colours() == (PP_COLOR, PP_COLOR, PP_COLOR)
-    gb.set_align("world")
-    assert gb._axis_colours() == AXIS_COLORS
+    for alignment in ("object", "world", "cplane"):
+        gb.set_align(alignment)
+        assert gb._axis_colours() == AXIS_COLORS
 
 
 # --- a held face under foreign axes ------------------------------------------
@@ -136,15 +136,16 @@ def test_a_leaning_face_under_world_axes_has_no_axis_to_extrude_along():
 
 
 def test_a_world_arrow_that_leans_lifts_and_slides():
-    """Dragging a leaning face 3 along world X: the part of that along
-    the normal lifts it (an offset, so with vertical walls its footprint
-    stays put), the rest slides it. The normal is (sin 30, 0, cos 30), so
-    the lift is 1.5 and the slide's x component 3 - 1.5 sin 30 = 2.25."""
+    """Dragging a leaning face 3 along world X moves that rigid face by 3;
+    its neighbours rebuild to meet the translated boundary."""
     box = g.make_box((0, 0, 0), 20, 10, 10)
     top = _face_where(box, lambda n: n[2] > 0.9)
     wedge = g.tilt_face(box, top, (10, 5, 10), (0, 1, 0), 30)
-    gb, vp, obj = _holding(wedge, "face",
-                           _face_where(wedge, lambda n: 0.5 < n[2] < 0.95))
+    lid_index = _face_where(wedge, lambda n: 0.5 < n[2] < 0.95)
+    lid_before = g.faces_of(wedge)[lid_index]
+    before_x = np.asarray(g.centroid(lid_before))[0]
+    before_area = g.surface_area(lid_before)
+    gb, vp, obj = _holding(wedge, "face", lid_index)
     gb.set_align("world")
     before = g.volume(wedge)
 
@@ -155,12 +156,16 @@ def test_a_world_arrow_that_leans_lifts_and_slides():
     assert "face" in label
     assert g.volume(out) != pytest.approx(before, abs=1.0)
     lid = g.faces_of(out)[_face_where(out, lambda n: 0.5 < n[2] < 0.95)]
-    assert np.asarray(g.centroid(lid))[0] == pytest.approx(12.25, abs=1e-3)
+    assert np.asarray(g.centroid(lid))[0] == pytest.approx(before_x + 3.0,
+                                                           abs=1e-3)
+    assert g.surface_area(lid) == pytest.approx(before_area, abs=1e-6)
 
 
 def test_a_world_ring_tilts_about_the_axis_laid_into_the_face():
     box = g.make_box((0, 0, 0), 20, 10, 10)
-    gb, vp, obj = _holding(box, "face", _face_where(box, lambda n: n[2] > 0.9))
+    lid_index = _face_where(box, lambda n: n[2] > 0.9)
+    lid_area = g.surface_area(g.faces_of(box)[lid_index])
+    gb, vp, obj = _holding(box, "face", lid_index)
     gb.set_align("world")
     _, axes = gb.anchor_and_axes()
     ring = next(i for i in (0, 1) if abs(axes[i][1]) > 0.9)   # about Y
@@ -169,8 +174,9 @@ def test_a_world_ring_tilts_about_the_axis_laid_into_the_face():
     gb.apply_scalar(20.0)
 
     out = vp.scene.get(obj.id).shape
-    assert g.volume(out) == pytest.approx(2000.0, abs=1e-3)
-    assert _face_where(out, lambda n: 0.9 < n[2] < 0.95)
+    lid = g.faces_of(out)[_face_where(out, lambda n: 0.9 < n[2] < 0.95)]
+    assert g.surface_area(lid) == pytest.approx(lid_area, abs=1e-6)
+    assert g.volume(out) != pytest.approx(2000.0, abs=1.0)
 
 
 # --- the tag and the menu ---------------------------------------------------

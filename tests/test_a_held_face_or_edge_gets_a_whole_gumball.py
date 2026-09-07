@@ -58,6 +58,20 @@ def _edge_at(shape, x=None, y=None, z=None):
     raise KeyError("no edge there")
 
 
+def _edge_lengths(face):
+    return sorted(g.curve_length(edge) for edge in g.edges_of(face))
+
+
+def _turned(vector, axis, degrees):
+    vector = np.asarray(vector, float)
+    axis = np.asarray(axis, float)
+    axis /= np.linalg.norm(axis)
+    angle = np.radians(degrees)
+    return (vector * np.cos(angle)
+            + np.cross(axis, vector) * np.sin(angle)
+            + axis * np.dot(axis, vector) * (1 - np.cos(angle)))
+
+
 def _chamfered_box():
     """A 10-box with its top-front edge (x=10, z=10) chamfered 3."""
     box = g.make_box((0, 0, 0), 10, 10, 10)
@@ -143,40 +157,152 @@ def _holding(shape, kind, index):
 def test_a_tilted_face_takes_its_neighbours_with_it():
     box = g.make_box((0, 0, 0), 10, 10, 10)
     top = _face_where(box, lambda n: n[2] > 0.9)
+    faces = g.faces_of(box)
+    lid_before = faces[top]
+    floor_before = faces[_face_where(box, lambda n: n[2] < -0.999)]
+    pivot = np.asarray(g.centroid(lid_before))
+    lid_area = g.surface_area(lid_before)
+    lid_edges = _edge_lengths(lid_before)
+    floor_center = np.asarray(g.centroid(floor_before))
+    floor_bbox = g.bbox(floor_before)
+    floor_area = g.surface_area(floor_before)
+    angle = 10.0
 
-    out = g.tilt_face(box, top, (5, 5, 10), (1, 0, 0), 10)
+    out = g.tilt_face(box, top, tuple(pivot), (1, 0, 0), angle)
 
-    tilted = [n for n in _normals(out) if n is not None and n[2] > 0.9]
-    assert len(tilted) == 1
-    assert abs(tilted[0][2]) == pytest.approx(np.cos(np.radians(10)), abs=1e-3)
-    assert len(g.faces_of(out)) == 6
-    # about its own centre, so what comes up one side goes down the other
-    assert g.volume(out) == pytest.approx(1000.0, abs=1e-3)
+    assert g.shape_kind(out) == "solid"
+    assert g.is_valid(out)
+    assert len(g.faces_of(out)) == len(faces)
+    tilted = _face_where(out, lambda n: n[2] > 0.9 and n[1] < -0.1)
+    assert _normals(out)[tilted] == pytest.approx(
+        (0, -np.sin(np.radians(angle)), np.cos(np.radians(angle))),
+        abs=1e-6)
+    lid = g.faces_of(out)[tilted]
+    assert np.asarray(g.centroid(lid)) == pytest.approx(pivot, abs=1e-6)
+    assert g.surface_area(lid) == pytest.approx(lid_area, abs=1e-6)
+    assert _edge_lengths(lid) == pytest.approx(lid_edges, abs=1e-6)
+    floor = g.faces_of(out)[_face_where(out, lambda n: n[2] < -0.999)]
+    assert np.asarray(g.centroid(floor)) == pytest.approx(floor_center,
+                                                          abs=1e-6)
+    assert g.bbox(floor)[0] == pytest.approx(floor_bbox[0], abs=1e-6)
+    assert g.bbox(floor)[1] == pytest.approx(floor_bbox[1], abs=1e-6)
+    assert g.surface_area(floor) == pytest.approx(floor_area, abs=1e-6)
+
+
+def test_tilting_a_frustum_cap_rotates_the_cap_rigidly():
+    box = g.make_box((0, 0, 0), 20, 10, 10)
+    top = _face_where(box, lambda n: n[2] > 0.999)
+    frustum = g.scale_face(box, top, 0.5)
+    faces = g.faces_of(frustum)
+    top = _face_where(frustum, lambda n: n[2] > 0.999)
+    bottom = _face_where(frustum, lambda n: n[2] < -0.999)
+    lid_before, floor_before = faces[top], faces[bottom]
+    pivot = np.asarray(g.centroid(lid_before))
+    lid_area = g.surface_area(lid_before)
+    lid_edges = sorted(g.curve_length(edge)
+                       for edge in g.edges_of(lid_before))
+    floor_center = np.asarray(g.centroid(floor_before))
+    floor_lo, floor_hi = g.bbox(floor_before)
+    floor_area = g.surface_area(floor_before)
+    angle = 20.0
+
+    out = g.tilt_face(frustum, top, tuple(pivot), (1, 0, 0), angle)
+
+    assert g.shape_kind(out) == "solid"
+    assert len(g.faces_of(out)) == len(faces)
+    normals = _normals(out)
+    tilted = _face_where(out, lambda n: n[2] > 0.9 and n[1] < -0.1)
+    assert normals[tilted] == pytest.approx(
+        (0, -np.sin(np.radians(angle)), np.cos(np.radians(angle))),
+        abs=1e-6)
+    lid = g.faces_of(out)[tilted]
+    assert np.asarray(g.centroid(lid)) == pytest.approx(pivot, abs=1e-6)
+    assert g.surface_area(lid) == pytest.approx(lid_area, abs=1e-6)
+    assert sorted(g.curve_length(edge) for edge in g.edges_of(lid)) \
+        == pytest.approx(lid_edges, abs=1e-6)
+
+    floor = g.faces_of(out)[_face_where(out, lambda n: n[2] < -0.999)]
+    assert np.asarray(g.centroid(floor)) == pytest.approx(floor_center,
+                                                          abs=1e-6)
+    assert g.bbox(floor)[0] == pytest.approx(floor_lo, abs=1e-6)
+    assert g.bbox(floor)[1] == pytest.approx(floor_hi, abs=1e-6)
+    assert g.surface_area(floor) == pytest.approx(floor_area, abs=1e-6)
 
 
 def test_tilting_about_a_far_edge_lifts_the_near_one():
-    """The hinge is wherever you say: rotate the top about its back edge
-    and the front face grows to meet it."""
+    """The hinge stays put while the opposite edge follows a circular arc."""
     box = g.make_box((0, 0, 0), 10, 10, 10)
     top = _face_where(box, lambda n: n[2] > 0.9)
+    faces = g.faces_of(box)
+    lid_before = faces[top]
+    floor_before = faces[_face_where(box, lambda n: n[2] < -0.999)]
+    floor_bbox = g.bbox(floor_before)
+    angle = 20.0
 
-    out = g.tilt_face(box, top, (0, 5, 10), (0, 1, 0), -20)
+    out = g.tilt_face(box, top, (0, 5, 10), (0, 1, 0), -angle)
 
-    front = g.faces_of(out)[_face_where(out, lambda n: n[0] > 0.9)]
-    lift = 10 * np.tan(np.radians(20))
-    assert g.bbox(front)[1][2] == pytest.approx(10 + lift, abs=1e-3)
+    assert g.shape_kind(out) == "solid"
+    assert g.is_valid(out)
+    assert len(g.faces_of(out)) == len(faces)
+    lid = g.faces_of(out)[
+        _face_where(out, lambda n: n[2] > 0.9 and n[0] < -0.1)]
+    reach = 10 * np.cos(np.radians(angle))
+    lift = 10 * np.sin(np.radians(angle))
+    assert g.bbox(lid)[0] == pytest.approx((0, 0, 10), abs=1e-6)
+    assert g.bbox(lid)[1] == pytest.approx((reach, 10, 10 + lift),
+                                           abs=1e-6)
+    assert np.asarray(g.centroid(lid)) == pytest.approx(
+        (reach / 2, 5, 10 + lift / 2), abs=1e-6)
+    assert g.surface_area(lid) == pytest.approx(
+        g.surface_area(lid_before), abs=1e-6)
+    assert _edge_lengths(lid) == pytest.approx(_edge_lengths(lid_before),
+                                                abs=1e-6)
+    hinge = [edge for edge in g.edges_of(lid)
+             if all(abs(p[0]) < 1e-6 and abs(p[2] - 10) < 1e-6
+                    for p in g.curve_endpoints(edge))]
+    assert len(hinge) == 1
+    assert sorted(p[1] for p in g.curve_endpoints(hinge[0])) \
+        == pytest.approx((0, 10), abs=1e-6)
+    floor = g.faces_of(out)[_face_where(out, lambda n: n[2] < -0.999)]
+    assert g.bbox(floor)[0] == pytest.approx(floor_bbox[0], abs=1e-6)
+    assert g.bbox(floor)[1] == pytest.approx(floor_bbox[1], abs=1e-6)
+    assert g.surface_area(floor) == pytest.approx(
+        g.surface_area(floor_before), abs=1e-6)
 
 
 def test_a_tilt_beside_a_chamfer_keeps_the_chamfer():
     cham = _chamfered_box()
     top = _face_where(cham, lambda n: n[2] > 0.99)
+    faces = g.faces_of(cham)
+    lid_before = faces[top]
+    floor_before = faces[_face_where(cham, lambda n: n[2] < -0.999)]
+    pivot = np.asarray(g.centroid(lid_before))
+    lid_area = g.surface_area(lid_before)
+    lid_edges = _edge_lengths(lid_before)
+    floor_center = np.asarray(g.centroid(floor_before))
+    floor_bbox = g.bbox(floor_before)
+    floor_area = g.surface_area(floor_before)
+    angle = 10.0
 
-    out = g.tilt_face(cham, top, tuple(g.centroid(g.faces_of(cham)[top])),
-                      (0, 1, 0), 10)
+    out = g.tilt_face(cham, top, tuple(pivot), (0, 1, 0), angle)
 
-    assert len(g.faces_of(out)) == 7
-    assert any(n is not None and abs(n[0] - n[2]) < 1e-3 and n[0] > 0.5
-               for n in _normals(out)), "the 45 degree face is still there"
+    assert g.shape_kind(out) == "solid"
+    assert g.is_valid(out)
+    assert len(g.faces_of(out)) == len(faces)
+    tilted = _face_where(out, lambda n: n[2] > 0.9 and n[0] > 0.1)
+    assert _normals(out)[tilted] == pytest.approx(
+        (np.sin(np.radians(angle)), 0, np.cos(np.radians(angle))),
+        abs=1e-6)
+    lid = g.faces_of(out)[tilted]
+    assert np.asarray(g.centroid(lid)) == pytest.approx(pivot, abs=1e-6)
+    assert g.surface_area(lid) == pytest.approx(lid_area, abs=1e-6)
+    assert _edge_lengths(lid) == pytest.approx(lid_edges, abs=1e-6)
+    floor = g.faces_of(out)[_face_where(out, lambda n: n[2] < -0.999)]
+    assert np.asarray(g.centroid(floor)) == pytest.approx(floor_center,
+                                                          abs=1e-6)
+    assert g.bbox(floor)[0] == pytest.approx(floor_bbox[0], abs=1e-6)
+    assert g.bbox(floor)[1] == pytest.approx(floor_bbox[1], abs=1e-6)
+    assert g.surface_area(floor) == pytest.approx(floor_area, abs=1e-6)
 
 
 def test_a_curved_face_cannot_be_tilted():
@@ -287,15 +413,36 @@ def test_the_rings_sit_square_to_the_longest_edge():
 
 def test_the_arrow_moves_the_face_and_the_chamfer_follows():
     cham = _chamfered_box()
-    gb, vp, obj = _holding(cham, "face",
-                           _face_where(cham, lambda n: n[2] > 0.99))
+    faces = g.faces_of(cham)
+    top = _face_where(cham, lambda n: n[2] > 0.99)
+    lid_before = faces[top]
+    floor_before = faces[_face_where(cham, lambda n: n[2] < -0.999)]
+    lid_center = np.asarray(g.centroid(lid_before))
+    lid_area = g.surface_area(lid_before)
+    lid_edges = _edge_lengths(lid_before)
+    floor_center = np.asarray(g.centroid(floor_before))
+    floor_bbox = g.bbox(floor_before)
+    floor_area = g.surface_area(floor_before)
+    gb, vp, obj = _holding(cham, "face", top)
 
     assert gb.begin_drag(("move", 2), 5.0, 10.0, NONE)
     gb.apply_scalar(4.0)
 
     out = vp.scene.get(obj.id).shape
-    assert len(g.faces_of(out)) == 7, "no new walls: the chamfer stretched"
-    assert g.volume(out) == pytest.approx(1155.0, abs=1e-3)
+    assert g.shape_kind(out) == "solid"
+    assert g.is_valid(out)
+    assert len(g.faces_of(out)) == len(faces)
+    lid = g.faces_of(out)[_face_where(out, lambda n: n[2] > 0.999)]
+    assert np.asarray(g.centroid(lid)) == pytest.approx(
+        lid_center + (0, 0, 4), abs=1e-6)
+    assert g.surface_area(lid) == pytest.approx(lid_area, abs=1e-6)
+    assert _edge_lengths(lid) == pytest.approx(lid_edges, abs=1e-6)
+    floor = g.faces_of(out)[_face_where(out, lambda n: n[2] < -0.999)]
+    assert np.asarray(g.centroid(floor)) == pytest.approx(floor_center,
+                                                          abs=1e-6)
+    assert g.bbox(floor)[0] == pytest.approx(floor_bbox[0], abs=1e-6)
+    assert g.bbox(floor)[1] == pytest.approx(floor_bbox[1], abs=1e-6)
+    assert g.surface_area(floor) == pytest.approx(floor_area, abs=1e-6)
 
 
 def test_the_box_extrudes_the_face_instead():
@@ -338,16 +485,42 @@ def test_carving_with_the_arrow_still_works():
 def test_a_ring_tilts_the_face():
     box = g.make_box((0, 0, 0), 10, 10, 10)
     top = _face_where(box, lambda n: n[2] > 0.9)
+    faces = g.faces_of(box)
+    lid_before = faces[top]
+    floor_before = faces[_face_where(box, lambda n: n[2] < -0.999)]
+    pivot = np.asarray(g.centroid(lid_before))
+    lid_area = g.surface_area(lid_before)
+    lid_edges = _edge_lengths(lid_before)
+    floor_center = np.asarray(g.centroid(floor_before))
+    floor_bbox = g.bbox(floor_before)
+    floor_area = g.surface_area(floor_before)
     gb, vp, obj = _holding(box, "face", top)
+    anchor, axes = gb.anchor_and_axes()
+    ring = _ring_facing_the_view(gb)
+    angle = 10.0
+    expected_normal = _turned((0, 0, 1), axes[ring], angle)
+    assert anchor == pytest.approx(pivot, abs=1e-6)
 
-    assert gb.begin_drag(("rot", _ring_facing_the_view(gb)), 9.0, 13.0, NONE)
-    label = gb.apply_scalar(10.0)
+    assert gb.begin_drag(("rot", ring), 9.0, 13.0, NONE)
+    label = gb.apply_scalar(angle)
 
     out = vp.scene.get(obj.id).shape
     assert "tilt" in label
-    assert g.volume(out) == pytest.approx(1000.0, abs=1e-3)
-    n = _normals(out)[_face_where(out, lambda n: n[2] > 0.9)]
-    assert n[2] == pytest.approx(np.cos(np.radians(10)), abs=1e-3)
+    assert g.shape_kind(out) == "solid"
+    assert g.is_valid(out)
+    assert len(g.faces_of(out)) == len(faces)
+    tilted = _face_where(out, lambda n: np.dot(n, expected_normal) > 0.999)
+    assert _normals(out)[tilted] == pytest.approx(expected_normal, abs=1e-6)
+    lid = g.faces_of(out)[tilted]
+    assert np.asarray(g.centroid(lid)) == pytest.approx(pivot, abs=1e-6)
+    assert g.surface_area(lid) == pytest.approx(lid_area, abs=1e-6)
+    assert _edge_lengths(lid) == pytest.approx(lid_edges, abs=1e-6)
+    floor = g.faces_of(out)[_face_where(out, lambda n: n[2] < -0.999)]
+    assert np.asarray(g.centroid(floor)) == pytest.approx(floor_center,
+                                                          abs=1e-6)
+    assert g.bbox(floor)[0] == pytest.approx(floor_bbox[0], abs=1e-6)
+    assert g.bbox(floor)[1] == pytest.approx(floor_bbox[1], abs=1e-6)
+    assert g.surface_area(floor) == pytest.approx(floor_area, abs=1e-6)
 
 
 def test_a_tilt_back_to_zero_is_the_face_you_started_with():
@@ -384,16 +557,55 @@ def test_the_gumball_stays_on_the_face_it_tilted():
 
 def test_a_tilt_too_far_keeps_the_last_good_face():
     box = g.make_box((0, 0, 0), 10, 10, 10)
-    gb, vp, obj = _holding(box, "face", _face_where(box, lambda n: n[2] > 0.9))
-    assert gb.begin_drag(("rot", _ring_facing_the_view(gb)), 9.0, 13.0, NONE)
-    gb.apply_scalar(10.0)
-    good = g.volume(vp.scene.get(obj.id).shape)
-    assert good == pytest.approx(1000.0, abs=1e-3)
+    top = _face_where(box, lambda n: n[2] > 0.9)
+    faces = g.faces_of(box)
+    lid_before = faces[top]
+    floor_before = faces[_face_where(box, lambda n: n[2] < -0.999)]
+    pivot = np.asarray(g.centroid(lid_before))
+    lid_area = g.surface_area(lid_before)
+    lid_edges = _edge_lengths(lid_before)
+    floor_center = np.asarray(g.centroid(floor_before))
+    floor_bbox = g.bbox(floor_before)
+    floor_area = g.surface_area(floor_before)
+    gb, vp, obj = _holding(box, "face", top)
+    _, axes = gb.anchor_and_axes()
+    ring = _ring_facing_the_view(gb)
+    good_angle = 10.0
+    good_normal = _turned((0, 0, 1), axes[ring], good_angle)
+    assert gb.begin_drag(("rot", ring), 9.0, 13.0, NONE)
+    gb.apply_scalar(good_angle)
 
-    gb.apply_scalar(89.9)                  # the plane cuts the box in half
+    good = vp.scene.get(obj.id).shape
+    assert g.shape_kind(good) == "solid"
+    assert g.is_valid(good)
+    assert len(g.faces_of(good)) == len(faces)
+    good_lid = g.faces_of(good)[
+        _face_where(good, lambda n: np.dot(n, good_normal) > 0.999)]
+    assert _normals(good)[_face_where(
+        good, lambda n: np.dot(n, good_normal) > 0.999)] \
+        == pytest.approx(good_normal, abs=1e-6)
+    assert np.asarray(g.centroid(good_lid)) == pytest.approx(pivot, abs=1e-6)
+    assert g.surface_area(good_lid) == pytest.approx(lid_area, abs=1e-6)
+    assert _edge_lengths(good_lid) == pytest.approx(lid_edges, abs=1e-6)
+
+    gb.apply_scalar(120.0)                 # folded past vertical: sides cross
 
     out = vp.scene.get(obj.id).shape
-    assert g.volume(out) == pytest.approx(good, abs=1e-3)
+    assert g.shape_kind(out) == "solid"
+    assert g.is_valid(out)
+    assert len(g.faces_of(out)) == len(faces)
+    retained = _face_where(out, lambda n: np.dot(n, good_normal) > 0.999)
+    assert _normals(out)[retained] == pytest.approx(good_normal, abs=1e-6)
+    lid = g.faces_of(out)[retained]
+    assert np.asarray(g.centroid(lid)) == pytest.approx(pivot, abs=1e-6)
+    assert g.surface_area(lid) == pytest.approx(lid_area, abs=1e-6)
+    assert _edge_lengths(lid) == pytest.approx(lid_edges, abs=1e-6)
+    floor = g.faces_of(out)[_face_where(out, lambda n: n[2] < -0.999)]
+    assert np.asarray(g.centroid(floor)) == pytest.approx(floor_center,
+                                                          abs=1e-6)
+    assert g.bbox(floor)[0] == pytest.approx(floor_bbox[0], abs=1e-6)
+    assert g.bbox(floor)[1] == pytest.approx(floor_bbox[1], abs=1e-6)
+    assert g.surface_area(floor) == pytest.approx(floor_area, abs=1e-6)
 
 
 # --- what a held edge offers ------------------------------------------------

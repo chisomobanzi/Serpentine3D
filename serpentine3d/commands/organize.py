@@ -3,7 +3,8 @@
 import uuid
 
 from ..core import geometry as g
-from .base import OptionReq, PointReq, SelectReq, TextReq, command
+from .base import (NumberReq, OptionReq, PointReq, SelectReq,
+                   TextReq, command)
 
 
 @command("group")
@@ -142,7 +143,52 @@ def cmd_count(ctx):
     if by_block:
         ctx.echo("Blocks: " + ", ".join(
             f"{n}× {b}" for b, n in sorted(by_block.items())))
+    clouds = [o for o in objs if o.kind == "pointcloud"]
+    if clouds:
+        points = sum(o.shape.count for o in clouds)
+        ctx.echo(f"Points: {points:,} in {len(clouds)} point cloud(s)")
     yield from ()
+
+
+@command("pointcloud", aliases=("pc",))
+def cmd_pointcloud(ctx):
+    """Point clouds: `info` says what a scan holds; `subsample` keeps an
+    even fraction of its points, which is the cheap way to make a scan
+    the laptop can orbit."""
+    objs = yield SelectReq("Select point clouds", kinds=("pointcloud",))
+    if not objs:
+        ctx.echo("No point clouds selected.")
+        return
+    what = yield OptionReq("Action", options=["info", "subsample"],
+                           default="info")
+    if what == "info":
+        for o in objs:
+            c = o.shape
+            (x0, y0, z0), (x1, y1, z1) = c.bbox()
+            fmt = ctx.scene.format_length
+            parts = [f"{c.count:,} points",
+                     f"{fmt(x1 - x0)} × {fmt(y1 - y0)} × {fmt(z1 - z0)}",
+                     "colour" if c.rgb is not None else "no colour"]
+            if c.conf is not None:
+                parts.append(f"confidence mean {float(c.conf.mean()):.2f}")
+            counts = c.level_counts()
+            if counts is not None:
+                parts.append("levels " + "/".join(f"{n:,}" for n in counts))
+            if c.provenance:
+                prov = c.provenance
+                parts.append("from " + ", ".join(
+                    str(prov[k]) for k in ("backbone", "scale", "session")
+                    if prov.get(k)))
+            ctx.echo(f"{o.name}: " + "; ".join(parts))
+        return
+    fraction = yield NumberReq("Fraction of points to keep", default=0.25)
+    if not 0 < fraction <= 1:
+        ctx.echo("Fraction must be between 0 and 1.")
+        return
+    for o in objs:
+        thinned = o.shape.subsampled(fraction)
+        ctx.scene.replace_shape(o.id, thinned)
+        ctx.echo(f"{o.name}: {thinned.count:,} points kept.")
 
 
 @command("meshtobrep")

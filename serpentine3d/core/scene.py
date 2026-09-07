@@ -63,7 +63,7 @@ class SceneObject:
     # read but not converted. Read it through `shape`, which converts what
     # it finds; the underscore is here so that property can exist at all.
     _shape: object
-    kind: str                          # curve | surface | solid | point | compound
+    kind: str          # curve | surface | solid | point | compound | mesh | pointcloud
     layer_id: str
     visible: bool = True
     locked: bool = False               # visible but unselectable
@@ -192,6 +192,13 @@ class Scene:
         self.record_history = False     # new surfaces remember their inputs
         self.history_records: list = []   # {"op", "inputs", "output", ...}
         self._regen_active = False
+        # What a scan session's .serp carries beside its point clouds
+        # (protocol/SERP-SESSION-RECORD.md): camera trajectories, one dict
+        # per stream, and the session record. Held as the plain dicts the
+        # file gave, so a save writes them back unchanged; nothing here
+        # draws or edits them yet.
+        self.trajectories: list = []
+        self.session: dict | None = None
 
     # -- notification --
     def add_listener(self, fn, kinds: tuple | None = None):
@@ -519,6 +526,8 @@ class Scene:
         self.annot_styles = {}
         self.image_planes = []
         self.history_records = []
+        self.trajectories = []
+        self.session = None
         # units are a user preference as much as a document property: keep
         self.notify()
 
@@ -548,6 +557,11 @@ class Scene:
             "annot_styles": {k: dict(v) for k, v in self.annot_styles.items()},
             "image_planes": copy.deepcopy(self.image_planes),
             "history_records": copy.deepcopy(self.history_records),
+            # By reference, not deep-copied: a trajectory is tens of
+            # thousands of poses that nothing in the app edits, and undo
+            # takes a snapshot every command.
+            "trajectories": self.trajectories,
+            "session": self.session,
         }
 
     def restore(self, snap: dict):
@@ -565,4 +579,6 @@ class Scene:
         self.image_planes = copy.deepcopy(snap.get("image_planes", []))
         self.history_records = copy.deepcopy(
             snap.get("history_records", []))
+        self.trajectories = snap.get("trajectories", [])
+        self.session = snap.get("session")
         self.notify()

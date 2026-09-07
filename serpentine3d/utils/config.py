@@ -60,6 +60,10 @@ DEFAULTS = {
         # What a fresh viewport shows: shaded | wireframe | ghosted | zebra
         # | curvature | technical | draft | rendered
         "default_mode": "shaded",
+        # Point clouds: pixels per point, and how many points a frame
+        # draws before a scan's finer levels are left out
+        "point_size": 2.0,
+        "point_budget": 2000000,
     },
     # Window geometry, dock state and view layout from the last session,
     # written on close — see MainWindow._remember_window.

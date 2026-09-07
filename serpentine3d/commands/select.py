@@ -33,6 +33,12 @@ def cmd_selsolid(ctx):
     yield from ()
 
 
+@command("selpointcloud", aliases=("selpc", "selpointclouds"), mutates=False)
+def cmd_selpointcloud(ctx):
+    _select_kind(ctx, "pointcloud", "point cloud(s)")
+    yield from ()
+
+
 @command("sellayer", mutates=False)
 def cmd_sellayer(ctx):
     name = yield TextReq("Layer name")

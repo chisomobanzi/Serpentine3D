@@ -549,11 +549,7 @@ class Gumball:
         return self._along_normal(state[1]) if state is not None else set()
 
     def _axis_colours(self):
-        """Red, green and blue say world or CPlane axes. A held face's own
-        frame is nobody's axes but its own, so those handles are all the
-        one brand gold."""
-        if self._face_mode() and self.align == "object":
-            return (PP_COLOR, PP_COLOR, PP_COLOR)
+        """Red, green and blue identify the X, Y and Z axes in every frame."""
         return AXIS_COLORS
 
     def _sweep_sources(self) -> list:
@@ -1314,16 +1310,19 @@ class Gumball:
             if hit is None:
                 return d["last_label"]
             delta = hit - d["ref"]
-            d["offset"] = np.asarray(delta, float)
             if d.get("pp"):                   # a held face: lift, then slide
                 oid, fidx = d["pp"]
                 orig = d["originals"].get(oid)
-                self._rebuild(oid, orig, float(np.linalg.norm(delta)),
-                              lambda _v: self._face_slid(orig, fidx, delta))
-                d["reshaped"] = True
-                d["last_label"] = ("slide face " + vp.scene.format_length(
-                    float(np.linalg.norm(delta))))
+                if self._rebuild(
+                        oid, orig, float(np.linalg.norm(delta)),
+                        lambda _v: self._face_slid(orig, fidx, delta)):
+                    d["offset"] = np.asarray(delta, float)
+                    d["reshaped"] = True
+                    d["last_label"] = (
+                        "slide face " + vp.scene.format_length(
+                            float(np.linalg.norm(delta))))
                 return d["last_label"]
+            d["offset"] = np.asarray(delta, float)
             self._move_by(delta)
             d["last_label"] = ("move "
                                + vp.scene.format_length(float(
@@ -1376,8 +1375,10 @@ class Gumball:
             elif d.get("pp") and i not in self._along_normal(axes):
                 oid, fidx = d["pp"]           # a held face, along an axis
                 orig = d["originals"].get(oid)   # that lies in it, or leans
-                self._rebuild(oid, orig, value, lambda v: self._face_slid(
-                    orig, fidx, axes[i] * v))
+                if not self._rebuild(
+                        oid, orig, value,
+                        lambda v: self._face_slid(orig, fidx, axes[i] * v)):
+                    return d["last_label"]
                 d["offset"] = np.asarray(axes[i] * value, float)
                 label = "slide face " + vp.scene.format_length(float(value))
             elif d.get("pp"):                 # a held face, in or out
@@ -1388,8 +1389,10 @@ class Gumball:
                 n = d.get("face_normal")
                 sign = (1.0 if n is None
                         else float(np.sign(np.dot(axes[i], n)) or 1.0))
-                self._rebuild(oid, orig, value, lambda v: self._face_moved(
-                    orig, fidx, v * sign, planar, grow))
+                if not self._rebuild(
+                        oid, orig, value, lambda v: self._face_moved(
+                            orig, fidx, v * sign, planar, grow)):
+                    return d["last_label"]
                 d["offset"] = np.asarray(axes[i] * value, float)
                 verb = ("extrude face" if grow else "move face" if planar
                         else "offset")
@@ -1398,8 +1401,10 @@ class Gumball:
                 oid, eidx = d["edge_move"]
                 orig = d["originals"].get(oid)
                 delta = np.asarray(axes[i] * value, float)
-                self._rebuild(oid, orig, value,
-                              lambda v: g.move_edge(orig, eidx, tuple(delta)))
+                if not self._rebuild(
+                        oid, orig, value,
+                        lambda v: g.move_edge(orig, eidx, tuple(delta))):
+                    return d["last_label"]
                 d["offset"] = delta
                 label = "move edge " + vp.scene.format_length(float(value))
             elif d.get("multiface"):          # offset every selected face
@@ -1450,9 +1455,10 @@ class Gumball:
             if n is not None:                 # about the axis laid into it
                 axis = axis - n * float(np.dot(axis, n))
                 axis = axis / (np.linalg.norm(axis) or 1.0)
+            if not self._rebuild(oid, orig, value, lambda v: g.tilt_face(
+                    orig, fidx, tuple(anchor), tuple(axis), v)):
+                return d["last_label"]
             d["tilt_axis"] = axis
-            self._rebuild(oid, orig, value, lambda v: g.tilt_face(
-                orig, fidx, tuple(anchor), tuple(axis), v))
             d["turned"] = float(value)
             label = f"tilt {value:.1f}°"
         elif kind == "rot":
@@ -1463,9 +1469,12 @@ class Gumball:
                 return d["last_label"]
             oid, fidx = d["pp"]
             orig = d["originals"].get(oid)
-            self._rebuild(oid, orig, value - 1.0, lambda _v: g.scale_face(
-                orig, fidx, float(value),
-                axis=None if uniform else tuple(axes[i])))
+            if not self._rebuild(
+                    oid, orig, value - 1.0,
+                    lambda _v: g.scale_face(
+                        orig, fidx, float(value),
+                        axis=None if uniform else tuple(axes[i]))):
+                return d["last_label"]
             d["reshaped"] = True
             label = f"scale face {value:.3f}" + (" (uniform)" if uniform
                                                  else "")
@@ -1574,17 +1583,19 @@ class Gumball:
     def _rebuild(self, oid, orig, value, make):
         """Show `make(value)` in place of the held solid, or the original
         at zero. A value the kernel cannot build keeps whatever was showing:
-        too far is not an error worth losing the drag over."""
+        too far is not an error worth losing the drag over. Return whether
+        the scene accepted this value so the handles track the same shape."""
         vp = self.vp
         if orig is None or vp.scene.get(oid) is None:
-            return
+            return False
         if abs(float(value)) < 1e-9:
             vp.scene.replace_shape(oid, orig)
-            return
+            return True
         try:
             vp.scene.replace_shape(oid, make(float(value)))
         except (g.GeometryError, IndexError):
-            pass
+            return False
+        return True
 
     @staticmethod
     def _face_moved(orig, fidx, value, planar, grow):
@@ -1601,7 +1612,7 @@ class Gumball:
         if grow:
             return g.push_pull(orig, fidx, value)
         try:
-            return g.offset_faces(orig, {fidx: value})
+            return g.offset_face(orig, fidx, value)
         except g.GeometryError:
             return g.push_pull(orig, fidx, value)
 

@@ -80,25 +80,31 @@ cd "$DIST"
 BUILT="$(ls "$DIST"/Serpentine3D-*.AppImage 2>/dev/null | head -1)"
 ls -lh "$BUILT"
 
-# The staging purge above stops the cause we know about; this catches the next
-# one. Any top-level serpentine* package besides serpentine3d is a name we did
-# not mean to put on the user's import path. Extracting one file per candidate
-# package is enough to list them, and costs milliseconds.
+# Inspect the complete bundle before it can replace the desktop-installed copy.
+# Besides catching stale package names, importing the real application through
+# the bundled Python catches incompatible binary wheels and missing libraries.
 if [ -n "$BUILT" ]; then
     PROBE="$(mktemp -d)"
     trap 'rm -rf "$PROBE"' EXIT
-    ( cd "$PROBE" && "$BUILT" --appimage-extract \
-        'opt/python*/lib/python*/site-packages/serpentine*/__init__.py' \
-        > /dev/null 2>&1 ) || true
-    STOWAWAYS="$(find "$PROBE/squashfs-root" -mindepth 1 -type d \
-        -name 'serpentine*' -printf '%f\n' 2>/dev/null \
-        | sort -u | grep -vx 'serpentine3d' || true)"
+    ( cd "$PROBE" && "$BUILT" --appimage-extract > /dev/null 2>&1 )
+    SITE_PACKAGES="$PROBE/squashfs-root/opt/python$PYVER/lib/python$PYVER/site-packages"
+    STOWAWAYS="$(
+        for PACKAGE in "$SITE_PACKAGES"/serpentine*; do
+            [ -f "$PACKAGE/__init__.py" ] || continue
+            basename "$PACKAGE"
+        done | sort -u | grep -vx 'serpentine3d' || true
+    )"
     if [ -n "$STOWAWAYS" ]; then
         echo "ERROR: the bundle ships top-level packages we did not intend:" >&2
         echo "$STOWAWAYS" | sed 's/^/  /' >&2
         echo "Stale setuptools staging, or a rename that left a tree behind." >&2
         exit 1
     fi
+
+    "$PROBE/squashfs-root/usr/bin/python$PYVER" -P - << 'PY'
+import serpentine3d.app
+PY
+    echo "Packaged application import check passed"
 fi
 
 # Keep the desktop-installed copy (what the dock/launcher runs) in sync

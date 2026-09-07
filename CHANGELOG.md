@@ -13,8 +13,8 @@
   about the axis laid into its plane, a scale box tapers it along that
   line, and the extrude box only appears on an axis that runs straight
   out of the face. The colours say whose axes they are: red, green and
-  blue are the world's or the CPlane's, gold is the face's own. The
-  choice is remembered.
+  blue match X, Y and Z under every alignment, including the face's own.
+  The choice is remembered.
 - **Every handle on a held face does something.** The 0.8.3 gumball hid
   the handles that could not change a plane. They are back, and they
   follow the rule a person dragging a face expects: the face's edges go
@@ -27,6 +27,37 @@
   it still extrudes. Only the ring about the normal and the scale box
   along it are left out, because a plane spun or stretched along its own
   normal is the same plane.
+- **Point clouds.** A scan opens as one object of a new kind, `pointcloud`:
+  a `.serp` version 3 file (the Mica session record — points in binary
+  members under `blobs/`, camera trajectories and the session record as
+  JSON beside them) reads and writes back unchanged, and `.ply` imports and
+  exports. Points draw in the scanner's colours from one buffer on the card,
+  culled by their box and anchored far from home like a mesh; a click on the
+  points selects the cloud, the Properties panel says how many points and
+  how big a box, and `count` reports points. When the visible scans add up
+  to more than the point budget (Options > Display, two million by default)
+  the finest level goes first, then the middle one, and the status line
+  says so. `pointcloud` has `info` and `subsample`; `selpointcloud` picks
+  them. A file written for a newer Serpentine3D is refused by name ("This
+  file needs Serpentine3D 0.8.4 or newer") instead of a traceback, and a
+  drawing without scans still saves as version 2, so older installs never
+  notice. Formats with no room for points (STEP, OBJ, glTF, ...) leave them
+  out and say so.
+
+### Fixed
+
+- **Held-face edits keep the face together.** Moving or rotating a planar
+  face now transforms that face as one piece and rebuilds its neighbours to
+  meet the new boundary, instead of changing the selected face's trimming.
+- **Fast held-face drags keep the gumball attached.** If the kernel rejects an
+  intermediate transform, the gumball stays at the last position whose shape
+  was accepted instead of moving away from the selected face.
+- **Extruding nested curve profiles preserves their holes.** Inner profiles
+  are assigned to the containing outer profile before extrusion, so nested
+  outlines produce the intended voids.
+- **The AppImage validates its bundled kernel before replacing the installed
+  copy.** The build pins the compatible OCP release, rejects stray packages,
+  and imports the packaged application in a headless self-check.
 
 ## 0.8.3 — 2026-09-03
 

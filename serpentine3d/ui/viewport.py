@@ -298,6 +298,37 @@ out vec4 frag;
 void main() { frag = uColor; }
 """
 
+# A scan's points: colour rides on the vertex, the size is pixels, and a
+# selected cloud is tinted towards the selection colour on the card rather
+# than recoloured point by point on the CPU.
+POINT_VERT = """
+#version 330 core
+layout(location=0) in vec3 pos;
+layout(location=1) in vec3 rgb;
+uniform mat4 uMVP;
+uniform float uPointSize;
+uniform int uClipCount;
+uniform vec4 uClips[4];
+out vec3 vColor;
+out float gl_ClipDistance[4];
+void main() {
+    gl_Position = uMVP * vec4(pos, 1.0);
+    gl_PointSize = uPointSize;
+    for (int i = 0; i < uClipCount; ++i)
+        gl_ClipDistance[i] = dot(uClips[i], vec4(pos, 1.0));
+    vColor = rgb;
+}
+"""
+
+POINT_FRAG = """
+#version 330 core
+in vec3 vColor;
+uniform vec3 uColor;        // the object's colour when points carry none
+uniform float uColorMix;    // 0 = vertex colour, 1 = uColor
+out vec4 frag;
+void main() { frag = vec4(mix(vColor, uColor, uColorMix), 1.0); }
+"""
+
 THICK_VERT = """
 #version 330 core
 layout(location=0) in vec3 pos;      // this end of the segment
@@ -586,6 +617,48 @@ def anchored_clips(clips, anchor):
             for c in clips]
 
 
+# A scan point on the card: xyz float32 then rgb uint8 and a pad byte.
+CLOUD_STRIDE = 16
+# Draw every level of every visible cloud up to this many points; past it
+# the finest level goes first, then the middle one. Two million points is
+# a frame's worth on the integrated graphics a site laptop has.
+POINT_BUDGET = 2_000_000
+POINT_SIZE_PX = 2.0
+
+
+def cloud_vertex_data(mesh, anchor) -> np.ndarray:
+    """The interleaved bytes a point cloud uploads: (N, 16) uint8 rows of
+    rebased float32 xyz, rgb, pad. White where the cloud brought no
+    colour, and the draw mixes the object's colour in instead."""
+    n = len(mesh.vertices)
+    rows = np.empty((n, CLOUD_STRIDE), np.uint8)
+    xyz = np.ascontiguousarray(rebased(mesh.vertices, anchor), np.float32)
+    rows[:, :12] = xyz.view(np.uint8).reshape(n, 12)
+    colors = mesh.cloud_colors
+    if colors is None:
+        rows[:, 12:15] = 255
+    else:
+        rows[:, 12:15] = colors
+    rows[:, 15] = 0
+    return rows
+
+
+def cloud_level_budget(counts: list, budget: int) -> int:
+    """The highest LOD level every visible cloud can draw within `budget`
+    points: 2 (everything) when the total fits, else 1, else 0.
+
+    `counts` holds each cloud's cumulative per-level counts, or None for a
+    cloud with no levels, which draws whole whatever the level.
+    """
+    def total(level):
+        return sum((c[level] if c is not None else c_all)
+                   for c, c_all in counts)
+    for level in (2, 1):
+        if total(level) <= budget:
+            return level
+    return 0
+
+
 class _MeshBuffers:
     """One mesh's vertex data on the GPU, shared by every viewport.
 
@@ -600,11 +673,20 @@ class _MeshBuffers:
         self.line_vbo = self.line_count = 0
         self.thick_vbo = self.thick_ebo = self.thick_count = 0
         self.iso_vbo = self.iso_count = 0
+        self.cloud_vbo = self.cloud_count = 0
+        self.cloud_levels = None         # cumulative counts per LOD level
+        self.cloud_colored = False       # points brought their own colour
         self.nbytes = 0                  # what this mesh costs on the GPU
         self._buffers = []
         # Everything below goes up relative to this, and the draw folds
         # it back into the matrix; see mesh_anchor above.
         self.anchor = mesh_anchor(mesh)
+        if mesh.is_cloud:
+            self.cloud_vbo = self._upload(GL.GL_ARRAY_BUFFER,
+                                          cloud_vertex_data(mesh, self.anchor))
+            self.cloud_count = len(mesh.vertices)
+            self.cloud_levels = mesh.cloud_levels
+            self.cloud_colored = mesh.cloud_colors is not None
         if mesh.has_faces:
             curv = mesh.curvature
             if len(curv) != len(mesh.vertices):
@@ -665,7 +747,13 @@ class _GpuObject:
         self.line_vao = self.line_count = 0
         self.thick_vao = self.thick_count = 0
         self.iso_vao = self.iso_count = 0
+        self.cloud_vao = self.cloud_count = 0
+        self.cloud_levels = buf.cloud_levels
+        self.cloud_colored = buf.cloud_colored
         self.anchor = buf.anchor      # the drawer folds this back in
+        if buf.cloud_count:
+            self.cloud_vao = self._cloud_vertex_array(buf.cloud_vbo)
+            self.cloud_count = buf.cloud_count
         if buf.tri_count:
             self.tri_vao = self._vertex_array(buf.tri_vbo, _WIDE_ATTRS,
                                               ebo=buf.tri_ebo)
@@ -699,9 +787,25 @@ class _GpuObject:
             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, ebo)
         return vao
 
+    @staticmethod
+    def _cloud_vertex_array(vbo) -> int:
+        """Position as floats, colour as bytes: 16 bytes a point, so a
+        million points is 16 MB on the card rather than 24."""
+        vao = GL.glGenVertexArrays(1)
+        GL.glBindVertexArray(vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
+        GL.glEnableVertexAttribArray(0)
+        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, CLOUD_STRIDE,
+                                 ctypes.c_void_p(0))
+        GL.glEnableVertexAttribArray(1)
+        GL.glVertexAttribPointer(1, 3, GL.GL_UNSIGNED_BYTE, True,
+                                 CLOUD_STRIDE, ctypes.c_void_p(12))
+        return vao
+
     def release(self):
         for vao in (self.tri_vao, self.line_vao, self.iso_vao,
-                    getattr(self, "thick_vao", 0)):
+                    getattr(self, "thick_vao", 0),
+                    getattr(self, "cloud_vao", 0)):
             if vao:
                 GL.glDeleteVertexArrays(1, [vao])
         self.forget()
@@ -715,6 +819,7 @@ class _GpuObject:
         last viewport drawing it lets go.
         """
         self.tri_vao = self.line_vao = self.iso_vao = self.thick_vao = 0
+        self.cloud_vao = 0
         gpu_share.release(self._share_key)
 
 
@@ -931,6 +1036,18 @@ class Viewport(QOpenGLWidget):
         self._last_mouse = None
         self._mesh_prog = self._line_prog = self._bg_prog = 0
         self._thick_prog = 0
+        self._point_prog = 0
+        # Point clouds: how big a point is on screen and how many the frame
+        # may hold before the finer levels are dropped (display settings).
+        self.point_size = float(config.get("display", "point_size",
+                                           default=POINT_SIZE_PX)
+                                if config else POINT_SIZE_PX)
+        self.point_budget = int(config.get("display", "point_budget",
+                                           default=POINT_BUDGET)
+                                if config else POINT_BUDGET)
+        # (level drawn, points drawn, points total) of the last frame, so
+        # the status bar can say when a scan is being shown thinned
+        self.cloud_lod = None
         self._max_line_width = 1.0          # real cap read back in initializeGL
         self._uloc_cache: dict = {}
         # what the GL context is already set to, so the draw loop can stop
@@ -981,6 +1098,7 @@ class Viewport(QOpenGLWidget):
         self._mesh_prog = _compile(MESH_VERT, MESH_FRAG)
         self._line_prog = _compile(LINE_VERT, LINE_FRAG)
         self._thick_prog = _compile(THICK_VERT, LINE_FRAG)
+        self._point_prog = _compile(POINT_VERT, POINT_FRAG)
         self._bg_prog = _compile(BG_VERT, BG_FRAG)
         self._tex_prog = _compile(TEX_VERT, TEX_FRAG)
         self._tex_vao = GL.glGenVertexArrays(1)
@@ -1033,6 +1151,11 @@ class Viewport(QOpenGLWidget):
         GL.glEnable(GL.GL_MULTISAMPLE)
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+        # the point shader sets gl_PointSize; a core profile needs telling
+        try:
+            GL.glEnable(GL.GL_PROGRAM_POINT_SIZE)
+        except Exception:                        # noqa: BLE001
+            pass
 
     def set_grid_params(self, extent: int, major: int):
         """Rebuild the grid with new dimensions (needs a live GL context)."""
@@ -1365,8 +1488,9 @@ class Viewport(QOpenGLWidget):
         cached = getattr(self, "_tech_cache", None)
         if cached is None or cached[0] != key:
             from ..core.mesh import MeshShape
+            from ..core.pointcloud import PointCloudShape
             shapes = [o.shape for o in self.scene.visible_objects()
-                      if not isinstance(o.shape, MeshShape)]
+                      if not isinstance(o.shape, (MeshShape, PointCloudShape))]
             if shapes:
                 fwd = cam.target - cam.position
                 fwd = fwd / max(np.linalg.norm(fwd), 1e-12)
@@ -1852,6 +1976,9 @@ class Viewport(QOpenGLWidget):
         if pending is not None and pending[0] is obj.shape:
             return True
         from ..core.mesh import MeshShape
+        from ..core.pointcloud import PointCloudShape
+        if isinstance(obj.shape, PointCloudShape):
+            return False          # its display is its arrays: no work to defer
         try:
             from ..core import geometry as g
             if isinstance(obj.shape, MeshShape):
@@ -1963,7 +2090,8 @@ class Viewport(QOpenGLWidget):
         clips_dirty = False           # True while anchored clips are bound
         for i in range(len(clips)):
             GL.glEnable(GL.GL_CLIP_DISTANCE0 + i)
-        for prog in (self._mesh_prog, self._line_prog, self._thick_prog):
+        for prog in (self._mesh_prog, self._line_prog, self._thick_prog,
+                     self._point_prog):
             self._set_clip_uniforms(prog, clips)
         translucent = mode == "ghosted" or any(
             (o.material or {}).get("opacity", 1.0) < 1.0 for o in objects)
@@ -1978,6 +2106,7 @@ class Viewport(QOpenGLWidget):
             # shadow that is inside it
             self._draw_ground_shadow(mvp, objects)
         objects = self._cull(mvp, objects)
+        max_level = self._cloud_budget(objects)
         # Uniform state belongs to the program, not the draw call. The
         # display-mode uniforms are the same for every object in the
         # frame, so they are set once here; the matrices moved into the
@@ -2015,7 +2144,7 @@ class Viewport(QOpenGLWidget):
                 # anchored object needs them re-expressed around its
                 # anchor, and the next unanchored one needs them back.
                 for prog in (self._mesh_prog, self._line_prog,
-                             self._thick_prog):
+                             self._thick_prog, self._point_prog):
                     self._set_clip_uniforms(prog, oclips)
                 clips_dirty = gpu.anchor is not None
             selected = self._looks_selected(obj.id)
@@ -2023,6 +2152,9 @@ class Viewport(QOpenGLWidget):
             if obj.locked and not selected:
                 grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
                 color = (grey, grey, grey)
+            if getattr(gpu, "cloud_count", 0):
+                self._draw_cloud(gpu, obj, omvp, color, selected, max_level)
+                continue
             line_color = color
             surface = color
             if mode == "rendered" and not selected and not obj.locked:
@@ -2131,7 +2263,7 @@ class Viewport(QOpenGLWidget):
                     GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
             if obj.clip_plane is not None and clips:
                 for prog in (self._mesh_prog, self._line_prog,
-                             self._thick_prog):
+                             self._thick_prog, self._point_prog):
                     self._set_clip_uniforms(prog, oclips)
             if gpu.iso_count and show_isos:
                 if selected:
@@ -2172,8 +2304,86 @@ class Viewport(QOpenGLWidget):
     def _end_clips(self, clips):
         for i in range(len(clips)):
             GL.glDisable(GL.GL_CLIP_DISTANCE0 + i)
-        for prog in (self._mesh_prog, self._line_prog, self._thick_prog):
+        for prog in (self._mesh_prog, self._line_prog, self._thick_prog,
+                     self._point_prog):
             self._set_clip_uniforms(prog, [])
+
+    # ------------------------------------------------------------ point clouds
+
+    def _cloud_budget(self, objects) -> int:
+        """Which LOD levels this frame draws of the clouds in `objects`,
+        and a note in the status bar when that is not all of them."""
+        counts = []
+        for obj in objects:
+            gpu = self._gpu.get(obj.id)
+            if gpu is not None and getattr(gpu, "cloud_count", 0):
+                counts.append((gpu.cloud_levels, gpu.cloud_count))
+        if not counts:
+            if self.cloud_lod is not None:
+                self.cloud_lod = None
+            return 2
+        level = cloud_level_budget(counts, self.point_budget)
+        total = sum(c_all for _, c_all in counts)
+        drawn = sum((c[level] if c is not None else c_all)
+                    for c, c_all in counts)
+        lod = (level, drawn, total)
+        if lod != self.cloud_lod:
+            self.cloud_lod = lod
+            self._say_cloud_lod()
+        return level
+
+    def cloud_lod_note(self) -> str:
+        """What the frame is doing about the point budget, for people."""
+        lod = self.cloud_lod
+        if lod is None or lod[1] >= lod[2]:
+            return ""
+        return (f"Point clouds thinned to level {lod[0]}: drawing "
+                f"{lod[1]:,} of {lod[2]:,} points")
+
+    def _say_cloud_lod(self):
+        note = self.cloud_lod_note()
+        win = self.window()
+        bar = getattr(win, "statusBar", None)
+        if bar is None or win is self:
+            return
+        try:
+            if note:
+                bar().showMessage(note, 6000)
+            else:
+                bar().clearMessage()
+        except Exception:                                # noqa: BLE001
+            pass                    # a status line is never worth a frame
+
+    def _draw_cloud(self, gpu, obj, mvp, color, selected: bool,
+                    max_level: int):
+        count = gpu.cloud_count
+        if gpu.cloud_levels is not None:
+            count = gpu.cloud_levels[min(max_level, len(gpu.cloud_levels) - 1)]
+        if count:
+            prog = self._point_prog
+            self._use(prog)
+            self._set_mvp(prog, mvp)
+            GL.glUniform1f(self._uloc(prog, "uPointSize"),
+                           self.point_size * (1.5 if selected else 1.0))
+            GL.glUniform3f(self._uloc(prog, "uColor"), *color)
+            # Coloured points keep their colour, tinted when selected so
+            # the scan still reads as a scan; uncoloured ones take the
+            # object's colour, or the selection colour outright.
+            if selected:
+                mix = 0.6 if gpu.cloud_colored else 1.0
+            else:
+                mix = 0.0 if gpu.cloud_colored else 1.0
+            GL.glUniform1f(self._uloc(prog, "uColorMix"), mix)
+            GL.glBindVertexArray(gpu.cloud_vao)
+            GL.glDrawArrays(GL.GL_POINTS, 0, int(count))
+        if selected:
+            mn, mx = obj.bbox()
+            segs = rebased(_bbox_segments(mn, mx), gpu.anchor)
+            self._preview.update(segs)
+            self._set_line_uniforms(mvp, (*theme.SELECTION_COLOR, 1.0))
+            self._line_width(1.0)
+            GL.glBindVertexArray(self._preview.vao)
+            GL.glDrawArrays(GL.GL_LINES, 0, len(segs))
 
     def _draw_ground_shadow(self, mvp, objects):
         """Flatten object triangles onto z=0 as a soft dark stamp."""
@@ -3466,6 +3676,14 @@ class Viewport(QOpenGLWidget):
             mesh = obj.mesh
             depth = np.inf
             hit = False
+            if mesh.is_cloud:
+                # Nearest point within the pick radius, over an even
+                # sample of the cloud: a box test would select a room-sized
+                # scan from anywhere inside it, which is everywhere.
+                pt_depth = self._nearest_cloud_point(mesh, eye, px, py, w, h)
+                if pt_depth is not None:
+                    found.append((pt_depth, obj.id))
+                continue
             if mesh.has_faces and self._pick_mode() != "wireframe":
                 tris, _ = self._near_triangles(mesh, px - r, py - r,
                                                px + r, py + r, w, h)
@@ -3511,6 +3729,30 @@ class Viewport(QOpenGLWidget):
         # by depth alone, so objects at the same distance keep scene order
         found.sort(key=lambda d: d[0])
         return [obj_id for _, obj_id in found]
+
+    # How many of a cloud's points a click or a band projects: enough that
+    # a wall of points has one under the cursor, few enough to be instant.
+    PICK_CLOUD_SAMPLE = 200_000
+
+    def _cloud_pick_points(self, mesh) -> np.ndarray:
+        n = len(mesh.vertices)
+        stride = max(1, n // self.PICK_CLOUD_SAMPLE)
+        return mesh.vertices[::stride].astype(float)
+
+    def _nearest_cloud_point(self, mesh, eye, px, py, w, h):
+        """Depth of the cloud point nearest the cursor within the pick
+        radius, or None when none is that close."""
+        pts = self._cloud_pick_points(mesh)
+        if not len(pts):
+            return None
+        scr = eye.project(pts, w, h)
+        ahead = scr[:, 2] > 0
+        d2 = (scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2
+        # a scan point is small on screen; give it the same reach a curve has
+        near = ahead & (d2 < (PICK_RADIUS_PX * 1.5) ** 2)
+        if not near.any():
+            return None
+        return float(scr[near, 2].min())
 
     def pick_subobject(self, px: float, py: float):
         """(obj_id, "edge"|"face", index) under the pixel, or None."""
@@ -4177,6 +4419,8 @@ class Viewport(QOpenGLWidget):
                 # inside. All of it is where it is, which answers both
                 # kinds of box at once.
                 pts = mesh.points
+            elif mesh.is_cloud:
+                pts = self._cloud_pick_points(mesh)
             elif len(mesh.vertices):
                 pts = mesh.vertices
             else:

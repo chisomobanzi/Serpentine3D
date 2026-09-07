@@ -205,7 +205,8 @@ class PropertiesPanel(QWidget):
             idx = self.layer_combo.findData(obj.layer_id)
             if idx >= 0:
                 self.layer_combo.setCurrentIndex(idx)
-            self.kind_label.setText(obj.kind.capitalize())
+            self.kind_label.setText("Point cloud" if obj.kind == "pointcloud"
+                                    else obj.kind.capitalize())
             self.measure_label.setText(self._measures(obj))
             self.color_widget.setEnabled(True)
             self._show_swatch(self._ink_of(obj))
@@ -337,6 +338,8 @@ class PropertiesPanel(QWidget):
             if obj.kind == "solid":
                 return (f"Volume: {g.volume(obj.shape):.3f} {u}³\n"
                         f"Area: {g.surface_area(obj.shape):.3f} {u}²")
+            if obj.kind == "pointcloud":
+                return cloud_measures(obj, fmt)
         except Exception:
             pass
         return "—"
@@ -434,3 +437,19 @@ class PropertiesPanel(QWidget):
             self.refresh()
             return
         self._paper_edit("detail scale", detail, scale_denom=denom)
+
+
+def cloud_measures(obj, fmt) -> str:
+    """What the panel says about a scan: how many points, how big a box
+    they fill, and which of them are being drawn when not all are."""
+    cloud = obj.shape
+    (x0, y0, z0), (x1, y1, z1) = cloud.bbox()
+    lines = [f"Points: {cloud.count:,}",
+             f"Size: {fmt(x1 - x0)} × {fmt(y1 - y0)} × {fmt(z1 - z0)}"]
+    counts = cloud.level_counts()
+    if counts is not None:
+        lines.append("Levels: " + ", ".join(
+            f"{n:,} at {lvl}" for lvl, n in enumerate(counts) if n))
+    if cloud.rgb is None:
+        lines.append("No colour: drawn in the layer colour")
+    return "\n".join(lines)

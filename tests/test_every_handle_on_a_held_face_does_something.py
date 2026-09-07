@@ -80,6 +80,21 @@ def test_a_slide_back_to_zero_is_the_box():
                for n in _normals(vp.scene.get(obj.id).shape))
 
 
+def test_a_slide_too_far_keeps_the_gumball_on_the_last_good_face():
+    gb, vp, obj, i = _slab_gumball()
+    gb.begin_drag(("move", i), 15.0, 10.0, NONE)
+    good_label = gb.apply_scalar(3.0)
+    good_anchor = gb._draw_anchor()[0]
+
+    label = gb.apply_scalar(21.0)  # the leaning walls would cross
+
+    assert label == good_label
+    assert gb._draw_anchor()[0] == pytest.approx(good_anchor, abs=1e-6)
+    out = vp.scene.get(obj.id).shape
+    lid = g.faces_of(out)[_face_where(out, lambda n: n[2] > 0.999)]
+    assert np.asarray(g.centroid(lid)) == pytest.approx((13, 5, 10), abs=1e-6)
+
+
 def test_the_scale_box_tapers_the_face_along_its_axis():
     gb, vp, obj, i = _slab_gumball()
 

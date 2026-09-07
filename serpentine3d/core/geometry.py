@@ -402,8 +402,9 @@ def apply_matrix(shape, matrix):
     """
     import numpy as np
     from .mesh import MeshShape
+    from .pointcloud import PointCloudShape
     m = np.asarray(matrix, float)
-    if isinstance(shape, MeshShape):
+    if isinstance(shape, (MeshShape, PointCloudShape)):
         return shape.transformed(m)
     a = m[:3, :3]
     # a similarity is a rotation times a single scale, so A@A.T is that
@@ -860,10 +861,37 @@ def offset_faces(shape, offsets: dict) -> TopoDS_Shape:
 
 
 def offset_face(shape, face_index: int, distance: float) -> TopoDS_Shape:
-    """Offset a single (typically non-planar) face of a solid along its
-    surface normal — e.g. push a cylinder's wall out to grow its radius.
-    A thin wrapper over offset_faces."""
-    return offset_faces(shape, {face_index: distance})
+    """Move one face along its surface normal.
+
+    A planar face is carried rigidly while its neighbours lean to keep hold
+    of its translated outline.  Curved faces retain the surface-offset
+    behaviour used to grow, for example, a cylinder's wall.
+    """
+    faces = faces_of(shape)
+    if not (0 <= face_index < len(faces)):
+        raise GeometryError("Face index out of range")
+    d = float(distance)
+    if abs(d) < tight():
+        raise GeometryError("Distance is zero")
+    try:
+        normal, point = _planar_frame(faces[face_index])
+    except GeometryError:
+        return offset_faces(shape, {face_index: d})
+
+    delta = tuple(v * d for v in normal)
+    try:
+        adapted = _refit_outline(
+            shape, face_index,
+            lambda p: tuple(p[k] + delta[k] for k in range(3)))
+    except GeometryError:
+        return offset_faces(shape, {face_index: d})
+    held = _face_on_plane(adapted, normal, point, near=point)
+    adapted_faces = faces_of(adapted)
+    held_index = next((i for i, face in enumerate(adapted_faces)
+                       if face.IsSame(held)), None)
+    if held_index is None:
+        raise GeometryError("The moved face has gone")
+    return offset_faces(adapted, {held_index: d})
 
 
 def _planar_frame(face):
@@ -932,12 +960,118 @@ def _rotated(v, axis, degrees):
     return tuple(v[i] * c + kv[i] * s + k[i] * kd * (1 - c) for i in range(3))
 
 
+def _rotate_face_rigidly(shape, face_index, pivot, axis, degrees):
+    """Rotate one polygonal face and carry its incident vertices with it.
+
+    Faces touching the held face are rebuilt from their updated boundary;
+    this lets a side become a single ruled patch when its fixed far edge and
+    rotated near edge are skew.  Faces outside that one-ring stay intact.
+    """
+    from OCP.BRepCheck import (
+        BRepCheck_Analyzer, BRepCheck_Shell, BRepCheck_Status,
+    )
+    from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
+    from OCP.GeomAbs import GeomAbs_CurveType
+    from .occ import BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Sewing
+
+    faces = faces_of(shape)
+    held = faces[face_index]
+    held_vertices = []
+    exp = TopExp_Explorer(held, occ.VERTEX)
+    while exp.More():
+        vertex = occ.to_vertex(exp.Current())
+        if not any(vertex.IsSame(other) for other in held_vertices):
+            held_vertices.append(vertex)
+        exp.Next()
+
+    def is_held(vertex):
+        return any(vertex.IsSame(other) for other in held_vertices)
+
+    def turned_point(value):
+        relative = tuple(value[k] - pivot[k] for k in range(3))
+        turned = _rotated(relative, axis, degrees)
+        return tuple(pivot[k] + turned[k] for k in range(3))
+
+    rebuilt = []
+    for face in faces:
+        if face.IsSame(held):
+            rebuilt.append(rotate(face, pivot, axis, degrees))
+            continue
+        outer = BRepTools.OuterWire_s(face)
+        walk = BRepTools_WireExplorer(outer)
+        points, edges, touches = [], [], False
+        while walk.More():
+            edge = occ.to_edge(walk.Current())
+            vertex = occ.to_vertex(walk.CurrentVertex())
+            point = pnt_tuple(occ.point_of_vertex(vertex))
+            on_held = is_held(vertex)
+            points.append(turned_point(point) if on_held else point)
+            edges.append(edge)
+            touches = touches or on_held
+            walk.Next()
+        if not touches:
+            rebuilt.append(face)
+            continue
+        wires = []
+        wire_exp = TopExp_Explorer(face, occ.WIRE)
+        while wire_exp.More():
+            wires.append(occ.to_wire(wire_exp.Current()))
+            wire_exp.Next()
+        if len(wires) != 1 or len(points) < 3:
+            raise GeometryError("A face beside this one cannot be rebuilt")
+        if any(occ.edge_adaptor(edge).GetType()
+               != GeomAbs_CurveType.GeomAbs_Line for edge in edges):
+            raise GeometryError("A curved face beside this one cannot adapt")
+        boundary = make_polyline(points, closed=True)
+        try:
+            new_face = planar_face(boundary)
+        except GeometryError:
+            if len(points) != 4:
+                new_face = patch_surface([boundary])
+            else:
+                from OCP.Geom import Geom_BezierSurface
+                from OCP.TColgp import TColgp_Array2OfPnt
+                poles = TColgp_Array2OfPnt(1, 2, 1, 2)
+                poles.SetValue(1, 1, _pnt(points[0]))
+                poles.SetValue(2, 1, _pnt(points[1]))
+                poles.SetValue(2, 2, _pnt(points[2]))
+                poles.SetValue(1, 2, _pnt(points[3]))
+                new_face = BRepBuilderAPI_MakeFace(
+                    Geom_BezierSurface(poles), tight()).Face()
+        new_face = occ.to_face(new_face)
+        before_n = face_point_normal(face)[1]
+        after_n = face_point_normal(new_face)[1]
+        if sum(a * b for a, b in zip(before_n, after_n)) < 0:
+            new_face = occ.to_face(new_face.Reversed())
+        rebuilt.append(new_face)
+
+    sew = BRepBuilderAPI_Sewing(tight())
+    for face in rebuilt:
+        sew.Add(face)
+    sew.Perform()
+    sewn = sew.SewedShape()
+    if sewn is None or sewn.IsNull() or sewn.ShapeType() != occ.SHELL:
+        raise GeometryError("Rotating the face did not leave one shell")
+    shell = occ.to_shell(sewn)
+    if BRepCheck_Shell(shell).Closed() \
+            != BRepCheck_Status.BRepCheck_NoError:
+        raise GeometryError("Rotating the face left an open shell")
+    solid_mk = BRepBuilderAPI_MakeSolid(shell)
+    if not solid_mk.IsDone():
+        raise GeometryError("The rotated shell could not become a solid")
+    out = solid_mk.Solid()
+    if (shape_kind(out) != "solid" or len(faces_of(out)) != len(faces)
+            or not BRepCheck_Analyzer(out).IsValid()):
+        raise GeometryError("Rotating the face did not leave a closed solid")
+    return out
+
+
 def tilt_face(shape, face_index: int, point: Point, axis: Point,
               degrees: float) -> TopoDS_Shape:
     """Turn a planar face of a solid about the line through `point` along
-    `axis`, which must lie in the face; the faces beside it stretch or trim
-    to meet it, the way they do when the face is moved. A draft angle, a
-    lid propped open, a wall leaned back: all this."""
+    `axis`, which must lie in the face.  Its outline turns rigidly and the
+    faces beside it adapt to keep hold of those edges.  A draft angle, a lid
+    propped open, a wall leaned back: all this."""
     faces = faces_of(shape)
     if not (0 <= face_index < len(faces)):
         raise GeometryError("Face index out of range")
@@ -953,8 +1087,9 @@ def tilt_face(shape, face_index: int, point: Point, axis: Point,
                             "nothing")
     if abs(float(degrees)) < 1e-9:
         raise GeometryError("Distance is zero")
-    out, _ = _draft(shape, face, point, a, _rotated(n, a, float(degrees)))
-    return out
+    return _rotate_face_rigidly(shape, face_index,
+                                tuple(float(v) for v in point), a,
+                                float(degrees))
 
 
 def edge_faces(shape, edge_index: int) -> list:
@@ -2623,7 +2758,8 @@ def _apply_trsf(shape, trsf: gp_Trsf, copy: bool = True) -> TopoDS_Shape:
 
 def translate(shape, offset: Point) -> TopoDS_Shape:
     from .mesh import MeshShape
-    if isinstance(shape, MeshShape):
+    from .pointcloud import PointCloudShape
+    if isinstance(shape, (MeshShape, PointCloudShape)):
         return shape.translated(offset)
     t = gp_Trsf()
     t.SetTranslation(_vec(offset))
@@ -2633,7 +2769,8 @@ def translate(shape, offset: Point) -> TopoDS_Shape:
 def rotate(shape, axis_point: Point, axis_dir: Point,
            angle_deg: float) -> TopoDS_Shape:
     from .mesh import MeshShape
-    if isinstance(shape, MeshShape):
+    from .pointcloud import PointCloudShape
+    if isinstance(shape, (MeshShape, PointCloudShape)):
         import numpy as np
         a = np.asarray(axis_dir, float)
         a = a / np.linalg.norm(a)
@@ -2684,7 +2821,8 @@ def scale(shape, center: Point, factor: float,
           factors: Point | None = None) -> TopoDS_Shape:
     """Uniform scale, or non-uniform when `factors=(sx,sy,sz)` given."""
     from .mesh import MeshShape
-    if isinstance(shape, MeshShape):
+    from .pointcloud import PointCloudShape
+    if isinstance(shape, (MeshShape, PointCloudShape)):
         import numpy as np
         f = np.asarray(factors if factors is not None
                        else (factor, factor, factor), float)
@@ -2730,7 +2868,8 @@ def scale_along_axis(shape, center: Point, axis: Point,
 
 def mirror(shape, plane_point: Point, plane_normal: Point) -> TopoDS_Shape:
     from .mesh import MeshShape
-    if isinstance(shape, MeshShape):
+    from .pointcloud import PointCloudShape
+    if isinstance(shape, (MeshShape, PointCloudShape)):
         import numpy as np
         n = np.asarray(plane_normal, float)
         n = n / np.linalg.norm(n)
@@ -2747,7 +2886,8 @@ def mirror(shape, plane_point: Point, plane_normal: Point) -> TopoDS_Shape:
 
 def copy_shape(shape) -> TopoDS_Shape:
     from .mesh import MeshShape
-    if isinstance(shape, MeshShape):
+    from .pointcloud import PointCloudShape
+    if isinstance(shape, (MeshShape, PointCloudShape)):
         return shape.copy()
     return BRepBuilderAPI_Copy(shape).Shape()
 
@@ -2755,14 +2895,17 @@ def copy_shape(shape) -> TopoDS_Shape:
 # --- interrogation ----------------------------------------------------------
 
 def shape_kind(shape) -> str:
-    """Classify as 'curve' | 'surface' | 'solid' | 'mesh' | 'point' |
-    'compound'.
+    """Classify as 'curve' | 'surface' | 'solid' | 'mesh' | 'pointcloud' |
+    'point' | 'compound'.
 
     Compounds are classified by their contents when uniform: a compound of
     solids behaves as a solid, of curves as a curve, and so on."""
     from .mesh import MeshShape
+    from .pointcloud import PointCloudShape
     if isinstance(shape, MeshShape):
         return "mesh"
+    if isinstance(shape, PointCloudShape):
+        return "pointcloud"
     st = shape.ShapeType()
     if st in (occ.EDGE, occ.WIRE):
         return "curve"
@@ -2800,7 +2943,8 @@ def unwrap_compound(shape) -> TopoDS_Shape:
 
 def bbox(shape) -> tuple[Point, Point]:
     from .mesh import MeshShape
-    if isinstance(shape, MeshShape):
+    from .pointcloud import PointCloudShape
+    if isinstance(shape, (MeshShape, PointCloudShape)):
         return shape.bbox()
     box = Bnd_Box()
     occ.bbox_add(shape, box)
@@ -2816,21 +2960,28 @@ def curve_length(shape) -> float:
 
 def surface_area(shape) -> float:
     from .mesh import MeshShape
+    from .pointcloud import PointCloudShape
     if isinstance(shape, MeshShape):
         return shape.area()
+    if isinstance(shape, PointCloudShape):
+        return 0.0                    # points have no surface
     return occ.surface_properties(shape).Mass()
 
 
 def volume(shape) -> float:
     from .mesh import MeshShape
+    from .pointcloud import PointCloudShape
     if isinstance(shape, MeshShape):
         return shape.volume()
+    if isinstance(shape, PointCloudShape):
+        return 0.0
     return occ.volume_properties(shape).Mass()
 
 
 def centroid(shape) -> Point:
     from .mesh import MeshShape
-    if isinstance(shape, MeshShape):
+    from .pointcloud import PointCloudShape
+    if isinstance(shape, (MeshShape, PointCloudShape)):
         return shape.centroid()
     kind = shape_kind(shape)
     if kind == "solid":
@@ -2852,10 +3003,16 @@ def is_valid(shape) -> bool:
 # than let every caller learn that, the bytes carry their own kind: a
 # mesh is tagged, anything else is the BREP it always was.
 _MESH_TAG = b"SMSH\x01"
+# A point cloud the same way, for the clipboard, the journal and undo: the
+# .serp file itself keeps clouds as raw blobs (fileio/native.py), not this.
+_CLOUD_TAG = b"SPCL\x01"
 
 
 def shape_to_bytes(shape) -> bytes:
     from .mesh import MeshShape
+    from .pointcloud import PointCloudShape
+    if isinstance(shape, PointCloudShape):
+        return _CLOUD_TAG + _cloud_pack(shape)
     if isinstance(shape, MeshShape):
         import numpy as np
         v = np.ascontiguousarray(shape.vertices, "<f4")
@@ -2872,7 +3029,46 @@ def shape_to_bytes(shape) -> bytes:
         os.unlink(path)
 
 
+def _cloud_pack(cloud) -> bytes:
+    import numpy as np
+    parts = [struct.pack("<I", cloud.count)]
+    flags = ((1 if cloud.rgb is not None else 0)
+             | (2 if cloud.conf is not None else 0)
+             | (4 if cloud.level is not None else 0))
+    parts.append(struct.pack("<I", flags))
+    parts.append(np.ascontiguousarray(cloud.xyz, "<f4").tobytes())
+    if cloud.rgb is not None:
+        parts.append(np.ascontiguousarray(cloud.rgb, np.uint8).tobytes())
+    if cloud.conf is not None:
+        parts.append(np.ascontiguousarray(cloud.conf, "<f4").tobytes())
+    if cloud.level is not None:
+        parts.append(np.ascontiguousarray(cloud.level, np.uint8).tobytes())
+    return b"".join(parts)
+
+
+def _cloud_unpack(data: bytes, offset: int):
+    import numpy as np
+    from .pointcloud import PointCloudShape
+    n, flags = struct.unpack("<II", data[offset:offset + 8])
+    at = offset + 8
+    xyz = np.frombuffer(data, "<f4", count=n * 3, offset=at).reshape(-1, 3)
+    at += n * 12
+    rgb = conf = level = None
+    if flags & 1:
+        rgb = np.frombuffer(data, np.uint8, count=n * 3,
+                            offset=at).reshape(-1, 3)
+        at += n * 3
+    if flags & 2:
+        conf = np.frombuffer(data, "<f4", count=n, offset=at)
+        at += n * 4
+    if flags & 4:
+        level = np.frombuffer(data, np.uint8, count=n, offset=at)
+    return PointCloudShape(xyz, rgb, conf, level)
+
+
 def shape_from_bytes(data: bytes):
+    if data[:len(_CLOUD_TAG)] == _CLOUD_TAG:
+        return _cloud_unpack(data, len(_CLOUD_TAG))
     if data[:len(_MESH_TAG)] == _MESH_TAG:
         import numpy as np
         from .mesh import MeshShape

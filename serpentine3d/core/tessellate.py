@@ -47,6 +47,14 @@ class DisplayMesh:
     # free-standing point objects (vertex shapes): (N, 3)
     points: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 3), np.float32))
+    # A point cloud (core/pointcloud.py) shows as vertices with no faces:
+    # the same bounds, culling and box-picking as everything else, and a
+    # points draw of its own. cloud_colors is (N, 3) uint8 or None;
+    # cloud_levels the cumulative point counts per LOD level, or None.
+    is_cloud: bool = False
+    cloud_colors: object = field(default=None, repr=False, compare=False)
+    cloud_levels: tuple | None = field(default=None, repr=False,
+                                       compare=False)
 
     has_curvature: bool = False
     # A serial number for this mesh, for caches that have to answer "is this
@@ -336,8 +344,11 @@ def _face_isocurves(face) -> list[np.ndarray]:
 
 def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
     from .mesh import MeshShape, mesh_to_display
+    from .pointcloud import PointCloudShape, cloud_to_display
     if isinstance(shape, MeshShape):
         return mesh_to_display(shape)
+    if isinstance(shape, PointCloudShape):
+        return cloud_to_display(shape)
     if deflection is None:
         deflection = _deflection_for(shape)
     if geometry.shape_kind(shape) != "curve":
