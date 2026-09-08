@@ -45,7 +45,7 @@ def set_default_gl_format():
 
 
 def match_pyopengl_to_qt() -> str | None:
-    """Make PyOpenGL talk to the driver through the same door Qt did.
+    """On Linux, make PyOpenGL use the same GLX/EGL binding as Qt.
 
     PyOpenGL picks a binding once, when `OpenGL.platform` is imported,
     from the environment: EGL if the session says Wayland, GLX
@@ -66,6 +66,11 @@ def match_pyopengl_to_qt() -> str | None:
     Call it once the QApplication exists (the probe needs a context to
     make current) and before anything imports the viewport.
     """
+    # A missing libGL.so.1 only implies EGL on Linux. On Windows and
+    # macOS this probe would force EGL instead of the native WGL/CGL
+    # backend, and frozen builds may not even contain the EGL plugin.
+    if sys.platform != "linux":
+        return None
     if os.environ.get("PYOPENGL_PLATFORM"):
         return None                     # someone chose by hand
     if _pyopengl_already_chose():

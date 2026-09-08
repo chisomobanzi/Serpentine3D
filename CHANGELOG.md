@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1 — 2026-09-08
+
+### Fixed
+
+- **Windows startup no longer forces the Linux EGL backend.** The GLX/EGL
+  probe added in 0.8.2 now runs only on Linux. Windows keeps its native WGL
+  backend, fixing the packaged application's `NoneType` exception while
+  importing `OpenGL.platform`. macOS also keeps its native backend.
+- Regression coverage checks Windows and macOS backend selection, explicit
+  user overrides, and Linux GLX/EGL matching.
+
 ## 0.9.0 — 2026-09-08
 
 ### Changed
