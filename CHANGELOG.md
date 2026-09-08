@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0 — 2026-09-08
+
+### Changed
+
+- **The point-cloud session format now carries its release contract.** Native
+  `.serp` version 3 files declare `requires: "0.9.0"`, matching the Mica
+  session-record specification and the Serpentine3D release that owns the
+  format. Drawings without point clouds, trajectories or session data still
+  use version 2 and remain compatible with older releases.
+
 ## 0.8.4 — 2026-09-08
 
 ### Added

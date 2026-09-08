@@ -6,21 +6,23 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.8.4 was cut (2026-09-08).
+Last updated when 0.9.0 was cut (2026-09-08).
 
 ---
 
 ## Where things stand
 
-Version `0.8.4` is in `pyproject.toml`, the lockfile and the three packaging
-files; `CHANGELOG.md`'s 0.8.4 section is dated 2026-09-08. This release adds
-native point-cloud objects and `.ply` interchange, makes held-face gumballs
-use the same red/green/blue axis colours as whole-object gumballs, and moves
-or rotates the selected planar face as one piece while its neighbours adapt.
-Rejected intermediate drags keep the gumball at the last valid shape. Nested
-closed profiles now extrude as material with holes, and the AppImage pins and
-self-tests its bundled geometry kernel before replacing the dock copy. Release
-validation on Linux: 2882 passed, nothing skipped.
+Version `0.9.0` is in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.9.0 section is dated 2026-09-08. It is the format
+contract release for native point-cloud objects and `.ply` interchange: a
+`.serp` version 3 session now declares that it requires 0.9.0, as the Mica
+session-record specification says. The point-cloud renderer, selection,
+properties, display budget, commands and version-3 round trip introduced in
+0.8.4 remain the implementation behind that contract. Release validation on
+Linux covered all 2,882 collected tests: 2,875 passed under the offscreen
+runner, 7 OpenGL-only tests skipped there, and all 5 SpaceMouse tests passed
+with local-socket access. The installed AppImage reports 0.9.0, passes its
+packaged self-test and answers a live RPC startup probe.
 
 0.8.2 was one fix, for the first bug reported by someone who could not
 start the app at all (#7, Manjaro/KDE Wayland on an RTX 3080): Serpentine3D now starts on

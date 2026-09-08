@@ -23,7 +23,7 @@ FORMAT_VERSION = 3
 # What a document with none of the version-3 kinds is written as.
 PLAIN_VERSION = 2
 # The Serpentine3D release a version-3 file asks its reader to be.
-REQUIRES = "0.8.4"
+REQUIRES = "0.9.0"
 
 
 def _write_container(doc: dict, path: str, thumbnail: bytes | None,
