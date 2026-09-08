@@ -119,6 +119,14 @@ class TextReq(Req):
 
 
 @dataclass
+class FileReq(TextReq):
+    """A path prompt a live window may answer with its file chooser."""
+    save: bool = False
+    title: str = "Choose file"
+    filters: str = ""
+
+
+@dataclass
 class OptionReq(Req):
     prompt: str
     options: list[str] = field(default_factory=list)
@@ -600,6 +608,7 @@ class CommandProcessor:
         self.request: Req | None = None
         self.last_command: str | None = None
         self.command_options: dict = {}
+        self.headless = False            # keep FileReq as typed input
         self._start_revision = 0
         self._select_buffer: list[str] = []
         self._listeners: list = []       # notified on state change
@@ -638,6 +647,8 @@ class CommandProcessor:
             expanded = alias_target.split()
             name = expanded[0]
             args = expanded[1:] + args
+        self.headless = any(arg.lower() == "--headless" for arg in args)
+        args = [arg for arg in args if arg.lower() != "--headless"]
         cd = resolve(name)
         if cd is None:
             self.ctx.echo(f"Unknown command: {name}")

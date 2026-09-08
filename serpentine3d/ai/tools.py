@@ -34,6 +34,19 @@ _NAMES = {"type": "array", "items": {"type": "string"}}
 
 TOOLS: list[dict] = [
     {
+        "name": "prepare_script",
+        "description": (
+            "Open Python source as a new editable Script draft without executing it. "
+            "Use for scripts the user wants to inspect, edit, or reuse. Run supplies "
+            "doc (working copy of the current Document), geo (geometry functions), "
+            "selected (selected scene objects). Use doc.get(name_or_id), doc.add(shape, "
+            "name=, layer=), doc.remove(name_or_id), doc.run(command, inputs), doc.scene.units. "
+            "For example doc.add(geo.make_box((0,0,0),10,20,30), name='Block'). "
+            "No live window or GUI api is supplied. User chooses Run, then Keep or Discard."),
+        "input_schema": _s(source={"type": "string"}, title={"type": "string"},
+                           _required=["source"]),
+    },
+    {
         "name": "scene_info",
         "description": (
             "Get the current scene: objects (name/kind/layer/bbox), layers, "
@@ -184,6 +197,8 @@ TOOLS: list[dict] = [
 def dispatch(api, name: str, args: dict) -> str | ImageResult:
     """Execute one tool call against a SerpApi. Raises ApiError on failure."""
     args = dict(args or {})
+    if name == "prepare_script":
+        return _j(api.prepare_script(args["source"], args.get("title", "Assistant.py")))
     if name == "scene_info":
         return _j(api.scene_info())
     if name == "screenshot":
@@ -248,6 +263,8 @@ def _j(result) -> str:
 def summarize_call(name: str, args: dict) -> str:
     """One-line human description of a tool call, for the chat panel."""
     args = args or {}
+    if name == "prepare_script":
+        return "preparing script: " + str(args.get("title", "Assistant.py"))
     if name == "run_command":
         inp = args.get("inputs") or []
         joined = " ".join(str(i) for i in inp if str(i))

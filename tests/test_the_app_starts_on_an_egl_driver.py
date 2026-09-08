@@ -115,9 +115,21 @@ def test_the_helper_is_cheap_to_import():
 
 def test_glx_is_asked_the_very_question_pyopengl_will_ask():
     """The probe is not a guess about the platform, it is the exact call
-    PyOpenGL's GLX binding makes. Nothing is current here, so it has to
+    PyOpenGL's GLX binding makes. Nothing is current at startup, so it has to
     come back empty - and above all it has to answer, not raise."""
-    assert glsetup._glx_sees_no_context() is True
+    import subprocess
+    import sys
+
+    # Earlier viewport tests may leave a real GLX context current even on
+    # Qt's offscreen platform. Exercise the startup condition in a fresh
+    # process, before Qt has created any context.
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "from serpentine3d.utils import glsetup; "
+         "assert glsetup._glx_sees_no_context() is True"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_pyopengl_is_pinned_to_egl_when_qt_is(monkeypatch,

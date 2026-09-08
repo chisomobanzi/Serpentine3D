@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from contextlib import contextmanager
 
 from . import fileio
 from .core import geometry as g
@@ -26,7 +27,39 @@ class SerpApi:
         self.viewport = window.viewport
         self.processor = window.processor
 
+    @contextmanager
+    def external_operation(self, name: str, args: dict, *, source: str,
+                           summary: str | None = None):
+        """Main-thread boundary for an AI or RPC operation on the live model.
+
+        Callers wrap dispatch with this context so a pending interactive
+        command retains its prompts/selection, and the common history records
+        the origin and outcome. Read-only queries remain available.
+        """
+        readonly = (name in {"scene_info", "screenshot", "measure", "viewport_info", "prepare_script"}
+                    or (name == "layers" and args.get("action", "list") == "list"))
+        description = summary or name
+        echo = self.window.command_line.echo
+        try:
+            if self.processor.busy and not readonly:
+                raise ApiError("Finish or cancel the active CAD command before requesting another operation.")
+            echo(f"[{source}] {description}")
+            yield
+        except Exception as exc:
+            echo(f"[{source}] {description}: {exc}")
+            raise
+
     # ------------------------------------------------------------- resolution
+
+    def prepare_script(self, source: str, title: str = "Assistant.py") -> dict:
+        """Open generated Python for review, without running it."""
+        if not isinstance(source, str) or not isinstance(title, str):
+            raise ApiError("Script source and title must be text.")
+        workspace = self.window.command_workspace
+        workspace.set_pane_visible("script", True)
+        workspace._ensure_script().new_draft(source, title or "Assistant.py")
+        return {"title": title, "status": "draft", "executed": False,
+                "message": "Ready in Script. The user can edit and choose Run to preview."}
 
     def _obj(self, ref: str):
         obj = self.scene.get(ref) or self.scene.find_by_name(ref)
@@ -137,7 +170,10 @@ class SerpApi:
         listener = messages.append
         self.window.ctx.add_echo_listener(listener)
         try:
-            ok = self.processor.run(command.strip())
+            text = command.strip()
+            if "--headless" not in (part.lower() for part in text.split()):
+                text += " --headless"
+            ok = self.processor.run(text)
             if not ok:
                 raise ApiError(messages[-1] if messages
                                else f"Unknown command {command}")

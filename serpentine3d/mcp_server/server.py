@@ -191,6 +191,17 @@ def serp_command(command: str, inputs: list[str] | None = None) -> str:
 
 
 @mcp.tool()
+def serp_prepare_script(source: str, title: str = "Assistant.py") -> str:
+    """Open Python in a new editable Script draft without executing it.
+
+    Existing drafts and geometry are preserved. Scripts can use doc (a working
+    document), geo (geometry helpers), and selected (selected SceneObjects).
+    The user can edit the draft, Run to preview, then Keep or Discard its changes.
+    """
+    return _call("prepare_script", source=source, title=title)
+
+
+@mcp.tool()
 def serp_layers(action: str = "list", name: str = "", new_name: str = "",
                 color: list[float] | None = None, visible: bool = True,
                 objects: list[str] | None = None, parent: str = "") -> str:

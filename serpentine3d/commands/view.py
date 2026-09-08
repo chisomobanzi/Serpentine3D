@@ -1,7 +1,12 @@
 """View and display commands (non-mutating)."""
 
 from ..core import geometry as g
-from .base import OptionReq, PointReq, SelectReq, TextReq, command, frame_sides
+from .base import (
+    FileReq, OptionReq, PointReq, SelectReq, TextReq, command, frame_sides,
+)
+
+
+_IMAGE_FILTER = "Images (*.png *.jpg *.jpeg)"
 
 
 def _vp(ctx):
@@ -136,7 +141,9 @@ def cmd_bottom(ctx):
 def cmd_viewcapturetofile(ctx):
     """Save the active viewport as a PNG image."""
     import os
-    path = yield TextReq("Image path", default="~/viewport.png")
+    path = yield FileReq("Image path", default="~/viewport.png", save=True,
+                         title="Save viewport capture",
+                         filters=_IMAGE_FILTER)
     path = os.path.abspath(os.path.expanduser(path.strip()))
     if not path.lower().endswith((".png", ".jpg", ".jpeg")):
         path += ".png"
@@ -754,8 +761,8 @@ def cmd_gumball(ctx):
 
 @command("pictureframe", aliases=("picture",))
 def cmd_pictureframe(ctx):
-    """Place a reference image in the model (trace over photos/plans)."""
-    from .base import OptionReq, PointReq, TextReq
+    """Choose and place an embedded reference image for tracing."""
+    from .base import OptionReq, PointReq
     action = "Add"
     if ctx.scene.image_planes:
         action = yield OptionReq("Picture frame",
@@ -767,19 +774,26 @@ def cmd_pictureframe(ctx):
         ctx.echo(f"Removed {n} picture frame(s).")
         return
     import os
-    path = yield TextReq("Image path (.png/.jpg)")
+    path = yield FileReq("Image path (.png/.jpg)", title="Choose picture",
+                         filters=_IMAGE_FILTER)
     path = os.path.abspath(os.path.expanduser(path.strip()))
     if not os.path.exists(path):
         ctx.echo(f"File not found: {path}")
         return
-    c1 = yield PointReq("First corner")
-    c2 = yield PointReq("Opposite corner (width; height follows the "
-                        "image aspect)", rubber_from=c1)
+    try:
+        with open(path, "rb") as image_file:
+            image_data = image_file.read()
+    except OSError:
+        ctx.echo(f"Could not read the image: {path}")
+        return
     from PySide6.QtGui import QImage
-    img = QImage(path)
+    img = QImage.fromData(image_data)
     if img.isNull():
         ctx.echo("Could not read the image.")
         return
+    c1 = yield PointReq("First corner")
+    c2 = yield PointReq("Opposite corner (width; height follows the "
+                        "image aspect)", rubber_from=c1)
     aspect = img.height() / max(img.width(), 1)
     cp = ctx.cplane
     u1, v1, w1 = cp.from_world(c1)
@@ -792,7 +806,7 @@ def cmd_pictureframe(ctx):
         cp.to_world(u1, v1 + height, w1), origin))
     ctx.scene.image_planes.append({
         "path": path, "origin": list(origin), "u": list(u_vec),
-        "v": list(v_vec), "alpha": 1.0,
+        "v": list(v_vec), "alpha": 1.0, "image_data": image_data,
     })
     ctx.scene.notify()
     ctx.echo(f"Picture frame placed ({os.path.basename(path)}).")

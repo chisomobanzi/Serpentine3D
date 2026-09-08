@@ -2,6 +2,8 @@
 
 Every command is typed on the command line (Tab completes,
 F1 opens this list inside the app). Aliases in parentheses.
+Commands that need a file open a filtered chooser by default. Append
+`--headless` to keep the typed path prompt for scripts and automation.
 
 ## Booleans
 
@@ -88,7 +90,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `ortho` | Toggle ortho: picked points lock to CPlane axes from the last |
 | `osnap` | Toggle one object-snap type (or All = the master switch) — |
 | `perspective` (`persp`) | Perspective |
-| `pictureframe` (`picture`) | Place a reference image in the model (trace over photos/plans). |
+| `pictureframe` (`picture`) | Choose and place an embedded reference image for tracing. |
 | `pointsoff` (`pf`) | Pointsoff |
 | `pointson` (`po`) | Show control points for selected curves and surfaces (F10). |
 | `printcheck` (`printinfo`) | Check selected objects for 3D-print readiness: watertight, manifold, |
@@ -215,6 +217,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `lockother` | Lock everything except what you picked, as Rhino's LockOther does. |
 | `matchprops` (`matchproperties`) | Copy layer, colour and material from one object to others. |
 | `meshtobrep` | Convert mesh objects into exact BREP shells (slow for big meshes). |
+| `pointcloud` (`pc`) | Point clouds: `info` says what a scan holds; `subsample` keeps an |
 | `purge` | Remove empty layers and unused block definitions. |
 | `sendbackward` (`sendbackwards`) | Nudge the selected objects one step towards the back. |
 | `sendtoback` (`sb`) | Draw the selected objects behind overlapping ones. |
@@ -235,6 +238,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `sellast` | Sellast |
 | `sellayer` | Sellayer |
 | `selname` | Select objects whose name contains the given text. |
+| `selpointcloud` (`selpc`, `selpointclouds`) | Selpointcloud |
 | `selprev` | Restore the previous selection. |
 | `selpt` (`selpoints`) | Selpt |
 | `selsolid` (`selsolids`) | Selsolid |
@@ -309,7 +313,7 @@ F1 opens this list inside the app). Aliases in parentheses.
 | `orient3pt` (`o3`) | Remap objects from three reference points to three target points |
 | `projecttocplane` (`flatten`) | Flatten curves/surfaces/points onto the construction plane. |
 | `rotate` (`ro`) | Rotate around the CPlane normal: type an angle, or pick a |
-| `rotate3d` (`ro3`) | Rotate around an arbitrary axis picked as two points. |
+| `rotate3d` (`ro3`) | Rotate around an arbitrary axis picked as two points: type an |
 | `scale` (`sc`) | Scale about a base point: type a factor, or grab a reference |
 | `scale1d` | Stretch along one direction only: type a factor and it stretches |
 | `scale2d` | Scale in the CPlane only (thickness along the CPlane normal is |

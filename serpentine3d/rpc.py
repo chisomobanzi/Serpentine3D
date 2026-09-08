@@ -48,11 +48,19 @@ class RpcServer(QObject):
             job["done"].set()
 
     def call(self, method: str, params: dict):
-        fn = getattr(self.api, method, None)
-        if fn is None or method.startswith("_"):
-            raise ApiError(f"Unknown method '{method}'")
-        job = {"fn": lambda: fn(**(params or {})),
-               "done": threading.Event()}
+        args = params or {}
+
+        def invoke():
+            # The history widget and pending command belong to the Qt thread,
+            # just like the API operation itself.
+            with self.api.external_operation(method, args, source="MCP"):
+                fn = getattr(self.api, method, None)
+                if (not callable(fn) or method.startswith("_")
+                        or method == "external_operation"):
+                    raise ApiError(f"Unknown method '{method}'")
+                return fn(**args)
+
+        job = {"fn": invoke, "done": threading.Event()}
         self._invoke.emit(job)
         job["done"].wait(timeout=120)
         if "error" in job:

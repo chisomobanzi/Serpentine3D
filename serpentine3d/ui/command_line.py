@@ -140,6 +140,7 @@ class CommandLine(QWidget):
         self.awaiting_command = True
         self._history: list[str] = []
         self._hist_pos = 0
+        self.suggestion_anchor = self
 
         mono = QFont("monospace")
         mono.setStyleHint(QFont.StyleHint.TypeWriter)
@@ -196,7 +197,7 @@ class CommandLine(QWidget):
         self._chips: list[QPushButton] = []
         self._keyword_chips: list[QPushButton] = []
 
-        row = QHBoxLayout()
+        row = self.entry_layout = QHBoxLayout()
         row.setContentsMargins(8, 4, 8, 6)
         row.setSpacing(8)
         row.addWidget(self.prompt_label)
@@ -237,6 +238,15 @@ class CommandLine(QWidget):
 
     def set_prompt(self, text: str):
         self.prompt_label.setText(text)
+        self.prompt_label.setVisible(not getattr(self, "compact", False)
+                                     or text.strip().rstrip(":").lower() != "command")
+
+    def set_compact(self, compact: bool):
+        """The workspace already labels the destination beside this entry."""
+        self.compact = compact
+        margins = (3, 0, 3, 0) if compact else (8, 4, 8, 6)
+        self.entry_layout.setContentsMargins(*margins)
+        self.set_prompt(self.prompt_label.text())
 
     def set_options(self, chips: list):
         """Show clickable [Name=Value] chips; click cycles the value."""
@@ -388,7 +398,8 @@ class CommandLine(QWidget):
                     max(200, self.input.width()))
         self.suggestions.setGeometry(
             self.input.mapTo(win, QPoint(0, 0)).x(),
-            max(0, self.mapTo(win, QPoint(0, 0)).y() - height), width, height)
+            max(0, self.suggestion_anchor.mapTo(win, QPoint(0, 0)).y() - height),
+            width, height)
         self.suggestions.raise_()
         self.suggestions.show()
 

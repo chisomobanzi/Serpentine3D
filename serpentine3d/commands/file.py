@@ -1,12 +1,13 @@
 """File commands: save, open, import, export, new.
 
-Each takes a typed path; the window's menu actions call these with dialogs.
+Each opens the window's file chooser by default and keeps its typed path
+request when run with ``--headless`` or through the API.
 """
 
 import os
 
 from .. import fileio
-from .base import OptionReq, SelectReq, TextReq, command
+from .base import FileReq, OptionReq, SelectReq, command
 
 
 def _expand(path: str) -> str:
@@ -33,8 +34,10 @@ def _thumbnail(ctx) -> bytes | None:
 
 @command("save", mutates=False)
 def cmd_save(ctx):
-    default = getattr(ctx, "current_path", None)
-    path = yield TextReq("Save as (.serp or .3dm path)", default=default)
+    default = getattr(ctx, "current_path", None) or "~/untitled.serp"
+    path = yield FileReq("Save as (.serp or .3dm path)", default=default,
+                         save=True, title="Save model",
+                         filters=fileio.export_filter())
     path = _expand(path)
     # Only a name with no writable extension gets the native one: typed
     # "out.3dm" used to become out.3dm.serp, so saving to Rhino needed
@@ -50,7 +53,8 @@ def cmd_save(ctx):
 
 @command("open", mutates=True)
 def cmd_open(ctx):
-    path = yield TextReq("File to open (.serp)")
+    path = yield FileReq("File to open (.serp)", title="Open model",
+                         filters=fileio.import_filter())
     path = _expand(path)
     if not os.path.exists(path):
         ctx.echo(f"File not found: {path}")
@@ -64,7 +68,8 @@ def cmd_open(ctx):
 
 @command("import", aliases=("imp",), mutates=True)
 def cmd_import(ctx):
-    path = yield TextReq("File to import (.step/.stp/.obj/.serp)")
+    path = yield FileReq("File to import (.step/.stp/.obj/.serp)",
+                         title="Import model", filters=fileio.import_filter())
     path = _expand(path)
     if not os.path.exists(path):
         ctx.echo(f"File not found: {path}")
@@ -83,7 +88,9 @@ def cmd_export(ctx):
     if scope == "Selected":
         objs = yield SelectReq("Select objects to export")
         ids = [o.id for o in objs]
-    path = yield TextReq("Export path (.step/.stp/.obj/.serp)")
+    path = yield FileReq("Export path (.step/.stp/.obj/.serp)",
+                         default="~/untitled.step", save=True,
+                         title="Export model", filters=fileio.export_filter())
     path = _expand(path)
     fileio.export_file(ctx.scene, path, only_ids=ids)
     ctx.echo(f"Exported to {path}")

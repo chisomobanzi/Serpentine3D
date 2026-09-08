@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from . import commands as cmd_pkg
 from . import fileio
 from .commands.base import (
-    CommandContext, CommandProcessor, PointReq, SelectReq, TextReq,
+    CommandContext, CommandProcessor, FileReq, PointReq, SelectReq, TextReq,
 )
 from .core.history import History
 from .core.scene import Scene
@@ -26,7 +26,7 @@ from .core.selection import SelectionManager
 from .ui import theme
 from .ui.command_line import CommandLine
 from .ui.dialogs import untether
-from .ui.display_panel import DisplayPanel
+from .ui.display_panel import DisplaySettingsDialog
 from .ui.layers_panel import LayersPanel
 from .ui.properties import PropertiesPanel
 from .ui.viewport import Viewport, set_default_gl_format
@@ -137,25 +137,14 @@ class MainWindow(QMainWindow):
                                          self._primary_dock)
 
         from .ui.osnap_bar import OsnapBar
+        from .ui.command_workspace import CommandWorkspace
         self.command_line = CommandLine()
         self.osnap_bar = OsnapBar(self.viewport, self.cfg)
-        cmd_container = QWidget()
-        from PySide6.QtWidgets import QSizePolicy
-        # Preferred, not Fixed: Fixed handed the dock a maximum height equal
-        # to the height it opened at, which left no separator to drag,
-        # because nothing above it could give it room it would not take.
-        # The height it asks for is unchanged, so it still opens small.
-        cmd_container.setSizePolicy(QSizePolicy.Policy.Expanding,
-                                    QSizePolicy.Policy.Preferred)
-        cmd_layout = QVBoxLayout(cmd_container)
-        cmd_layout.setContentsMargins(0, 0, 0, 0)
-        cmd_layout.setSpacing(0)
-        cmd_layout.addWidget(self._build_space_tab_row())   # tabs + "＋"
-        cmd_layout.addWidget(self.command_line, 1)   # the history takes it
-        cmd_layout.addWidget(self.osnap_bar)
+        self.command_workspace = CommandWorkspace(
+            self, self.command_line, self._build_space_tab_row(), self.osnap_bar)
         self._cmd_dock = QDockWidget("Command", self)
         self._cmd_dock.setObjectName("commandDock")
-        self._cmd_dock.setWidget(cmd_container)
+        self._cmd_dock.setWidget(self.command_workspace)
         self._cmd_dock.setFeatures(
             QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         self._cmd_dock.setTitleBarWidget(_EmptyTitleBar())
@@ -179,16 +168,10 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
                            self._layer_dock)
 
-        # Under Properties and Layers, which is the edge someone coming from
-        # Rhino looks along for it (GitHub #5). It stays short — a mode and
-        # two checkboxes — so it costs the other two almost nothing.
-        self.display_panel = DisplayPanel(
-            viewport_source=lambda: self.active_viewport)
-        self._display_dock = QDockWidget("Display", self)
-        self._display_dock.setObjectName("displayDock")
-        self._display_dock.setWidget(self.display_panel)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
-                           self._display_dock)
+        # Display controls belong to the viewport title menu. Create their
+        # modeless window only when requested, leaving this column for
+        # Properties and Layers.
+        self._display_settings = None
 
         # The panels a field's Enter must stay in, and whose splitter the
         # user drags: see eventFilter.
@@ -197,8 +180,7 @@ class MainWindow(QMainWindow):
             dock.installEventFilter(self)
         # proportions are set post-show in _balance_docks (a pre-show
         # resizeDocks gets redistributed once the layout is realised)
-        QTimer.singleShot(0, self._balance_docks)
-        self._ai_dock = None                # created on first use
+        QTimer.singleShot(0, self, self._balance_docks)
         # The chrome first, then the layout. The toolbar takes its width off
         # the left of the panes and the menu bar its height off the top, so
         # sizes restored into a window still missing them are laid out for a
@@ -214,6 +196,7 @@ class MainWindow(QMainWindow):
                                   viewport=self.viewport, window=self)
         self.ctx.current_path = None
         self.processor = CommandProcessor(self.ctx)
+        self._file_picker_open = False
         self.ctx.add_echo_listener(self.command_line.echo)
         self.processor.add_listener(self._sync_command_state)
 
@@ -270,6 +253,7 @@ class MainWindow(QMainWindow):
         self.command_line.echo("Serpentine3D — type a command to begin "
                                "(line, circle, box, extrude, loft, ...)")
         self.command_line.focus()
+        self.command_workspace.restore_settings()
 
     @staticmethod
     def _pane_alive(vp) -> bool:
@@ -297,7 +281,6 @@ class MainWindow(QMainWindow):
         self._active_vp = vp
         self.ctx.viewport = vp                   # commands act on this pane
         self.properties.refresh()                # and so does the panel
-        self.display_panel.refresh()             # which pane's settings
 
     def _dock_viewport(self, vp, title: str, closable: bool = True,
                        name: str | None = None):
@@ -334,7 +317,9 @@ class MainWindow(QMainWindow):
         280 px would undo them every launch (GitHub #5)."""
         if not getattr(self, "_docks_restored", False):
             # the command strip spans the bottom full-width: resize it alone
-            self.resizeDocks([self._cmd_dock], [96], Qt.Orientation.Vertical)
+            self.resizeDocks([self._cmd_dock],
+                             [self.command_workspace.sizeHint().height()],
+                             Qt.Orientation.Vertical)
             self._set_panel_width(PANEL_WIDTH)
             # 280 is the width our own font's columns need. A machine
             # whose sans-serif is wider needs more, and the layers panel
@@ -412,8 +397,8 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self._settling = True
         if self._panel_width:
-            QTimer.singleShot(0, self._hold_panel_width)
-        QTimer.singleShot(_SETTLE_MS, self._settled)
+            QTimer.singleShot(0, self, self._hold_panel_width)
+        QTimer.singleShot(_SETTLE_MS, self, self._settled)
 
     def _settled(self):
         """The window has stopped moving: the docks are the user's again."""
@@ -498,22 +483,8 @@ class MainWindow(QMainWindow):
         return vp
 
     def show_ai_panel(self):
-        """Open (or reveal) the AI assistant dock."""
-        if self._ai_dock is None:
-            from .ai.panel import AiPanel
-            panel = AiPanel(self)
-            dock = QDockWidget("Assistant", self)
-            dock.setObjectName("aiDock")
-            dock.setWidget(panel)
-            dock.setMinimumWidth(320)
-            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-            self._ai_dock = dock
-        self._ai_dock.show()
-        self._ai_dock.raise_()
-        panel = self._ai_dock.widget()
-        if panel.input_row.isVisible():
-            panel.input.setFocus()
-        return panel
+        """Reveal the conversation without changing the input destination."""
+        return self.command_workspace.show_assistant()
 
     def _viewport_title(self, vp) -> str:
         """What a pane is showing, in the order you would say it: the view,
@@ -573,6 +544,8 @@ class MainWindow(QMainWindow):
         for mode in vp.DISPLAY_MODES:
             toggle(mode.capitalize(), vp.display_mode == mode,
                    lambda m=mode: vp.set_display_mode(m))
+        self._action(menu, "Display settings…", None,
+                     lambda: self._show_display_settings(vp))
         if self.scene.layouts:
             # A space tab swaps the whole arrangement, but a space is still
             # a property of one pane underneath, and this is where you say
@@ -596,16 +569,29 @@ class MainWindow(QMainWindow):
                      lambda: self.run_command("1view"))
         return menu
 
+    def _show_display_settings(self, vp):
+        """Open one set of controls for the pane whose menu was used."""
+        dialog = self._display_settings
+        if dialog is not None and dialog.viewport is not vp:
+            dialog.close()
+            dialog = None
+        if dialog is None:
+            dialog = DisplaySettingsDialog(vp, self)
+            self._display_settings = dialog
+
+            def forget(_result):
+                if self._display_settings is dialog:
+                    self._display_settings = None
+
+            dialog.finished.connect(forget)
+        dialog.panel.refresh()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
     def _wire_viewport(self, vp):
         vp.installEventFilter(self)
         vp.displayModeChanged.connect(self._update_status)
-        # The mode is also reachable from the menu, the viewport title and
-        # the command line, none of which come through the panel. Only the
-        # active pane speaks for it; a background one changing mode is not
-        # the panel's business.
-        vp.displayModeChanged.connect(
-            lambda v=vp: v is self.active_viewport
-            and self.display_panel.refresh())
         vp.layoutSelectionChanged.connect(self._update_status)
         vp.layoutSelectionChanged.connect(self.properties.refresh)
         vp.history = self.history
@@ -705,7 +691,7 @@ class MainWindow(QMainWindow):
                 aux.zoom_extents()
             # split builds the 2x2 structure but leaves lopsided sizes;
             # even them out once the layout is realised
-            QTimer.singleShot(0, self._equalize_quad)
+            QTimer.singleShot(0, self, self._equalize_quad)
         else:
             for dock in self.aux_docks:
                 dock.hide()
@@ -920,7 +906,7 @@ class MainWindow(QMainWindow):
         m_tools = mb.addMenu("&Tools")
         self._action(m_tools, "Command Palette...", "Ctrl+Shift+P",
                      self._show_palette)
-        self._action(m_tools, "Python Console", "Ctrl+`",
+        self._action(m_tools, "Script Editor", "Ctrl+`",
                      self._toggle_console)
         self._action(m_tools, "Settings...", "Ctrl+,", self._show_settings)
 
@@ -969,7 +955,7 @@ class MainWindow(QMainWindow):
             if self.processor.last_command:
                 self.processor.run(self.processor.last_command)
             return
-        self.processor.run(text.split()[0])
+        self.processor.run(text)
 
     def _cancel(self):
         if self.processor.busy:
@@ -1092,6 +1078,25 @@ class MainWindow(QMainWindow):
                 vp.set_preview(None)
         self.osnap_bar.refresh()
         self._update_status()
+        self._offer_file_picker(req)
+
+    def _offer_file_picker(self, req):
+        """Let a live command's pending FileReq use the window chooser."""
+        if (not isinstance(req, FileReq) or self.processor.headless
+                or self._file_picker_open or not self.processor.busy):
+            return
+        self._file_picker_open = True
+        try:
+            path = self._pick_file(
+                save=req.save, title=req.title,
+                name=os.path.expanduser(req.default or ""),
+                filters=req.filters)
+        finally:
+            self._file_picker_open = False
+        if path:
+            self.processor.provide_text(path)
+        elif self.processor.busy and self.processor.request is req:
+            self.processor.cancel()
 
     def _on_object_clicked(self, obj_id: str, modifiers):
         if isinstance(self.processor.request, SelectReq):
@@ -1606,6 +1611,7 @@ class MainWindow(QMainWindow):
                 self.cfg.get("window", "layout", default="quad"))
 
     def _remember_window(self):
+        self.command_workspace.save_settings()
         self.cfg.set("window", "geometry",
                      bytes(self.saveGeometry().toBase64()).decode())
         self.cfg.set("window", "state",
@@ -1644,6 +1650,8 @@ class MainWindow(QMainWindow):
         # user chose with default-constructed geometry.
         if self.isVisible():
             self._remember_window()
+        if self.command_workspace.console is not None:
+            self.command_workspace.console.shutdown()
         self.autosave.clean_exit()
         if self.journal is not None:
             self.journal.write_fingerprint()
@@ -2007,16 +2015,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- settings
 
     def _toggle_console(self):
-        if not hasattr(self, "_console_dock"):
-            from .ui.console import PythonConsole
-            self._console_dock = QDockWidget("Python", self)
-            self._console_dock.setObjectName("pythonDock")
-            self._console_dock.setWidget(PythonConsole(self))
-            self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea,
-                               self._console_dock)
-        else:
-            self._console_dock.setVisible(
-                not self._console_dock.isVisible())
+        self.command_workspace.toggle_script()
 
     def _show_settings(self):
         from .ui.settings_dialog import SettingsDialog
@@ -2207,6 +2206,25 @@ class MainWindow(QMainWindow):
             return
         # any printable key focuses the command line (Rhino behaviour)
         text = ev.text()
+        if self.command_workspace.mode == "ai":
+            # The explicit destination also owns typing forwarded from a
+            # viewport or history. Hidden CAD drafts must never receive it.
+            field = self.command_workspace.assistant.input
+            if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self.command_workspace.submit()
+                ev.accept()
+                return
+            if ev.key() == Qt.Key.Key_Escape:
+                field.clear()
+                ev.accept()
+                return
+            if text and text.isprintable() and not ev.modifiers() & (
+                    Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier):
+                field.setFocus()
+                if field.isEnabled():
+                    field.insertPlainText(text)
+                ev.accept()
+                return
         if text and text.isprintable() and not self.command_line.input.hasFocus():
             self.command_line.focus()
             self.command_line.input.insert(text)

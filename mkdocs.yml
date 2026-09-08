@@ -52,6 +52,7 @@ nav:
       - Your first model: getstarted/first-model.md
       - "Tutorial: a stage flat": getstarted/stage-flat.md
   - How-to guides:
+      - Commands, AI, and scripts: howto/workspace.md
       - Export for 3D printing: howto/3d-printing.md
       - Make a drawing sheet: howto/drawings.md
       - Make a clip of your work: howto/clips.md
@@ -63,6 +64,7 @@ nav:
       - Keyboard & mouse: reference/keyboard.md
   - Explanation:
       - How it works: explanation/how-it-works.md
+      - Command workspace: explanation/command-workspace.md
   - Coming from Rhino: coming-from-rhino.md
   # Code signing policy: code-signing-policy.md   (see exclude_docs below)
 

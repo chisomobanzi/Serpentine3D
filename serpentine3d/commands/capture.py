@@ -7,7 +7,7 @@ import math
 import os
 import time
 
-from .base import NumberReq, OptionReq, TextReq, command
+from .base import FileReq, NumberReq, OptionReq, command
 
 
 def _bounds_of(ctx):
@@ -33,6 +33,12 @@ def _default_out() -> str:
     base = videos if os.path.isdir(videos) else os.path.expanduser("~")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     return os.path.join(base, f"serpentine-turntable-{stamp}.mp4")
+
+
+def _output_request() -> FileReq:
+    """The shared destination prompt for both turntable commands."""
+    return FileReq("Output file (.mp4)", default=_default_out(), save=True,
+                   title="Save turntable", filters="MP4 video (*.mp4)")
 
 
 def _story_frame(image, width: int = 1080, height: int = 1920):
@@ -78,7 +84,7 @@ def cmd_turntable(ctx):
     seconds = yield NumberReq("Seconds", default=8.0, minimum=0.5)
     aspect = yield OptionReq("Aspect", options=["16:9", "9:16", "1:1"],
                              default="16:9")
-    out = yield TextReq("Output file (.mp4)", default=_default_out())
+    out = yield _output_request()
     out = os.path.expanduser(out)
     if not out.lower().endswith(".mp4"):
         out += ".mp4"
@@ -130,7 +136,7 @@ def cmd_turntable_ui(ctx):
         return
 
     seconds = yield NumberReq("Seconds", default=15.0, minimum=0.5)
-    out = yield TextReq("Output file (.mp4)", default=_default_out())
+    out = yield _output_request()
     out = os.path.expanduser(out)
     if not out.lower().endswith(".mp4"):
         out += ".mp4"

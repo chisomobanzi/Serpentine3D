@@ -6,7 +6,9 @@ language, live apply, and one-click import for Rhino alias files.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import threading
+
+from PySide6.QtCore import QObject, QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView,
@@ -51,6 +53,26 @@ def _section(title: str, subtitle: str) -> QWidget:
     layout.addWidget(t)
     layout.addWidget(s)
     return w
+
+
+class _ModelDiscovery(QObject):
+    finished = Signal(str, object, str)
+
+    def start(self, endpoint: str):
+        def fetch():
+            from ..ai.local_client import discover_models
+            try:
+                models, error = discover_models(endpoint), ""
+            except Exception as exc:
+                models, error = [], str(exc)
+            try:
+                self.finished.emit(endpoint, models, error)
+            except RuntimeError:
+                # The dialog owns this signal object and can be destroyed
+                # while HTTP is in flight. Qt has already disconnected its
+                # receivers; a completed request then has nothing to update.
+                pass
+        threading.Thread(target=fetch, daemon=True).start()
 
 
 class SettingsDialog(QDialog):
@@ -399,15 +421,27 @@ class SettingsDialog(QDialog):
 
     def _assistant_page(self) -> QWidget:
         from PySide6.QtWidgets import QComboBox, QLineEdit
-        from ..ai.client import DEFAULT_MODEL, MODELS
+        from ..ai.local_client import DEFAULT_ENDPOINT
         w, layout = _page(
             "Assistant",
-            "The in-app AI assistant (View menu or the `ai` command) "
-            "models with your own Anthropic API key. The "
-            "ANTHROPIC_API_KEY environment variable takes precedence "
-            "and is never written to disk.")
+            "Choose who receives Ask AI messages. LM Studio runs models on "
+            "your local server; Anthropic uses your own cloud API key. "
+            "Changes during a response apply to the next turn.")
 
-        row = QHBoxLayout()
+        self._ai_loading = True
+        row_provider = QHBoxLayout()
+        row_provider.addWidget(QLabel("Provider"))
+        self.cb_ai_provider = QComboBox()
+        self.cb_ai_provider.addItem("Anthropic", "anthropic")
+        self.cb_ai_provider.addItem("LM Studio", "lmstudio")
+        self.cb_ai_provider.setCurrentIndex(max(0, self.cb_ai_provider.findData(
+            self.cfg.get("ai", "provider", default="anthropic"))))
+        row_provider.addWidget(self.cb_ai_provider, 1)
+        layout.addLayout(row_provider)
+
+        self.ai_key_row = QWidget()
+        row = QHBoxLayout(self.ai_key_row)
+        row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(QLabel("API key"))
         self.ed_ai_key = QLineEdit()
         self.ed_ai_key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -416,33 +450,139 @@ class SettingsDialog(QDialog):
             str(self.cfg.get("ai", "api_key", default="") or ""))
         self.ed_ai_key.editingFinished.connect(self._ai_changed)
         row.addWidget(self.ed_ai_key, 1)
-        layout.addLayout(row)
+        layout.addWidget(self.ai_key_row)
+
+        self.ai_endpoint_row = QWidget()
+        endpoint_row = QHBoxLayout(self.ai_endpoint_row)
+        endpoint_row.setContentsMargins(0, 0, 0, 0)
+        endpoint_row.addWidget(QLabel("Server URL"))
+        self.ed_ai_endpoint = QLineEdit(str(self.cfg.get(
+            "ai", "local_endpoint", default=DEFAULT_ENDPOINT)))
+        self.ed_ai_endpoint.setPlaceholderText(DEFAULT_ENDPOINT)
+        self.ed_ai_endpoint.setAccessibleName("LM Studio endpoint")
+        self.ed_ai_endpoint.editingFinished.connect(self._ai_changed)
+        endpoint_row.addWidget(self.ed_ai_endpoint, 1)
+        self.btn_ai_refresh = QPushButton("Refresh models")
+        self.btn_ai_refresh.clicked.connect(self._discover_ai_models)
+        endpoint_row.addWidget(self.btn_ai_refresh)
+        layout.addWidget(self.ai_endpoint_row)
 
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("Model"))
         self.cb_ai_model = QComboBox()
-        current = self.cfg.get("ai", "model", default=DEFAULT_MODEL)
-        for model_id, label in MODELS:
-            self.cb_ai_model.addItem(label, model_id)
-            if model_id == current:
-                self.cb_ai_model.setCurrentIndex(self.cb_ai_model.count() - 1)
+        self.cb_ai_model.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.cb_ai_model.setMinimumContentsLength(16)
         self.cb_ai_model.currentIndexChanged.connect(self._ai_changed)
         row2.addWidget(self.cb_ai_model, 1)
         layout.addLayout(row2)
 
-        note = QLabel("The key is stored in your Serpentine3D config "
-                      "file, readable only by your user account. Usage "
-                      "is billed to your Anthropic account.")
-        note.setWordWrap(True)
-        note.setStyleSheet("color: #85868a; font-size: 11px;")
-        layout.addWidget(note)
+        self.ai_note = QLabel()
+        self.ai_note.setWordWrap(True)
+        self.ai_note.setStyleSheet("color: #85868a; font-size: 11px;")
+        layout.addWidget(self.ai_note)
+        self.ai_discovery_status = QLabel()
+        self.ai_discovery_status.setWordWrap(True)
+        layout.addWidget(self.ai_discovery_status)
+        self._ai_discovery = _ModelDiscovery(self)
+        self._ai_discovery.finished.connect(self._ai_models_discovered)
+        self.cb_ai_provider.currentIndexChanged.connect(self._ai_provider_changed)
+        self._ai_provider_changed()
         layout.addStretch(1)
         return w
 
     def _ai_changed(self):
+        if self._ai_loading:
+            return
+        from ..ai.local_client import DEFAULT_ENDPOINT
+
         self.cfg.set("ai", "api_key", self.ed_ai_key.text().strip())
-        self.cfg.set("ai", "model", self.cb_ai_model.currentData())
+        local = self.cb_ai_provider.currentData() == "lmstudio"
+        self.cfg.set("ai", "provider", self.cb_ai_provider.currentData())
+        endpoint = self.ed_ai_endpoint.text().strip()
+        previous_endpoint = self.cfg.get("ai", "local_endpoint", default=DEFAULT_ENDPOINT)
+        if endpoint != previous_endpoint:
+            # Model IDs can overlap across servers; image support established
+            # by the previous server must not follow an endpoint edit.
+            self.cfg.set("ai", "local_models", [])
+            if local:
+                current = self.cb_ai_model.currentData()
+                with QSignalBlocker(self.cb_ai_model):
+                    self.cb_ai_model.clear()
+                    self.cb_ai_model.addItem(current or "Refresh to discover local models", current)
+                self.ai_discovery_status.setText("Server URL changed. Refresh models again.")
+        self.cfg.set("ai", "local_endpoint", endpoint)
+        if self.cb_ai_model.currentData():
+            self.cfg.set("ai", "local_model" if local else "model", self.cb_ai_model.currentData())
         self.cfg.save()
+        # Settings also apply when the assistant pane was already open.
+        from ..ai.panel import AiPanel
+        for panel in self.window.findChildren(AiPanel):
+            panel._refresh_mode()
+
+    def _ai_provider_changed(self, *_):
+        from ..ai.client import DEFAULT_MODEL, MODELS
+        self._ai_loading = True
+        local = self.cb_ai_provider.currentData() == "lmstudio"
+        self.ai_key_row.setVisible(not local)
+        self.ai_endpoint_row.setVisible(local)
+        self.cb_ai_model.clear()
+        if local:
+            current = self.cfg.get("ai", "local_model", default="")
+            models = self.cfg.get("ai", "local_models", default=[]) or []
+            for model in models:
+                self._add_local_model(model)
+            if current and self.cb_ai_model.findData(current) < 0:
+                self.cb_ai_model.addItem(current, current)
+            if not self.cb_ai_model.count():
+                self.cb_ai_model.addItem("Refresh to discover local models", None)
+            self.ai_note.setText("Start LM Studio's local server, then refresh models. "
+                                 "Cloud API keys are never sent to this server. "
+                                 "Vision support is read from the server's model metadata.")
+        else:
+            current = self.cfg.get("ai", "model", default=DEFAULT_MODEL)
+            for model_id, label in MODELS:
+                self.cb_ai_model.addItem(label, model_id)
+            self.ai_note.setText("The key is stored in your Serpentine3D config. "
+                                 "ANTHROPIC_API_KEY takes precedence and is never saved. "
+                                 "Usage is billed to your Anthropic account.")
+        index = self.cb_ai_model.findData(current)
+        self.cb_ai_model.setCurrentIndex(max(0, index))
+        self.ai_discovery_status.clear()
+        self._ai_loading = False
+        self._ai_changed()
+
+    def _add_local_model(self, model):
+        model_id = model["id"]
+        label = model.get("label", model_id)
+        self.cb_ai_model.addItem(f"{label} · {model_id}" if label != model_id else model_id, model_id)
+        features = "Vision" if model.get("vision") else "Text only"
+        if model.get("tool_use") is False:
+            features += " · not trained for tool use"
+        elif model.get("tool_use"):
+            features += " · tool use"
+        self.cb_ai_model.setItemData(self.cb_ai_model.count() - 1, features, Qt.ItemDataRole.ToolTipRole)
+
+    def _discover_ai_models(self):
+        self._ai_changed()
+        self.btn_ai_refresh.setEnabled(False)
+        self.ai_discovery_status.setText("Discovering models…")
+        self._ai_discovery.start(self.ed_ai_endpoint.text().strip())
+
+    def _ai_models_discovered(self, endpoint, models, error):
+        self.btn_ai_refresh.setEnabled(True)
+        if endpoint != self.ed_ai_endpoint.text().strip():
+            self.ai_discovery_status.setText("Server URL changed. Refresh models again.")
+            return
+        if error:
+            self.ai_discovery_status.setText(error)
+            return
+        self.cfg.set("ai", "local_models", models)
+        self.cfg.save()
+        if self.cb_ai_provider.currentData() == "lmstudio":
+            self._ai_provider_changed()
+            self.ai_discovery_status.setText(
+                f"{len(models)} local language models found." if models
+                else "No language models found. Download a model in LM Studio first.")
 
     def _display_page(self) -> QWidget:
         w, layout = _page("Display",

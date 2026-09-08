@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="A visual product and architecture vision for professional drafting in Serpentine3D.">
+<title>Serpentine3D — The Drawing, Reconsidered</title>
+<style>
+  :root {
+    --ground: #e9ece5;
+    --paper: #fafaf5;
+    --paper-2: #f2f4ee;
+    --ink: #17212a;
+    --ink-2: #46535e;
+    --ink-3: #74808a;
+    --rule: #bdc7bd;
+    --rule-soft: #d9ded7;
+    --blue: #285f8e;
+    --blue-bright: #4e8fc4;
+    --blue-pale: #dceaf4;
+    --gold: #d7a63e;
+    --gold-pale: #f4ead1;
+    --red: #b73f33;
+    --red-pale: #f3dfdc;
+    --green: #24775d;
+    --green-pale: #dcece6;
+    --chrome: #181d23;
+    --chrome-2: #222a32;
+    --chrome-3: #2d3741;
+    --chrome-rule: #3b4651;
+    --chrome-text: #e4e9ec;
+    --chrome-muted: #98a4ae;
+    --shadow: 0 22px 55px rgba(27, 37, 45, .13), 0 2px 8px rgba(27, 37, 45, .08);
+    --serif: Georgia, "Times New Roman", serif;
+    --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; background: var(--ground); }
+  body {
+    margin: 0;
+    color: var(--ink);
+    background:
+      linear-gradient(rgba(40, 95, 142, .035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(40, 95, 142, .035) 1px, transparent 1px),
+      var(--ground);
+    background-size: 32px 32px;
+    font-family: var(--sans);
+    line-height: 1.55;
+  }
+
+  button, input, select { font: inherit; }
+  button { cursor: pointer; }
+  a { color: inherit; }
+  ::selection { color: var(--ink); background: var(--gold-pale); }
+
+  .page-frame {
+    width: min(1500px, calc(100% - 32px));
+    margin: 16px auto;
+    border: 1px solid var(--ink);
+    outline: 1px solid var(--rule);
+    outline-offset: 5px;
+    background: rgba(250, 250, 245, .9);
+  }
+
+  .topbar {
+    min-height: 58px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 10px clamp(18px, 4vw, 58px);
+    border-bottom: 1px solid var(--ink);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+
+  .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; }
+  .brand-mark { width: 32px; height: 32px; }
+  .issue-stamp {
+    padding: 5px 9px;
+    border: 1px solid var(--red);
+    color: var(--red);
+    transform: rotate(-1deg);
+  }
+
+  main { overflow: hidden; }
+  .section {
+    padding: clamp(64px, 9vw, 128px) clamp(22px, 6vw, 92px);
+    border-bottom: 1px solid var(--rule);
+  }
+  .section:last-child { border-bottom: 0; }
+
+  .hero {
+    min-height: 720px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.02fr) minmax(400px, .98fr);
+    align-items: center;
+    gap: clamp(42px, 7vw, 110px);
+    position: relative;
+  }
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    color: var(--blue);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+  .eyebrow::before { content: ""; width: 42px; height: 1px; background: currentColor; }
+  h1, h2, h3, p { margin-top: 0; }
+  h1, h2 { font-family: var(--serif); font-weight: 400; letter-spacing: -.025em; }
+  h1 { max-width: 12ch; margin-bottom: 28px; font-size: clamp(58px, 7.4vw, 112px); line-height: .94; }
+  h1 em { color: var(--blue); font-weight: 400; }
+  h2 { margin-bottom: 24px; font-size: clamp(42px, 5.5vw, 76px); line-height: 1.02; }
+  h3 { font-size: 18px; line-height: 1.25; }
+  .lede { max-width: 62ch; color: var(--ink-2); font-family: var(--serif); font-size: clamp(20px, 2.2vw, 27px); line-height: 1.45; }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+  .button {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 44px;
+    padding: 10px 16px;
+    border: 1px solid var(--ink);
+    background: transparent;
+    color: var(--ink);
+    text-decoration: none;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .button.primary { border-color: var(--blue); background: var(--blue); color: white; }
+  .button:hover { transform: translateY(-1px); box-shadow: 0 5px 12px rgba(23,33,42,.1); }
+  .button:focus-visible, .scenario-button:focus-visible, .workspace-item:focus-visible {
+    outline: 3px solid rgba(78, 143, 196, .45);
+    outline-offset: 2px;
+  }
+
+  .hero-diagram {
+    position: relative;
+    min-height: 520px;
+  }
+  .hero-sheet {
+    position: absolute;
+    inset: 20px 16px 56px 10px;
+    padding: 22px;
+    border: 1px solid var(--ink);
+    background: var(--paper);
+    box-shadow: var(--shadow);
+    transform: rotate(1.7deg);
+  }
+  .hero-sheet::before { content: ""; position: absolute; inset: 12px; border: 1px dashed var(--rule); }
+  .hero-sheet svg { width: 100%; height: 100%; }
+  .hero-callout {
+    position: absolute;
+    z-index: 2;
+    max-width: 230px;
+    padding: 13px 15px;
+    border: 1px solid currentColor;
+    background: var(--paper);
+    box-shadow: 5px 5px 0 rgba(23,33,42,.09);
+    font-size: 13px;
+  }
+  .hero-callout strong { display: block; margin-bottom: 3px; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  .hero-callout.one { top: 0; right: 0; color: var(--green); }
+  .hero-callout.two { right: 24px; bottom: 18px; color: var(--blue); }
+  .hero-callout.three { left: 0; bottom: 0; color: var(--red); }
+
+  .section-intro { max-width: 880px; margin-bottom: clamp(40px, 6vw, 76px); }
+  .section-intro p { max-width: 66ch; color: var(--ink-2); font-size: 18px; }
+
+  .principles { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--ink); }
+  .principle { min-height: 250px; padding: 28px; border-right: 1px solid var(--ink); background: rgba(250,250,245,.6); }
+  .principle:last-child { border-right: 0; }
+  .principle-no { margin-bottom: 55px; color: var(--blue); font-family: var(--mono); font-size: 12px; }
+  .principle p { color: var(--ink-2); }
+
+  /* Future app mockup */
+  .mockup-shell {
+    border: 1px solid #0d1116;
+    border-radius: 7px;
+    overflow: hidden;
+    background: var(--chrome);
+    box-shadow: 0 32px 70px rgba(15, 20, 25, .27);
+  }
+  .mockup-titlebar {
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    border-bottom: 1px solid #090c0f;
+    color: var(--chrome-text);
+    background: #13181d;
+    font-size: 12px;
+  }
+  .traffic { display: flex; gap: 6px; }
+  .traffic i { width: 9px; height: 9px; border-radius: 50%; background: #53606b; }
+  .mockup-mode { display: flex; align-items: center; gap: 8px; color: var(--chrome-muted); }
+  .mockup-mode b { color: var(--gold); font-weight: 600; }
+  .mockup-grid { display: grid; grid-template-columns: 230px minmax(560px, 1fr) 260px; min-height: 710px; }
+  .mock-panel { color: var(--chrome-text); background: var(--chrome-2); }
+  .mock-panel.left { border-right: 1px solid #0e1318; }
+  .mock-panel.right { border-left: 1px solid #0e1318; }
+  .panel-head {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--chrome-rule);
+    color: var(--chrome-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .panel-head button { border: 0; background: none; color: var(--chrome-muted); }
+  .tree { padding: 10px 8px; font-size: 12px; }
+  .tree-group { margin-bottom: 18px; }
+  .tree-label { padding: 6px 7px; color: #7f8b95; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+  .tree-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 31px;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: #c8d0d5;
+    text-align: left;
+  }
+  .tree-row:hover, .tree-row.active { background: #34404b; }
+  .tree-row.active { color: white; box-shadow: inset 2px 0 var(--gold); }
+  .tree-row.child { padding-left: 24px; }
+  .tree-icon { width: 15px; color: #8e9ba5; font-family: var(--mono); }
+  .tree-row span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-row .health { margin-left: auto; }
+  .health { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px rgba(36,119,93,.13); }
+  .health.rebuild { background: var(--gold); }
+  .health.broken { background: var(--red); }
+
+  .canvas-wrap { min-width: 0; display: grid; grid-template-rows: 43px 1fr 74px; background: #11171c; }
+  .canvas-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 10px;
+    border-bottom: 1px solid #080b0e;
+    background: #20272e;
+  }
+  .tool-pill {
+    height: 29px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 9px;
+    border: 1px solid #424d57;
+    border-radius: 3px;
+    color: #c4ccd1;
+    background: #28313a;
+    font-size: 10px;
+  }
+  .tool-pill.accent { border-color: #81692f; color: #f1d38b; background: #3c3524; }
+  .toolbar-spacer { flex: 1; }
+  .canvas {
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    overflow: auto;
+    padding: 30px;
+    background:
+      radial-gradient(circle at 50% 45%, rgba(255,255,255,.045), transparent 52%),
+      #151b21;
+  }
+  .drawing-paper {
+    width: min(720px, 92%);
+    aspect-ratio: 1.414 / 1;
+    position: relative;
+    padding: 4.8%;
+    color: #19232b;
+    background: #f8f8f3;
+    box-shadow: 0 12px 28px rgba(0,0,0,.35);
+  }
+  .drawing-paper::before { content: ""; position: absolute; inset: 3%; border: 1px solid #9ea8aa; }
+  .paper-grid { height: calc(100% - 15%); display: grid; grid-template-columns: 1.05fr .95fr; grid-template-rows: 1fr 1fr; gap: 5%; }
+  .detail-view {
+    position: relative;
+    border: 1px solid #7b8589;
+    background: #fcfcf8;
+    transition: box-shadow .15s, border-color .15s;
+  }
+  .detail-view.selected { border: 2px solid var(--gold); box-shadow: 0 0 0 4px rgba(215,166,62,.17); }
+  .detail-view svg { display: block; width: 100%; height: 100%; }
+  .detail-label { position: absolute; left: 4px; bottom: 2px; color: #63717a; font-family: var(--mono); font-size: 6px; }
+  .view-badge { position: absolute; top: 5px; right: 5px; display: flex; align-items: center; gap: 4px; padding: 3px 5px; border: 1px solid #c3d8cc; border-radius: 9px; color: var(--green); background: rgba(250,250,245,.93); font-size: 6px; font-weight: 700; }
+  .view-badge.warn { border-color: #e0c998; color: #8b681c; }
+  .dimension {
+    position: absolute;
+    left: 9%;
+    bottom: 12%;
+    width: 35%;
+    height: 10%;
+    border-top: 1px solid #2b5f95;
+    color: #2b5f95;
+    transition: filter .15s;
+  }
+  .dimension::before, .dimension::after { content: ""; position: absolute; top: -7px; height: 13px; border-left: 1px solid currentColor; }
+  .dimension::before { left: 0; } .dimension::after { right: 0; }
+  .dimension span { position: absolute; top: -16px; left: 42%; padding: 0 4px; background: #f8f8f3; font-family: var(--mono); font-size: 7px; }
+  .dimension.selected { filter: drop-shadow(0 0 4px rgba(215,166,62,.9)); color: #9e6f10; }
+  .titleblock-mini { position: absolute; right: 4.8%; bottom: 4.5%; width: 40%; height: 10%; border: 1px solid #39444c; }
+  .titleblock-mini::before { content: "ASSEMBLY / ISSUE A / 1 OF 4"; position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--mono); font-size: 6px; }
+
+  .command-deck { padding: 9px 12px; border-top: 1px solid #080b0e; background: #1d242b; color: var(--chrome-muted); font-family: var(--mono); font-size: 10px; }
+  .command-prompt { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .command-prompt b { color: var(--chrome-text); }
+  .command-chips { display: flex; gap: 6px; overflow: hidden; }
+  .command-chip { padding: 3px 7px; border: 1px solid #46525d; border-radius: 9px; white-space: nowrap; }
+  .command-chip.good { border-color: #356e5c; color: #77b9a4; }
+
+  .inspector { padding: 14px; font-size: 11px; }
+  .inspector-summary { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--chrome-rule); }
+  .inspector-summary h4 { margin: 0 0 4px; color: white; font-size: 14px; }
+  .inspector-summary p { margin: 0; color: var(--chrome-muted); font-size: 10px; }
+  .property-group { margin-bottom: 16px; }
+  .property-group-title { margin-bottom: 7px; color: #7e8993; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+  .property-row { display: grid; grid-template-columns: 44% 56%; align-items: center; min-height: 29px; border-bottom: 1px solid #303943; }
+  .property-row label { color: #9ca7b0; }
+  .property-value { padding: 4px 6px; border: 1px solid #3d4852; border-radius: 2px; color: #e1e6e9; background: #1b2229; }
+  .property-value.link { color: #7fb2dc; }
+  .status-box { padding: 9px; border: 1px solid #315f51; border-radius: 3px; color: #a8d7c7; background: rgba(36,119,93,.11); }
+  .status-box.warn { border-color: #755e2b; color: #efd693; background: rgba(215,166,62,.08); }
+  .status-box strong { display: block; margin-bottom: 2px; font-size: 10px; }
+
+  .scenario-strip { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 18px; border: 1px solid var(--ink); }
+  .scenario-button {
+    min-height: 98px;
+    padding: 18px;
+    border: 0;
+    border-right: 1px solid var(--ink);
+    color: var(--ink);
+    background: var(--paper);
+    text-align: left;
+  }
+  .scenario-button:last-child { border-right: 0; }
+  .scenario-button.active { color: white; background: var(--blue); }
+  .scenario-button small { display: block; margin-bottom: 5px; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; opacity: .7; }
+  .scenario-button strong { display: block; font-size: 14px; }
+
+  .feature-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  .feature-card { min-height: 390px; padding: 30px; border: 1px solid var(--ink); background: var(--paper); }
+  .feature-card.wide { grid-column: 1 / -1; min-height: 340px; }
+  .feature-top { display: grid; grid-template-columns: 42px 1fr; gap: 16px; margin-bottom: 26px; }
+  .feature-number { color: var(--blue); font-family: var(--mono); font-size: 12px; }
+  .feature-card p { max-width: 58ch; color: var(--ink-2); }
+  .mini-ui { min-height: 180px; margin-top: 28px; padding: 18px; border: 1px solid var(--rule); background: var(--paper-2); }
+
+  .mini-sheet-tree { display: grid; grid-template-columns: 1fr auto; gap: 9px 14px; align-items: center; font-size: 12px; }
+  .mini-sheet-tree .indent { padding-left: 22px; color: var(--ink-2); }
+  .mini-state { padding: 3px 7px; border-radius: 10px; color: var(--green); background: var(--green-pale); font-family: var(--mono); font-size: 9px; }
+  .mini-state.warn { color: #87651b; background: var(--gold-pale); }
+  .mini-state.bad { color: var(--red); background: var(--red-pale); }
+
+  .property-demo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .property-demo div { padding: 10px; border: 1px solid var(--rule); background: white; }
+  .property-demo small { display: block; margin-bottom: 4px; color: var(--ink-3); font-family: var(--mono); font-size: 8px; text-transform: uppercase; }
+  .property-demo b { font-size: 12px; }
+  .property-demo .linked { grid-column: 1 / -1; border-color: #8eb5d3; color: var(--blue); background: var(--blue-pale); }
+
+  .align-demo { display: flex; align-items: center; justify-content: center; gap: 18px; min-height: 150px; }
+  .align-view { width: 26%; aspect-ratio: 1.25; position: relative; border: 1px solid var(--ink-2); background: white; }
+  .align-view::before { content: ""; position: absolute; left: 24%; right: 24%; top: 28%; bottom: 20%; border: 1px solid var(--ink); }
+  .align-view::after { content: attr(data-label); position: absolute; left: 0; bottom: -20px; width: 100%; color: var(--ink-3); font-family: var(--mono); font-size: 8px; text-align: center; }
+  .align-line { position: absolute; left: 8%; right: 8%; height: 1px; background: var(--blue-bright); }
+
+  .transaction { display: grid; grid-template-columns: 1fr 36px 1fr; align-items: stretch; gap: 14px; }
+  .transaction-pane { padding: 14px; border: 1px solid var(--rule); background: white; }
+  .transaction-pane h4 { margin: 0 0 12px; font-size: 12px; }
+  .transaction-arrow { display: grid; place-items: center; color: var(--blue); font-size: 22px; }
+  .change-row { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; color: var(--ink-2); font-size: 11px; }
+  .change-mark { flex: none; width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--green); font-size: 9px; }
+  .change-mark.move { background: var(--blue); }
+
+  .drawing-graph { display: grid; grid-template-columns: repeat(4, 1fr); align-items: center; gap: 14px; margin-top: 26px; }
+  .graph-node { min-height: 100px; display: grid; place-items: center; padding: 14px; border: 1px solid var(--ink); background: white; text-align: center; }
+  .graph-node b { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; }
+  .graph-node span { color: var(--ink-3); font-size: 11px; }
+  .graph-arrow { display: none; }
+
+  .milestone-list { border-top: 1px solid var(--ink); }
+  .milestone {
+    display: grid;
+    grid-template-columns: 120px minmax(220px, .7fr) 1.3fr;
+    gap: 28px;
+    padding: 34px 0;
+    border-bottom: 1px solid var(--ink);
+  }
+  .milestone-tag { color: var(--blue); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+  .milestone h3 { font-family: var(--serif); font-size: 29px; font-weight: 400; }
+  .milestone ul { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 24px; margin: 0; padding: 0; list-style: none; color: var(--ink-2); font-size: 14px; }
+  .milestone li { position: relative; padding-left: 18px; }
+  .milestone li::before { content: "+"; position: absolute; left: 0; color: var(--blue); font-family: var(--mono); }
+  .milestone.focus { margin: 0 -22px; padding-left: 22px; padding-right: 22px; background: var(--blue-pale); }
+
+  .acceptance {
+    display: grid;
+    grid-template-columns: .75fr 1.25fr;
+    gap: clamp(32px, 6vw, 88px);
+    align-items: start;
+  }
+  .acceptance-card { padding: 32px; border: 1px solid var(--blue); background: var(--blue); color: white; box-shadow: 9px 9px 0 rgba(40,95,142,.15); }
+  .acceptance-card small { display: block; margin-bottom: 28px; font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; opacity: .75; }
+  .acceptance-card blockquote { margin: 0; font-family: var(--serif); font-size: clamp(24px, 3vw, 38px); line-height: 1.3; }
+  .acceptance-steps { counter-reset: step; }
+  .acceptance-step { position: relative; min-height: 74px; padding: 0 0 24px 52px; border-left: 1px solid var(--rule); }
+  .acceptance-step:last-child { border-left-color: transparent; }
+  .acceptance-step::before { counter-increment: step; content: counter(step); position: absolute; left: -17px; top: -2px; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--ink); border-radius: 50%; background: var(--paper); font-family: var(--mono); font-size: 11px; }
+  .acceptance-step h3 { margin-bottom: 4px; }
+  .acceptance-step p { color: var(--ink-2); font-size: 14px; }
+
+  footer { display: flex; justify-content: space-between; gap: 30px; padding: 28px clamp(18px, 4vw, 58px); border-top: 1px solid var(--ink); font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  @media (max-width: 1100px) {
+    .hero { grid-template-columns: 1fr; }
+    .hero-diagram { min-height: 470px; }
+    .mockup-grid { grid-template-columns: 190px minmax(540px, 1fr) 230px; }
+    .mockup-shell { overflow-x: auto; }
+    .scenario-strip { grid-template-columns: repeat(2, 1fr); }
+    .scenario-button:nth-child(2) { border-right: 0; }
+    .scenario-button:nth-child(-n+2) { border-bottom: 1px solid var(--ink); }
+  }
+
+  @media (max-width: 760px) {
+    .page-frame { width: calc(100% - 16px); margin: 8px auto; }
+    .topbar { align-items: flex-start; }
+    .topbar > span:not(.issue-stamp) { display: none; }
+    .section { padding-top: 68px; padding-bottom: 68px; }
+    .hero { min-height: auto; }
+    .hero-diagram { min-height: 400px; }
+    .hero-callout { max-width: 175px; font-size: 11px; }
+    .principles, .feature-grid { grid-template-columns: 1fr; }
+    .principle { border-right: 0; border-bottom: 1px solid var(--ink); }
+    .principle:last-child { border-bottom: 0; }
+    .feature-card.wide { grid-column: auto; }
+    .transaction { grid-template-columns: 1fr; }
+    .transaction-arrow { transform: rotate(90deg); }
+    .drawing-graph { grid-template-columns: 1fr 1fr; }
+    .milestone { grid-template-columns: 1fr; gap: 10px; }
+    .milestone ul { grid-template-columns: 1fr; }
+    .acceptance { grid-template-columns: 1fr; }
+    footer { flex-direction: column; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .button { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page-frame">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+        <path d="M30 6C17 4 10 10 12 17c2 7 17 3 16 11-1 6-10 8-19 5" fill="none" stroke="#285f8e" stroke-width="2.2" stroke-linecap="round"/>
+        <circle cx="30" cy="6" r="2.3" fill="#b73f33"/>
+      </svg>
+      <span>Serpentine3D / Drafting vision</span>
+    </div>
+    <span>Product direction · August 2026</span>
+    <span class="issue-stamp">Discussion draft 01</span>
+  </header>
+
+  <main>
+    <section class="section hero">
+      <div>
+        <div class="eyebrow">The drawing, reconsidered</div>
+        <h1>Trust the <em>sheet</em>.</h1>
+        <p class="lede">A professional drafting experience where every view is live, every annotation knows its source, and every issue can be reproduced—by hand, script, or AI.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#workspace">Explore the workspace <span>↓</span></a>
+          <a class="button" href="#milestones">See the build sequence</a>
+        </div>
+      </div>
+
+      <div class="hero-diagram" aria-label="Illustration of a live drawing sheet">
+        <div class="hero-sheet">
+          <svg viewBox="0 0 560 390" role="img" aria-label="Technical drawing with plan, front, section and isometric views">
+            <g fill="none" stroke="#26343d" stroke-width="1.3">
+              <rect x="30" y="34" width="226" height="138"/>
+              <rect x="302" y="34" width="226" height="138"/>
+              <rect x="30" y="205" width="226" height="130"/>
+              <rect x="302" y="205" width="226" height="130"/>
+              <path d="M78 72h124v70H78zm42 0v70M78 100h124"/>
+              <path d="M353 139V81l45-28 81 34v52H353m45-86v61m81-27-48 28-78-34"/>
+              <path d="M84 309h118v-64h-55v42H84zm63-64v-17"/>
+              <path d="M353 306h126v-27h-48v-51h-30v51h-48z"/>
+            </g>
+            <g fill="none" stroke="#285f8e" stroke-width="1">
+              <path d="M78 158v21m124-21v21M78 175h124"/>
+              <path d="m78 175 7-3m-7 3 7 3m117-3-7-3m7 3-7 3"/>
+            </g>
+            <text x="132" y="171" fill="#285f8e" font-family="monospace" font-size="10">2400</text>
+            <g font-family="monospace" font-size="8" fill="#63717a">
+              <text x="34" y="45">PLAN · 1:20</text><text x="306" y="45">ISO · NTS</text>
+              <text x="34" y="216">SECTION A-A · 1:20</text><text x="306" y="216">FRONT · 1:20</text>
+            </g>
+            <g transform="translate(302 347)">
+              <rect width="226" height="28" fill="none" stroke="#26343d"/>
+              <path d="M105 0v28m60-28v28" stroke="#26343d"/>
+              <text x="6" y="12" font-family="monospace" font-size="8">PLINTH ASSEMBLY</text>
+              <text x="110" y="12" font-family="monospace" font-size="7">ISSUE A</text>
+              <text x="170" y="12" font-family="monospace" font-size="7">A-102 / 4</text>
+            </g>
+          </svg>
+        </div>
+        <div class="hero-callout one"><strong>Current</strong>Linework rebuilt from model revision 184.</div>
+        <div class="hero-callout two"><strong>Traceable</strong>Dimension anchored to Base Plate · Edge 04.</div>
+        <div class="hero-callout three"><strong>Review needed</strong>One callout lost its source after the last edit.</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-intro reveal">
+        <div class="eyebrow">Product thesis</div>
+        <h2>Not more chrome.<br>More confidence.</h2>
+        <p>Rhino’s command line is powerful, but documentation work becomes a hunt through layouts, properties, dialogs, and remembered commands. Serpentine3D can keep the speed and remove the uncertainty.</p>
+      </div>
+      <div class="principles reveal">
+        <article class="principle">
+          <div class="principle-no">01 / DIRECT</div>
+          <h3>Act on what is selected.</h3>
+          <p>A detail exposes scale and filters. A dimension exposes precision and its source. Text edits in place. The interface follows the object instead of making the user find the right dialog.</p>
+        </article>
+        <article class="principle">
+          <div class="principle-no">02 / LIVE</div>
+          <h3>Show what is safe.</h3>
+          <p>Views and annotations visibly report whether they are current, rebuilding, ambiguous, or broken. A blank view can never masquerade as a finished drawing.</p>
+        </article>
+        <article class="principle">
+          <div class="principle-no">03 / ONE ENGINE</div>
+          <h3>Manual and headless agree.</h3>
+          <p>The UI, scripts, MCP, CI, and AI all operate on the same drawing graph. A published sheet never depends on which viewport happened to be open.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="workspace">
+      <div class="section-intro reveal">
+        <div class="eyebrow">A better interface than Rhino</div>
+        <h2>One workspace.<br>Three levels of intent.</h2>
+        <p>The navigator answers “where am I?”, the canvas answers “what am I changing?”, and the inspector answers “what exactly is it?”. The command line remains available without carrying the whole burden of discoverability.</p>
+      </div>
+
+      <div class="mockup-shell reveal" aria-label="Interactive concept for a Serpentine3D drafting workspace">
+        <div class="mockup-titlebar">
+          <div class="traffic"><i></i><i></i><i></i></div>
+          <div>Serpentine3D — Plinth Assembly.serp</div>
+          <div class="mockup-mode">Workspace: <b>Drawing</b> · Model r184</div>
+        </div>
+        <div class="mockup-grid">
+          <aside class="mock-panel left">
+            <div class="panel-head"><span>Drawing navigator</span><button aria-label="Add sheet">＋</button></div>
+            <div class="tree">
+              <div class="tree-group">
+                <div class="tree-label">Drawing set · Issue A</div>
+                <button class="tree-row"><span class="tree-icon">▾</span><span>A-100 · General</span><i class="health"></i></button>
+                <button class="tree-row active"><span class="tree-icon">▾</span><span>A-102 · Assembly</span><i class="health"></i></button>
+                <button class="tree-row child" data-scenario-jump="detail"><span class="tree-icon">⌗</span><span>Plan · 1:20</span><i class="health"></i></button>
+                <button class="tree-row child"><span class="tree-icon">⌗</span><span>Front · 1:20</span><i class="health"></i></button>
+                <button class="tree-row child"><span class="tree-icon">⌗</span><span>Section A-A</span><i class="health rebuild"></i></button>
+                <button class="tree-row child" data-scenario-jump="health"><span class="tree-icon">!</span><span>Detail B</span><i class="health broken"></i></button>
+                <button class="tree-row"><span class="tree-icon">›</span><span>A-103 · Details</span><i class="health broken"></i></button>
+              </div>
+              <div class="tree-group">
+                <div class="tree-label">Named views</div>
+                <button class="tree-row"><span class="tree-icon">◇</span><span>Hero isometric</span></button>
+                <button class="tree-row"><span class="tree-icon">◇</span><span>Fabrication front</span></button>
+              </div>
+              <div class="tree-group">
+                <div class="tree-label">Standards</div>
+                <button class="tree-row"><span class="tree-icon">Aa</span><span>ISO Architectural</span></button>
+                <button class="tree-row"><span class="tree-icon">▥</span><span>Studio A3 Landscape</span></button>
+              </div>
+            </div>
+          </aside>
+
+          <div class="canvas-wrap">
+            <div class="canvas-toolbar">
+              <span class="tool-pill accent">＋ Standard view set</span>
+              <span class="tool-pill">Align ▾</span>
+              <span class="tool-pill">Distribute</span>
+              <span class="tool-pill">Annotate ▾</span>
+              <span class="toolbar-spacer"></span>
+              <span class="tool-pill">Preflight <b style="color:#efbe57">1</b></span>
+              <span class="tool-pill">Publish</span>
+            </div>
+            <div class="canvas">
+              <div class="drawing-paper">
+                <div class="paper-grid">
+                  <div class="detail-view selected" id="mock-detail">
+                    <span class="view-badge"><i class="health"></i> CURRENT</span>
+                    <svg viewBox="0 0 250 150" aria-hidden="true">
+                      <g fill="none" stroke="#17212a" stroke-width="1.5"><rect x="44" y="28" width="162" height="94"/><rect x="80" y="28" width="34" height="94"/><path d="M44 68h162M114 28v94"/></g>
+                      <g fill="none" stroke="#9da6aa" stroke-dasharray="4 3"><path d="M61 28v94M190 28v94"/></g>
+                    </svg>
+                    <span class="detail-label">PLAN · 1:20 · TECHNICAL</span>
+                  </div>
+                  <div class="detail-view">
+                    <span class="view-badge"><i class="health"></i> CURRENT</span>
+                    <svg viewBox="0 0 220 150" aria-hidden="true"><g fill="none" stroke="#17212a" stroke-width="1.4"><path d="M44 118V59l42-27 86 33v53H44m42-86v61m86-28-48 29-80-35"/><path d="M86 93h38V54"/></g></svg>
+                    <span class="detail-label">ISO · NTS · TECHNICAL</span>
+                  </div>
+                  <div class="detail-view">
+                    <span class="view-badge warn"><i class="health rebuild"></i> REBUILDING</span>
+                    <svg viewBox="0 0 250 150" aria-hidden="true"><g fill="none" stroke="#17212a" stroke-width="1.5"><path d="M44 117h162V89h-65V31H93v58H44z"/><path d="M93 47h48"/></g><g stroke="#65717a" stroke-width="1"><path d="M37 18h178M37 18l8-5m-8 5 8 5M215 18l-8-5m8 5-8 5"/></g></svg>
+                    <span class="detail-label">SECTION A-A · 1:20</span>
+                  </div>
+                  <div class="detail-view">
+                    <span class="view-badge"><i class="health"></i> CURRENT</span>
+                    <svg viewBox="0 0 220 150" aria-hidden="true"><g fill="none" stroke="#17212a" stroke-width="1.5"><path d="M35 119h150V92h-55V31H91v61H35z"/></g></svg>
+                    <span class="detail-label">FRONT · 1:20 · TECHNICAL</span>
+                  </div>
+                </div>
+                <div class="dimension" id="mock-dimension"><span>2400</span></div>
+                <div class="titleblock-mini"></div>
+              </div>
+            </div>
+            <div class="command-deck">
+              <div class="command-prompt"><span>&gt;</span><b id="command-copy">Detail selected — drag to move; grips resize the frame.</b></div>
+              <div class="command-chips" id="command-chips"><span class="command-chip good">Current</span><span class="command-chip">Scale 1:20</span><span class="command-chip">Technical</span><span class="command-chip">Lock</span><span class="command-chip">Edit filter…</span></div>
+            </div>
+          </div>
+
+          <aside class="mock-panel right">
+            <div class="panel-head"><span>Context inspector</span><button aria-label="More options">•••</button></div>
+            <div class="inspector" id="inspector-content">
+              <div class="inspector-summary"><h4>Plan</h4><p>Detail view · A-102 Assembly</p></div>
+              <div class="property-group">
+                <div class="property-group-title">View</div>
+                <div class="property-row"><label>Direction</label><span class="property-value">Top</span></div>
+                <div class="property-row"><label>Scale</label><span class="property-value">1:20</span></div>
+                <div class="property-row"><label>Mode</label><span class="property-value">Technical</span></div>
+                <div class="property-row"><label>Camera</label><span class="property-value link">Fabrication plan ↗</span></div>
+              </div>
+              <div class="property-group">
+                <div class="property-group-title">Contents</div>
+                <div class="property-row"><label>Filter</label><span class="property-value link">Fabrication set ↗</span></div>
+                <div class="property-row"><label>Layers</label><span class="property-value">12 shown</span></div>
+                <div class="property-row"><label>Section</label><span class="property-value">None</span></div>
+              </div>
+              <div class="status-box"><strong>Current · model r184</strong>Linework generated 8 seconds ago.</div>
+            </div>
+          </aside>
+        </div>
+      </div>
+
+      <div class="scenario-strip reveal" role="group" aria-label="Explore interface scenarios">
+        <button class="scenario-button active" data-scenario="detail"><small>01 · Organise</small><strong>Select a live detail</strong></button>
+        <button class="scenario-button" data-scenario="dimension"><small>02 · Inspect</small><strong>Trace a dimension</strong></button>
+        <button class="scenario-button" data-scenario="health"><small>03 · Preflight</small><strong>Resolve broken work</strong></button>
+        <button class="scenario-button" data-scenario="ai"><small>04 · Review</small><strong>Approve an AI proposal</strong></button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-intro reveal">
+        <div class="eyebrow">Key daily interactions</div>
+        <h2>Less hunting.<br>More drawing.</h2>
+        <p>These are not separate modes or plugins. They are small, composable improvements to the work professionals repeat all day.</p>
+      </div>
+
+      <div class="feature-grid">
+        <article class="feature-card reveal">
+          <div class="feature-top"><span class="feature-number">01</span><div><h3>The sheet set is visible</h3><p>Sheets, views, health, issue state, and standards live in one navigator. A warning belongs beside the affected item—not in a log after export.</p></div></div>
+          <div class="mini-ui mini-sheet-tree">
+            <b>▾ A-102 · Assembly</b><span class="mini-state">Current</span>
+            <span class="indent">⌗ Plan · 1:20</span><span class="mini-state">Current</span>
+            <span class="indent">⌗ Section A-A</span><span class="mini-state warn">Rebuilding</span>
+            <span class="indent">! Detail B</span><span class="mini-state bad">Broken ref</span>
+            <b>› A-103 · Details</b><span class="mini-state bad">1 issue</span>
+          </div>
+        </article>
+
+        <article class="feature-card reveal">
+          <div class="feature-top"><span class="feature-number">02</span><div><h3>Properties follow the selection</h3><p>No separate detail, annotation, or style dialog. Multi-select exposes shared properties; one change updates everything selected as a single undoable transaction.</p></div></div>
+          <div class="mini-ui property-demo">
+            <div><small>Type</small><b>4 detail views</b></div>
+            <div><small>Scale</small><b>1:20</b></div>
+            <div><small>Display</small><b>Technical</b></div>
+            <div><small>Alignment</small><b>Baseline</b></div>
+            <div><small>Filter</small><b>Mixed</b></div>
+            <div><small>Status</small><b>3 current</b></div>
+            <div class="linked"><small>Linked style</small><b>Studio fabrication / click to inspect source</b></div>
+          </div>
+        </article>
+
+        <article class="feature-card reveal">
+          <div class="feature-top"><span class="feature-number">03</span><div><h3>Standard views arrive together</h3><p>Choose a named model view or selection, then place a coordinated plan/front/right/isometric set. They share alignment, scale, and a content filter from the start.</p></div></div>
+          <div class="mini-ui align-demo" style="position:relative">
+            <span class="align-line" style="top:50%"></span>
+            <div class="align-view" data-label="PLAN"></div>
+            <div class="align-view" data-label="FRONT"></div>
+            <div class="align-view" data-label="RIGHT"></div>
+          </div>
+        </article>
+
+        <article class="feature-card reveal">
+          <div class="feature-top"><span class="feature-number">04</span><div><h3>Annotations explain themselves</h3><p>Select a dimension to see the object and topology it references. When topology changes, Serpentine3D either reattaches confidently or asks for review.</p></div></div>
+          <div class="mini-ui">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px"><span class="mini-state">Healthy reference</span><b style="font-size:12px">Overall width · 2400 mm</b></div>
+            <div class="property-demo">
+              <div><small>Source 1</small><b>Base Plate</b></div>
+              <div><small>Entity</small><b>Edge 04</b></div>
+              <div><small>Precision</small><b>0 mm</b></div>
+              <div class="linked"><small>Fallback signature</small><b>Horizontal edge · z 0 · nearest (−1200, 0, 0)</b></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="feature-card wide reveal">
+          <div class="feature-top"><span class="feature-number">05</span><div><h3>AI proposes; the drawing owner decides</h3><p>AI operates on typed drawing entities and returns a diff. It can organise, annotate, and preflight without silently changing the issued set.</p></div></div>
+          <div class="mini-ui transaction">
+            <div class="transaction-pane">
+              <h4>Current · A-103 Details</h4>
+              <div class="change-row"><span class="change-mark move">·</span><span>Three loose views with mixed scales.</span></div>
+              <div class="change-row"><span class="change-mark move">·</span><span>No overall dimension or view labels.</span></div>
+            </div>
+            <div class="transaction-arrow">→</div>
+            <div class="transaction-pane">
+              <h4>Proposal 07 · not yet applied</h4>
+              <div class="change-row"><span class="change-mark">+</span><span>Align views and standardise at 1:5.</span></div>
+              <div class="change-row"><span class="change-mark">+</span><span>Add 4 associative dimensions.</span></div>
+              <div class="change-row"><span class="change-mark">+</span><span>Move Detail C to a new sheet; update callout.</span></div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-intro reveal">
+        <div class="eyebrow">The shared foundation</div>
+        <h2>A drawing graph,<br>not a screenshot.</h2>
+        <p>Every UI feature rests on a document-level model that also works with no window open. This is the point where better interaction, dependable publishing, and AI-native operation become the same investment.</p>
+      </div>
+      <div class="drawing-graph reveal">
+        <div class="graph-node"><div><b>Model evidence</b><span>Objects · topology · properties</span></div></div>
+        <div class="graph-node"><div><b>Drawing graph</b><span>Sheets · views · semantic refs</span></div></div>
+        <div class="graph-node"><div><b>Health + preflight</b><span>Current · stale · broken · failed</span></div></div>
+        <div class="graph-node"><div><b>Outputs</b><span>UI · PDF · DXF · MCP · CI</span></div></div>
+      </div>
+    </section>
+
+    <section class="section" id="milestones">
+      <div class="section-intro reveal">
+        <div class="eyebrow">Build sequence</div>
+        <h2>Daily drafting,<br>in the right order.</h2>
+        <p>The first milestone is deliberately about correctness. Faster annotation is only valuable once the resulting sheet can be trusted after the model changes.</p>
+      </div>
+
+      <div class="milestone-list reveal">
+        <article class="milestone">
+          <div class="milestone-tag">Foundation / 01</div>
+          <h3>Professional trust</h3>
+          <ul>
+            <li>Unit-correct detail scales</li>
+            <li>Persistent model references</li>
+            <li>Broken-reference states</li>
+            <li>Asynchronous HLR rendering</li>
+            <li>Headless sheet renderer</li>
+            <li>Publish-blocking preflight</li>
+          </ul>
+        </article>
+
+        <article class="milestone focus">
+          <div class="milestone-tag">Daily drafting / 02</div>
+          <h3>Work at drawing speed</h3>
+          <ul>
+            <li>Drawing navigator</li>
+            <li>Contextual inspector</li>
+            <li>Annotation multi-edit</li>
+            <li>Direct text + dimension grips</li>
+            <li>Standard view-set placement</li>
+            <li>Align, distribute, equal size</li>
+            <li>Per-detail visibility filters</li>
+            <li>Template + standards library</li>
+            <li>Ordinate and continued dims</li>
+            <li>Dual units and tolerances</li>
+          </ul>
+        </article>
+
+        <article class="milestone">
+          <div class="milestone-tag">Drawing set / 03</div>
+          <h3>Coordinate the issue</h3>
+          <ul>
+            <li>Linked sections and callouts</li>
+            <li>Automatic sheet references</li>
+            <li>Revision clouds and issue sets</li>
+            <li>Model-backed schedules</li>
+            <li>Deterministic batch publishing</li>
+            <li>Stronger 3DM/DXF exchange</li>
+          </ul>
+        </article>
+
+        <article class="milestone">
+          <div class="milestone-tag">Beyond Rhino / 04</div>
+          <h3>Make change legible</h3>
+          <ul>
+            <li>Change-impact review</li>
+            <li>Standards linting in CI</li>
+            <li>Reviewable AI transactions</li>
+            <li>Constraint-aware drafting</li>
+            <li>Publication provenance</li>
+            <li>Explain any line or value</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="acceptance reveal">
+        <div class="acceptance-card">
+          <small>The first decisive acceptance test</small>
+          <blockquote>Build an inch-based model, create an A3 sheet and a 1:10 view, associate a dimension, revise the model, verify the dimension, and export PDF—without constructing a GUI window.</blockquote>
+        </div>
+        <div class="acceptance-steps">
+          <div class="acceptance-step"><h3>Make scale undeniable</h3><p>One conversion service defines model units, paper millimetres, view scale, dimension formatting, and scale bars.</p></div>
+          <div class="acceptance-step"><h3>Give references identity</h3><p>Start with linear dimensions and a clear healthy / ambiguous / broken lifecycle.</p></div>
+          <div class="acceptance-step"><h3>Extract the drawing service</h3><p>Create and render sheets through a document API independent of active Qt viewports.</p></div>
+          <div class="acceptance-step"><h3>Expose the same operations</h3><p>Commands, the inspector, scripts, and MCP become adapters over one typed service.</p></div>
+          <div class="acceptance-step"><h3>Publish only known-good work</h3><p>Golden outputs and preflight turn professional dependability into something testable.</p></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Serpentine3D drafting vision · discussion document</span>
+    <span>Powerful by hand · deterministic headlessly · reviewable with AI</span>
+  </footer>
+</div>
+
+<script>
+  const scenarios = {
+    detail: {
+      command: "Detail selected — drag to move; grips resize the frame.",
+      chips: ["Current", "Scale 1:20", "Technical", "Lock", "Edit filter…"],
+      inspector: `
+        <div class="inspector-summary"><h4>Plan</h4><p>Detail view · A-102 Assembly</p></div>
+        <div class="property-group">
+          <div class="property-group-title">View</div>
+          <div class="property-row"><label>Direction</label><span class="property-value">Top</span></div>
+          <div class="property-row"><label>Scale</label><span class="property-value">1:20</span></div>
+          <div class="property-row"><label>Mode</label><span class="property-value">Technical</span></div>
+          <div class="property-row"><label>Camera</label><span class="property-value link">Fabrication plan ↗</span></div>
+        </div>
+        <div class="property-group">
+          <div class="property-group-title">Contents</div>
+          <div class="property-row"><label>Filter</label><span class="property-value link">Fabrication set ↗</span></div>
+          <div class="property-row"><label>Layers</label><span class="property-value">12 shown</span></div>
+          <div class="property-row"><label>Section</label><span class="property-value">None</span></div>
+        </div>
+        <div class="status-box"><strong>Current · model r184</strong>Linework generated 8 seconds ago.</div>`
+    },
+    dimension: {
+      command: "Overall width selected — edit in place or inspect its model source.",
+      chips: ["Healthy ref", "ISO Arch", "Precision 0", "Tolerance", "Show source"],
+      inspector: `
+        <div class="inspector-summary"><h4>Overall width · 2400 mm</h4><p>Associative linear dimension</p></div>
+        <div class="property-group">
+          <div class="property-group-title">Appearance</div>
+          <div class="property-row"><label>Style</label><span class="property-value link">ISO Architectural ↗</span></div>
+          <div class="property-row"><label>Precision</label><span class="property-value">0 mm</span></div>
+          <div class="property-row"><label>Tolerance</label><span class="property-value">None</span></div>
+          <div class="property-row"><label>Override</label><span class="property-value">—</span></div>
+        </div>
+        <div class="property-group">
+          <div class="property-group-title">Model evidence</div>
+          <div class="property-row"><label>Start</label><span class="property-value link">Base Plate · E04 ↗</span></div>
+          <div class="property-row"><label>End</label><span class="property-value link">Base Plate · E11 ↗</span></div>
+          <div class="property-row"><label>Updated</label><span class="property-value">Model r184</span></div>
+        </div>
+        <div class="status-box"><strong>Healthy reference</strong>Both edges resolved exactly after the last edit.</div>`
+    },
+    health: {
+      command: "Preflight found 1 broken reference and 1 view still rebuilding.",
+      chips: ["Resolve selected", "Show in model", "Rebuild all", "Preflight again"],
+      inspector: `
+        <div class="inspector-summary"><h4>Detail callout B</h4><p>Broken model reference · A-103 Details</p></div>
+        <div class="property-group">
+          <div class="property-group-title">Reference health</div>
+          <div class="property-row"><label>Expected</label><span class="property-value">Circular edge</span></div>
+          <div class="property-row"><label>Previous</label><span class="property-value">Top Plate · E19</span></div>
+          <div class="property-row"><label>Fallback</label><span class="property-value">Near Ø42 hole</span></div>
+          <div class="property-row"><label>Candidates</label><span class="property-value">2 possible</span></div>
+        </div>
+        <div class="status-box warn"><strong>Review required</strong>The source edge was replaced. Choose one of two candidates; publication is paused.</div>`
+    },
+    ai: {
+      command: "AI proposal 07 — 7 changes ready for review; nothing applied yet.",
+      chips: ["Preview all", "Accept selected", "Reject", "Explain", "Apply as one undo"],
+      inspector: `
+        <div class="inspector-summary"><h4>Proposal 07</h4><p>AI drafting transaction · not applied</p></div>
+        <div class="property-group">
+          <div class="property-group-title">Suggested changes</div>
+          <div class="property-row"><label>Move</label><span class="property-value">3 details</span></div>
+          <div class="property-row"><label>Restyle</label><span class="property-value">3 details</span></div>
+          <div class="property-row"><label>Create</label><span class="property-value">4 dimensions</span></div>
+          <div class="property-row"><label>Update</label><span class="property-value">1 callout</span></div>
+        </div>
+        <div class="property-group">
+          <div class="property-group-title">Validation</div>
+          <div class="property-row"><label>Preflight</label><span class="property-value">Passes</span></div>
+          <div class="property-row"><label>Undo</label><span class="property-value">One transaction</span></div>
+        </div>
+        <div class="status-box"><strong>Safe to preview</strong>No issued sheet is modified until this proposal is accepted.</div>`
+    }
+  };
+
+  const detail = document.querySelector("#mock-detail");
+  const dimension = document.querySelector("#mock-dimension");
+  const inspector = document.querySelector("#inspector-content");
+  const command = document.querySelector("#command-copy");
+  const chips = document.querySelector("#command-chips");
+
+  function setScenario(name) {
+    const data = scenarios[name];
+    if (!data) return;
+    document.querySelectorAll(".scenario-button").forEach(button => {
+      button.classList.toggle("active", button.dataset.scenario === name);
+    });
+    detail.classList.toggle("selected", name === "detail" || name === "ai");
+    dimension.classList.toggle("selected", name === "dimension");
+    inspector.innerHTML = data.inspector;
+    command.textContent = data.command;
+    chips.innerHTML = data.chips.map((chip, index) => `<span class="command-chip ${index === 0 ? "good" : ""}">${chip}</span>`).join("");
+  }
+
+  document.querySelectorAll(".scenario-button").forEach(button => {
+    button.addEventListener("click", () => setScenario(button.dataset.scenario));
+  });
+  document.querySelectorAll("[data-scenario-jump]").forEach(button => {
+    button.addEventListener("click", () => setScenario(button.dataset.scenarioJump));
+  });
+  detail.addEventListener("click", () => setScenario("detail"));
+  dimension.addEventListener("click", event => { event.stopPropagation(); setScenario("dimension"); });
+
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add("visible");
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: .08 });
+  document.querySelectorAll(".reveal").forEach(element => observer.observe(element));
+
+  // File URLs do not consistently restore a fragment after the page's large
+  // inline layout has settled. Re-apply it once so links into this standalone
+  // document land on the intended section in Chrome, Safari and Firefox.
+  if (location.hash) {
+    window.setTimeout(() => {
+      const target = document.querySelector(location.hash);
+      if (!target) return;
+      target.querySelectorAll(".reveal").forEach(element => {
+        element.classList.add("visible");
+      });
+      if (target.classList.contains("reveal")) target.classList.add("visible");
+      const previous = document.documentElement.style.scrollBehavior;
+      document.documentElement.style.scrollBehavior = "auto";
+      target.scrollIntoView({ block: "start" });
+      window.requestAnimationFrame(() => {
+        document.documentElement.style.scrollBehavior = previous;
+      });
+    }, 80);
+  }
+</script>
+</body>
+</html>

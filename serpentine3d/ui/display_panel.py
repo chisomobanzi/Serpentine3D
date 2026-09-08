@@ -1,19 +1,16 @@
-"""What the pane you are in draws: its mode, and what it draws on top.
+"""Viewport display controls, opened from that viewport's title menu.
 
-Rhino puts this beside Properties and people coming from it look there
-first. GitHub #5 asked for it by name, wanting isocurves off in a rendered
-view; before this the only way to reach a display mode at all was the
-viewport's own title, and isocurves could not be reached at all.
-
-The panel holds no state. It reads the active viewport on every refresh
-and writes straight back to it, so four panes with four different settings
-stay four panes rather than one panel's idea of them.
+The reusable panel reads its supplied viewport on each refresh. The dialog
+binds that source for its lifetime, so activating another viewport never
+redirects edits to it.
 """
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFormLayout, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+    QVBoxLayout, QWidget,
 )
 
 #: Mode id to the label people read, in the order the View menu lists them.
@@ -30,7 +27,7 @@ _MODES = [
 
 
 class DisplayPanel(QWidget):
-    """Display settings for whichever viewport is active."""
+    """Display settings for the viewport returned by ``viewport_source``."""
 
     def __init__(self, viewport_source, parent=None):
         super().__init__(parent)
@@ -73,8 +70,7 @@ class DisplayPanel(QWidget):
         return self._source()
 
     def refresh(self):
-        """Point the controls at the active viewport. Called when the active
-        pane changes and when one of them changes mode by another route."""
+        """Read the supplied viewport without creating display overrides."""
         vp = self.viewport()
         if vp is None:
             return
@@ -120,3 +116,25 @@ class DisplayPanel(QWidget):
 
     def set_edges_checked(self, on: bool):
         self.edge_box.setChecked(bool(on))
+
+
+class DisplaySettingsDialog(QDialog):
+    """Modeless settings that stay attached to their originating viewport."""
+
+    def __init__(self, viewport, parent=None):
+        super().__init__(parent)
+        self.viewport = viewport
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setWindowTitle(
+            f"Display settings · {viewport._view_name.capitalize()}")
+        self.setMinimumWidth(300)
+        self.panel = DisplayPanel(lambda: viewport, self)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.panel)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.close)
+        layout.addWidget(buttons)
+        # Covers changes made through commands, APIs and the viewport menu,
+        # including per-pane edge/isocurve overrides.
+        viewport.displayModeChanged.connect(self.panel.refresh)
+        viewport.destroyed.connect(self.close)

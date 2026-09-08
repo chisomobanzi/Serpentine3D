@@ -87,12 +87,13 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
     clouds = [o for o in scene.all() if o.kind == "pointcloud"]
     trajectories = list(getattr(scene, "trajectories", None) or [])
     session = getattr(scene, "session", None) or None
+    blobs = {}
     doc = {
         "format": "serpentine3d",
         "version": PLAIN_VERSION,
         "named_views": scene.named_views,
         "units": scene.units,
-        "image_planes": scene.image_planes,
+        "image_planes": _image_planes_to_json(scene.image_planes, blobs),
         "block_defs": {
             bid: {
                 "name": bd["name"],
@@ -150,7 +151,6 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
             if obj.kind != "pointcloud"
         ],
     }
-    blobs = {}
     if clouds or trajectories or session:
         doc["version"] = 3
         doc["requires"] = REQUIRES
@@ -159,6 +159,31 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
         if session:
             doc["session"] = session
     _write_container(doc, path, thumbnail, blobs)
+
+
+def _image_planes_to_json(planes, blobs: dict) -> list[dict]:
+    """Move embedded picture bytes out of JSON and into archive members."""
+    import hashlib
+    import os
+
+    entries = []
+    for index, plane in enumerate(planes):
+        data = plane.get("image_data")
+        entry = {key: value for key, value in plane.items()
+                 if key not in ("image_data", "image")}
+        if isinstance(data, (bytes, bytearray, memoryview)):
+            data = bytes(data)
+            suffix = os.path.splitext(str(plane.get("path", "")))[1].lower()
+            if suffix not in (".png", ".jpg", ".jpeg", ".bmp", ".gif",
+                              ".webp", ".tif", ".tiff"):
+                suffix = ".img"
+            digest = hashlib.sha256(data).hexdigest()[:16]
+            member = f"images/{index:04d}-{digest}{suffix}"
+            blobs[member] = data
+            entry.pop("path", None)
+            entry["image"] = member
+        entries.append(entry)
+    return entries
 
 
 def _cloud_to_json(obj, blobs: dict) -> dict:
@@ -279,7 +304,8 @@ def _load_doc(scene, doc: dict, blobs=None):
     layers.current_id = id_map.get(current, "default")
     scene.named_views = dict(doc.get("named_views", {}))
     scene.units = doc.get("units", scene.units)
-    scene.image_planes = list(doc.get("image_planes", []))
+    scene.image_planes = _image_planes_from_json(
+        doc.get("image_planes", []), blobs)
     for bid, bd in doc.get("block_defs", {}).items():
         scene.block_defs[bid] = {
             "name": bd["name"],
@@ -292,6 +318,7 @@ def _load_doc(scene, doc: dict, blobs=None):
                           doc.get("annot_styles", {}).items()}
     scene.history_records = list(doc.get("history_records", []))
 
+    object_id_map = {}
     for od in doc.get("objects", []):
         if od.get("mesh"):
             shape = _mesh_from_json(od["mesh"])
@@ -299,6 +326,8 @@ def _load_doc(scene, doc: dict, blobs=None):
             shape = geometry.shape_from_bytes(base64.b64decode(od["brep"]))
         obj = scene.add(shape, name=od["name"],
                         layer_id=id_map.get(od["layer"], "default"))
+        if od.get("id"):
+            object_id_map[od["id"]] = obj.id
         updates = {}
         if not od.get("visible", True):
             updates["visible"] = False
@@ -329,6 +358,8 @@ def _load_doc(scene, doc: dict, blobs=None):
             continue
         obj = scene.add(cloud, name=cd.get("name") or None,
                         layer_id=id_map.get(cd.get("layer"), "default"))
+        if cd.get("id"):
+            object_id_map[cd["id"]] = obj.id
         updates = {}
         if not cd.get("visible", True):
             updates["visible"] = False
@@ -339,8 +370,33 @@ def _load_doc(scene, doc: dict, blobs=None):
         if updates:
             scene.update(obj.id, **updates)
 
+    # Loading assigns fresh scene IDs. Regeneration and script ownership must
+    # follow the loaded objects, rather than retain the file's obsolete IDs.
+    for record in scene.history_records:
+        record["inputs"] = [object_id_map.get(oid, oid)
+                            for oid in record.get("inputs", [])]
+        if "output" in record:
+            record["output"] = object_id_map.get(record["output"], record["output"])
+
     scene.trajectories = list(doc.get("trajectories", []))
     scene.session = doc.get("session") or None
+
+
+def _image_planes_from_json(planes, blobs=None) -> list[dict]:
+    """Restore embedded pictures, leaving legacy external paths untouched."""
+    restored = []
+    for saved_plane in planes:
+        plane = dict(saved_plane)
+        member = plane.pop("image", None)
+        if member and blobs is not None:
+            try:
+                data = blobs.read(member)
+            except (KeyError, OSError, RuntimeError):
+                data = None
+            if data is not None:
+                plane["image_data"] = data
+        restored.append(plane)
+    return restored
 
 
 def _cloud_from_json(cd: dict, blobs):

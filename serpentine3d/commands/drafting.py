@@ -9,7 +9,9 @@ from ..core.layout import (
 )
 # a detail view named "front" should look where the front view looks
 from ..ui.camera import STANDARD_VIEWS as _VIEW_ANGLES
-from .base import NumberReq, OptionReq, PointReq, SelectReq, TextReq, command
+from .base import (
+    FileReq, NumberReq, OptionReq, PointReq, SelectReq, TextReq, command,
+)
 
 
 def _window(ctx):
@@ -331,7 +333,8 @@ def cmd_exportpdf(ctx):
     import os
     default_name = (f"~/{lay.name}.pdf" if scope == "Current"
                     else "~/sheets.pdf")
-    path = yield TextReq("PDF path", default=default_name)
+    path = yield FileReq("PDF path", default=default_name, save=True,
+                         title="Export PDF", filters="PDF (*.pdf)")
     path = os.path.abspath(os.path.expanduser(path.strip()))
     if not path.endswith(".pdf"):
         path += ".pdf"
@@ -636,8 +639,10 @@ def cmd_exportdxf(ctx):
     """Export the active layout sheet (or the model) to DXF."""
     import os
     lay = _active_layout(ctx)
-    path = yield TextReq("DXF path",
-                         default=f"~/{lay.name if lay else 'model'}.dxf")
+    path = yield FileReq("DXF path",
+                         default=f"~/{lay.name if lay else 'model'}.dxf",
+                         save=True, title="Export DXF",
+                         filters="DXF (*.dxf)")
     path = os.path.abspath(os.path.expanduser(path.strip()))
     if not path.endswith(".dxf"):
         path += ".dxf"
@@ -660,7 +665,8 @@ def cmd_exportsvg(ctx):
         return
         yield  # pragma: no cover
     import os
-    path = yield TextReq("SVG path", default=f"~/{lay.name}.svg")
+    path = yield FileReq("SVG path", default=f"~/{lay.name}.svg", save=True,
+                         title="Export SVG", filters="SVG (*.svg)")
     path = os.path.abspath(os.path.expanduser(path.strip()))
     if not path.endswith(".svg"):
         path += ".svg"

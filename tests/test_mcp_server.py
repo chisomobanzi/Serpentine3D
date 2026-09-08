@@ -16,7 +16,7 @@ EXPECTED_TOOLS = {
     "serp_scene_info", "serp_screenshot", "serp_create_curve",
     "serp_create_surface", "serp_boolean", "serp_transform", "serp_select",
     "serp_command", "serp_layers", "serp_import", "serp_export",
-    "serp_measure", "serp_undo", "serp_viewport",
+    "serp_measure", "serp_undo", "serp_viewport", "serp_prepare_script",
 }
 
 

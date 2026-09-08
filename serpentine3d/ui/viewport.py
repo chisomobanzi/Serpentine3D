@@ -1686,15 +1686,22 @@ class Viewport(QOpenGLWidget):
         GL.glBindVertexArray(batch.vao)
         GL.glDrawArrays(GL.GL_LINES, 0, batch.count)
 
-    def _texture_for(self, path: str):
-        entry = self._image_textures.get(path)
+    def _texture_for(self, path: str, image_data: bytes | None = None):
+        if image_data is None:
+            cache_key = path
+        else:
+            import hashlib
+            image_data = bytes(image_data)
+            cache_key = ("embedded", hashlib.sha256(image_data).digest())
+        entry = self._image_textures.get(cache_key)
         if entry is not None:
             return entry
         from PySide6.QtGui import QImage
-        img = QImage(path)
+        img = (QImage(path) if image_data is None
+               else QImage.fromData(image_data))
         if img.isNull():
-            self._image_textures[path] = (0, 1.0)
-            return self._image_textures[path]
+            self._image_textures[cache_key] = (0, 1.0)
+            return self._image_textures[cache_key]
         img = img.convertToFormat(QImage.Format.Format_RGBA8888)
         img = img.mirrored(False, True)
         tex = GL.glGenTextures(1)
@@ -1708,15 +1715,16 @@ class Viewport(QOpenGLWidget):
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER,
                            GL.GL_LINEAR)
         aspect = img.width() / max(img.height(), 1)
-        self._image_textures[path] = (tex, aspect)
-        return self._image_textures[path]
+        self._image_textures[cache_key] = (tex, aspect)
+        return self._image_textures[cache_key]
 
     def _draw_image_planes(self, mvp):
         planes = getattr(self.scene, "image_planes", [])
         if not planes:
             return
         for plane in planes:
-            tex, _ = self._texture_for(plane["path"])
+            tex, _ = self._texture_for(
+                plane.get("path", ""), plane.get("image_data"))
             if not tex:
                 continue
             o = rebased(np.asarray(plane["origin"], float)[None],
@@ -2970,6 +2978,36 @@ class Viewport(QOpenGLWidget):
         """
         self._draw_ghost(mvp)
         self._draw_preview(mvp)
+        self._draw_script_preview(mvp)
+
+    def _draw_script_preview(self, mvp):
+        """Script reviews are independent from the active command's ghost.
+
+        The scene owns this transient overlay, so new/reopened viewports see
+        the same preview and no hidden pane can retain an obsolete copy.
+        """
+        overlay = getattr(self.scene, "script_preview", None)
+        if overlay is None or self.space != "model" or self._preview is None:
+            return
+        for (tris, segs, points), color in zip(overlay, ((.43, .87, .69), (.95, .40, .35))):
+            if len(tris):
+                self._preview.update(rebased(tris, self._frame_anchor))
+                self._set_line_uniforms(mvp, (*color, .24))
+                GL.glDepthMask(False)
+                GL.glBindVertexArray(self._preview.vao)
+                GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(tris))
+                GL.glDepthMask(True)
+            if len(segs):
+                GL.glDisable(GL.GL_DEPTH_TEST)
+                self._preview.update(rebased(segs, self._frame_anchor))
+                self._draw_lines(self._preview, mvp, (*color, .92), 1.8)
+                GL.glEnable(GL.GL_DEPTH_TEST)
+            if len(points):
+                self._preview.update(rebased(points, self._frame_anchor))
+                self._set_line_uniforms(mvp, (*color, .9))
+                GL.glPointSize(4.0)
+                GL.glBindVertexArray(self._preview.vao)
+                GL.glDrawArrays(GL.GL_POINTS, 0, len(points))
 
     def set_preview(self, segments: np.ndarray | None,
                     markers: list | None = None):

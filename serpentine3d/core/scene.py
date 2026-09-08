@@ -547,6 +547,7 @@ class Scene:
     def snapshot(self) -> dict:
         import copy
         return {
+            "units": self.units,
             "objects": {k: v.clone() for k, v in self.objects.items()},
             "order": list(self._order),
             "counters": dict(self._counters),
@@ -566,6 +567,7 @@ class Scene:
 
     def restore(self, snap: dict):
         import copy
+        self.units = snap.get("units", self.units)
         self.objects = {k: v.clone() for k, v in snap["objects"].items()}
         self._order = list(snap["order"])
         self._counters = dict(snap["counters"])

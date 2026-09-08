@@ -293,11 +293,11 @@ def test_panel_opens_and_runs_scripted_turn(tmp_path, monkeypatch):
     # no key -> setup card is shown, input hidden
     assert panel.setup_card.isVisibleTo(panel)
     assert not panel.input_row.isVisibleTo(panel)
-    # saving a key swaps to the input row
+    # Saving a key dismisses setup; the workspace owns the shared composer.
     panel.key_edit.setText("sk-test")
     panel._save_key()
     assert w.cfg.get("ai", "api_key") == "sk-test"
-    assert panel.input_row.isVisibleTo(panel)
+    assert panel.setup_card.isHidden()
     # scripted turn drives real geometry through the panel's agent
     panel._ensure_agent()
     panel.agent.client = ScriptedClient([

@@ -17,6 +17,8 @@ def main():
         "",
         "Every command is typed on the command line (Tab completes,",
         "F1 opens this list inside the app). Aliases in parentheses.",
+        "Commands that need a file open a filtered chooser by default. Append",
+        "`--headless` to keep the typed path prompt for scripts and automation.",
         "",
     ]
     for section, cmds in command_reference().items():

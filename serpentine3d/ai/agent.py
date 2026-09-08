@@ -50,17 +50,30 @@ briefly, don't write essays.
 Command reference (run_command): every command speaks its prompts in \
 order; supply inputs as strings. Points are "x,y,z". Selection prompts \
 take object names, "all", or "" to end selection.
+Box takes THREE inputs: first base corner, opposite base corner, then \
+height. For a 40 by 30 by 20 box use inputs=["0,0,0", "40,30,0", "20"]. \
+The second corner's Z coordinate does not supply height.
+If a tool reports an error, correct the arguments and retry before \
+claiming that the requested geometry was created.
 {command_reference}
 """
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(vision: bool = True) -> str:
     from ..commands.base import _REGISTRY
     lines = []
     for cd in sorted(_REGISTRY.values(), key=lambda c: c.name):
         alias = f" ({', '.join(cd.aliases)})" if cd.aliases else ""
         lines.append(f"  {cd.name}{alias} — {cd.label}")
-    return _SYSTEM.format(command_reference="\n".join(lines))
+    prompt = _SYSTEM.format(command_reference="\n".join(lines))
+    if not vision:
+        prompt = prompt.replace(
+            "- After building something non-trivial, call screenshot and LOOK at it. "
+            "If it is wrong, fix it before answering. Set an informative view first "
+            "(viewport tool: perspective + zoom_extents is a good default).",
+            "- This model is text-only and cannot inspect screenshots. Verify work "
+            "with scene_info and measure; do not claim to have seen the viewport.")
+    return prompt
 
 
 class Agent(QObject):
@@ -72,6 +85,7 @@ class Agent(QObject):
     turnFinished = Signal(str)              # stop reason
     errorRaised = Signal(str)
     usageUpdated = Signal(int, int)         # input tokens, output tokens
+    conversationReset = Signal()
 
     _invoke = Signal(object)
 
@@ -82,8 +96,10 @@ class Agent(QObject):
         self.client = client
         self.max_steps = max_steps
         self.messages: list[dict] = []
-        self.system = build_system_prompt()
+        self.system = build_system_prompt(getattr(client, "vision", True))
         self._stop = threading.Event()
+        self._reset_requested = threading.Event()
+        self._state_lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._in_tokens = 0
         self._out_tokens = 0
@@ -98,20 +114,32 @@ class Agent(QObject):
 
     def send(self, text: str):
         """Start one user turn (returns immediately; signals follow)."""
-        if self.busy:
-            return
-        self._stop.clear()
-        self.messages.append({"role": "user",
-                              "content": self._user_content(text)})
-        self._thread = threading.Thread(target=self._turn, daemon=True)
-        self._thread.start()
+        with self._state_lock:
+            if self.busy or self._reset_requested.is_set():
+                return
+            self._stop.clear()
+            self.messages.append({"role": "user",
+                                  "content": self._user_content(text)})
+            self._thread = threading.Thread(target=self._turn, daemon=True)
+            self._thread.start()
 
     def stop(self):
         self._stop.set()
 
     def reset(self):
-        if not self.busy:
-            self.messages.clear()
+        """Clear the conversation once any active turn has stopped."""
+        with self._state_lock:
+            if self.busy:
+                self._reset_requested.set()
+                self.stop()
+                return
+            self._clear_conversation()
+        self.conversationReset.emit()
+
+    def _clear_conversation(self):
+        self.messages.clear()
+        self._in_tokens = self._out_tokens = 0
+        self._reset_requested.clear()
 
     # ------------------------------------------------------- turn machinery
 
@@ -137,11 +165,11 @@ class Agent(QObject):
                     tools=T.TOOLS, on_text=self.textDelta.emit,
                     should_stop=self._stop.is_set)
                 self._track_usage(reply.get("usage") or {})
-                self.messages.append({"role": "assistant",
-                                      "content": reply["content"]})
-                if reply["stop_reason"] == "aborted":
+                if self._stop.is_set() or reply["stop_reason"] == "aborted":
                     self.turnFinished.emit("stopped")
                     return
+                self.messages.append({"role": "assistant",
+                                      "content": reply["content"]})
                 calls = [b for b in reply["content"]
                          if b.get("type") == "tool_use"]
                 if not calls:
@@ -157,6 +185,16 @@ class Agent(QObject):
             traceback.print_exc()
             self._drop_dangling_tool_use()
             self.errorRaised.emit(f"{type(exc).__name__}: {exc}")
+        finally:
+            # Serialize the final reset with New chat and send(), including
+            # a reset requested just as the worker is completing.
+            with self._state_lock:
+                reset = self._reset_requested.is_set()
+                if reset:
+                    self._clear_conversation()
+                self._thread = None
+            if reset:
+                self.conversationReset.emit()
 
     def _run_tool(self, call: dict) -> dict:
         name, args = call["name"], call.get("input") or {}
@@ -166,8 +204,8 @@ class Agent(QObject):
             self.toolFinished.emit(name, False, "stopped")
             return {**base, "content": "aborted by user", "is_error": True}
         try:
-            result = self._on_main(lambda: T.dispatch(self.api, name, args))
-        except ApiError as exc:
+            result = self._on_main(lambda: self._dispatch_tool(name, args))
+        except (ApiError, ValueError, TypeError, KeyError) as exc:
             self.toolFinished.emit(name, False, str(exc))
             return {**base, "content": str(exc), "is_error": True}
         if isinstance(result, T.ImageResult):
@@ -180,21 +218,31 @@ class Agent(QObject):
         self.toolFinished.emit(name, True, _clip(result))
         return {**base, "content": result}
 
+    def _dispatch_tool(self, name: str, args: dict):
+        # Check again on the main thread: Stop may arrive while a tool was
+        # queued, or the user may have started a CAD prompt during HTTP I/O.
+        if self._stop.is_set():
+            raise ApiError("Operation stopped before execution.")
+        with self.api.external_operation(name, args, source="AI",
+                                         summary=T.summarize_call(name, args)):
+            if name == "screenshot" and not getattr(self.client, "vision", True):
+                raise ApiError("This model has no vision support; use scene_info or measure for text-only verification.")
+            return T.dispatch(self.api, name, args)
+
     def _drop_dangling_tool_use(self):
         """A turn that dies after an assistant tool_use message would leave
-        the transcript unsendable (tool_use with no tool_result) — trim it."""
-        while self.messages:
-            last = self.messages[-1]
-            content = last.get("content")
-            if (last["role"] == "assistant" and isinstance(content, list)
-                    and any(b.get("type") == "tool_use" for b in content)):
-                self.messages.pop()
-            elif (last["role"] == "user" and isinstance(content, list)
-                    and any(b.get("type") == "tool_result"
-                            for b in content)):
-                self.messages.pop()
-            else:
-                break
+        the transcript unsendable (tool_use with no tool_result) — trim it.
+
+        A completed tool/result pair must survive a later network error:
+        those operations already happened in the user's scene.
+        """
+        if not self.messages:
+            return
+        last = self.messages[-1]
+        content = last.get("content")
+        if (last["role"] == "assistant" and isinstance(content, list)
+                and any(b.get("type") == "tool_use" for b in content)):
+            self.messages.pop()
 
     def _track_usage(self, usage: dict):
         self._in_tokens += int(usage.get("input_tokens") or 0)

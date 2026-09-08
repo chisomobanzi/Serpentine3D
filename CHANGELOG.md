@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A bottom workspace for commands, scripts and the assistant.** Command
+  history stays visible beside optional resizable panes, with model/layout
+  tabs above them. An explicit Command / Ask AI switch routes the shared
+  input and keeps separate drafts. Pane arrangements are remembered.
+  The input occupies one row, script controls share the file-tab row, and
+  the assistant's model and settings share one header. Routine hints live
+  in tooltips; preview controls appear when relevant.
+- **Local assistants through LM Studio.** Assistant settings discover local
+  models and their capabilities, alongside the existing Anthropic provider.
+  Streamed tool calls operate on real geometry and identify their actions
+  in command history. Pending CAD prompts are preserved, and provider
+  errors and cancellation keep completed operations in the conversation.
+- **MCP shares the workspace.** External agents identify their operations
+  and errors in command history, respect pending modelling prompts, and can
+  hand off unexecuted Python drafts with `serp_prepare_script`.
+- **A Python script editor with geometry previews.** Edit and save `.py`
+  files, start from bundled examples, or open an assistant-prepared draft.
+  Run stages changes on a worker; Keep commits them as one undoable change,
+  and Discard leaves the document untouched. Reruns replace the script's
+  previous outputs, and open drafts recover after a normal app close. Tab
+  closing offers Save, Discard or Cancel for unsaved code.
+- **Display settings in viewport dropdowns.** Surface edges, isocurves,
+  and display mode are accessible from each viewport title. The controls
+  stay bound to that viewport and free the former permanent Display dock.
+- **File commands open a file picker.** `open`, `import`, `save`, `export`,
+  `pictureframe`, the sheet exporters, viewport capture and turntable capture
+  now open an appropriately filtered chooser when they reach the filename.
+  Append `--headless` to a command to keep the typed path prompt for scripts
+  and unattended workflows; API and MCP command calls do this automatically.
+- **Reference images travel with the drawing.** `pictureframe` embeds the
+  original encoded image in the `.serp` archive, so moving the drawing or
+  deleting the source image no longer leaves an empty frame. Existing files
+  that refer to an external image path still open as before.
+
 ## 0.8.4 — 2026-09-08
 
 ### Added
