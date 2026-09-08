@@ -22,7 +22,9 @@ properties, display budget, commands and version-3 round trip introduced in
 Linux covered all 2,882 collected tests: 2,875 passed under the offscreen
 runner, 7 OpenGL-only tests skipped there, and all 5 SpaceMouse tests passed
 with local-socket access. The installed AppImage reports 0.9.0, passes its
-packaged self-test and answers a live RPC startup probe.
+packaged self-test and answers a live RPC startup probe. Released on
+2026-09-08: pushed, tagged `v0.9.0`, and published with the Linux AppImage,
+Windows installer and Apple Silicon DMG attached.
 
 0.8.2 was one fix, for the first bug reported by someone who could not
 start the app at all (#7, Manjaro/KDE Wayland on an RTX 3080): Serpentine3D now starts on
