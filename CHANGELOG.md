@@ -10,7 +10,9 @@
   input and keeps separate drafts. Pane arrangements are remembered.
   The input occupies one row, script controls share the file-tab row, and
   the assistant's model and settings share one header. Routine hints live
-  in tooltips; preview controls appear when relevant.
+  in tooltips; preview controls appear when relevant. Minimal outline icons
+  identify AI, scripts and commands, with a subtle custom script-tab close
+  button and consistent hover and selected states.
 - **Local assistants through LM Studio.** Assistant settings discover local
   models and their capabilities, alongside the existing Anthropic provider.
   Streamed tool calls operate on real geometry and identify their actions

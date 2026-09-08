@@ -8,14 +8,15 @@ import re
 import threading
 import uuid
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal, Slot
+from PySide6.QtCore import QCoreApplication, QEvent, QRect, QSize, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QFontDatabase, QPainter, QSyntaxHighlighter, QTextCharFormat
 from PySide6.QtWidgets import (
     QDialog, QFileDialog, QHBoxLayout, QLabel, QLayout, QMenu, QMessageBox, QPlainTextEdit,
-    QPushButton, QSizePolicy, QTabWidget, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
+    QPushButton, QSizePolicy, QTabBar, QTabWidget, QTextBrowser, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..script_runtime import execute_script, fingerprint
+from .workspace_icons import workspace_icon
 
 
 BOX_EXAMPLE = '''# A box on a named layer. Edit the dimensions, then Run.
@@ -177,16 +178,24 @@ class ScriptEditor(QWidget):
         self.tabs.setDocumentMode(True)
         self.tabs.setMovable(True)
         self.tabs.setTabsClosable(True)
+        self.tabs.setIconSize(QSize(16, 16))
+        self.tabs.setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.setStyleSheet("""
             QTabWidget::pane { border: none; }
             QTabBar::tab { background: transparent; color: #929a9e;
-                border: none; padding: 6px 7px; }
+                border: none; padding: 4px 7px; }
             QTabBar::tab:selected { color: #dbdcd6; background: #27292d;
                 border-bottom: 1px solid #aa8b49; }
+            QToolButton#scriptTabClose { background: transparent; border: none;
+                border-radius: 3px; padding: 0; }
+            QToolButton#scriptTabClose:hover { background: #3b4046; }
+            QToolButton#scriptTabClose:pressed { background: #484e55; }
+            QToolButton#scriptTabClose:focus { border: 1px solid #657d98; }
         """)
         layout.addWidget(self.tabs, 1)
         actions = self.tab_actions = QWidget()
+        actions.setStyleSheet("QPushButton, QToolButton { padding: 3px 6px; }")
         files = QHBoxLayout(actions)
         files.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
         files.setContentsMargins(4, 0, 1, 0)
@@ -205,12 +214,15 @@ class ScriptEditor(QWidget):
         self.stop_button = self._button("Stop", self.stop)
         self.keep_button = self._button("Keep", self.keep)
         self.discard_button = self._button("Discard", self.discard)
+        for button, name in ((self.run_button, "run"), (self.stop_button, "stop")):
+            button.setIcon(workspace_icon(name, color="#b6d5c7" if name == "run" else "#9ca6ad"))
+            button.setIconSize(QSize(14, 14))
         for button in (self.run_button, self.stop_button, self.keep_button, self.discard_button):
             files.addWidget(button)
         self.run_button.setStyleSheet("background: #2b4038; color: #b6d5c7;")
         self.run_button.setToolTip("Run Python to preview document changes")
         more = QToolButton()
-        more.setText("⋯")
+        more.setIcon(workspace_icon("more"))
         more.setToolTip("Script actions · New, Open, Save and Help")
         more.setAccessibleName("Script actions")
         more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -256,7 +268,21 @@ class ScriptEditor(QWidget):
         editor.script_id = str(uuid.uuid4())
         editor.script_title = title
         editor.setPlainText(source)
-        self.tabs.addTab(editor, title)
+        index = self.tabs.addTab(editor, workspace_icon("script", color="#9baec7"), title)
+        # Replace the platform's close artwork while retaining Qt's close
+        # signal and the existing save/discard flow. Resolve the index on click
+        # so moving tabs never changes which document the button closes.
+        close = QToolButton(self.tabs.tabBar())
+        close.setObjectName("scriptTabClose")
+        close.setIcon(workspace_icon("close", color="#8d979f"))
+        close.setIconSize(QSize(16, 16))
+        close.setFixedSize(20, 20)
+        close.setAccessibleName("Close script")
+        close.setToolTip("Close script")
+        close.clicked.connect(
+            lambda: self.tabs.tabCloseRequested.emit(self.tabs.indexOf(editor)))
+        self.tabs.tabBar().setTabButton(index, QTabBar.ButtonPosition.LeftSide, None)
+        self.tabs.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, close)
         self.tabs.setCurrentWidget(editor)
         editor.document().modificationChanged.connect(
             lambda changed: self.tabs.setTabText(self.tabs.indexOf(editor),
@@ -394,9 +420,12 @@ class ScriptEditor(QWidget):
             button.setVisible(button.isEnabled())
         # QTabWidget caches corner placement. Reflow after preview actions
         # change width so their right edge stays inside a narrow pane.
+        self.tab_actions.layout().invalidate()
         self.tab_actions.layout().activate()
+        self.tab_actions.adjustSize()
         self.tabs.setCornerWidget(self.tab_actions, Qt.Corner.TopRightCorner)
         self.tab_actions.show()
+        QCoreApplication.sendEvent(self.tabs, QEvent(QEvent.Type.LayoutRequest))
         self.status.setVisible(bool(self.status.text()))
 
     def run(self):

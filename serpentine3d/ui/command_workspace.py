@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSplitter, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
+from .workspace_icons import workspace_icon
+
 
 class CommandWorkspace(QWidget):
     """Keep pane layout independent from the destination of typed input."""
@@ -40,8 +42,10 @@ class CommandWorkspace(QWidget):
             QPushButton:disabled, QToolButton:disabled { color: #62676b; }
             QPushButton:checked, QToolButton:checked { background: #39372f; color: #dbc087;
                 border-bottom-color: #aa8b49; }
-            QPushButton#aiMode:checked { background: #29473f;
+            QPushButton#workspaceAssistant:checked, QPushButton#aiMode:checked { background: #29473f;
                 color: #9bd3c3; border-bottom-color: #4c8273; }
+            QPushButton#workspaceScript:checked { background: #2c343f;
+                color: #bacbdf; border-bottom-color: #657d98; }
             QPushButton#workspaceSubmit { background: #39372f;
                 color: #dbc087; padding: 3px 10px; }
             QPushButton#workspaceSubmit[mode="ai"] { background: #294b42;
@@ -61,6 +65,10 @@ class CommandWorkspace(QWidget):
         toolbar.setContentsMargins(0, 0, 2, 0)
         self.assistant_toggle = self._toggle("Assistant")
         self.script_toggle = self._toggle("Script")
+        self.assistant_toggle.setObjectName("workspaceAssistant")
+        self.script_toggle.setObjectName("workspaceScript")
+        self.assistant_toggle.setIcon(workspace_icon("assistant", active_color="#9bd3c3"))
+        self.script_toggle.setIcon(workspace_icon("script", active_color="#bacbdf"))
         self.assistant_toggle.toggled.connect(
             lambda shown: self.set_pane_visible("assistant", shown))
         self.script_toggle.toggled.connect(
@@ -68,7 +76,7 @@ class CommandWorkspace(QWidget):
         toolbar.addWidget(self.assistant_toggle)
         toolbar.addWidget(self.script_toggle)
         arrange = QToolButton()
-        arrange.setText("⋯")
+        arrange.setIcon(workspace_icon("more"))
         arrange.setAccessibleName("Arrange")
         arrange.setToolTip("Arrange workspace")
         arrange.setFixedWidth(28)
@@ -83,7 +91,7 @@ class CommandWorkspace(QWidget):
         arrange.setMenu(menu)
         toolbar.addWidget(arrange)
         self.expand_button = QToolButton()
-        self.expand_button.setText("⤢")
+        self.expand_button.setIcon(workspace_icon("expand"))
         self.expand_button.setAccessibleName("Expand")
         self.expand_button.setFixedWidth(28)
         self.expand_button.setToolTip("Expand workspace")
@@ -94,6 +102,9 @@ class CommandWorkspace(QWidget):
         self.collapse_button.clicked.connect(
             lambda: self.set_collapsed(not self._collapsed))
         toolbar.addWidget(self.collapse_button)
+        for button in (arrange, self.expand_button, self.collapse_button):
+            button.setIconSize(QSize(16, 16))
+            button.setStyleSheet("padding: 3px 5px;")
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setChildrenCollapsible(False)
@@ -131,6 +142,8 @@ class CommandWorkspace(QWidget):
         group = QButtonGroup(self)
         self.command_mode = self._toggle("Command")
         self.ai_mode = self._toggle("Ask AI")
+        self.command_mode.setIcon(workspace_icon("command", active_color="#dbc087"))
+        self.ai_mode.setIcon(workspace_icon("assistant", active_color="#9bd3c3"))
         self.ai_mode.setObjectName("aiMode")
         for button in (self.command_mode, self.ai_mode):
             group.addButton(button)
@@ -166,6 +179,7 @@ class CommandWorkspace(QWidget):
     def _toggle(text):
         button = QPushButton(text)
         button.setCheckable(True)
+        button.setIconSize(QSize(16, 16))
         return button
 
     def sizeHint(self):
@@ -306,6 +320,9 @@ class CommandWorkspace(QWidget):
         if busy and self.assistant.btn_send.text() == "Stopping…":
             label = "Stopping…"
         self.submit_button.setText(label)
+        self.submit_button.setIcon(workspace_icon(
+            "stop" if busy else "send" if ai else "run",
+            color="#a9dfce" if ai else "#dbc087"))
         self.inputs.setToolTip(
             "Enter to send · Shift+Enter for a new line" if ai else
             "Enter to run · Esc to clear · History stays visible")
@@ -325,7 +342,8 @@ class CommandWorkspace(QWidget):
 
     def _update_collapse_control(self):
         label = "Restore workspace" if self._collapsed else "Collapse workspace"
-        self.collapse_button.setText("⌃" if self._collapsed else "⌄")
+        self.collapse_button.setIcon(workspace_icon(
+            "chevron-up" if self._collapsed else "chevron-down"))
         self.collapse_button.setAccessibleName(label)
         self.collapse_button.setToolTip(label)
         self.expand_button.setEnabled(not self._collapsed)

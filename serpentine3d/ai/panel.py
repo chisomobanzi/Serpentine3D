@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..api import SerpApi
+from ..ui.workspace_icons import workspace_icon
 from .agent import Agent, build_system_prompt
 from .client import DEFAULT_MODEL, AnthropicClient, resolve_api_key
 from .local_client import DEFAULT_ENDPOINT, LocalClient
@@ -61,18 +62,28 @@ class AiPanel(QWidget):
 
         header = QHBoxLayout()
         header.setSpacing(3)
+        mark = QLabel()
+        mark.setPixmap(workspace_icon("assistant", color="#88b6a7").pixmap(
+            QSize(16, 16), self.devicePixelRatioF()))
+        mark.setFixedSize(20, 20)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.setAccessibleName("Assistant")
+        header.addWidget(mark)
         self.recipient = QLabel()
         self.recipient.setMinimumWidth(0)
         self.recipient.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.recipient.setStyleSheet("color: #88b6a7; font-size: 11px;")
         self.usage = QLabel("")
         self.usage.setStyleSheet("color: #85868a; font-size: 11px;")
-        self.btn_new = QPushButton("+")
+        self.btn_new = QPushButton()
+        self.btn_new.setIcon(workspace_icon("plus"))
+        self.btn_new.setStyleSheet("padding: 0;")
         self.btn_new.setAccessibleName("New chat")
         self.btn_new.setToolTip("New chat")
         self.btn_new.setFixedSize(26, 28)
         self.btn_new.clicked.connect(self._new_chat)
         self.btn_settings = QPushButton("Settings")
+        self.btn_settings.setIcon(workspace_icon("settings"))
         self.btn_settings.setFixedHeight(28)
         self.btn_settings.clicked.connect(self._open_settings)
         header.addWidget(self.recipient, 1)
