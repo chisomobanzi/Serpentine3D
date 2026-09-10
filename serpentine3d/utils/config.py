@@ -35,6 +35,7 @@ DEFAULTS = {
     "osnaps": {
         "enabled": True,
         "end": True,
+        "point": True,
         "mid": True,
         "center": True,
         "quad": True,

@@ -10,12 +10,14 @@ from __future__ import annotations
 import numpy as np
 
 from . import geometry, occ
+from .pointcloud import PointCloudShape
+from .spatial import build_index
 
-SNAP_TYPES = ("end", "mid", "center", "quad", "int", "appint", "perp",
+SNAP_TYPES = ("end", "point", "mid", "center", "quad", "int", "appint", "perp",
               "near")
 
 # priority when several candidates fall inside the pick radius
-_PRIORITY = {"end": 0, "int": 1, "appint": 2, "quad": 3, "mid": 4,
+_PRIORITY = {"end": 0, "point": 0, "int": 1, "appint": 2, "quad": 3, "mid": 4,
              "center": 5, "perp": 6, "near": 7}
 
 # How many screen segments near the cursor get paired up. Every pair is
@@ -31,7 +33,10 @@ _APPARENT_GAP = 1e-6
 
 
 def _static_snap_points(shape) -> list[tuple[tuple, str]]:
-    """end / mid / center / quad candidates for one shape."""
+    """point / end / mid / center / quad candidates for one shape."""
+    # Cloud samples are queried spatially, never expanded into CAD features.
+    if isinstance(shape, PointCloudShape):
+        return []
     out = []
     seen = set()
 
@@ -52,7 +57,7 @@ def _static_snap_points(shape) -> list[tuple[tuple, str]]:
 
     if shape.ShapeType() == occ.VERTEX:
         x, y, z = geometry.point_coords(shape)
-        add(x, y, z, "end")
+        add(x, y, z, "point")
         return out
 
     from OCP.GeomAbs import GeomAbs_CurveType
@@ -276,8 +281,9 @@ class SnapIndex:
         self.scene = scene
         self._cache: dict[str, tuple[int, list]] = {}
         self._int_cache: tuple[int, list] | None = None
+        self._cloud_cache = {}
         self.enabled = True
-        self.types = {t: t in ("end", "mid", "center", "quad", "int")
+        self.types = {t: t in ("end", "point", "mid", "center", "quad", "int")
                       for t in SNAP_TYPES}
         if config is not None:
             osnaps = config.get("osnaps", default={}) or {}
@@ -301,6 +307,53 @@ class SnapIndex:
         if self._int_cache is None or self._int_cache[0] != rev:
             self._int_cache = (rev, _intersections(objects))
         return self._int_cache[1]
+
+    def _cloud_point(self, obj, camera, px, py, width, height, radius_px):
+        """Nearest full-resolution sample, narrowing large scans by chunks.
+
+        Keep only world-space bounds in the cache: every camera pose, zoom,
+        viewport size and layout detail projects them afresh. Shapes are
+        immutable, so replacement also invalidates a transformed scan.
+        """
+        shape = obj.shape
+        entry = self._cloud_cache.get(obj.id)
+        if entry is None or entry[0] is not shape:
+            index = build_index(shape.xyz[:, None, :])
+            corners = None
+            if index is not None:
+                axes = np.array([[x, y, z] for x in (0, 1)
+                                 for y in (0, 1) for z in (0, 1)], bool)
+                corners = np.where(axes[None, :, :], index.maxs[:, None, :],
+                                   index.mins[:, None, :])
+            entry = (shape, index, corners)
+            self._cloud_cache[obj.id] = entry
+        _, index, corners = entry
+        xyz = shape.xyz
+        if index is not None:
+            # Detail-frame clipping belongs to samples, not chunk corners:
+            # a box can enclose the whole frame with every corner outside.
+            screen = camera.project(corners.reshape(-1, 3), width, height,
+                                    clipped=False).reshape(-1, 8, 3)
+            front = screen[:, :, 2] > 0
+            lo = screen[:, :, :2].min(axis=1)
+            hi = screen[:, :, :2].max(axis=1)
+            overlaps = ((lo[:, 0] < px + radius_px) &
+                        (hi[:, 0] > px - radius_px) &
+                        (lo[:, 1] < py + radius_px) &
+                        (hi[:, 1] > py - radius_px))
+            # A box crossing the eye plane can project beyond its corners.
+            keep = front.any(axis=1) & (~front.all(axis=1) | overlaps)
+            xyz = xyz[index.gather(keep)]
+        if not len(xyz):
+            return None
+        screen = camera.project(xyz, width, height)
+        d2 = (screen[:, 0] - px) ** 2 + (screen[:, 1] - py) ** 2
+        valid = np.flatnonzero((screen[:, 2] > 0) & (d2 < radius_px ** 2))
+        if not len(valid):
+            return None
+        # Pixel distance wins; stacked points then choose the nearest eye depth.
+        nearest = valid[np.lexsort((screen[valid, 2], d2[valid]))[0]]
+        return tuple(float(v) for v in xyz[nearest])
 
     # -- query --
 
@@ -344,6 +397,9 @@ class SnapIndex:
         if not self.enabled:
             return None
         objects = self.scene.visible_objects()
+        visible_ids = {obj.id for obj in objects}
+        self._cloud_cache = {key: value for key, value in self._cloud_cache.items()
+                             if key in visible_ids}
         pts, kinds = [], []
 
         # what you are drawing is not in the scene yet, but you still want to
@@ -354,6 +410,14 @@ class SnapIndex:
                 kinds.append(kind)
 
         for obj in objects:
+            if isinstance(obj.shape, PointCloudShape):
+                if self.types.get("point"):
+                    p = self._cloud_point(obj, camera, px, py, width, height,
+                                          radius_px)
+                    if p is not None:
+                        pts.append(p)
+                        kinds.append("point")
+                continue
             for p, kind in self._points(obj):
                 if self.types.get(kind):
                     pts.append(p)
@@ -381,7 +445,7 @@ class SnapIndex:
             d2[scr[:, 2] <= 0] = np.inf
             in_range = d2 < radius_px ** 2
             for i in np.nonzero(in_range)[0]:
-                score = (_PRIORITY[kinds[i]], d2[i])
+                score = (_PRIORITY[kinds[i]], d2[i], scr[i, 2])
                 if best_score is None or score < best_score:
                     best_score = score
                     best = (tuple(arr[i]), kinds[i])
@@ -449,4 +513,4 @@ class SnapIndex:
 # kept for backward compatibility with existing tests
 def snap_points_for(shape) -> list[tuple[tuple, str]]:
     return [(p, k) for p, k in _static_snap_points(shape)
-            if k in ("end", "mid", "center")]
+            if k in ("point", "end", "mid", "center")]

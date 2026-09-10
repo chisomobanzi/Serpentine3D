@@ -4895,7 +4895,7 @@ def _axis_guide(base, direction, reach: float) -> np.ndarray:
 
 def _snap_marker(kind: str, c: np.ndarray, right: np.ndarray,
                  up: np.ndarray, s: float) -> np.ndarray:
-    """Distinct marker glyph per snap type, as GL_LINES vertex pairs."""
+    """Snap marker glyphs, as GL_LINES vertex pairs."""
     r = (right * s).astype(np.float32)
     u = (up * s).astype(np.float32)
     c = c.astype(np.float32)
@@ -4904,7 +4904,7 @@ def _snap_marker(kind: str, c: np.ndarray, right: np.ndarray,
         return [np.stack([pts[i], pts[(i + 1) % len(pts)]])
                 for i in range(len(pts))]
 
-    if kind == "end":                     # square
+    if kind in ("end", "point"):           # square around the snapped point
         segs = loop([c - r - u, c + r - u, c + r + u, c - r + u])
     elif kind == "mid":                   # triangle
         segs = loop([c - r - u, c + r - u, c + u])

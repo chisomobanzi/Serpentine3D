@@ -602,6 +602,10 @@ class MainWindow(QMainWindow):
         dialog.activateWindow()
 
     def _wire_viewport(self, vp):
+        # Object snaps belong to the drawing, including while a command moves
+        # between panes. The index caches world geometry; each query supplies
+        # its own camera and pending picks, so every pane can share it.
+        vp.snaps = self.viewport.snaps
         vp.setAcceptDrops(True)
         vp.installEventFilter(self)
         vp.displayModeChanged.connect(self._update_status)

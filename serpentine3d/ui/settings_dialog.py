@@ -392,6 +392,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.os_master)
         labels = {
             "end": "End points", "mid": "Midpoints",
+            "point": "Point objects and point-cloud samples",
             "center": "Circle/arc centers", "quad": "Quadrant points",
             "int": "Intersections",
             "appint": "Apparent intersections (crossing on screen only)",

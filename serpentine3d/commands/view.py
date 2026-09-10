@@ -463,7 +463,7 @@ def cmd_snap(ctx):
     yield from ()
 
 
-_OSNAP_KINDS = ("End", "Mid", "Center", "Quad", "Int", "AppInt", "Perp",
+_OSNAP_KINDS = ("End", "Point", "Mid", "Center", "Quad", "Int", "AppInt", "Perp",
                 "Near")
 
 

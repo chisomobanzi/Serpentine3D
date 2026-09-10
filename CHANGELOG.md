@@ -4,6 +4,9 @@
 
 ### Added
 
+- **Snap to individual point-cloud samples (#14).** The Point object snap
+  uses each sample’s actual 3D position while drawing, with a persistent
+  toggle in the snap bar, settings and `osnap` command.
 - **Import images as pictures (#17).** Choose JPG, JPEG, PNG or WebP through
   File > Import, or drag them onto a viewport, then place the picture by its
   corners with a translucent image preview. Pictures preserve aspect ratio and
@@ -49,6 +52,16 @@
   original encoded image in the `.serp` archive, so moving the drawing or
   deleting the source image no longer leaves an empty frame. Existing files
   that refer to an external image path still open as before.
+
+### Fixed
+
+- **Point snapping also controls standalone Point objects.** They no longer
+  snap through the End toggle when Point is off; End continues to control
+  actual curve endpoints.
+- **Object-snap changes reach every drawing pane immediately.** Switching
+  a snap type or the master toggle while drawing in Top, Front, Right or
+  an extra viewport updates the live line and its next pick. The snap bar,
+  settings and `osnap` command now use the same state in every pane.
 
 ## 0.9.1 — 2026-09-08
 
