@@ -43,6 +43,27 @@
   deleting the source image no longer leaves an empty frame. Existing files
   that refer to an external image path still open as before.
 
+## 0.9.1 — 2026-09-08
+
+### Fixed
+
+- **Windows startup no longer forces the Linux EGL backend.** The GLX/EGL
+  probe added in 0.8.2 now runs only on Linux. Windows keeps its native WGL
+  backend, fixing the packaged application's `NoneType` exception while
+  importing `OpenGL.platform`. macOS also keeps its native backend.
+- Regression coverage checks Windows and macOS backend selection, explicit
+  user overrides, and Linux GLX/EGL matching.
+
+## 0.9.0 — 2026-09-08
+
+### Changed
+
+- **The point-cloud session format now carries its release contract.** Native
+  `.serp` version 3 files declare `requires: "0.9.0"`, matching the Mica
+  session-record specification and the Serpentine3D release that owns the
+  format. Drawings without point clouds, trajectories or session data still
+  use version 2 and remain compatible with older releases.
+
 ## 0.8.4 — 2026-09-08
 
 ### Added

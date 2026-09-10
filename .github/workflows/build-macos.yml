@@ -1,0 +1,39 @@
+name: Build macOS disk image
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package and test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pytest
+      - name: Check startup backend selection and release metadata
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/test_the_app_starts_on_an_egl_driver.py tests/test_release.py -q
+      - name: Build disk image
+        run: packaging/macos/build-dmg.sh "$(which python)"
+      - name: Upload disk image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Serpentine3D-macOS-arm64
+          path: packaging/macos/Serpentine3D-*-arm64.dmg
+          if-no-files-found: error
+      - name: Attach to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" packaging/macos/Serpentine3D-*-arm64.dmg --clobber

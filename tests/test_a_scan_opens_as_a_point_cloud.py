@@ -113,7 +113,7 @@ def test_saving_a_scene_with_a_point_cloud_writes_version_3_with_blobs_and_reloa
 
     doc = _doc(path)
     assert doc["version"] == 3
-    assert doc["requires"] == "0.8.4"
+    assert doc["requires"] == "0.9.0"
     assert doc["objects"] == [], "clouds live in their own list"
     entry = doc["pointclouds"][0]
     assert entry["count"] == 400
@@ -201,7 +201,7 @@ def _spec_file(path, points: int = 200) -> tuple:
                      "visibility_mean": 0.9}],
     }
     doc = {
-        "format": "serpentine3d", "version": 3, "requires": "0.8.4",
+        "format": "serpentine3d", "version": 3, "requires": "0.9.0",
         "units": "m",
         "layers": [
             {"id": "default", "name": "Default", "color": [0.8, 0.8, 0.8],

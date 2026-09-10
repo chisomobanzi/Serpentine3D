@@ -113,6 +113,29 @@ def test_the_helper_is_cheap_to_import():
 
 # --- PyOpenGL has to end up on the same binding Qt chose ---------------
 
+@pytest.fixture
+def linux_binding_probe(monkeypatch, unset_pyopengl_platform):
+    """Exercise Linux's binding choice even when tests run on Windows/macOS."""
+    monkeypatch.setattr(glsetup.sys, "platform", "linux")
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+@pytest.mark.parametrize("override", [None, "osmesa"])
+def test_native_platforms_keep_their_binding_without_a_linux_probe(
+        monkeypatch, unset_pyopengl_platform, platform, override):
+    monkeypatch.setattr(glsetup.sys, "platform", platform)
+    monkeypatch.setattr(glsetup, "_pyopengl_already_chose", lambda: False)
+    if override is not None:
+        monkeypatch.setenv("PYOPENGL_PLATFORM", override)
+
+    def linux_probe():
+        pytest.fail("Windows/macOS must not probe for Linux GLX/EGL")
+
+    monkeypatch.setattr(glsetup, "_qt_gl_binding", linux_probe)
+    assert glsetup.match_pyopengl_to_qt() is None
+    assert os.environ.get("PYOPENGL_PLATFORM") == override
+
+
 def test_glx_is_asked_the_very_question_pyopengl_will_ask():
     """The probe is not a guess about the platform, it is the exact call
     PyOpenGL's GLX binding makes. Nothing is current at startup, so it has to
@@ -133,7 +156,7 @@ def test_glx_is_asked_the_very_question_pyopengl_will_ask():
 
 
 def test_pyopengl_is_pinned_to_egl_when_qt_is(monkeypatch,
-                                              unset_pyopengl_platform):
+                                              linux_binding_probe):
     monkeypatch.setattr(glsetup, "_pyopengl_already_chose", lambda: False)
     monkeypatch.setattr(glsetup, "_qt_gl_binding", lambda: "egl")
     assert glsetup.match_pyopengl_to_qt() == "egl"
@@ -141,7 +164,7 @@ def test_pyopengl_is_pinned_to_egl_when_qt_is(monkeypatch,
 
 
 def test_pyopengl_is_pinned_to_glx_when_qt_is(monkeypatch,
-                                              unset_pyopengl_platform):
+                                              linux_binding_probe):
     """Left to itself PyOpenGL reads XDG_SESSION_TYPE, so in a Wayland
     session it assumes EGL - including when Qt could not get a Wayland
     surface and quietly fell back to XWayland, where Qt is on GLX. That
@@ -155,7 +178,7 @@ def test_pyopengl_is_pinned_to_glx_when_qt_is(monkeypatch,
 
 
 def test_nothing_is_pinned_when_there_is_no_context_to_measure(
-        monkeypatch, unset_pyopengl_platform):
+        monkeypatch, linux_binding_probe):
     """Offscreen, or a machine with no GL at all. We know nothing, so we
     say nothing and let PyOpenGL guess as it always did."""
     monkeypatch.setattr(glsetup, "_pyopengl_already_chose", lambda: False)
@@ -164,7 +187,7 @@ def test_nothing_is_pinned_when_there_is_no_context_to_measure(
     assert "PYOPENGL_PLATFORM" not in os.environ
 
 
-def test_a_binding_chosen_by_hand_wins(monkeypatch, unset_pyopengl_platform):
+def test_a_binding_chosen_by_hand_wins(monkeypatch, linux_binding_probe):
     """Someone debugging a driver sets this; we do not argue."""
     os.environ["PYOPENGL_PLATFORM"] = "osmesa"
     monkeypatch.setattr(glsetup, "_pyopengl_already_chose", lambda: False)
@@ -174,7 +197,7 @@ def test_a_binding_chosen_by_hand_wins(monkeypatch, unset_pyopengl_platform):
 
 
 def test_it_does_not_pretend_once_pyopengl_has_already_chosen(
-        monkeypatch, unset_pyopengl_platform):
+        monkeypatch, linux_binding_probe):
     """PyOpenGL reads the variable as `OpenGL.platform` is imported and
     never again. Setting it after that would change nothing while
     looking like it had."""

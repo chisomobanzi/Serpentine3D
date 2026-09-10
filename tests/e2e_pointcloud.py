@@ -55,7 +55,7 @@ def write_scan(path: str):
     xyz, rgb, conf, level = room_scan()
     n = len(xyz)
     doc = {
-        "format": "serpentine3d", "version": 3, "requires": "0.8.4",
+        "format": "serpentine3d", "version": 3, "requires": "0.9.0",
         "units": "m",
         "layers": [
             {"id": "default", "name": "Default", "color": [0.8, 0.8, 0.8],

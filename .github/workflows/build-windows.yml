@@ -25,7 +25,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install .
-          python -m pip install pyinstaller
+          python -m pip install pyinstaller pytest
+
+      - name: Check startup backend selection and release metadata
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/test_the_app_starts_on_an_egl_driver.py tests/test_release.py -q
 
       - name: Install Inno Setup 6
         run: choco install innosetup --no-progress -y
