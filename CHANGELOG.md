@@ -55,6 +55,11 @@
 
 ### Fixed
 
+- **Joined extrusion profiles retain every edge (#11).** Join connects
+  curves and offset wires regardless of selection order, and rejects
+  disconnected selections without discarding pieces. Cap no longer duplicates
+  flat walls or loses disconnected capped components; select adjoining
+  extruded walls, Join them, then Cap to close their planar openings.
 - **Point snapping also controls standalone Point objects.** They no longer
   snap through the End toggle when Point is off; End continues to control
   actual curve endpoints.

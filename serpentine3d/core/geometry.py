@@ -307,16 +307,21 @@ def to_wire(shape) -> TopoDS_Shape:
 
 def join_curves(shapes: list) -> TopoDS_Shape:
     """Join edges/wires into a single wire (must connect end-to-end)."""
-    mk = BRepBuilderAPI_MakeWire()
-    for s in shapes:
-        st = s.ShapeType()
-        if st == occ.EDGE:
-            mk.Add(occ.to_edge(s))
-        elif st == occ.WIRE:
-            mk.Add(occ.to_wire(s))
-        else:
+    from OCP.TopTools import TopTools_ListOfShape
+
+    edges = []
+    for shape in shapes:
+        if shape.ShapeType() not in (occ.EDGE, occ.WIRE):
             raise GeometryError("join expects curves")
-    if not mk.IsDone():
+        edges.extend(edges_of(shape))
+    # Adding curves one by one silently discards an initially disconnected
+    # piece, even if a later connector would join it. Submit the whole set.
+    pending = TopTools_ListOfShape()
+    for edge in edges:
+        pending.Append(edge)
+    mk = BRepBuilderAPI_MakeWire()
+    mk.Add(pending)
+    if not mk.IsDone() or len(edges_of(mk.Wire())) != len(edges):
         raise GeometryError("Curves do not connect end-to-end")
     return mk.Wire()
 
@@ -1351,41 +1356,44 @@ def face_long_direction(face) -> Point | None:
 def cap_holes(shape) -> TopoDS_Shape:
     """Close planar openings of a surface/shell and solidify if possible."""
     from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds
-    from .occ import (
-        BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeSolid,
-        BRepBuilderAPI_Sewing,
-    )
+
     fb = ShapeAnalysis_FreeBounds(shape)
     closed = fb.GetClosedWires()
     caps = []
+    existing = faces_of(shape)
     if closed is not None and not closed.IsNull():
         exp = TopExp_Explorer(closed, occ.WIRE)
         while exp.More():
             wire = occ.to_wire(exp.Current())
             exp.Next()
             mk = BRepBuilderAPI_MakeFace(wire, True)
-            if mk.IsDone():
-                caps.append(mk.Face())
+            if not mk.IsDone():
+                continue
+            face = mk.Face()
+            # A flat wall's outside boundary is also a closed planar wire,
+            # but filling it again only doubles the wall. An opening has no
+            # area already covered by any of the existing faces.
+            covered = False
+            for original in existing:
+                common = BRepAlgoAPI_Common(face, original)
+                if not common.IsDone():
+                    raise GeometryError("Could not check planar opening")
+                if surface_area(common.Shape()) > max(tol() ** 2,
+                                                      surface_area(face) * 1e-9):
+                    covered = True
+                    break
+            if not covered:
+                caps.append(face)
     if not caps:
         raise GeometryError("No closable planar openings found")
-    sew = BRepBuilderAPI_Sewing(tol())
-    sew.Add(shape)
-    for f in caps:
-        sew.Add(f)
-    sew.Perform()
-    sewn = sew.SewedShape()
-    # try to promote the closed shell to a solid
-    try:
-        exp = TopExp_Explorer(sewn, occ.SHELL)
-        if exp.More():
-            solid_mk = BRepBuilderAPI_MakeSolid(occ.to_shell(exp.Current()))
-            if solid_mk.IsDone():
-                solid = solid_mk.Solid()
-                if volume(solid) > 1e-12:
-                    return solid
-    except Exception:
-        pass
-    return sewn
+    # Keep every component and only promote shells that are actually closed.
+    sewn = join_surfaces([shape, *caps])
+    pieces = [join_surfaces([piece]) for piece in joined_pieces(sewn)]
+    from OCP.BRepLib import BRepLib
+    for piece in pieces:
+        if piece.ShapeType() == occ.SOLID:
+            BRepLib.OrientClosedSolid_s(occ.to_solid(piece))
+    return pieces[0] if len(pieces) == 1 else make_compound(pieces)
 
 
 def intersect_shapes(a, b) -> list:

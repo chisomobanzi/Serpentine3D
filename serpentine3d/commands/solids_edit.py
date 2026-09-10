@@ -177,6 +177,8 @@ def cmd_cap(ctx):
             ctx.echo(f"{o.name}: {exc}")
     if done:
         ctx.echo(f"Capped {done} object(s).")
+    elif len(objs) > 1:
+        ctx.echo("For adjoining walls, Join the surfaces first, then run Cap.")
 
 
 @command("intersect", aliases=("int",))
