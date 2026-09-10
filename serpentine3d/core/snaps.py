@@ -41,6 +41,15 @@ def _static_snap_points(shape) -> list[tuple[tuple, str]]:
             seen.add(key)
             out.append(((x, y, z), kind))
 
+    from .picture import PictureShape
+    if isinstance(shape, PictureShape):
+        for a, b in shape.feature_edges().reshape(-1, 2, 3):
+            add(*a, "end")
+            add(*b, "end")
+            add(*((a + b) / 2), "mid")
+        add(*shape.centroid(), "center")
+        return out
+
     if shape.ShapeType() == occ.VERTEX:
         x, y, z = geometry.point_coords(shape)
         add(x, y, z, "end")

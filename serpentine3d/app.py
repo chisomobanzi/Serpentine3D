@@ -67,6 +67,7 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
         self.setAcceptDrops(True)
         self._importing_file = False
+        self._pending_import_paths = []
 
         # core state
         self._pending_update = None
@@ -201,6 +202,7 @@ class MainWindow(QMainWindow):
         self._file_picker_open = False
         self.ctx.add_echo_listener(self.command_line.echo)
         self.processor.add_listener(self._sync_command_state)
+        self.processor.add_listener(self._resume_dropped_imports)
 
         # wiring
         self.command_line.submitted.connect(self._on_submit)
@@ -439,6 +441,7 @@ class MainWindow(QMainWindow):
                 self.dragEnterEvent(event)
                 return True
             if event.type() == QEvent.Type.Drop:
+                self._set_active_viewport(obj)
                 self.dropEvent(event)
                 return True
         if event.type() == QEvent.Type.MouseButtonPress \
@@ -953,6 +956,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- commanding
 
     def run_command(self, name: str):
+        self._pending_import_paths.clear()
         self.processor.run(name)
         self.command_line.focus()
 
@@ -968,6 +972,7 @@ class MainWindow(QMainWindow):
         self.processor.run(text)
 
     def _cancel(self):
+        self._pending_import_paths.clear()
         if self.processor.busy:
             self.processor.cancel()
         elif self.scene.cv_enabled:
@@ -1512,18 +1517,22 @@ class MainWindow(QMainWindow):
     def _file_import(self):
         if self._importing_file:
             return
-        path = self._pick_file(save=False, title="Import")
+        path = self._pick_file(save=False, title="Import",
+                               filters=fileio.import_filter(pictures=True))
         if not path:
             return
+        self._pending_import_paths.clear()
         self._import_path(path)
 
     def _dropped_import_paths(self, event):
         """Only local files supported by the normal Import dialog qualify."""
-        if self._importing_file or not event.possibleActions() & Qt.DropAction.CopyAction:
+        if (self._importing_file or self._pending_import_paths
+                or not event.possibleActions() & Qt.DropAction.CopyAction):
             return []
         return [url.toLocalFile() for url in event.mimeData().urls()
                 if url.isLocalFile()
-                and os.path.splitext(url.toLocalFile())[1].lower() in fileio.IMPORT_EXTS
+                and os.path.splitext(url.toLocalFile())[1].lower()
+                in (fileio.IMPORT_EXTS | fileio.PICTURE_EXTS)
                 and os.path.isfile(url.toLocalFile())]
 
     def dragEnterEvent(self, event):
@@ -1543,12 +1552,33 @@ class MainWindow(QMainWindow):
             return
         event.setDropAction(Qt.DropAction.CopyAction)
         event.accept()
-        for path in paths:
-            self._import_path(path)
+        if self.processor.busy:
+            self.processor.cancel()
+        self._pending_import_paths = paths
+        self._continue_dropped_imports()
+
+    def _resume_dropped_imports(self):
+        if self._pending_import_paths and not self.processor.busy:
+            # Finish command/history cleanup before starting another picture.
+            QTimer.singleShot(0, self._continue_dropped_imports)
+
+    def _continue_dropped_imports(self):
+        while (self._pending_import_paths and not self.processor.busy
+               and not self._importing_file):
+            self._import_path(self._pending_import_paths.pop(0))
 
     def _import_path(self, path):
         """Share Import's undo, progress and error handling with file drops."""
         if self._importing_file:
+            return
+        if self.processor.busy:
+            self.processor.cancel()
+        if os.path.splitext(path)[1].lower() in fileio.PICTURE_EXTS:
+            # Feed the known path as one value, preserving spaces and avoiding
+            # another chooser. The command owns placement, undo and Escape.
+            self.processor.run("import --headless")
+            self.processor.provide(path)
+            self.command_line.focus()
             return
         # Progress callbacks process Qt events; another drop must not nest an
         # import (and its history checkpoint) inside the one already running.

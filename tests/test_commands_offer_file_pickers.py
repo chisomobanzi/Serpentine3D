@@ -69,7 +69,9 @@ def _prepare(win, kind):
             win.scene.notify()
     elif kind == "picture":
         # Force the Add/RemoveAll prompt so the picker timing is covered too.
-        win.scene.image_planes.append({"path": "already-there.png"})
+        win.scene.image_planes = [{"path": "already-there.png",
+                                   "origin": [0, 0, 0], "u": [2, 0, 0],
+                                   "v": [0, 1, 0]}]
 
 
 def _assert_default(kind, name):

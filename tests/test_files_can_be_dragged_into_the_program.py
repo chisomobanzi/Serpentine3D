@@ -104,10 +104,13 @@ def test_dropped_geometry_joins_existing_work_and_can_be_undone(
     assert window.ctx.current_path == current_path
 
 
-@pytest.mark.parametrize("extension", sorted(fileio.IMPORT_EXTS))
+@pytest.mark.parametrize("extension", sorted(
+    fileio.IMPORT_EXTS - {".jpg", ".jpeg", ".png", ".webp"}))
 @pytest.mark.parametrize("uppercase", [False, True], ids=["lowercase", "uppercase"])
 def test_every_import_format_reaches_the_importer_with_its_local_path(
         window, tmp_path, monkeypatch, extension, uppercase):
+    # Pictures need interactive placement; their dialog/drop behavior is
+    # exercised in test_images_can_be_imported_as_pictures.py.
     suffix = extension.upper() if uppercase else extension
     path = tmp_path / ("Model with spaces" + suffix)
     path.write_bytes(b"format dispatch is checked at the import boundary")

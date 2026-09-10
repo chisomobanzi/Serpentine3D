@@ -44,6 +44,11 @@ EXPORT_FORMATS = [
 IMPORT_EXTS = {e for _, exts in IMPORT_FORMATS for e in exts}
 EXPORT_EXTS = {e for _, exts in EXPORT_FORMATS for e in exts}
 
+# Pictures need user-chosen corners, so the interactive Import chooser offers
+# them separately from the model formats that import_file can read directly.
+PICTURE_FORMATS = [("Images", (".png", ".jpg", ".jpeg", ".webp"))]
+PICTURE_EXTS = {e for _, exts in PICTURE_FORMATS for e in exts}
+
 
 def _filter(formats, catch_alls: bool) -> str:
     """Build a Qt name-filter string.
@@ -65,9 +70,15 @@ def _filter(formats, catch_alls: bool) -> str:
     return ";;".join(parts)
 
 
-def import_filter() -> str:
-    """Name filter for Open/Import dialogs."""
-    return _filter(IMPORT_FORMATS, catch_alls=True)
+def import_filter(*, pictures: bool = False) -> str:
+    """Name filter for models, optionally including interactive pictures."""
+    formats = IMPORT_FORMATS + PICTURE_FORMATS if pictures else IMPORT_FORMATS
+    return _filter(formats, catch_alls=True)
+
+
+def picture_filter() -> str:
+    """Name filter for placing a reference picture."""
+    return _filter(PICTURE_FORMATS, catch_alls=False)
 
 
 def export_filter() -> str:

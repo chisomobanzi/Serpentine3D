@@ -255,10 +255,20 @@ def cmd_explode(ctx):
         ctx.echo(f"Exploded into {total} object(s).")
 
 
+def _add_split_piece(ctx, shape, target):
+    """Keep a picture's display attributes with each cropped region."""
+    if target.kind == "picture":
+        obj = ctx.scene.add_from(shape, target)
+        ctx.scene.update(obj.id, linetype=target.linetype,
+                         draw_order=target.draw_order, block_id=target.block_id)
+        return obj
+    return ctx.scene.add(shape, layer_id=target.layer_id)
+
+
 @command("split")
 def cmd_split(ctx):
-    targets = yield SelectReq("Select curve or surface to split",
-                              kinds=("curve", "surface", "solid"),
+    targets = yield SelectReq("Select curve, surface or picture to split",
+                              kinds=("curve", "surface", "solid", "picture"),
                               max_count=1)
     cutters = yield SelectReq("Select cutting objects",
                               allow_preselected=False)
@@ -266,7 +276,7 @@ def cmd_split(ctx):
     pieces = g.split_shape(target.shape, [c.shape for c in cutters],
                            direction=tuple(ctx.cplane.normal))
     for p in pieces:
-        ctx.scene.add(p, layer_id=target.layer_id)
+        _add_split_piece(ctx, p, target)
     ctx.scene.remove(target.id)
     ctx.echo(f"Split {target.name} into {len(pieces)} pieces.")
 
@@ -275,16 +285,17 @@ def cmd_split(ctx):
 def cmd_trim(ctx):
     cutters = yield SelectReq("Select cutting objects")
     targets = yield SelectReq("Select object to trim",
-                              kinds=("curve", "surface", "solid"),
+                              kinds=("curve", "surface", "solid", "picture"),
                               max_count=1, allow_preselected=False)
     target = targets[0]
     pieces = g.split_shape(target.shape, [c.shape for c in cutters],
                            direction=tuple(ctx.cplane.normal))
-    added = [ctx.scene.add(p, layer_id=target.layer_id) for p in pieces]
+    added = [_add_split_piece(ctx, p, target) for p in pieces]
     ctx.scene.remove(target.id)
     doomed = yield SelectReq(
         "Select the piece(s) to trim away", allow_preselected=False)
-    kept = 0
+    piece_ids = {a.id for a in added}
+    doomed = [o for o in doomed if o.id in piece_ids]
     for o in doomed:
         ctx.scene.remove(o.id)
     kept = sum(1 for a in added if ctx.scene.get(a.id))

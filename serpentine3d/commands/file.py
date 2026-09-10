@@ -68,9 +68,13 @@ def cmd_open(ctx):
 
 @command("import", aliases=("imp",), mutates=True)
 def cmd_import(ctx):
-    path = yield FileReq("File to import (.step/.stp/.obj/.serp)",
-                         title="Import model", filters=fileio.import_filter())
+    path = yield FileReq("File to import (model or image)", title="Import",
+                         filters=fileio.import_filter(pictures=True))
     path = _expand(path)
+    if os.path.splitext(path)[1].lower() in fileio.PICTURE_EXTS:
+        from .view import place_picture
+        yield from place_picture(ctx, path)
+        return
     if not os.path.exists(path):
         ctx.echo(f"File not found: {path}")
         return

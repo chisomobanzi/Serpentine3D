@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Import images as pictures (#17).** Choose JPG, JPEG, PNG or WebP through
+  File > Import, or drag them onto a viewport, then place the picture by its
+  corners with a translucent image preview. Pictures preserve aspect ratio and
+  transparency, can be selected, transformed and deleted with Undo, and travel
+  inside the saved drawing. Split and Trim cut picture regions without stretching
+  their image content, including diagonal cuts and holes. Multiple dropped images
+  are placed in sequence.
 - **Drag files into the app to import them (#16).** Drop one or more files
   onto the window or a viewport using any format offered by File > Import.
   Imports retain progress, cancellation and Undo; source files stay in place.

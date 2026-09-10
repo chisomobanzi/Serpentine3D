@@ -773,41 +773,50 @@ def cmd_pictureframe(ctx):
         ctx.scene.notify()
         ctx.echo(f"Removed {n} picture frame(s).")
         return
+    from .. import fileio
+    path = yield FileReq("Image path (.png/.jpg/.jpeg/.webp)",
+                         title="Choose picture", filters=fileio.picture_filter())
+    yield from place_picture(ctx, path)
+
+
+def place_picture(ctx, path):
+    """Place a known image path; shared by Picture and interactive Import."""
     import os
-    path = yield FileReq("Image path (.png/.jpg)", title="Choose picture",
-                         filters=_IMAGE_FILTER)
     path = os.path.abspath(os.path.expanduser(path.strip()))
-    if not os.path.exists(path):
-        ctx.echo(f"File not found: {path}")
-        return
     try:
         with open(path, "rb") as image_file:
             image_data = image_file.read()
-    except OSError:
-        ctx.echo(f"Could not read the image: {path}")
-        return
+    except OSError as exc:
+        raise ValueError(f"Could not read the image: {path}") from exc
     from PySide6.QtGui import QImage
     img = QImage.fromData(image_data)
     if img.isNull():
-        ctx.echo("Could not read the image.")
-        return
+        raise ValueError(f"Could not decode the image: {path}")
     c1 = yield PointReq("First corner")
-    c2 = yield PointReq("Opposite corner (width; height follows the "
-                        "image aspect)", rubber_from=c1)
-    aspect = img.height() / max(img.width(), 1)
     cp = ctx.cplane
+    aspect = img.height() / max(img.width(), 1)
     u1, v1, w1 = cp.from_world(c1)
-    u2, v2, _ = cp.from_world(c2)
-    width = u2 - u1
-    height = abs(width) * aspect * (1 if v2 >= v1 else -1)
     origin = cp.to_world(u1, v1, w1)
-    u_vec = tuple(a - b for a, b in zip(cp.to_world(u2, v1, w1), origin))
-    v_vec = tuple(a - b for a, b in zip(
-        cp.to_world(u1, v1 + height, w1), origin))
-    ctx.scene.image_planes.append({
-        "path": path, "origin": list(origin), "u": list(u_vec),
-        "v": list(v_vec), "alpha": 1.0, "image_data": image_data,
-    })
+    from ..core.picture import PictureShape
+
+    def picture_at(corner):
+        u2, v2, _ = cp.from_world(corner)
+        width = u2 - u1
+        if abs(width) < 1e-12:
+            raise ValueError("The picture needs a non-zero width.")
+        height = abs(width) * aspect * (1 if v2 >= v1 else -1)
+        u_vec = tuple(a - b for a, b in zip(cp.to_world(u2, v1, w1), origin))
+        v_vec = tuple(a - b for a, b in zip(
+            cp.to_world(u1, v1 + height, w1), origin))
+        return PictureShape({
+            "path": path, "origin": list(origin), "u": list(u_vec),
+            "v": list(v_vec), "alpha": 1.0, "image_data": image_data,
+        })
+
+    c2 = yield PointReq("Opposite corner (width; height follows the "
+                        "image aspect)", rubber_from=c1, rubber_band=False,
+                        preview_fn=picture_at)
+    ctx.scene.add(picture_at(c2), name=os.path.basename(path))
     ctx.scene.notify()
     ctx.echo(f"Picture frame placed ({os.path.basename(path)}).")
 

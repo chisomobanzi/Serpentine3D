@@ -372,7 +372,10 @@ in vec2 vUV;
 uniform sampler2D uTex;
 uniform float uAlpha;
 out vec4 frag;
-void main() { frag = vec4(texture(uTex, vUV).rgb, uAlpha); }
+void main() {
+    vec4 picture = texture(uTex, vUV);
+    frag = vec4(picture.rgb, picture.a * uAlpha);
+}
 """
 
 BG_VERT = """
@@ -1032,6 +1035,7 @@ class Viewport(QOpenGLWidget):
         self._preview: _LineBatch | None = None
         self._preview_data = np.zeros((0, 3), np.float32)
         self._ghost = None                     # DisplayMesh of pending result
+        self._ghost_picture = None             # textured pending picture
         self._marker_points: list = []
         self._last_mouse = None
         self._mesh_prog = self._line_prog = self._bg_prog = 0
@@ -1719,22 +1723,23 @@ class Viewport(QOpenGLWidget):
         return self._image_textures[cache_key]
 
     def _draw_image_planes(self, mvp):
-        planes = getattr(self.scene, "image_planes", [])
-        if not planes:
+        from ..core.picture import PictureShape
+        pictures = [obj.shape for obj in self.scene.visible_objects()
+                    if obj.kind == "picture"]
+        if self._ghost_picture is not None:
+            pictures.append(PictureShape(self._ghost_picture))
+        if not pictures:
             return
-        for plane in planes:
+        for picture in pictures:
+            plane = picture.plane
             tex, _ = self._texture_for(
                 plane.get("path", ""), plane.get("image_data"))
             if not tex:
                 continue
-            o = rebased(np.asarray(plane["origin"], float)[None],
-                        self._frame_anchor)[0]
-            u = np.asarray(plane["u"], np.float32)
-            v = np.asarray(plane["v"], np.float32)
-            quad = np.array([
-                [*o, 0, 0], [*(o + u), 1, 0], [*(o + u + v), 1, 1],
-                [*o, 0, 0], [*(o + u + v), 1, 1], [*(o + v), 0, 1],
-            ], np.float32)
+            indices = picture.triangles.ravel()
+            quad = np.column_stack((
+                rebased(picture.vertices, self._frame_anchor)[indices],
+                picture.uv[indices])).astype(np.float32)
             self._use(self._tex_prog)
             GL.glUniformMatrix4fv(
                 self._uloc(self._tex_prog, "uMVP"), 1,
@@ -1751,7 +1756,7 @@ class Viewport(QOpenGLWidget):
             GL.glBufferData(GL.GL_ARRAY_BUFFER, quad.nbytes, quad,
                             GL.GL_DYNAMIC_DRAW)
             GL.glDepthMask(False)
-            GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
+            GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(quad))
             GL.glDepthMask(True)
 
     def _draw_grid(self, mvp):
@@ -2179,7 +2184,9 @@ class Viewport(QOpenGLWidget):
                 line_color = (min(color[0], 0.3), min(color[1], 0.3),
                               min(color[2], 0.33))
 
-            if obj.clip_plane is not None:
+            if obj.kind == "picture":
+                fill_alpha_obj = 0.0
+            elif obj.clip_plane is not None:
                 fill_alpha_obj = 0.18
             else:
                 fill_alpha_obj = fill_alpha
@@ -2220,7 +2227,7 @@ class Viewport(QOpenGLWidget):
             # something whose lines are the object rather than the outline
             # of a face. Those are never what "show edges" is asking about,
             # and switching them off would empty the drawing.
-            if gpu.line_count and (show_edges or not gpu.tri_count):
+            if gpu.line_count and (selected or show_edges or not gpu.tri_count):
                 if selected:
                     edge_color = (*theme.SELECTION_COLOR, 1.0)
                 elif obj.kind == "curve":
@@ -2879,14 +2886,23 @@ class Viewport(QOpenGLWidget):
         the details already on it.
         """
         from ..core.layout import DetailView
+        from ..core.picture import PictureShape
+        had_picture = self._ghost_picture is not None
+        self._ghost_picture = None
         if isinstance(shape, DetailView):
             self.layout_view.set_ghost_detail(shape)
             self._update_draw_readout()   # the frame's size is the readout
             self.update()
             return
         self.layout_view.set_ghost_detail(None)
+        if isinstance(shape, PictureShape):
+            self._ghost = None
+            self._ghost_picture = dict(shape.plane)
+            self._ghost_picture["alpha"] = float(shape.plane.get("alpha", 1.0)) * 0.55
+            self.update()
+            return
         if shape is None:
-            if self._ghost is not None:
+            if self._ghost is not None or had_picture:
                 self._ghost = None
                 self.update()
             return
@@ -3722,7 +3738,7 @@ class Viewport(QOpenGLWidget):
                 if pt_depth is not None:
                     found.append((pt_depth, obj.id))
                 continue
-            if mesh.has_faces and self._pick_mode() != "wireframe":
+            if mesh.has_faces and (obj.kind == "picture" or self._pick_mode() != "wireframe"):
                 tris, _ = self._near_triangles(mesh, px - r, py - r,
                                                px + r, py + r, w, h)
                 t = ray_triangle_hits(origin, direction,

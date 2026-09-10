@@ -1883,6 +1883,10 @@ def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
     pane cuts it the way it looked like it would. World Z, the plane a Top
     pane draws on, is what you get if nobody says otherwise.
     """
+    from .picture import PictureShape
+    if isinstance(target, PictureShape):
+        return [target.with_region(face) for face in
+                split_shape(target.face(), cutters, direction)]
     from .occ import BRepAlgoAPI_Splitter, TopTools_ListOfShape
     kind = shape_kind(target)
     length = math.sqrt(sum(float(v) ** 2 for v in direction))
@@ -1891,6 +1895,10 @@ def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
 
     tools = TopTools_ListOfShape()
     for c in cutters:
+        if isinstance(c, PictureShape):
+            c = c.face()
+        elif shape_kind(c) in ("mesh", "pointcloud"):
+            raise GeometryError("Use curves, surfaces or pictures as cutting objects")
         tool = c
         if kind in ("surface", "solid") and shape_kind(c) == "curve":
             # sweep the cutter clear through the target, starting a little
@@ -2902,6 +2910,9 @@ def shape_kind(shape) -> str:
     solids behaves as a solid, of curves as a curve, and so on."""
     from .mesh import MeshShape
     from .pointcloud import PointCloudShape
+    from .picture import PictureShape
+    if isinstance(shape, PictureShape):
+        return "picture"
     if isinstance(shape, MeshShape):
         return "mesh"
     if isinstance(shape, PointCloudShape):
@@ -3009,6 +3020,9 @@ _CLOUD_TAG = b"SPCL\x01"
 
 
 def shape_to_bytes(shape) -> bytes:
+    from .picture import PictureShape
+    if isinstance(shape, PictureShape):
+        return shape.to_bytes()
     from .mesh import MeshShape
     from .pointcloud import PointCloudShape
     if isinstance(shape, PointCloudShape):
@@ -3067,6 +3081,9 @@ def _cloud_unpack(data: bytes, offset: int):
 
 
 def shape_from_bytes(data: bytes):
+    from .picture import PICTURE_TAG, PictureShape
+    if data.startswith(PICTURE_TAG):
+        return PictureShape.from_bytes(data)
     if data[:len(_CLOUD_TAG)] == _CLOUD_TAG:
         return _cloud_unpack(data, len(_CLOUD_TAG))
     if data[:len(_MESH_TAG)] == _MESH_TAG:

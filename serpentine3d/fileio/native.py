@@ -93,7 +93,13 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
         "version": PLAIN_VERSION,
         "named_views": scene.named_views,
         "units": scene.units,
-        "image_planes": _image_planes_to_json(scene.image_planes, blobs),
+        "image_planes": _image_planes_to_json([
+            dict(obj.shape.plane, id=obj.id, name=obj.name, layer=obj.layer_id,
+                 visible=obj.visible, locked=obj.locked, group=obj.group_id,
+                 block=obj.block_id, color=obj.color, material=obj.material,
+                 linetype=obj.linetype, draw_order=obj.draw_order,
+                 annotation=obj.annotation)
+            for obj in scene.all() if obj.kind == "picture"], blobs),
         "block_defs": {
             bid: {
                 "name": bd["name"],
@@ -148,7 +154,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
             for obj in scene.all()
             # In their own list below, so a reader older than version 3
             # opens the rest of the drawing with the scan simply absent.
-            if obj.kind != "pointcloud"
+            if obj.kind not in ("pointcloud", "picture")
         ],
     }
     if clouds or trajectories or session:
@@ -304,8 +310,20 @@ def _load_doc(scene, doc: dict, blobs=None):
     layers.current_id = id_map.get(current, "default")
     scene.named_views = dict(doc.get("named_views", {}))
     scene.units = doc.get("units", scene.units)
-    scene.image_planes = _image_planes_from_json(
-        doc.get("image_planes", []), blobs)
+    object_id_map = {}
+    from ..core.picture import PictureShape
+    for plane in _image_planes_from_json(doc.get("image_planes", []), blobs):
+        obj = scene.add(PictureShape(plane), name=plane.get("name"),
+                        layer_id=id_map.get(plane.get("layer"), "default"))
+        if plane.get("id"):
+            object_id_map[plane["id"]] = obj.id
+        scene.update(obj.id, visible=plane.get("visible", True),
+                     locked=plane.get("locked", False), group_id=plane.get("group"),
+                     block_id=plane.get("block"), color=plane.get("color"),
+                     material=plane.get("material"),
+                     annotation=plane.get("annotation"),
+                     linetype=plane.get("linetype", "ByLayer"),
+                     draw_order=plane.get("draw_order", 0))
     for bid, bd in doc.get("block_defs", {}).items():
         scene.block_defs[bid] = {
             "name": bd["name"],
@@ -318,7 +336,6 @@ def _load_doc(scene, doc: dict, blobs=None):
                           doc.get("annot_styles", {}).items()}
     scene.history_records = list(doc.get("history_records", []))
 
-    object_id_map = {}
     for od in doc.get("objects", []):
         if od.get("mesh"):
             shape = _mesh_from_json(od["mesh"])

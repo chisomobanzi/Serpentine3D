@@ -160,6 +160,8 @@ class SceneObject:
         return self._mesh is not None
 
     def clone(self) -> "SceneObject":
+        if self.kind == "picture":
+            return replace(self, _shape=self.shape.copy())
         return replace(self)
 
 
@@ -188,7 +190,6 @@ class Scene:
         self.units: str = "mm"          # document units (utils/units.py)
         self.block_defs: dict = {}      # id -> {"name", "shapes": [TopoDS]}
         self.annot_styles: dict = {}    # name -> text/dim style overrides
-        self.image_planes: list = []    # reference images (pictureframe)
         self.record_history = False     # new surfaces remember their inputs
         self.history_records: list = []   # {"op", "inputs", "output", ...}
         self._regen_active = False
@@ -201,6 +202,20 @@ class Scene:
         self.session: dict | None = None
 
     # -- notification --
+    @property
+    def image_planes(self):
+        """Legacy file representation; pictures themselves are scene objects."""
+        return [obj.shape.plane for obj in self.all() if obj.kind == "picture"]
+
+    @image_planes.setter
+    def image_planes(self, planes):
+        from .picture import PictureShape
+        for obj in list(self.all()):
+            if obj.kind == "picture":
+                self.remove(obj.id)
+        for plane in planes:
+            self.add(PictureShape(plane), name=plane.get("name"))
+
     def add_listener(self, fn, kinds: tuple | None = None):
         """Subscribe; kinds limits calls to those change categories
         ("objects", "layers", "layouts") — "all" changes always fire."""
@@ -578,7 +593,8 @@ class Scene:
                            snap.get("block_defs", {}).items()}
         self.annot_styles = {k: dict(v) for k, v in
                              snap.get("annot_styles", {}).items()}
-        self.image_planes = copy.deepcopy(snap.get("image_planes", []))
+        if not any(obj.kind == "picture" for obj in self.all()):
+            self.image_planes = copy.deepcopy(snap.get("image_planes", []))
         self.history_records = copy.deepcopy(
             snap.get("history_records", []))
         self.trajectories = snap.get("trajectories", [])

@@ -167,8 +167,8 @@ def test_declared_import_exts_are_really_dispatched(ext, tmp_path):
 
 
 def test_dialogs_use_the_fileio_filters(monkeypatch):
-    """Open/Import must get the import filter and Export the export filter —
-    the wiring bug behind #2 was one shared string used for both."""
+    """Open offers model files, Import also offers interactive pictures, and
+    Export uses its own supported formats."""
     from serpentine3d import app as app_mod
 
     seen = {}
@@ -192,7 +192,9 @@ def test_dialogs_use_the_fileio_filters(monkeypatch):
 
     assert ".3dm" in _exts_in(seen["Open"])
     assert seen["Open"] == fileio.import_filter()
-    assert seen["Import"] == fileio.import_filter()
+    assert _exts_in(seen["Import"]) == set(fileio.IMPORT_EXTS) | {
+        ".jpg", ".jpeg", ".png", ".webp",
+    }
     assert seen["Export"] == fileio.export_filter()
 
 
