@@ -4,6 +4,9 @@
 
 ### Added
 
+- **Drag files into the app to import them (#16).** Drop one or more files
+  onto the window or a viewport using any format offered by File > Import.
+  Imports retain progress, cancellation and Undo; source files stay in place.
 - **A bottom workspace for commands, scripts and the assistant.** Command
   history stays visible beside optional resizable panes, with model/layout
   tabs above them. An explicit Command / Ask AI switch routes the shared

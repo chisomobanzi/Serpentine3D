@@ -65,6 +65,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
         self.resize(1440, 900)
+        self.setAcceptDrops(True)
+        self._importing_file = False
 
         # core state
         self._pending_update = None
@@ -432,6 +434,13 @@ class MainWindow(QMainWindow):
         afterwards takes a couple of hundred milliseconds more, and only
         the flag covers that.
         """
+        if isinstance(obj, Viewport):
+            if event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+                self.dragEnterEvent(event)
+                return True
+            if event.type() == QEvent.Type.Drop:
+                self.dropEvent(event)
+                return True
         if event.type() == QEvent.Type.MouseButtonPress \
                 and isinstance(obj, Viewport):
             self._set_active_viewport(obj)
@@ -590,6 +599,7 @@ class MainWindow(QMainWindow):
         dialog.activateWindow()
 
     def _wire_viewport(self, vp):
+        vp.setAcceptDrops(True)
         vp.installEventFilter(self)
         vp.displayModeChanged.connect(self._update_status)
         vp.layoutSelectionChanged.connect(self._update_status)
@@ -1500,9 +1510,49 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Save failed", str(exc))
 
     def _file_import(self):
+        if self._importing_file:
+            return
         path = self._pick_file(save=False, title="Import")
         if not path:
             return
+        self._import_path(path)
+
+    def _dropped_import_paths(self, event):
+        """Only local files supported by the normal Import dialog qualify."""
+        if self._importing_file or not event.possibleActions() & Qt.DropAction.CopyAction:
+            return []
+        return [url.toLocalFile() for url in event.mimeData().urls()
+                if url.isLocalFile()
+                and os.path.splitext(url.toLocalFile())[1].lower() in fileio.IMPORT_EXTS
+                and os.path.isfile(url.toLocalFile())]
+
+    def dragEnterEvent(self, event):
+        if self._dropped_import_paths(event):
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        self.dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        paths = self._dropped_import_paths(event)
+        if not paths:
+            event.ignore()
+            return
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        for path in paths:
+            self._import_path(path)
+
+    def _import_path(self, path):
+        """Share Import's undo, progress and error handling with file drops."""
+        if self._importing_file:
+            return
+        # Progress callbacks process Qt events; another drop must not nest an
+        # import (and its history checkpoint) inside the one already running.
+        self._importing_file = True
         try:
             self.history.checkpoint("import")
             n = self._import_showing_progress(path)
@@ -1514,6 +1564,8 @@ class MainWindow(QMainWindow):
         except Exception as exc:                              # noqa: BLE001
             self.history.discard_checkpoint()
             QMessageBox.warning(self, "Import failed", str(exc))
+        finally:
+            self._importing_file = False
 
     # STL export mesh-quality presets, shown in the export prompt.
     _STL_QUALITY = [("Draft — coarse, small file", "draft"),
