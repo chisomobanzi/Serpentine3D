@@ -11,6 +11,7 @@ dependencies = [
     "cadquery-ocp==7.9.3.1.1",
     "PySide6>=6.6",
     "numpy>=1.26",
+    "pye57>=0.4.19,<0.5",
     "PyOpenGL>=3.1",
     "mcp>=2",               # the server is written against mcp.server.mcpserver
     "httpx>=0.27,<1",       # the AI client speaks it directly; mcp 2 moved to httpx2

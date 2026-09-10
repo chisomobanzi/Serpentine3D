@@ -16,9 +16,16 @@ format is chosen by extension.
 | `.svg` | ✓ | ✓ | Paths import as curves (béziers exact); layouts export as vector SVG |
 | `.glb` |  | ✓ | Binary glTF with materials (Unreal / Blender / web) |
 | `.usda` / `.usd` |  | ✓ | USD for virtual-production pipelines |
+| `.e57` | ✓ |  | Point clouds: separate registered scans with RGB colours; Cartesian and spherical coordinates |
 
 ## Notes
 
+- **E57 scans.** Choose File > Import or drag an `.e57` file into the window.
+  Each scan becomes a separate named point cloud, positioned using its stored
+  scan pose. E57 coordinates are in metres and are converted to the current
+  model units. Invalid samples are omitted; 16-bit colours are converted to
+  8-bit RGB for display. Save as `.serp` to retain the imported clouds. Embedded
+  photographs, intensity and scanner-specific metadata are not imported.
 - **Exact vs. mesh.** `.serp` and `.step` carry exact geometry both ways;
   `.3dm` is exact for curves but writes surfaces and solids as meshes — for
   an exact round trip through Rhino, export STEP and `import` it there.

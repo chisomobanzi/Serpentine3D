@@ -20,6 +20,7 @@ IMPORT_FORMATS = [
     ("DXF", (".dxf",)),
     ("SVG", (".svg",)),
     ("PLY point cloud", (".ply",)),
+    ("E57 point cloud", (".e57",)),
 ]
 
 EXPORT_FORMATS = [
@@ -132,9 +133,8 @@ def import_file(scene, path: str, progress=None) -> int:
     """Import any supported file into the scene. Returns object count added.
 
     `progress` is called as `progress(fraction, message)` while the work runs;
-    answering False cancels it, raising `Cancelled`. Only .3dm reports as it
-    goes so far — the rest bracket the read, so a caller's dialog behaves the
-    same whatever the format.
+    answering False cancels it, raising `Cancelled`. E57 and Rhino report as
+    they read; other formats bracket the read.
     """
     ext = os.path.splitext(path)[1].lower()
     report = Progress(progress,
@@ -188,6 +188,17 @@ def _import_file(scene, path: str, ext: str, report) -> int:
         named = ply.import_ply(path)
         for name, shape in named:
             scene.add(shape, name=name)
+        return len(named)
+    if ext == ".e57":
+        from . import e57
+        named = e57.import_e57(path, units=scene.units,
+                               progress=report.part(0.0, 0.95))
+        # Reading and cancellation finish before mutating the scene, so a bad
+        # later station or Cancel cannot leave half a survey imported.
+        adding = report.part(0.95, 1.0)
+        for done, (name, shape) in enumerate(named, 1):
+            scene.add(shape, name=name)
+            adding.tick(done / len(named), f"Adding scan {done} of {len(named)}")
         return len(named)
     if ext == ".3dm":
         from . import rhino

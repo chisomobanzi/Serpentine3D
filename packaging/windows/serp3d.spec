@@ -9,6 +9,8 @@ from PyInstaller.utils.hooks import collect_dynamic_libs
 # OCP.pyd links against the VTK runtime shipped in the vtkmodules wheel;
 # nothing imports vtk from Python, so collect the DLLs explicitly.
 vtk_bins = collect_dynamic_libs("vtkmodules")
+# libE57 needs the Xerces XML runtime shipped beside its extension.
+e57_bins = collect_dynamic_libs("pye57")
 
 # ProductName/ProductVersion on the .exe, generated from the package version.
 # SignPath enforces both at signing time; Windows shows them in Properties.
@@ -21,7 +23,7 @@ version_file = str(make_version_info.main())
 a = Analysis(
     ["serp3d_entry.py"],
     pathex=[],
-    binaries=vtk_bins,
+    binaries=vtk_bins + e57_bins,
     datas=[],
     hiddenimports=[],
     excludes=[

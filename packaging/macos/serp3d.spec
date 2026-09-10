@@ -8,6 +8,8 @@ from PyInstaller.utils.hooks import collect_dynamic_libs
 # that runtime in turn pulls in the VTK dylibs from the vtkmodules wheel.
 # Nothing imports either from Python, so collect both explicitly.
 binaries = collect_dynamic_libs("OCP") + collect_dynamic_libs("vtkmodules")
+# libE57 needs the Xerces XML runtime shipped beside its extension.
+binaries += collect_dynamic_libs("pye57")
 
 a = Analysis(
     ["serp3d_entry.py"],

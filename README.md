@@ -269,6 +269,7 @@ Settings live in `~/.config/serpentine3d/settings.json`.
 | `.svg` | ✓ | ✓ | Paths import as curves (béziers exact); layouts export as vector SVG |
 | `.glb` | | ✓ | Binary glTF with materials (Unreal/Blender/web) |
 | `.usda` | | ✓ | USD for virtual-production pipelines |
+| `.e57` | ✓ | | Point clouds: separate registered scans, RGB colours, Cartesian/spherical coordinates; metres converted to model units |
 
 ## The assistant (AI modelling)
 

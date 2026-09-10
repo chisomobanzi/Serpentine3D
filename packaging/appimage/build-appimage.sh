@@ -103,6 +103,7 @@ if [ -n "$BUILT" ]; then
 
     "$PROBE/squashfs-root/usr/bin/python$PYVER" -P - << 'PY'
 import serpentine3d.app
+import pye57  # Load libE57 and its bundled Xerces runtime before handoff.
 PY
     echo "Packaged application import check passed"
 fi

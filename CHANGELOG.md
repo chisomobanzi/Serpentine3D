@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Import E57 point clouds (#15).** Open, import or drag in `.e57` scans with
+  their names, registered positions and RGB colours. Cartesian and spherical
+  coordinates convert from metres to model units; invalid points are omitted.
+  Imported scans remain separate point-cloud objects and persist in `.serp` files.
 - **Snap to individual point-cloud samples (#14).** The Point object snap
   uses each sample’s actual 3D position while drawing, with a persistent
   toggle in the snap bar, settings and `osnap` command.

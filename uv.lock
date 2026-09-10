@@ -1785,6 +1785,36 @@ wheels = [
 ]
 
 [[package]]
+name = "pye57"
+version = "0.4.19"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pyquaternion" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/46/cd/93dbfeec9dcc1bfb3f4c3f8edcc31d67eacfa683c8a3a3b90fffa98adcd7/pye57-0.4.19.tar.gz", hash = "sha256:0323a0cb5e62286fb3f4d7a2c63d811bb813ac65e2a21cfadf8ca848eaa27101", size = 474227, upload-time = "2025-11-26T21:38:44.26Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/05/3ffba49cc59cc7130f4a81b8153513601fb57b4660f94d65051763e38579/pye57-0.4.19-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c9d678c7a78b1b33cf75765c193a55ced19febbd8f37e2b9a49c6957d2226b5c", size = 2588690, upload-time = "2025-11-26T21:38:13.874Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/de/448cd13ae098a035ed71744c6bd81826d89ac9f98aa6336be5e49996ae1d/pye57-0.4.19-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:29c81a05e062737fe7a1883d1717ec0a05d86876c4d549b2bdacafa230dd7ba2", size = 17167112, upload-time = "2025-11-26T21:38:15.479Z" },
+    { url = "https://files.pythonhosted.org/packages/51/9c/95f355e5a2f3fe5654d3d518831b91aa0c6943f66690750e9ac3f7fe3d9d/pye57-0.4.19-cp310-cp310-win_amd64.whl", hash = "sha256:b0fdc023d88706739ff5bfa22022bd69611b2394298d477a9cc91c669c4cbcf8", size = 1128676, upload-time = "2025-11-26T21:38:17.274Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/68/5d04a0fbe6833e0c6b027cf9562ff2c9b63f01f9a6108cb07d54096f8723/pye57-0.4.19-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:56175b0424edb0624dad83a973f5d6c1e974f521d263d0230665e23e430a6703", size = 2589798, upload-time = "2025-11-26T21:38:18.863Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/ee/b6fe83ceb9b76298cee9d226e86ee611e2e38f22b2d9c80c0e451dd2ecf6/pye57-0.4.19-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:938ef15a5ab64a877a0a3b11bf58a4b5967fdc4fbb969c80987dd959400d9220", size = 17185711, upload-time = "2025-11-26T21:38:20.437Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/95/2ce656932797b29181c5deff7366a0b2c6c8caf5f3688928a67fb051faf0/pye57-0.4.19-cp311-cp311-win_amd64.whl", hash = "sha256:858aab1379924f11c04ab80653d7853fec71c43abf60c8bde27e3077e03abf7c", size = 1129348, upload-time = "2025-11-26T21:38:24.857Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/84/453ddb116a0f081223eb193ae2e47748bd9b40afc3e1315c0f94f08d0c45/pye57-0.4.19-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:d548a28ea795ad003fcabdceccd624ddd6674360cc08df4a39b2d6854073d688", size = 2591085, upload-time = "2025-11-26T21:38:25.996Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/c0/583f287be7deddf6ceaaeffd7ad2db5c9cecf0b82af131e5ce36861aa701/pye57-0.4.19-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:326890c430a8019528e8ce97fb8fb7355aa64fbd41c00c6161a12ff1c86592fa", size = 17252005, upload-time = "2025-11-26T21:38:27.779Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/44/abc7d0576eb8c791cc0866a187dde795c69b5550119b1fd1fc09222e251a/pye57-0.4.19-cp312-cp312-win_amd64.whl", hash = "sha256:ec415dac94f66832d8f8709ef33eb43b1a5a002ac63c02af5458229c8d29e3a2", size = 1130762, upload-time = "2025-11-26T21:38:29.562Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/10/1ee8fe0fce7b1ae8f643f55a3b8207fafd4efae67707f4e60831e3334799/pye57-0.4.19-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:290c6c04e12fbc281560c775d5716c3a808e279704518b1987bdc53367d11bdb", size = 2591076, upload-time = "2025-11-26T21:38:30.721Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/d6/5cd3dfb00ceba448a4a2f488af0565f1869515c0bfa3c325b706d7684990/pye57-0.4.19-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:230540b53f04b004025ccc840b42d2813299bc19e00ad9e9e216b394fd9299fd", size = 17252315, upload-time = "2025-11-26T21:38:32.09Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/fe/613fcde256d10c0d1a8f7288d3ca871a9fa6996f0602da71f4940e93bbc4/pye57-0.4.19-cp313-cp313-win_amd64.whl", hash = "sha256:d27332054bf18689acb45470a3bc16d4c21ed7b0b0848c56ef9e42cc8980a3c4", size = 1130809, upload-time = "2025-11-26T21:38:35.04Z" },
+    { url = "https://files.pythonhosted.org/packages/65/51/7748498e84d72209750567f4b9850d9a4a0405d91b6b93bd86cda7448208/pye57-0.4.19-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:e20bb7b68c020c79c4abc8227cd79e0ae15407609c13cc36d1638b1af2f2a02c", size = 2591844, upload-time = "2025-11-26T21:38:36.593Z" },
+    { url = "https://files.pythonhosted.org/packages/52/60/7f8940aaa72c6faecd260cb38c335c32681267968dab5b387a9d1f2cefdf/pye57-0.4.19-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:99aa67fd36a6607d08e927cfe25a14fb74eb55065889020ec4b67ec174563887", size = 17245465, upload-time = "2025-11-26T21:38:38.392Z" },
+    { url = "https://files.pythonhosted.org/packages/65/57/4c081affb44cf0cf5b4ce695fd09010680d9a02dd54105c490bacfb5c6da/pye57-0.4.19-cp314-cp314-win_amd64.whl", hash = "sha256:9f9d54c89ee9a3c835d6e04640a069cb22321d4d8d54e5d7e0055fed134eb8f3", size = 1170650, upload-time = "2025-11-26T21:38:41.55Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/51/c8c80982a65420d0ea9d491fea956ceae8b32f7f210ac016fadab9677a44/pye57-0.4.19-cp314-cp314t-win_amd64.whl", hash = "sha256:52772b0ef4a8ec2e4bc3d3134b9edb2cbd9c8d412104659ea0eaa0cb85b1e20b", size = 1196893, upload-time = "2025-11-26T21:38:42.644Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1839,6 +1869,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc", size = 6851574, upload-time = "2026-01-21T03:57:59.36Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d", size = 122781, upload-time = "2026-01-21T03:57:55.912Z" },
+]
+
+[[package]]
+name = "pyquaternion"
+version = "0.9.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7d/0d/3d092aa20efaedacb89c3221a92c6491be5b28f618a2c36b52b53e7446c2/pyquaternion-0.9.9.tar.gz", hash = "sha256:b1f61af219cb2fe966b5fb79a192124f2e63a3f7a777ac3cadf2957b1a81bea8", size = 15530, upload-time = "2020-10-05T01:31:30.327Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/b3/d8482e8cacc8ea15a356efea13d22ce1c5914a9ee36622ba250523240bf2/pyquaternion-0.9.9-py3-none-any.whl", hash = "sha256:e65f6e3f7b1fdf1a9e23f82434334a1ae84f14223eee835190cd2e841f8172ec", size = 14361, upload-time = "2020-10-05T01:31:37.575Z" },
 ]
 
 [[package]]
@@ -2358,6 +2402,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pye57" },
     { name = "pyopengl" },
     { name = "pyside6" },
     { name = "rhino3dm" },
@@ -2382,6 +2427,7 @@ requires-dist = [
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "pye57", specifier = ">=0.4.19,<0.5" },
     { name = "pyopengl", specifier = ">=3.1" },
     { name = "pyside6", specifier = ">=6.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
