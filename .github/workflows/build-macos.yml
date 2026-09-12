@@ -36,4 +36,13 @@ jobs:
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" packaging/macos/Serpentine3D-*-arm64.dmg --clobber
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          assets=$(gh release view "$tag" --json assets --jq '.assets[].name')
+          for path in packaging/macos/Serpentine3D-*-arm64.dmg; do
+            if grep -Fxq "$(basename "$path")" <<< "$assets"; then
+              echo 'Keeping the disk image already prepared in the draft release.'
+            else
+              gh release upload "$tag" "$path"
+            fi
+          done

@@ -52,4 +52,13 @@ jobs:
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "packaging/windows/Output/Serpentine3D-Setup-x86_64.exe" --clobber
+        run: |
+          $tag = "${{ github.event.release.tag_name }}"
+          $assets = gh release view $tag --json assets --jq '.assets[].name'
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect release assets" }
+          if ($assets -contains 'Serpentine3D-Setup-x86_64.exe') {
+            Write-Host 'Keeping the installer already prepared and tested in the draft release.'
+          } else {
+            gh release upload $tag "packaging/windows/Output/Serpentine3D-Setup-x86_64.exe"
+            if ($LASTEXITCODE -ne 0) { throw "Could not upload installer" }
+          }
