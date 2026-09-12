@@ -30,10 +30,12 @@ class AuthError(AiError):
     pass
 
 
-def resolve_api_key(cfg) -> str | None:
+def resolve_api_key(cfg, provider="anthropic") -> str | None:
     """Env var wins (never stored); falls back to the config file."""
-    return (os.environ.get("ANTHROPIC_API_KEY")
-            or cfg.get("ai", "api_key", default=None)
+    env_key, config_key = ("OPENAI_API_KEY", "openai_api_key") if provider == "openai" else (
+        "ANTHROPIC_API_KEY", "api_key")
+    return (os.environ.get(env_key)
+            or cfg.get("ai", config_key, default=None)
             or None)
 
 

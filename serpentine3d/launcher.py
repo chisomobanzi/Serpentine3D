@@ -43,6 +43,13 @@ def main() -> int:
         print(version_line())
         return 0
 
+    if "--mcp" in sys.argv:
+        # External assistants launch the installed app as a stdio server.
+        # Keep stdout and startup free of the GUI, splash and geometry kernel.
+        from .mcp_server.server import main as mcp_main
+        mcp_main()
+        return 0
+
     if "--selftest" in sys.argv:
         # headless bundle check — no window, no splash
         from .app import _selftest

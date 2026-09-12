@@ -125,6 +125,8 @@ class Agent(QObject):
 
     def stop(self):
         self._stop.set()
+        if hasattr(self.client, "interrupt"):
+            self.client.interrupt()
 
     def reset(self):
         """Clear the conversation once any active turn has stopped."""

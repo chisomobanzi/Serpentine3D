@@ -183,5 +183,5 @@ def test_the_paper_side_has_no_anchor():
 def test_combs_arrows_and_image_planes_ride_the_anchor():
     for fn in (vp_mod.Viewport._draw_combs,
                vp_mod.Viewport._draw_direction_arrows,
-               vp_mod.Viewport._draw_image_planes):
+               vp_mod.Viewport._draw_pictures):
         assert "rebased(" in inspect.getsource(fn), fn.__qualname__

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 — 2026-09-13
 
 ### Added
 
@@ -57,6 +57,13 @@
   in tooltips; preview controls appear when relevant. Minimal outline icons
   identify AI, scripts and commands, with a subtle custom script-tab close
   button and consistent hover and selected states.
+- **Connect an assistant from the workspace.** Compact connection cards
+  offer a ChatGPT account through Codex, local models through LM Studio,
+  and OpenAI or Anthropic API keys. Model discovery and sign-in remain responsive, and
+  connection setup preserves drafts until Send. Account tools operate on
+  real geometry through the same command history, cancellation and Undo
+  path as other assistants. ChatGPT credentials remain managed by Codex;
+  disconnecting Serpentine leaves the shared account signed in.
 - **Local assistants through LM Studio.** Assistant settings discover local
   models and their capabilities, alongside the existing Anthropic provider.
   Streamed tool calls operate on real geometry and identify their actions
@@ -64,7 +71,9 @@
   errors and cancellation keep completed operations in the conversation.
 - **MCP shares the workspace.** External agents identify their operations
   and errors in command history, respect pending modelling prompts, and can
-  hand off unexecuted Python drafts with `serp_prepare_script`.
+  hand off unexecuted Python drafts with `serp_prepare_script`. Assistant
+  setup supplies copyable client configuration. The installed app supports
+  `--mcp` to run the stdio server without opening a window.
 - **A Python script editor with geometry previews.** Edit and save `.py`
   files, start from bundled examples, or open an assistant-prepared draft.
   Run stages changes on a worker; Keep commits them as one undoable change,
@@ -86,6 +95,12 @@
 
 ### Fixed
 
+- **Windows assistant connections close cleanly.** Codex command wrappers
+  release their child processes on disconnect and application exit; desktop
+  launch also finds conventional per-user command-wrapper installations.
+- **Protect new picture and text data from older readers.** Drawings using
+  editable text, formatted notes or picture objects require 0.10.0 when saved.
+  Plain CAD and point-cloud-only files retain their earlier format versions.
 - **Joined extrusion profiles retain every edge (#11).** Join connects
   curves and offset wires regardless of selection order, and rejects
   disconnected selections without discarding pieces. Cap no longer duplicates
