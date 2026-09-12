@@ -17,18 +17,41 @@ shared input. **Command** returns to ordinary modelling commands. Each mode
 keeps its own draft; opening a pane does not change the input destination.
 The command history remains visible beside the conversation.
 
-Choose your provider in **Settings → Assistant**.
+On first use, choose a connection directly in the Assistant pane. You can
+use a ChatGPT account, an API key, or a model running in LM Studio. The
+connection icon beside the model name lets you change this later. Choosing
+a connection never sends your draft automatically.
+
+![Assistant connection choices in the installed app](../assets/img/assistant-connections.png){ width="600" }
+
+### ChatGPT account
+
+Serpentine uses the official [Codex app-server](https://learn.chatgpt.com/docs/app-server)
+to connect your ChatGPT account. Install the [Codex CLI](https://developers.openai.com/codex/cli/)
+before starting Serpentine. The app checks your PATH and common per-user
+installation locations, including NVM installations used from the desktop.
+
+1. Choose **ChatGPT** in the Assistant pane.
+2. Reuse your existing Codex account, or choose **Sign in** to open the
+   browser. Return to Serpentine after completing sign-in.
+3. Select an available model and choose **Connect**.
+4. Choose **Ask AI** and send a prompt, or click an example to draft one.
+
+Codex manages authentication and account access. Serpentine does not copy
+your account tokens into its settings. Disconnecting the Assistant leaves
+your Codex account signed in. Account limits and model availability are
+determined by your ChatGPT plan.
 
 ### LM Studio: run a model on your machine
 
 1. Open LM Studio and start its local server in the Developer view.
-2. In Serpentine's Assistant settings, choose **LM Studio** and enter the
+2. In the Assistant pane, choose **Local** and enter the
    server URL, usually `http://127.0.0.1:1234`.
-3. Refresh the model list and choose a model. Qwen and Gemma can be used when
+3. Choose **Discover**, select a model, and choose **Connect**. Qwen and Gemma can be used when
    installed in LM Studio; use a model trained for tool use to edit geometry.
 4. Return to **Ask AI** and try: “Create a box 40 by 30 by 20.”
 
-No Anthropic key is needed for LM Studio. Requests go to the server URL you
+No cloud key or account is needed for LM Studio. Requests go to the server URL you
 configure. With a loopback URL and a model served locally, inference stays
 on this machine.
 
@@ -42,12 +65,22 @@ LM Studio manages model loading, context size and CPU/GPU memory allocation.
 If loading fails for lack of GPU memory, lower GPU offload or context size
 there. Serpentine does not change those settings.
 
-### Anthropic
+### Cloud API keys
 
-Choose **Anthropic**, supply an API key, and select a model. You can also set
-`ANTHROPIC_API_KEY` before launching the app. Anthropic requests send your
-conversation and requested scene information to Anthropic's API; the key is
-used only for that provider.
+Choose **API key**, select **OpenAI** or **Anthropic**, supply a key, and
+select a model before choosing **Connect**. You can also set
+`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` before launching the app.
+Environment keys take precedence over keys entered in the app and are not
+copied into its configuration. Entered keys are saved in your Serpentine
+configuration; each provider uses only its own key.
+
+Cloud requests send your conversation and requested scene information to
+the provider you selected. An API key is never sent to your LM Studio server.
+
+API usage is billed separately from a ChatGPT or Claude subscription.
+Anthropic does not offer Claude subscription sign-in for third-party
+applications without prior approval. To use an existing signed-in Claude
+client, connect it to Serpentine through MCP below.
 
 ### Working alongside a drawing command
 
@@ -61,21 +94,35 @@ Changing models during a turn applies to the next turn.
 
 ## Connect an external MCP client
 
-With the GUI running (it opens a local RPC bridge automatically), add
-to your MCP client config — e.g. Claude Code:
+Open the Assistant's connection options and choose **External assistant ·
+MCP** to copy a configuration for the build you are running. Add it to your
+external client's MCP settings and keep the Serpentine GUI open. This lets
+an assistant you already use work on the scene, without configuring an
+in-app model connection.
 
-```bash
-claude mcp add serpentine3d -- /path/to/.venv/bin/serp3d-mcp
-```
-
-or in `claude_desktop_config.json`:
+For an installed Linux AppImage, the configuration looks like this:
 
 ```json
 {
   "mcpServers": {
-    "serpentine3d": { "command": "/path/to/.venv/bin/serp3d-mcp" }
+    "serpentine3d": {
+      "command": "/home/your-user/Applications/Serpentine3D.AppImage",
+      "args": ["--mcp"]
+    }
   }
 }
+```
+
+The helper uses the original AppImage path so the configuration remains
+valid after the application closes or updates. It does not use the
+temporary directory where AppImages mount their bundled Python runtime.
+`--mcp` starts only the stdio MCP server; start the GUI separately.
+
+For a Python installation, you can also add the installed server directly —
+for example, with Claude Code:
+
+```bash
+claude mcp add serpentine3d -- /path/to/.venv/bin/serp3d-mcp
 ```
 
 The MCP server finds the running GUI through `~/.serpentine3d/rpc.port`.

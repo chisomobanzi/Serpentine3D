@@ -19,7 +19,7 @@ from ..core.layers import Layer
 
 # The newest version this reader understands. Anything newer is refused
 # with the version it asks for, never a traceback.
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 # What a document with none of the version-3 kinds is written as.
 PLAIN_VERSION = 2
 # The Serpentine3D release a version-3 file asks its reader to be.
@@ -164,6 +164,21 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
         doc["trajectories"] = trajectories
         if session:
             doc["session"] = session
+    # Earlier readers silently lose picture edits and text typography, or
+    # cannot decode editable text BReps. Ordinary CAD/cloud files stay v2/v3.
+    from ..core.picture import PictureShape
+    from ..core.text_object import TextShape
+    new_shapes = [obj.shape for obj in scene.all()]
+    new_shapes.extend(obj.shape for lay in scene.layouts for obj in lay.objects)
+    new_shapes.extend(shape for block in scene.block_defs.values()
+                      for shape in block["shapes"])
+    formatted_notes = any(note.font_family or note.font_style
+                          or note.alignment != "left"
+                          for lay in scene.layouts for note in lay.notes)
+    if formatted_notes or any(isinstance(shape, (PictureShape, TextShape))
+                              for shape in new_shapes):
+        doc["version"] = 4
+        doc["requires"] = "0.10.0"
     _write_container(doc, path, thumbnail, blobs)
 
 

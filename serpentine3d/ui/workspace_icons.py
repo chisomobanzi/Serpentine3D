@@ -22,6 +22,13 @@ _SHAPES = {
     "send": '<path d="M8 13V3m-4 4 4-4 4 4"/>',
     "plus": '<path d="M8 3v10M3 8h10"/>',
     "settings": '<path d="M2 5h3m4 0h5M2 11h5m4 0h3"/><circle cx="7" cy="5" r="2"/><circle cx="9" cy="11" r="2"/>',
+    "account": '<circle cx="8" cy="5" r="2.5"/><path d="M2.5 14v-1a5.5 5.5 0 0 1 11 0v1"/>',
+    "local": '<rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5 14h6m-3-2.5V14m-3-8 2 1.5L5 9m4 0h2"/>',
+    "key": '<circle cx="5" cy="5" r="3"/><path d="m7.2 7.2 6.3 6.3m-3-3 2-2m-4 0 2-2"/>',
+    "link": '<path d="m6.5 9.5 3-3m-5.1 1.1L3 9a2.8 2.8 0 0 0 4 4l1.4-1.4m-.8-7.2L9 3a2.8 2.8 0 0 1 4 4l-1.4 1.4"/>',
+    "copy": '<rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M3 10.5H2.5v-8h8V3"/>',
+    "refresh": '<path d="M13.3 6A5.5 5.5 0 1 0 13 11m.5-8v3.5H10"/>',
+    "external": '<path d="M9 2.5h4.5V7m0-4.5-7 7M6 3.5H2.5v10h10V10"/>',
 }
 
 

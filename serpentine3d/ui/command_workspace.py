@@ -196,7 +196,6 @@ class CommandWorkspace(QWidget):
             self.assistant_pane.layout().addWidget(self.assistant)
             field = self.assistant.use_external_composer()
             field.setAccessibleName("AI assistant input")
-            field.setPlaceholderText("Ask about your model…")
             field.setFixedHeight(48)
             field.setStyleSheet(
                 "QPlainTextEdit { background: #202b28; color: #d0e5dc;"
@@ -316,10 +315,15 @@ class CommandWorkspace(QWidget):
         self.inputs.updateGeometry()
         busy = bool(ai and self.assistant and self.assistant.agent
                     and self.assistant.agent.busy)
+        ready = bool(self.assistant and self.assistant.is_ready())
         label = "Stop" if busy else "Send to AI" if ai else "Run command"
         if busy and self.assistant.btn_send.text() == "Stopping…":
             label = "Stopping…"
         self.submit_button.setText(label)
+        self.submit_button.setEnabled(not ai or busy or (
+            ready and not self.assistant._resetting))
+        self.submit_button.setToolTip(
+            "Choose a connection in Assistant to send" if ai and not ready else label)
         self.submit_button.setIcon(workspace_icon(
             "stop" if busy else "send" if ai else "run",
             color="#a9dfce" if ai else "#dbc087"))

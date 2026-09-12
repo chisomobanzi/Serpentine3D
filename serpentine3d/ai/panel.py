@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
+    QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
     QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
@@ -13,7 +13,10 @@ from ..api import SerpApi
 from ..ui.workspace_icons import workspace_icon
 from .agent import Agent, build_system_prompt
 from .client import DEFAULT_MODEL, AnthropicClient, resolve_api_key
+from .connection_setup import ConnectionSetup
 from .local_client import DEFAULT_ENDPOINT, LocalClient
+from .openai_client import DEFAULT_MODEL as OPENAI_DEFAULT_MODEL, OpenAIClient
+from .codex_client import CodexClient
 
 _CHIP_RUNNING = "color: #8fa3b8; font-family: monospace; font-size: 11px;"
 _CHIP_OK = "color: #7fb069; font-family: monospace; font-size: 11px;"
@@ -54,6 +57,7 @@ class AiPanel(QWidget):
         self._chips: list[QLabel] = []
         self._resetting = False
         self._external_composer = False
+        self._editing_connection = False
         self.setAccessibleName("Assistant")
 
         root = QVBoxLayout(self)
@@ -82,10 +86,13 @@ class AiPanel(QWidget):
         self.btn_new.setToolTip("New chat")
         self.btn_new.setFixedSize(26, 28)
         self.btn_new.clicked.connect(self._new_chat)
-        self.btn_settings = QPushButton("Settings")
+        self.btn_settings = QPushButton()
         self.btn_settings.setIcon(workspace_icon("settings"))
-        self.btn_settings.setFixedHeight(28)
-        self.btn_settings.clicked.connect(self._open_settings)
+        self.btn_settings.setAccessibleName("Connection options")
+        self.btn_settings.setToolTip("Connection options")
+        self.btn_settings.setStyleSheet("padding: 0;")
+        self.btn_settings.setFixedSize(26, 28)
+        self.btn_settings.clicked.connect(self._toggle_connection_setup)
         header.addWidget(self.recipient, 1)
         header.addWidget(self.usage)
         header.addWidget(self.btn_new)
@@ -95,38 +102,43 @@ class AiPanel(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(2, 2, 2, 2)
+        content_layout.setSpacing(6)
+        self.setup_card = ConnectionSetup(self.cfg)
+        self.setup_card.connected.connect(self._connection_saved)
+        self.setup_card.changed.connect(self._refresh_mode)
+        self.setup_card.disconnectRequested.connect(self._disconnect_account)
+        # Keep the original standalone key entry API available to callers.
+        self.key_edit = self.setup_card.key_edit
+        content_layout.addWidget(self.setup_card)
+
+        self.welcome = QWidget()
+        welcome = QVBoxLayout(self.welcome)
+        welcome.setContentsMargins(0, 4, 0, 4)
+        welcome.setSpacing(6)
+        intro = QLabel("Describe what to model, edit your selection, or ask about the scene.")
+        intro.setWordWrap(True)
+        welcome.addWidget(intro)
+        examples = QHBoxLayout()
+        for text, prompt in (("Make a box", "Make a 4 by 5 by 6 box"),
+                             ("Inspect this scene", "What's in this scene?")):
+            button = QPushButton(text)
+            button.setToolTip("Draft an example prompt")
+            button.clicked.connect(lambda checked=False, draft=prompt: self._draft_prompt(draft))
+            examples.addWidget(button)
+        examples.addStretch(1)
+        welcome.addLayout(examples)
+        content_layout.addWidget(self.welcome)
         self.feed_host = QWidget()
         self.feed = QVBoxLayout(self.feed_host)
         self.feed.setContentsMargins(2, 2, 2, 2)
         self.feed.setSpacing(8)
         self.feed.addStretch(1)
-        self.scroll.setWidget(self.feed_host)
+        content_layout.addWidget(self.feed_host, 1)
+        self.scroll.setWidget(content)
         root.addWidget(self.scroll, 1)
-
-        # --- key setup card (swapped with the input row) ---
-        self.setup_card = QWidget()
-        card = QVBoxLayout(self.setup_card)
-        card.setContentsMargins(0, 0, 0, 0)
-        self.setup_intro = QLabel(
-            "The assistant models with your own Anthropic API key "
-            "(console.anthropic.com → API keys). The key is stored in "
-            "your Serpentine3D config; the ANTHROPIC_API_KEY environment "
-            "variable also works and is never written to disk.")
-        self.setup_intro.setWordWrap(True)
-        self.setup_intro.setStyleSheet("color: #85868a;")
-        self.setup_key_row = QWidget()
-        row = QHBoxLayout(self.setup_key_row)
-        row.setContentsMargins(0, 0, 0, 0)
-        self.key_edit = QLineEdit()
-        self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.key_edit.setPlaceholderText("sk-ant-…")
-        btn_save = QPushButton("Save key")
-        btn_save.clicked.connect(self._save_key)
-        row.addWidget(self.key_edit, 1)
-        row.addWidget(btn_save)
-        card.addWidget(self.setup_intro)
-        card.addWidget(self.setup_key_row)
-        root.addWidget(self.setup_card)
 
         # --- input row ---
         self.input_row = QWidget()
@@ -151,6 +163,11 @@ class AiPanel(QWidget):
         root.addWidget(self.input_row)
 
         self._refresh_mode()
+        if (self.cfg.get("ai", "provider", default="") == "chatgpt"
+                and self.cfg.get("ai", "chatgpt_connected", default=False)):
+            self.setup_card.account_form.show()
+            self.setup_card.account_choice.setChecked(True)
+            QTimer.singleShot(0, lambda: self.setup_card.account_form.discover(restore=True))
 
     def use_external_composer(self):
         """Give a containing workspace the input, retaining the chat and setup.
@@ -166,29 +183,71 @@ class AiPanel(QWidget):
         self._refresh_mode()
         return self.input
 
-    # ------------------------------------------------------------- key mgmt
+    # ------------------------------------------------------------- connection
+
+    def is_ready(self):
+        provider, address, model, _vision = self._settings()
+        if provider == "chatgpt":
+            return self.setup_card.account_form.ready
+        return bool(model and (provider == "lmstudio" or address))
 
     def _refresh_mode(self):
-        local = self.cfg.get("ai", "provider", default="anthropic") == "lmstudio"
-        model = self.cfg.get("ai", "local_model" if local else "model",
-                             default="" if local else DEFAULT_MODEL)
-        ready = bool(model) if local else bool(resolve_api_key(self.cfg))
-        self.setup_card.setVisible(not ready)
+        provider, _address, model, _vision = self._settings()
+        local = provider == "lmstudio"
+        ready = self.is_ready()
+        self.setup_card.setVisible(not ready or self._editing_connection)
+        self.welcome.setVisible(ready and not self._editing_connection and self.feed.count() == 1)
         self.input_row.setVisible(ready and not self._external_composer)
-        self.setup_key_row.setVisible(not local and not self._external_composer)
-        self.setup_intro.setText(
-            "Choose LM Studio in Settings, enter its server URL, then refresh "
-            "and select a local model. No cloud API key is needed." if local else
-            "Add your Anthropic API key below, or open Settings to choose a "
-            "local model with LM Studio. ANTHROPIC_API_KEY also works.")
-        if self._external_composer:
-            self.setup_intro.setText("Choose a local model or connect an API key in Settings.")
-        label = f"{'LM Studio · local' if local else 'Anthropic'} · {model or 'choose a model in Settings'}"
+        self.btn_send.setEnabled(ready)
+        self.input.setPlaceholderText(
+            "Ask about your model…" if ready else "Choose a connection above to send a prompt…")
+        if local or provider == "chatgpt":
+            metadata = next((m for m in self.cfg.get("ai", "local_models" if local else "chatgpt_models", default=[]) or []
+                             if m.get("id") == model), {})
+            model = metadata.get("label") or model
+        provider_label = {"lmstudio": "LM Studio · local", "chatgpt": "ChatGPT",
+                          "openai": "OpenAI"}.get(provider, "Anthropic")
+        label = (f"{provider_label} · {model}" if ready
+                 else "Choose a connection")
         if self.agent and self.agent.busy and self._client_settings != self._settings():
             label = f"{getattr(self.agent.client, 'model', 'Assistant')} · responding; settings apply next turn"
         self.recipient.setText(label)
         self.recipient.setToolTip(label)
         self.composerStateChanged.emit()
+
+    def _toggle_connection_setup(self):
+        self._editing_connection = not self._editing_connection
+        self._refresh_mode()
+        if self.setup_card.isVisibleTo(self):
+            self.scroll.verticalScrollBar().setValue(0)
+
+    def _connection_saved(self):
+        self._editing_connection = False
+        self._refresh_mode()
+
+    def _disconnect_account(self):
+        if self.agent:
+            self.agent.stop()
+            if isinstance(self.agent.client, CodexClient):
+                self.agent.client.close()
+                self._client_settings = None
+        self.setup_card.account_form.disconnect_account()
+        self._editing_connection = False
+        self._refresh_mode()
+
+    def shutdown(self):
+        if self.agent:
+            self.agent.stop()
+            if hasattr(self.agent.client, "close"):
+                self.agent.client.close()
+        self.setup_card.account_form.close_connection()
+
+    def _draft_prompt(self, prompt):
+        self.input.setPlainText(prompt)
+        workspace = getattr(self.window, "command_workspace", None)
+        if workspace is not None:
+            workspace.set_mode("ai")
+        self.input.setFocus()
 
     def _open_settings(self):
         from ..ui.settings_dialog import SettingsDialog
@@ -202,24 +261,29 @@ class AiPanel(QWidget):
 
     def _settings(self):
         provider = self.cfg.get("ai", "provider", default="anthropic")
+        if provider == "chatgpt":
+            model = self.cfg.get("ai", "chatgpt_model", default="")
+            metadata = next((m for m in self.cfg.get("ai", "chatgpt_models", default=[]) or []
+                             if m.get("id") == model), {})
+            account = self.setup_card.account_form
+            # Include the process identity so rediscovery replaces a client
+            # whose previous Codex process exited, even for the same model.
+            return (provider, account.server if account.ready else None,
+                    model, bool(metadata.get("vision")))
         if provider == "lmstudio":
             model = self.cfg.get("ai", "local_model", default="")
             metadata = next((m for m in self.cfg.get("ai", "local_models", default=[]) or []
                              if m.get("id") == model), {})
             return (provider, self.cfg.get("ai", "local_endpoint", default=DEFAULT_ENDPOINT),
                     model, bool(metadata.get("vision")))
+        if provider == "openai":
+            return (provider, resolve_api_key(self.cfg, provider),
+                    self.cfg.get("ai", "openai_model", default=OPENAI_DEFAULT_MODEL), True)
         return (provider, resolve_api_key(self.cfg),
                 self.cfg.get("ai", "model", default=DEFAULT_MODEL), True)
 
     def _save_key(self):
-        key = self.key_edit.text().strip()
-        if not key:
-            return
-        self.cfg.set("ai", "api_key", key)
-        self.cfg.save()
-        self.key_edit.clear()
-        self._refresh_mode()
-        self.input.setFocus()
+        self.setup_card.save_key()
 
     # --------------------------------------------------------------- agent
 
@@ -236,8 +300,14 @@ class AiPanel(QWidget):
         client = None
         if self.agent is None or settings != self._client_settings:
             try:
-                client = (LocalClient(address, model, vision=vision)
-                          if provider == "lmstudio" else AnthropicClient(address, model))
+                if provider == "chatgpt":
+                    client = CodexClient(self.setup_card.account_form.server, model, vision=vision)
+                elif provider == "lmstudio":
+                    client = LocalClient(address, model, vision=vision)
+                elif provider == "openai":
+                    client = OpenAIClient(address, model)
+                else:
+                    client = AnthropicClient(address, model)
             except Exception as exc:
                 self._on_error(str(exc))
                 return None
@@ -257,7 +327,9 @@ class AiPanel(QWidget):
             old_client = self.agent.client
             self.agent.client = client
             self.agent.system = build_system_prompt(vision)
-            if hasattr(old_client, "close"):
+            if (hasattr(old_client, "close") and not (
+                    isinstance(old_client, CodexClient) and isinstance(client, CodexClient)
+                    and old_client.server is client.server)):
                 old_client.close()
         self._client_settings = settings
         self._refresh_mode()
@@ -276,6 +348,7 @@ class AiPanel(QWidget):
             self.btn_send.setText("Stopping…" if self.agent.busy else "Send")
             self.input.setEnabled(False)
             self.agent.reset()
+        self._refresh_mode()
         self.composerStateChanged.emit()
 
     def _on_conversation_reset(self):
@@ -302,6 +375,7 @@ class AiPanel(QWidget):
         if agent is None or agent.busy:
             return
         self.input.clear()
+        self.welcome.hide()
         self._add_user_bubble(text)
         self._stream_label = None
         self.btn_send.setText("Stop")
@@ -367,6 +441,9 @@ class AiPanel(QWidget):
 
     def _on_usage(self, tokens_in: int, tokens_out: int):
         if self._resetting:
+            return
+        if not tokens_in and not tokens_out:
+            self.usage.clear()
             return
         self.usage.setText(f"{tokens_in / 1000:.1f}k in · "
                            f"{tokens_out / 1000:.1f}k out")

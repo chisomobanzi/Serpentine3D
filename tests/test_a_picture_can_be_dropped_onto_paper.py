@@ -90,7 +90,7 @@ def captured_layout_pictures(monkeypatch):
     for name in (
             "glUniformMatrix4fv", "glUniform1i", "glActiveTexture",
             "glBindTexture", "glBindVertexArray", "glBindBuffer",
-            "glDepthMask"):
+            "glDepthMask", "glDisable", "glEnable"):
         monkeypatch.setattr(viewport_module.GL, name, lambda *args: None)
     monkeypatch.setattr(viewport_module.GL, "glUniform1f", uniform)
     monkeypatch.setattr(viewport_module.GL, "glBufferData", upload)

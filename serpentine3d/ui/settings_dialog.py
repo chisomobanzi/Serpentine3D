@@ -6,9 +6,7 @@ language, live apply, and one-click import for Rhino alias files.
 
 from __future__ import annotations
 
-import threading
-
-from PySide6.QtCore import QObject, QSignalBlocker, Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView,
@@ -18,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..commands import base as cmd_base
+from ..ai.model_discovery import ModelDiscovery as _ModelDiscovery
 from ..core.snaps import SNAP_TYPES
 from ..utils.config import parse_chord, parse_rhino_aliases, parse_shortcuts
 from .dialogs import untether
@@ -53,26 +52,6 @@ def _section(title: str, subtitle: str) -> QWidget:
     layout.addWidget(t)
     layout.addWidget(s)
     return w
-
-
-class _ModelDiscovery(QObject):
-    finished = Signal(str, object, str)
-
-    def start(self, endpoint: str):
-        def fetch():
-            from ..ai.local_client import discover_models
-            try:
-                models, error = discover_models(endpoint), ""
-            except Exception as exc:
-                models, error = [], str(exc)
-            try:
-                self.finished.emit(endpoint, models, error)
-            except RuntimeError:
-                # The dialog owns this signal object and can be destroyed
-                # while HTTP is in flight. Qt has already disconnected its
-                # receivers; a completed request then has nothing to update.
-                pass
-        threading.Thread(target=fetch, daemon=True).start()
 
 
 class SettingsDialog(QDialog):
@@ -425,8 +404,8 @@ class SettingsDialog(QDialog):
         from ..ai.local_client import DEFAULT_ENDPOINT
         w, layout = _page(
             "Assistant",
-            "Choose who receives Ask AI messages. LM Studio runs models on "
-            "your local server; Anthropic uses your own cloud API key. "
+            "Choose who receives Ask AI messages: your ChatGPT account, a local model, "
+            "or an OpenAI or Anthropic API key. "
             "Changes during a response apply to the next turn.")
 
         self._ai_loading = True
@@ -434,7 +413,9 @@ class SettingsDialog(QDialog):
         row_provider.addWidget(QLabel("Provider"))
         self.cb_ai_provider = QComboBox()
         self.cb_ai_provider.addItem("Anthropic", "anthropic")
+        self.cb_ai_provider.addItem("OpenAI", "openai")
         self.cb_ai_provider.addItem("LM Studio", "lmstudio")
+        self.cb_ai_provider.addItem("ChatGPT account", "chatgpt")
         self.cb_ai_provider.setCurrentIndex(max(0, self.cb_ai_provider.findData(
             self.cfg.get("ai", "provider", default="anthropic"))))
         row_provider.addWidget(self.cb_ai_provider, 1)
@@ -446,9 +427,6 @@ class SettingsDialog(QDialog):
         row.addWidget(QLabel("API key"))
         self.ed_ai_key = QLineEdit()
         self.ed_ai_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.ed_ai_key.setPlaceholderText("sk-ant-…")
-        self.ed_ai_key.setText(
-            str(self.cfg.get("ai", "api_key", default="") or ""))
         self.ed_ai_key.editingFinished.connect(self._ai_changed)
         row.addWidget(self.ed_ai_key, 1)
         layout.addWidget(self.ai_key_row)
@@ -474,6 +452,7 @@ class SettingsDialog(QDialog):
         self.cb_ai_model.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.cb_ai_model.setMinimumContentsLength(16)
         self.cb_ai_model.currentIndexChanged.connect(self._ai_changed)
+        self.cb_ai_model.editTextChanged.connect(self._ai_changed)
         row2.addWidget(self.cb_ai_model, 1)
         layout.addLayout(row2)
 
@@ -487,7 +466,7 @@ class SettingsDialog(QDialog):
         self._ai_discovery = _ModelDiscovery(self)
         self._ai_discovery.finished.connect(self._ai_models_discovered)
         self.cb_ai_provider.currentIndexChanged.connect(self._ai_provider_changed)
-        self._ai_provider_changed()
+        self._ai_provider_changed(save=False)
         layout.addStretch(1)
         return w
 
@@ -496,9 +475,12 @@ class SettingsDialog(QDialog):
             return
         from ..ai.local_client import DEFAULT_ENDPOINT
 
-        self.cfg.set("ai", "api_key", self.ed_ai_key.text().strip())
-        local = self.cb_ai_provider.currentData() == "lmstudio"
-        self.cfg.set("ai", "provider", self.cb_ai_provider.currentData())
+        provider = self.cb_ai_provider.currentData()
+        if provider in ("anthropic", "openai"):
+            key_name = "openai_api_key" if provider == "openai" else "api_key"
+            self.cfg.set("ai", key_name, self.ed_ai_key.text().strip())
+        local = provider == "lmstudio"
+        self.cfg.set("ai", "provider", provider)
         endpoint = self.ed_ai_endpoint.text().strip()
         previous_endpoint = self.cfg.get("ai", "local_endpoint", default=DEFAULT_ENDPOINT)
         if endpoint != previous_endpoint:
@@ -512,22 +494,40 @@ class SettingsDialog(QDialog):
                     self.cb_ai_model.addItem(current or "Refresh to discover local models", current)
                 self.ai_discovery_status.setText("Server URL changed. Refresh models again.")
         self.cfg.set("ai", "local_endpoint", endpoint)
-        if self.cb_ai_model.currentData():
-            self.cfg.set("ai", "local_model" if local else "model", self.cb_ai_model.currentData())
+        model = (self.cb_ai_model.currentText().strip() if provider == "openai"
+                 else self.cb_ai_model.currentData())
+        if model:
+            model_key = {"lmstudio": "local_model", "chatgpt": "chatgpt_model",
+                         "openai": "openai_model"}.get(provider, "model")
+            self.cfg.set("ai", model_key, model)
         self.cfg.save()
         # Settings also apply when the assistant pane was already open.
         from ..ai.panel import AiPanel
         for panel in self.window.findChildren(AiPanel):
             panel._refresh_mode()
 
-    def _ai_provider_changed(self, *_):
+    def _ai_provider_changed(self, *_, save=True):
         from ..ai.client import DEFAULT_MODEL, MODELS
+        from ..ai.openai_client import DEFAULT_MODEL as OPENAI_DEFAULT_MODEL, MODELS as OPENAI_MODELS
         self._ai_loading = True
         local = self.cb_ai_provider.currentData() == "lmstudio"
-        self.ai_key_row.setVisible(not local)
+        account = self.cb_ai_provider.currentData() == "chatgpt"
+        openai = self.cb_ai_provider.currentData() == "openai"
+        self.ai_key_row.setVisible(not local and not account)
         self.ai_endpoint_row.setVisible(local)
         self.cb_ai_model.clear()
-        if local:
+        self.cb_ai_model.setEditable(openai)
+        self.cb_ai_model.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        if account:
+            current = self.cfg.get("ai", "chatgpt_model", default="")
+            for model in self.cfg.get("ai", "chatgpt_models", default=[]) or []:
+                self.cb_ai_model.addItem(model.get("label") or model["id"], model["id"])
+            if current and self.cb_ai_model.findData(current) < 0:
+                self.cb_ai_model.addItem(current, current)
+            if not self.cb_ai_model.count():
+                self.cb_ai_model.addItem("Connect in the Assistant", None)
+            self.ai_note.setText("Sign in and manage your ChatGPT connection in the Assistant’s connection options.")
+        elif local:
             current = self.cfg.get("ai", "local_model", default="")
             models = self.cfg.get("ai", "local_models", default=[]) or []
             for model in models:
@@ -540,17 +540,30 @@ class SettingsDialog(QDialog):
                                  "Cloud API keys are never sent to this server. "
                                  "Vision support is read from the server's model metadata.")
         else:
-            current = self.cfg.get("ai", "model", default=DEFAULT_MODEL)
-            for model_id, label in MODELS:
+            current = self.cfg.get("ai", "openai_model" if openai else "model",
+                                   default=OPENAI_DEFAULT_MODEL if openai else DEFAULT_MODEL)
+            for model_id, label in OPENAI_MODELS if openai else MODELS:
                 self.cb_ai_model.addItem(label, model_id)
-            self.ai_note.setText("The key is stored in your Serpentine3D config. "
-                                 "ANTHROPIC_API_KEY takes precedence and is never saved. "
-                                 "Usage is billed to your Anthropic account.")
+            if current and self.cb_ai_model.findData(current) < 0:
+                self.cb_ai_model.addItem(current, current)
+            provider_label = "OpenAI" if openai else "Anthropic"
+            self.ed_ai_key.setAccessibleName(f"{provider_label} API key")
+            self.ed_ai_key.setPlaceholderText(f"{provider_label} API key · " + (
+                "sk-…" if openai else "sk-ant-…"))
+            self.ed_ai_key.setText(str(self.cfg.get(
+                "ai", "openai_api_key" if openai else "api_key", default="") or ""))
+            self.ai_note.setText(f"API usage is billed to your {provider_label} account, "
+                                 "separately from subscriptions.")
+            details = ("The key is stored in your Serpentine3D config. "
+                       f"{'OPENAI' if openai else 'ANTHROPIC'}_API_KEY takes precedence and is never saved.")
+            self.ai_note.setToolTip(details)
+            self.ed_ai_key.setToolTip(details)
         index = self.cb_ai_model.findData(current)
         self.cb_ai_model.setCurrentIndex(max(0, index))
         self.ai_discovery_status.clear()
         self._ai_loading = False
-        self._ai_changed()
+        if save:
+            self._ai_changed()
 
     def _add_local_model(self, model):
         model_id = model["id"]

@@ -2053,6 +2053,8 @@ class MainWindow(QMainWindow):
             self._remember_window()
         if self.command_workspace.console is not None:
             self.command_workspace.console.shutdown()
+        if self.command_workspace.assistant is not None:
+            self.command_workspace.assistant.shutdown()
         self.autosave.clean_exit()
         if self.journal is not None:
             self.journal.write_fingerprint()

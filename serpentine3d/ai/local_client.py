@@ -70,6 +70,9 @@ def discover_models(endpoint: str) -> list[dict]:
 
 
 class LocalClient:
+    provider_label = "LM Studio"
+    token_limit_parameter = "max_tokens"
+
     def __init__(self, endpoint: str, model: str, *, vision: bool = False):
         self.endpoint = server_root(endpoint)
         self.model = model
@@ -78,6 +81,15 @@ class LocalClient:
 
     def close(self):
         self._client.close()
+
+    def _headers(self):
+        return {}
+
+    def _http_error(self, status, body):
+        return AiError(_friendly_http_error(status, body))
+
+    def _request_error(self, exc):
+        return AiError(f"LM Studio request failed: {exc}. Check that its local server and model are running.")
 
     def _messages(self, system: str, messages: list[dict]) -> list[dict]:
         converted = [{"role": "system", "content": system}]
@@ -134,17 +146,17 @@ class LocalClient:
                    "tools": [{"type": "function", "function": {
                        "name": t["name"], "description": t.get("description", ""),
                        "parameters": t["input_schema"]}} for t in tools],
-                   "max_tokens": max_tokens, "stream": True,
+                   self.token_limit_parameter: max_tokens, "stream": True,
                    "stream_options": {"include_usage": True}}
         try:
             with self._client.stream("POST", self.endpoint + "/v1/chat/completions",
-                                     json=payload) as response:
+                                     json=payload, headers=self._headers()) as response:
                 if response.status_code >= 400:
-                    raise AiError(_friendly_http_error(response.status_code,
-                                                       response.read().decode(errors="replace")))
+                    raise self._http_error(response.status_code,
+                                           response.read().decode(errors="replace"))
                 return self._consume(response, on_text, should_stop)
         except httpx.RequestError as exc:
-            raise AiError(f"LM Studio request failed: {exc}. Check that its local server and model are running.") from exc
+            raise self._request_error(exc) from exc
 
     def _consume(self, response, on_text, should_stop):
         text, calls, usage, finish = "", {}, {}, None
@@ -161,7 +173,7 @@ class LocalClient:
             try:
                 data = json.loads(raw)
                 if data.get("error"):
-                    raise AiError(f"LM Studio: {data['error']}")
+                    raise AiError(f"{self.provider_label}: {data['error']}")
                 tokens = data.get("usage") or {}
                 if tokens:
                     usage = {"input_tokens": tokens.get("prompt_tokens", 0),
@@ -183,11 +195,11 @@ class LocalClient:
                         call["arguments"] += function.get("arguments") or ""
                     finish = choice.get("finish_reason") or finish
             except (ValueError, KeyError, TypeError, AttributeError) as exc:
-                raise AiError("LM Studio returned a malformed response stream.") from exc
+                raise AiError(f"{self.provider_label} returned a malformed response stream.") from exc
         if should_stop and should_stop():
             return {"content": [], "stop_reason": "aborted", "usage": usage}
         if not finish:
-            raise AiError("LM Studio's response ended early. Please retry.")
+            raise AiError(f"{self.provider_label}'s response ended early. Please retry.")
         blocks = [{"type": "text", "text": text}] if text else []
         if calls and finish != "tool_calls":
             raise AiError("The model's tool arguments were incomplete. Please retry.")
@@ -207,8 +219,10 @@ class LocalClient:
                            "name": call["name"], "input": arguments})
         if not blocks:
             if finish == "length":
-                raise AiError("The model reached its output limit before returning an answer. "
-                              "Try a shorter request or disable reasoning in LM Studio.")
+                advice = ("Try a shorter request or disable reasoning in LM Studio."
+                          if self.provider_label == "LM Studio" else "Try a shorter request.")
+                raise AiError(f"{self.provider_label} reached its output limit before returning an answer. "
+                              + advice)
             raise AiError("The model returned an empty response. Please retry.")
         return {"content": blocks, "stop_reason": "tool_use" if calls else finish,
                 "usage": usage}
