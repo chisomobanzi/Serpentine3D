@@ -4,6 +4,11 @@
 
 ### Added
 
+- **Gumball copy and two-axis scale gestures.** Alt-drag a layout gumball
+  arrow or plane pad to move a duplicate while leaving the source in place.
+  Shift-drag the pad on layout text to scale it uniformly about its visible
+  centre. The same Shift-pad gesture scales model objects equally along the
+  pad's two coloured axes while preserving the axis normal to the pad.
 - **Direct text editing and 3D lettering (#18).** Place a note or model label,
   then type directly beside it in the drawing—no text dialog. Content, installed
   font families and styles, physical letter height and alignment stay live in

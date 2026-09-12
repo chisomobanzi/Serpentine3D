@@ -15,13 +15,16 @@ that — so the handles that would lie about what they do are not drawn.
 
 from __future__ import annotations
 
+import copy
 import inspect
 
 import pytest
+from PySide6.QtCore import Qt
 
 import serpentine3d.commands  # registers all commands  # noqa: F401
 from serpentine3d.app import MainWindow
-from serpentine3d.core.layout import DetailView, Layout, TextNote
+from serpentine3d.core.layout import (DetailView, Layout, TextNote,
+                                     annotation_bounds)
 from serpentine3d.ui.camera import STANDARD_VIEWS
 from serpentine3d.ui.gumball import CONE1, PAD0, PAD1, SHAFT0
 
@@ -176,12 +179,12 @@ def _pull(lv, gb, press, dx: float, dy: float):
     gb.drag_to(*lv.paper_to_screen(press[0] + dx, press[1] + dy))
 
 
-def _drag(lv, handle, dx: float, dy: float):
+def _drag(lv, handle, dx: float, dy: float, modifiers=None):
     """Take `handle` at its own pixel and pull it by paper millimetres."""
     gb = lv.gumball
     sx, sy = _handle(lv, handle[0], handle[1])
     press = lv.screen_to_paper(sx, sy)
-    assert gb.begin_drag(handle, sx, sy)
+    assert gb.begin_drag(handle, sx, sy, modifiers)
     _pull(lv, gb, press, dx, dy)
     return gb, press
 
@@ -237,6 +240,89 @@ def test_a_locked_detail_in_the_handful_stays_put(sheet):
     _drag(lv, ("move", 0), 20.0, 0.0)
     assert det.x == pytest.approx(x0)
     assert note.x == pytest.approx(nx0 + 20.0)
+
+
+@pytest.mark.parametrize(
+    ("handle", "pull", "expected"),
+    [
+        (("move", 0), (12.0, 7.0), (12.0, 0.0)),
+        (("pad", 2), (9.0, 6.0), (9.0, 6.0)),
+    ],
+    ids=("axis-arrow", "plane-square"),
+)
+def test_alt_drag_duplicates_the_selected_note_as_one_undo(
+        sheet, handle, pull, expected):
+    w, lv, _det, note = sheet
+    lv.selected = [("note", note)]
+    x0, y0 = note.x, note.y
+    undo0 = len(w.history._undo)
+
+    gb, _press = _drag(
+        lv, handle, *pull, Qt.KeyboardModifier.AltModifier)
+    gb.end_drag()
+
+    assert len(w.scene.layouts[0].notes) == 2
+    original = next(item for item in w.scene.layouts[0].notes
+                    if item.id == note.id)
+    duplicate = next(item for item in w.scene.layouts[0].notes
+                     if item.id != note.id)
+    assert (original.x, original.y) == pytest.approx((x0, y0))
+    assert (duplicate.x, duplicate.y) == pytest.approx(
+        (x0 + expected[0], y0 + expected[1]))
+    assert lv.selected == [("note", duplicate)]
+    assert len(w.history._undo) == undo0 + 1
+
+    w.history.undo()
+    restored, = w.scene.layouts[0].notes
+    assert restored.id == note.id
+    assert (restored.x, restored.y) == pytest.approx((x0, y0))
+
+
+def test_shift_dragging_the_pad_scales_a_note_uniformly_about_its_centre(
+        sheet):
+    w, lv, _det, note = sheet
+    lv.selected = [("note", note)]
+    original_state = copy.deepcopy(vars(note))
+    original_bounds = annotation_bounds("note", note, w.scene)
+    original_centre = ((original_bounds[0] + original_bounds[2]) / 2,
+                       (original_bounds[1] + original_bounds[3]) / 2)
+    original_size = (original_bounds[2] - original_bounds[0],
+                     original_bounds[3] - original_bounds[1])
+    undo0 = len(w.history._undo)
+
+    gb = lv.gumball
+    original_anchor = gb.anchor()
+    assert original_anchor == pytest.approx(original_centre)
+    sx, sy = _handle(lv, "pad", 2)
+    press = lv.screen_to_paper(sx, sy)
+    shift = Qt.KeyboardModifier.ShiftModifier
+    assert gb.begin_drag(("pad", 2), sx, sy, shift)
+    tx, ty = lv.paper_to_screen(press[0] + 12., press[1] + 12.)
+    gb.drag_to(tx, ty, shift)
+    gb.end_drag()
+
+    scaled_bounds = annotation_bounds("note", note, w.scene)
+    scaled_centre = ((scaled_bounds[0] + scaled_bounds[2]) / 2,
+                     (scaled_bounds[1] + scaled_bounds[3]) / 2)
+    scaled_size = (scaled_bounds[2] - scaled_bounds[0],
+                   scaled_bounds[3] - scaled_bounds[1])
+    factors = (scaled_size[0] / original_size[0],
+               scaled_size[1] / original_size[1])
+
+    assert factors[0] > 1.1, (
+        "Shift-dragging the plane square must materially enlarge the note")
+    assert factors[0] == pytest.approx(factors[1])
+    assert scaled_centre == pytest.approx(original_centre)
+    assert gb.anchor() == pytest.approx(original_anchor)
+    assert lv.selected == [("note", note)]
+    assert len(w.scene.layouts[0].notes) == 1
+    assert len(w.history._undo) == undo0 + 1
+
+    w.history.undo()
+    restored, = w.scene.layouts[0].notes
+    assert vars(restored) == original_state
+    assert annotation_bounds("note", restored, w.scene) == pytest.approx(
+        original_bounds)
 
 
 # ------------------------------------------------------------ typing a value

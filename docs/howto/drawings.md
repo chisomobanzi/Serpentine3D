@@ -41,10 +41,14 @@ resizing; drag the body to move it.
 
 Anything picked on a sheet also gets a gumball: an X arrow, a Y arrow
 and a pad that takes both at once. Drag a handle to move everything
-picked, or type a distance to move it exactly that far. Nothing on a
-sheet has an angle or a size to grab, so the sheet's gumball is arrows
-only. Locked details stay where they are. Step into a detail and the
-gumball goes back to holding the model objects inside it.
+picked, or type a distance to move it exactly that far. Hold Alt while
+dragging an arrow or the pad to move a duplicate. Hold Shift while dragging
+the pad on selected text to scale it uniformly about its visible centre.
+Locked details stay where they are. Step into a detail and the gumball goes
+back to holding the model objects inside it. There, or in model space,
+Shift-drag a plane pad to scale equally along its two coloured axes while
+leaving the axis normal to the pad unchanged. Alt+Shift makes and scales a
+copy.
 
 ## Annotations
 

@@ -1309,6 +1309,18 @@ class Gumball:
             hit = ray_plane_any(origin, direction, anchor, axes[i])
             if hit is None:
                 return d["last_label"]
+            if uniform and not any(d.get(key) for key in (
+                    "cvs", "pp", "multiface", "fillet", "edge_move",
+                    "extrude")):
+                start_radius = float(np.linalg.norm(d["ref"] - anchor))
+                if start_radius < 1e-9:
+                    return d["last_label"]
+                factor = max(float(np.linalg.norm(hit - anchor))
+                             / start_radius, 0.01)
+                self._scale_in_plane_by(anchor, axes[i], factor)
+                d["reshaped"] = abs(factor - 1.0) > 1e-9
+                d["last_label"] = f"scale {factor:.3f} (in plane)"
+                return d["last_label"]
             delta = hit - d["ref"]
             if d.get("pp"):                   # a held face: lift, then slide
                 oid, fidx = d["pp"]
@@ -1579,6 +1591,18 @@ class Gumball:
         else:
             self._apply(lambda s: g.scale_along_axis(
                 s, tuple(anchor), tuple(axis), value))
+
+    def _scale_in_plane_by(self, anchor, normal, value):
+        """Scale equally in the plane through `anchor`, preserving normal."""
+        anchor = np.asarray(anchor, float)
+        normal = np.asarray(normal, float)
+        normal = normal / (np.linalg.norm(normal) or 1.0)
+        plane = np.eye(3) - np.outer(normal, normal)
+        linear = np.eye(3) + (float(value) - 1.0) * plane
+        matrix = np.eye(4)
+        matrix[:3, :3] = linear
+        matrix[:3, 3] = anchor - linear @ anchor
+        self._apply(lambda s: g.apply_matrix(s, matrix))
 
     def _rebuild(self, oid, orig, value, make):
         """Show `make(value)` in place of the held solid, or the original

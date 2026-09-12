@@ -24,7 +24,7 @@ from serpentine3d.app import MainWindow
 from serpentine3d.core import geometry as g
 from serpentine3d.core.layout import DetailView, Layout, detail_project
 from serpentine3d.ui.camera import STANDARD_VIEWS
-from serpentine3d.ui.gumball import CONE1, SHAFT0
+from serpentine3d.ui.gumball import CONE1, PAD0, PAD1, SHAFT0
 from serpentine3d.ui.layout_view import detail_plane
 
 BOX_MIN = (-100.0, -80.0, 0.0)
@@ -346,6 +346,61 @@ def test_the_model_window_keeps_its_own_gumball(sheet):
     scr = vp.camera.project([anchor + axes[0] * (SHAFT0 + CONE1) / 2 * s],
                             vp.width(), vp.height())[0]
     assert gb.hit_test(float(scr[0]), float(scr[1])) == ("move", 0)
+
+
+def test_shift_dragging_a_model_pad_scales_in_its_two_axes(sheet):
+    """Shift turns a plane pad into a two-axis scale about the anchor."""
+    w, _det, box = sheet
+    w.switch_space("model")
+    vp = w.viewport
+    vp.camera.set_standard_view("top")
+    vp.camera.zoom_extents(g.bbox(box.shape), vp.width() / vp.height())
+
+    gb = vp.gumball
+    original_lo, original_hi = map(np.asarray, g.bbox(box.shape))
+    original_size = original_hi - original_lo
+    original_centre = (original_lo + original_hi) / 2
+    original_anchor, axes = gb.anchor_and_axes()
+    undo0 = len(w.history._undo)
+
+    # Take hold of the pad where it is actually drawn, then pull it farther
+    # from the anchor along both axes in its plane.  Projection and drag_to
+    # exercise the viewport's real screen ray in the same way as the mouse.
+    pad_axis = 2
+    u, v = axes[0], axes[1]
+    size = gb._size_world(original_anchor)
+    pad_middle = (PAD0 + PAD1) / 2
+    press = _screen(w, original_anchor + (u + v) * pad_middle * size)
+    assert gb.hit_test(*press) == ("pad", pad_axis)
+    shift = Qt.KeyboardModifier.ShiftModifier
+    assert gb.begin_drag(("pad", pad_axis), *press, shift)
+    target = _screen(w, original_anchor + (u + v) * 0.8 * size)
+    gb.drag_to(*target, shift)
+    gb.end_drag()
+
+    scaled = w.scene.get(box.id)
+    scaled_lo, scaled_hi = map(np.asarray, g.bbox(scaled.shape))
+    scaled_size = scaled_hi - scaled_lo
+    factors = scaled_size / original_size
+
+    assert factors[0] > 1.1, (
+        "Shift-dragging a plane pad must materially scale its first axis")
+    assert factors[1] == pytest.approx(factors[0], rel=1e-5)
+    assert factors[2] == pytest.approx(1.0, abs=1e-6), (
+        "The axis normal to the pad must remain unscaled")
+    assert (scaled_lo + scaled_hi) / 2 == pytest.approx(original_centre)
+    assert gb.anchor_and_axes()[0] == pytest.approx(original_anchor)
+    assert w.selection.ids == [box.id]
+    assert len(w.scene.all()) == 1
+    assert len(w.history._undo) == undo0 + 1
+
+    w.history.undo()
+    restored = w.scene.get(box.id)
+    np.testing.assert_allclose(
+        np.asarray(g.bbox(restored.shape)),
+        np.asarray((original_lo, original_hi)),
+    )
+    assert w.selection.ids == [box.id]
 
 
 if __name__ == "__main__":

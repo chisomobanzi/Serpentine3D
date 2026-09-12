@@ -7,11 +7,9 @@ those are model geometry: there is no shape to transform, only millimetres
 across a sheet. So this is a second, much smaller gumball rather than a mode
 of the first one, and it shares nothing with it but the look.
 
-It offers two arrows and the one plane pad a sheet has. Nothing turns and
-nothing scales, because nothing on a sheet has an angle or a size that a
-handle could honestly change — a detail frame is an upright rectangle with
-corner grips of its own for that. Handles that would lie about what they do
-are better not drawn.
+It offers two arrows and the one plane pad a sheet has. The pad moves ordinary
+sheet items and Shift-drag scales text uniformly in the paper plane. Nothing
+turns, and a detail frame keeps using its own corner grips for resizing.
 
 Everything here is in paper millimetres, hit-tested in viewport pixels, and
 sized so the arrows come out the length they are in the model window.
@@ -19,13 +17,17 @@ sized so the arrows come out the length they are in the model window.
 
 from __future__ import annotations
 
+import copy
+
 import numpy as np
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QBrush, QColor, QPen, QPolygonF
 
-from ..core.layout import move_sheet_item, sheet_item_bounds
+from ..core.layout import (annotation_bounds, copy_sheet_item, move_sheet_item,
+                           note_text_height, sheet_item_bounds, sheet_pools)
 from .gumball import (
     AXIS_COLORS, CONE1, HOVER_COLOR, PAD0, PAD1, PAD_ALPHA, SHAFT0, SIZE_PX,
+    _alt_held,
 )
 
 # Paper is two-dimensional, so the axes are named the way the model gumball
@@ -39,6 +41,12 @@ def _qcolor(rgb, alpha: int = 255) -> QColor:
     c = QColor(int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255))
     c.setAlpha(alpha)
     return c
+
+
+def _shift_held(modifiers) -> bool:
+    """Shift state, robust to a Qt KeyboardModifiers flag or a plain int."""
+    m = getattr(modifiers, "value", modifiers)          # Qt flag -> int
+    return bool(int(m) & int(Qt.KeyboardModifier.ShiftModifier.value))
 
 
 class PaperGumball:
@@ -155,12 +163,43 @@ class PaperGumball:
         if at is None or not picks:
             return False
         self.vp.window_checkpoint("gumball " + handle[0])
+        original_selection = list(self.lv.selected)
+        copies = []
+        if modifiers is not None and _alt_held(modifiers) \
+                and handle[0] in ("move", "pad"):
+            lay = self.lv.layout
+            if lay is not None:
+                for kind, obj in picks:
+                    dup = copy_sheet_item(lay, kind, obj)
+                    if dup is not None:
+                        copies.append((kind, dup))
+            if copies:
+                picks = copies
+                self.lv.selected = list(copies)
+                self.vp.layoutSelectionChanged.emit()
+                self.vp.scene.notify("layouts")
+        scaling_notes = (modifiers is not None
+                         and _shift_held(modifiers)
+                         and handle[0] == "pad"
+                         and all(kind == "note" for kind, _obj in picks))
+        note_originals = []
+        if scaling_notes:
+            for _kind, note in picks:
+                note_originals.append((
+                    note,
+                    copy.deepcopy(vars(note)),
+                    annotation_bounds("note", note, self.vp.scene),
+                ))
         self.drag = {
             "handle": handle,
             "anchor": at,
             "picks": picks,
+            "copies": copies,
+            "original_selection": original_selection,
             "start": self.lv.screen_to_paper(px, py),
             "offset": (0.0, 0.0),
+            "scale": 1.0,
+            "note_originals": note_originals,
             "typed": "",
             "armed": False,
             "last_label": "",
@@ -177,6 +216,47 @@ class PaperGumball:
         if d["handle"][0] == "move":
             return (dx, 0.0) if axis == X else (0.0, dy)
         return (dx, dy)
+
+    def _wanted_scale(self, px: float, py: float) -> float:
+        """Uniform paper scale asked for by a Shift-pad drag."""
+        d = self.drag
+        now = np.asarray(self.lv.screen_to_paper(px, py), float)
+        anchor = np.asarray(d["anchor"], float)
+        start_radius = float(np.linalg.norm(
+            np.asarray(d["start"], float) - anchor))
+        if start_radius < 1e-9:
+            return 1.0
+        return max(float(np.linalg.norm(now - anchor)) / start_radius, 0.01)
+
+    def _scale_notes_to(self, factor: float):
+        """Scale note typography and placement from the drag-start state."""
+        d = self.drag
+        anchor = np.asarray(d["anchor"], float)
+        for note, state, bounds in d["note_originals"]:
+            note.__dict__.clear()
+            note.__dict__.update(copy.deepcopy(state))
+            if abs(factor - 1.0) < 1e-12:
+                continue
+
+            x0, y0, x1, y1 = bounds
+            old_centre = np.asarray(((x0 + x1) / 2, (y0 + y1) / 2),
+                                    float)
+            wanted_centre = anchor + (old_centre - anchor) * factor
+
+            # A named annotation style owns the effective height. Scaling is
+            # an explicit per-note edit, so preserve its rendered size as the
+            # new local height and detach it from that shared style.
+            height = note_text_height(note, self.vp.scene)
+            note.style = ""
+            note.height = height * factor
+            bx0, by0, bx1, by1 = annotation_bounds(
+                "note", note, self.vp.scene)
+            new_centre = np.asarray(((bx0 + bx1) / 2, (by0 + by1) / 2),
+                                    float)
+            note.x += float(wanted_centre[0] - new_centre[0])
+            note.y += float(wanted_centre[1] - new_centre[1])
+        d["scale"] = factor
+        self.vp.scene.notify("layouts")
 
     def _move_to(self, offset: tuple):
         """Put the selection at `offset` from where the drag found it.
@@ -200,12 +280,17 @@ class PaperGumball:
             return ""
         self.drag["typed"] = ""
         self.drag["armed"] = False
-        self._move_to(self._wanted(px, py))
-        dx, dy = self.drag["offset"]
-        if self.drag["handle"][0] == "move":
-            label = f"{dx if self.drag['handle'][1] == X else dy:.2f} mm"
+        if self.drag["note_originals"]:
+            factor = self._wanted_scale(px, py)
+            self._scale_notes_to(factor)
+            label = f"{factor:.3f}x"
         else:
-            label = f"{dx:.2f}, {dy:.2f} mm"
+            self._move_to(self._wanted(px, py))
+            dx, dy = self.drag["offset"]
+            if self.drag["handle"][0] == "move":
+                label = f"{dx if self.drag['handle'][1] == X else dy:.2f} mm"
+            else:
+                label = f"{dx:.2f}, {dy:.2f} mm"
         self.drag["last_label"] = label
         return label
 
@@ -213,15 +298,41 @@ class PaperGumball:
         d = self.drag
         if d is None:
             return
-        if abs(d["offset"][0]) < 1e-9 and abs(d["offset"][1]) < 1e-9:
+        moved = (abs(d["scale"] - 1.0) >= 1e-9
+                 if d["note_originals"]
+                 else (abs(d["offset"][0]) >= 1e-9
+                       or abs(d["offset"][1]) >= 1e-9))
+        if not moved:
             # Nothing went anywhere, so nothing is worth an undo step.
+            self._remove_copies(d)
             self.vp.window_discard_checkpoint()
         self.drag = None
+
+    def _remove_copies(self, d):
+        """Remove copies made provisionally when an Alt drag is abandoned."""
+        lay = self.lv.layout
+        if lay is None or not d["copies"]:
+            return
+        pools = sheet_pools(lay)
+        for kind, obj in d["copies"]:
+            pool = pools.get(kind)
+            if pool is not None and obj in pool:
+                pool.remove(obj)
+            if kind == "detail":
+                self.lv._hlr_cache.pop(obj.id, None)
+        self.lv.selected = d["original_selection"]
+        self.vp.layoutSelectionChanged.emit()
+        self.vp.scene.notify("layouts")
 
     def cancel_drag(self):
         if self.drag is None:
             return
-        self._move_to((0.0, 0.0))
+        d = self.drag
+        if d["note_originals"]:
+            self._scale_notes_to(1.0)
+        else:
+            self._move_to((0.0, 0.0))
+        self._remove_copies(d)
         self.vp.window_discard_checkpoint()
         self.drag = None
         self.vp.scene.notify("layouts")
