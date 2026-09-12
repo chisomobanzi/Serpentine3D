@@ -35,6 +35,18 @@ side by side. Rhino makes you leave model space to look at a sheet.
 | `detaillock` | freeze a detail's camera |
 | `detailsection` | live section cut with hatching |
 
+Run `detail` and click two opposite corners on the sheet. The model appears
+inside the frame while you choose the second corner. The first detail uses
+**Top, 1:100**; later details reuse the last successfully placed view and scale
+for the current window.
+
+The **View** and **Scale** command options are available at either corner.
+Changing a setting returns you to placement without losing the first corner.
+The scale stays fixed as you resize the frame. Choose **Fit** to fit the model
+automatically as the rectangle changes; choose **Scale** to return to a fixed
+scale. Escape cancels placement. The finished detail stays selected so you can
+adjust its view and scale in **Properties**.
+
 Double-click a detail to *enter* it (pan/zoom acts on the model);
 click outside to leave. Selected details show corner grips for
 resizing; drag the body to move it.

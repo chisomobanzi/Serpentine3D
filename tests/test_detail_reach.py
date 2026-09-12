@@ -210,6 +210,9 @@ def test_a_paper_command_snaps_to_nothing_in_the_model(sheet):
     w, _lay, det, _box, _wire = sheet
     vp = w.viewport
     vp.point_space = "paper"
+    # Test model endpoints, without the nearby paper-frame centre snap.
+    for kind in vp.snaps.types:
+        vp.snaps.types[kind] = kind == "end"
     pos = _screen(w, det, WIRE[0], 0, 0)
     pt = vp.world_point_at(pos.x(), pos.y())
     assert pt[2] == 0.0

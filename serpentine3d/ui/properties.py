@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from itertools import product
+from math import atan, dist, isclose, pi, sin, tan
+
 from PySide6.QtCore import QSignalBlocker, Signal, Qt
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (
@@ -14,6 +17,7 @@ from ..core.layout import DetailView, PaperObject, TextNote, parse_scale
 from ..core.text import TextShape
 from ..core.linetype import LINETYPES
 from .layout_view import LINE_VISIBLE
+from .camera import STANDARD_VIEWS
 
 # the scales an architect draws at, smallest denominator first; anything else
 # is typed in and read by the same rules as the `detailscale` command
@@ -86,6 +90,14 @@ class PropertiesPanel(QWidget):
         self.scale_combo.currentTextChanged.connect(self._scale_chosen)
         self.scale_combo.lineEdit().editingFinished.connect(self._scale_typed)
 
+        self.detail_view_combo = QComboBox()
+        self.detail_view_combo.addItems(
+            ["Custom", "Top", "Front", "Right", "Left", "Back", "Bottom",
+             "Perspective"])
+        self.detail_view_combo.model().item(0).setEnabled(False)
+        self.detail_view_combo.setToolTip("View shown inside the selected detail")
+        self.detail_view_combo.currentTextChanged.connect(self._change_detail_view)
+
         self.kind_label = QLabel("—")
         self.measure_label = QLabel("—")
         self.measure_label.setWordWrap(True)
@@ -98,6 +110,7 @@ class PropertiesPanel(QWidget):
         form.addRow("Colour", self.color_widget)
         form.addRow("Linetype", self.linetype_combo)
         form.addRow("Lineweight", self.lineweight_edit)
+        form.addRow("View", self.detail_view_combo)
         form.addRow("Scale", self.scale_combo)
         form.addRow("Type", self.kind_label)
         form.addRow("Info", self.measure_label)
@@ -261,6 +274,7 @@ class PropertiesPanel(QWidget):
             self._refresh_model()
         if detail is not None:
             self._show_scale(detail)
+            self._show_detail_view(detail)
         editable = self._editable_text()
         editable_id = editable.id if editable is not None else None
         selection_changed = editable_id != self._text_edit_selection_id
@@ -410,6 +424,7 @@ class PropertiesPanel(QWidget):
         self.form.setRowVisible(self.linetype_combo, paper)
         self.form.setRowVisible(self.lineweight_edit, paper)
         self.form.setRowVisible(self.scale_combo, detail)
+        self.form.setRowVisible(self.detail_view_combo, detail)
         self.color_reset.setText("By sheet" if paper else "By layer")
         self.color_reset.setToolTip(
             "Remove the override, use the sheet's ink" if paper
@@ -488,6 +503,44 @@ class PropertiesPanel(QWidget):
         text = detail.scale_text()
         self.scale_combo.setCurrentIndex(self.scale_combo.findText(text))
         self.scale_combo.setEditText(text)
+
+    def _show_detail_view(self, detail: DetailView):
+        name = "Custom"
+        for index in range(1, self.detail_view_combo.count()):
+            candidate = self.detail_view_combo.itemText(index)
+            azimuth, elevation = STANDARD_VIEWS[candidate.lower()]
+            delta = (detail.azimuth - azimuth + pi) % (2 * pi) - pi
+            if (detail.perspective == (candidate == "Perspective")
+                    and isclose(delta, 0, abs_tol=1e-7)
+                    and isclose(detail.elevation, elevation, abs_tol=1e-7)):
+                name = candidate
+                break
+        self.detail_view_combo.setCurrentText(name)
+
+    def _change_detail_view(self, name: str):
+        if self._updating or name == "Custom":
+            return
+        detail = self._detail_pick()
+        if detail is None:
+            return
+        azimuth, elevation = STANDARD_VIEWS[name.lower()]
+        perspective = name == "Perspective"
+        fields = dict(azimuth=azimuth, elevation=elevation,
+                      perspective=perspective)
+        if all(getattr(detail, key) == value for key, value in fields.items()):
+            return
+        if perspective and not detail.perspective:
+            bounds = self.scene.bbox()
+            if bounds is not None:
+                # Enclose the model about the existing target in a sphere,
+                # then stand back beyond both the horizontal and vertical FOV.
+                radius = max(dist(point, detail.target)
+                             for point in product(*zip(*bounds)))
+                aspect = max(detail.w, 1e-6) / max(detail.h, 1e-6)
+                half_angle = atan(tan(pi / 8) * min(aspect, 1.0))
+                fields["perspective_distance"] = max(
+                    detail.perspective_distance, radius * 1.1 / sin(half_angle))
+        self._paper_edit("detail view", detail, **fields)
 
     def _blank_editors(self):
         """Nothing to edit: emptied and greyed, not left saying what the last

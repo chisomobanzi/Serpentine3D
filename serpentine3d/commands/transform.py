@@ -8,7 +8,12 @@ from .base import (
 
 def _ghost(objs, fn):
     """Compound preview of every object transformed by fn(shape)."""
-    return g.make_compound([fn(o.shape) for o in objs])
+    from ..core.picture import PictureShape
+    shapes = [fn(o.shape) for o in objs]
+    if len(shapes) == 1 and isinstance(shapes[0], PictureShape):
+        return shapes[0]
+    return g.make_compound([s.face() if isinstance(s, PictureShape) else s
+                            for s in shapes])
 
 
 def _what_to_transform(ctx, prompt, **kw):
@@ -139,16 +144,24 @@ def cmd_copy(ctx):
     ctx.echo(f"Copied {len(objs)} object(s) {count} time(s).")
 
 
-@command("rotate", aliases=("ro",))
+@command("rotate", aliases=("ro",), space="any")
 def cmd_rotate(ctx):
     """Rotate around the CPlane normal: type an angle, or pick a
     reference direction and drag it to its new heading (live preview)."""
     import math
 
     import numpy as np
-    held, objs = yield from _what_to_transform(ctx, "Select objects to rotate")
+    lv = ctx.sheet_view()
+    if lv is not None:
+        objs = [obj for kind, obj in lv.selected if kind == "object"]
+        if not objs or len(objs) != len(lv.selected):
+            ctx.echo("Select paper geometry or pictures to rotate first.")
+            return
+        held = []
+    else:
+        held, objs = yield from _what_to_transform(ctx, "Select objects to rotate")
     center = yield PointReq("Center of rotation")
-    axis = tuple(ctx.cplane.normal)
+    axis = (0.0, 0.0, 1.0) if lv is not None else tuple(ctx.cplane.normal)
     ref = yield PointReq("Angle in degrees, or first reference point",
                          rubber_from=center, allow_number=True)
     if isinstance(ref, float):
@@ -174,8 +187,14 @@ def cmd_rotate(ctx):
                             rubber_from=center, allow_number=True,
                             preview_fn=_preview)
         angle = p2 if isinstance(p2, float) else _angle(p2)
-    _do(ctx, held, objs, lambda s: g.rotate(s, center, axis, angle),
-        "Rotated", f" by {angle:g} degrees")
+    if lv is not None:
+        for obj in objs:
+            obj.shape = g.rotate(obj.shape, center, axis, angle)
+        ctx.scene.notify("layouts")
+        ctx.echo(f"Rotated {len(objs)} paper object(s) by {angle:g} degrees.")
+    else:
+        _do(ctx, held, objs, lambda s: g.rotate(s, center, axis, angle),
+            "Rotated", f" by {angle:g} degrees")
 
 
 @command("scale", aliases=("sc",))

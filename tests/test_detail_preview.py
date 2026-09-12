@@ -1,13 +1,4 @@
-"""Drawing a detail with something to look at while you draw it.
-
-`detail` used to ask for two corners and show nothing at all between them: no
-rectangle, no size, and no hint of what the frame would end up containing. You
-picked blind and found out afterwards, which on a sheet means undo, again, and
-again until the model happens to fit.
-
-So the view and the scale are chosen first — you cannot preview a view nobody
-has picked — and the frame is then dragged with the model live inside it.
-"""
+"""Detail starts with two paper corners; optional settings update its live preview."""
 
 from __future__ import annotations
 
@@ -19,6 +10,7 @@ import pytest
 import serpentine3d.commands  # registers all commands  # noqa: F401
 from serpentine3d.app import MainWindow
 from serpentine3d.commands.drafting import _frame
+from serpentine3d.commands.base import PointReq
 from serpentine3d.core import geometry as g
 from serpentine3d.core.layout import DetailView, Layout
 from serpentine3d.ui.camera import STANDARD_VIEWS
@@ -43,16 +35,23 @@ def _prompt(proc) -> str:
 
 # ------------------------------------------------------ what it asks, and when
 
-def test_it_asks_which_view_before_the_frame(sheet):
-    """The frame is the last question, because it is the only one the other
-    two can be shown answering."""
-    _w, proc, _lay = sheet
+def test_detail_immediately_accepts_corners_with_optional_settings(sheet):
+    _w, proc, lay = sheet
     proc.run("detail")
-    assert "view" in _prompt(proc)
-    proc.provide("Top")
-    assert "scale" in _prompt(proc)
-    proc.provide("1:5")
-    assert "corner" in _prompt(proc)
+    assert isinstance(proc.request, PointReq)
+    assert "first corner" in _prompt(proc)
+    assert {"View", "Scale", "Fit"} <= set(proc.keyword_chips())
+    proc.provide((20.0, 20.0, 0.0))
+    assert isinstance(proc.request, PointReq)
+    assert "opposite corner" in _prompt(proc)
+    assert {"View", "Scale", "Fit"} <= set(proc.keyword_chips())
+    ghost = proc.preview_for((120.0, 100.0, 0.0))
+    assert ghost.scale_denom == pytest.approx(100)
+    az, el = STANDARD_VIEWS["top"]
+    assert (ghost.azimuth, ghost.elevation) == pytest.approx((az, el))
+    proc.provide((120.0, 100.0, 0.0))
+    assert not proc.busy
+    assert lay.details[0] is ghost
 
 
 def test_the_frame_is_the_rectangle_the_two_corners_make():
@@ -63,7 +62,8 @@ def test_the_frame_is_the_rectangle_the_two_corners_make():
 def test_the_detail_still_comes_out_where_you_drew_it(sheet):
     _w, proc, lay = sheet
     proc.run("detail")
-    for value in ("Top", "1:5", (120.0, 100.0, 0.0), (20.0, 20.0, 0.0)):
+    _settings(proc, "Top", "1:5")
+    for value in ((120.0, 100.0, 0.0), (20.0, 20.0, 0.0)):
         proc.provide(value)
     assert not proc.busy
     det = lay.details[0]
@@ -75,7 +75,7 @@ def test_the_detail_still_comes_out_where_you_drew_it(sheet):
 def test_a_frame_too_small_is_still_refused(sheet):
     _w, proc, lay = sheet
     proc.run("detail")
-    for value in ("Top", "1:5", (20.0, 20.0, 0.0), (23.0, 60.0, 0.0)):
+    for value in ((20.0, 20.0, 0.0), (23.0, 60.0, 0.0)):
         proc.provide(value)
     assert not proc.busy
     assert lay.details == []
@@ -83,11 +83,19 @@ def test_a_frame_too_small_is_still_refused(sheet):
 
 # --------------------------------------------------------------- the ghost
 
+def _settings(proc, view, scale):
+    proc.provide_text("View")
+    proc.provide_text(view)
+    proc.provide_text("Scale")
+    proc.provide_text(scale)
+    assert isinstance(proc.request, PointReq)
+
+
 def _to_frame(proc, view="Top", scale="1:5", c1=(20.0, 20.0, 0.0)):
     """Run `detail` up to the corner that drags the frame."""
     proc.run("detail")
-    for value in (view, scale, c1):
-        proc.provide(value)
+    _settings(proc, view, scale)
+    proc.provide(c1)
     return proc
 
 
@@ -270,3 +278,76 @@ def test_the_readout_goes_when_the_frame_does(sheet):
     vp.set_ghost(DetailView(x=20.0, y=20.0, w=100.0, h=80.0))
     vp.set_ghost(None)
     assert not vp._draw_readout.isVisible()
+
+
+def test_settings_can_change_after_first_corner_without_losing_it(sheet):
+    _w, proc, lay = sheet
+    proc.run("detail")
+    proc.provide((20.0, 30.0, 0.0))
+    _settings(proc, "Right", "1:25")
+    ghost = proc.preview_for((120.0, 110.0, 0.0))
+    assert (ghost.x, ghost.y, ghost.w, ghost.h) == (20, 30, 100, 80)
+    assert (ghost.azimuth, ghost.elevation) == pytest.approx(STANDARD_VIEWS["right"])
+    assert ghost.scale_denom == 25
+    proc.provide((120.0, 110.0, 0.0))
+    assert lay.details[0].scale_denom == 25
+
+
+def test_resizing_frame_keeps_chosen_scale_until_fit_is_requested(sheet):
+    _w, proc, lay = sheet
+    _to_frame(proc, scale="1:100")
+    assert proc.preview_for((120.0, 100.0, 0.0)).scale_denom == 100
+    assert proc.preview_for((70.0, 60.0, 0.0)).scale_denom == 100
+    proc.provide_text("Fit")
+    assert isinstance(proc.request, PointReq)
+    ghost = proc.preview_for((70.0, 60.0, 0.0))
+    assert 0 < ghost.scale_denom < 100
+    # The 40 x 30 mm top-view model fits inside the 50 x 40 mm frame.
+    assert 40 / ghost.scale_denom <= ghost.w
+    assert 30 / ghost.scale_denom <= ghost.h
+    proc.provide((70.0, 60.0, 0.0))
+    assert lay.details[0].scale_denom == ghost.scale_denom
+
+
+def test_next_detail_remembers_last_successful_settings(sheet):
+    _w, proc, lay = sheet
+    _to_frame(proc, view="Front", scale="1:20")
+    proc.provide((120.0, 100.0, 0.0))
+    proc.run("detail")
+    assert isinstance(proc.request, PointReq)
+    proc.provide((150.0, 20.0, 0.0))
+    ghost = proc.preview_for((250.0, 100.0, 0.0))
+    assert ghost.scale_denom == 20
+    assert (ghost.azimuth, ghost.elevation) == pytest.approx(STANDARD_VIEWS["front"])
+    proc.provide((250.0, 100.0, 0.0))
+    assert len(lay.details) == 2
+
+
+def test_cancel_clears_preview_and_does_not_remember_unplaced_settings(sheet):
+    w, proc, lay = sheet
+    _to_frame(proc, view="Front", scale="1:20")
+    proc.provide((120.0, 100.0, 0.0))
+    _to_frame(proc, view="Right", scale="1:5")
+    w.viewport.set_ghost(proc.preview_for((120.0, 100.0, 0.0)))
+    assert w.viewport.layout_view.ghost_detail is not None
+    proc.cancel()
+    w._sync_command_state()
+    assert w.viewport.layout_view.ghost_detail is None
+    assert len(lay.details) == 1
+    proc.run("detail")
+    proc.provide((150.0, 20.0, 0.0))
+    ghost = proc.preview_for((250.0, 100.0, 0.0))
+    assert ghost.scale_denom == 20
+    assert (ghost.azimuth, ghost.elevation) == pytest.approx(STANDARD_VIEWS["front"])
+
+
+def test_new_detail_is_selected_and_ready_to_edit_in_properties(sheet):
+    from tests.test_the_properties_panel_sets_a_detail_scale import _scale_combo
+
+    w, proc, lay = sheet
+    _to_frame(proc, scale="1:20")
+    proc.provide((120.0, 100.0, 0.0))
+    assert w.viewport.layout_view.selected == [("detail", lay.details[0])]
+    combo = _scale_combo(w.properties)
+    assert combo is not None
+    assert combo.currentText() == "1:20"

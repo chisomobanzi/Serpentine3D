@@ -759,7 +759,7 @@ def cmd_gumball(ctx):
     yield from ()
 
 
-@command("pictureframe", aliases=("picture",))
+@command("pictureframe", aliases=("picture",), space="any")
 def cmd_pictureframe(ctx):
     """Choose and place an embedded reference image for tracing."""
     from .base import OptionReq, PointReq
@@ -793,21 +793,34 @@ def place_picture(ctx, path):
     if img.isNull():
         raise ValueError(f"Could not decode the image: {path}")
     c1 = yield PointReq("First corner")
-    cp = ctx.cplane
     aspect = img.height() / max(img.width(), 1)
-    u1, v1, w1 = cp.from_world(c1)
-    origin = cp.to_world(u1, v1, w1)
+    paper = bool(getattr(ctx, "on_bare_paper", lambda: False)())
+    cp = ctx.cplane
+    if paper:
+        u1, v1, w1 = map(float, c1)
+        origin = (u1, v1, w1)
+    else:
+        u1, v1, w1 = cp.from_world(c1)
+        origin = cp.to_world(u1, v1, w1)
     from ..core.picture import PictureShape
 
     def picture_at(corner):
-        u2, v2, _ = cp.from_world(corner)
+        if paper:
+            u2, v2 = float(corner[0]), float(corner[1])
+        else:
+            u2, v2, _ = cp.from_world(corner)
         width = u2 - u1
         if abs(width) < 1e-12:
             raise ValueError("The picture needs a non-zero width.")
         height = abs(width) * aspect * (1 if v2 >= v1 else -1)
-        u_vec = tuple(a - b for a, b in zip(cp.to_world(u2, v1, w1), origin))
-        v_vec = tuple(a - b for a, b in zip(
-            cp.to_world(u1, v1 + height, w1), origin))
+        if paper:
+            u_vec = (width, 0.0, 0.0)
+            v_vec = (0.0, height, 0.0)
+        else:
+            u_vec = tuple(a - b for a, b in zip(
+                cp.to_world(u2, v1, w1), origin))
+            v_vec = tuple(a - b for a, b in zip(
+                cp.to_world(u1, v1 + height, w1), origin))
         return PictureShape({
             "path": path, "origin": list(origin), "u": list(u_vec),
             "v": list(v_vec), "alpha": 1.0, "image_data": image_data,
@@ -816,8 +829,11 @@ def place_picture(ctx, path):
     c2 = yield PointReq("Opposite corner (width; height follows the "
                         "image aspect)", rubber_from=c1, rubber_band=False,
                         preview_fn=picture_at)
-    ctx.scene.add(picture_at(c2), name=os.path.basename(path))
-    ctx.scene.notify()
+    if paper:
+        ctx.add(picture_at(c2), name=os.path.basename(path))
+    else:
+        ctx.scene.add(picture_at(c2), name=os.path.basename(path))
+        ctx.scene.notify()
     ctx.echo(f"Picture frame placed ({os.path.basename(path)}).")
 
 

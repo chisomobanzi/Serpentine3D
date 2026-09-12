@@ -8,8 +8,9 @@ across a sheet. So this is a second, much smaller gumball rather than a mode
 of the first one, and it shares nothing with it but the look.
 
 It offers two arrows and the one plane pad a sheet has. The pad moves ordinary
-sheet items and Shift-drag scales text uniformly in the paper plane. Nothing
-turns, and a detail frame keeps using its own corner grips for resizing.
+sheet items and Shift-drag scales text and paper geometry uniformly in the
+paper plane. Paper geometry also gets a Z-axis ring for turning it in the
+sheet; a detail frame keeps using its own corner grips for resizing.
 
 Everything here is in paper millimetres, hit-tested in viewport pixels, and
 sized so the arrows come out the length they are in the model window.
@@ -26,8 +27,8 @@ from PySide6.QtGui import QBrush, QColor, QPen, QPolygonF
 from ..core.layout import (annotation_bounds, copy_sheet_item, move_sheet_item,
                            note_text_height, sheet_item_bounds, sheet_pools)
 from .gumball import (
-    AXIS_COLORS, CONE1, HOVER_COLOR, PAD0, PAD1, PAD_ALPHA, SHAFT0, SIZE_PX,
-    _alt_held,
+    ARC_R, AXIS_COLORS, CONE1, HOVER_COLOR, PAD0, PAD1, PAD_ALPHA, SHAFT0,
+    SIZE_PX, _alt_held,
 )
 
 # Paper is two-dimensional, so the axes are named the way the model gumball
@@ -35,6 +36,8 @@ from .gumball import (
 # and the single pad is the one perpendicular to the axis that is not here.
 X, Y, PAD_AXIS = 0, 1, 2
 _HIT_PX = 7.0                       # how near a cursor has to come to a shaft
+_ROT_START_DEG = 20.0               # leave space beside the +X arrow
+_ROT_END_DEG = 70.0                 # and beside the +Y arrow
 
 
 def _qcolor(rgb, alpha: int = 255) -> QColor:
@@ -63,6 +66,9 @@ class PaperGumball:
         self.lv = layout_view
         self.hover = None
         self.drag = None            # dict: handle, start, offset, typed, ...
+        self._copy_undo_selection = None
+        self.vp.scene.add_listener(
+            self._restore_alt_copy_selection, kinds=("layouts",))
 
     # ----------------------------------------------------------------- state
 
@@ -123,6 +129,11 @@ class PaperGumball:
         return (at[0] + (s if axis == X else 0.0),
                 at[1] + (s if axis == Y else 0.0))
 
+    def _can_rotate(self) -> bool:
+        """Whether every selected item has paper-plane geometry to turn."""
+        picks = self._picks()
+        return bool(picks) and all(kind == "object" for kind, _obj in picks)
+
     def hit_test(self, px: float, py: float):
         if not self.active():
             return None
@@ -145,6 +156,14 @@ class PaperGumball:
                 *self._axis_end(at, axis, CONE1)), float)
             if _seg_dist(cursor, a, b) < _HIT_PX:
                 return ("move", axis)
+        if self._can_rotate():
+            centre = np.asarray(self.lv.paper_to_screen(*at), float)
+            radius = ARC_R * SIZE_PX
+            delta = cursor - centre
+            angle = float(np.degrees(np.arctan2(-delta[1], delta[0]))) % 360.0
+            on_arc = _ROT_START_DEG <= angle <= _ROT_END_DEG
+            if on_arc and abs(float(np.linalg.norm(delta)) - radius) < _HIT_PX:
+                return ("rot", PAD_AXIS)
         return None
 
     def update_hover(self, px: float, py: float) -> bool:
@@ -162,11 +181,14 @@ class PaperGumball:
         picks = self._picks()
         if at is None or not picks:
             return False
+        rotating = handle == ("rot", PAD_AXIS)
+        if handle[0] == "rot" and (not rotating or not self._can_rotate()):
+            return False
         self.vp.window_checkpoint("gumball " + handle[0])
         original_selection = list(self.lv.selected)
         copies = []
         if modifiers is not None and _alt_held(modifiers) \
-                and handle[0] in ("move", "pad"):
+                and handle[0] in ("move", "pad", "rot"):
             lay = self.lv.layout
             if lay is not None:
                 for kind, obj in picks:
@@ -178,18 +200,25 @@ class PaperGumball:
                 self.lv.selected = list(copies)
                 self.vp.layoutSelectionChanged.emit()
                 self.vp.scene.notify("layouts")
-        scaling_notes = (modifiers is not None
+        scaling_items = (modifiers is not None
                          and _shift_held(modifiers)
                          and handle[0] == "pad"
-                         and all(kind == "note" for kind, _obj in picks))
+                         and all(kind in ("note", "object")
+                                 for kind, _obj in picks))
         note_originals = []
-        if scaling_notes:
-            for _kind, note in picks:
-                note_originals.append((
-                    note,
-                    copy.deepcopy(vars(note)),
-                    annotation_bounds("note", note, self.vp.scene),
-                ))
+        object_originals = []
+        if scaling_items:
+            for kind, obj in picks:
+                if kind == "note":
+                    note_originals.append((
+                        obj,
+                        copy.deepcopy(vars(obj)),
+                        annotation_bounds("note", obj, self.vp.scene),
+                    ))
+                else:
+                    object_originals.append((obj, obj.shape))
+        rotation_originals = ([(obj, obj.shape) for _kind, obj in picks]
+                              if rotating else [])
         self.drag = {
             "handle": handle,
             "anchor": at,
@@ -199,7 +228,11 @@ class PaperGumball:
             "start": self.lv.screen_to_paper(px, py),
             "offset": (0.0, 0.0),
             "scale": 1.0,
+            "scaling": scaling_items,
             "note_originals": note_originals,
+            "object_originals": object_originals,
+            "rotation_originals": rotation_originals,
+            "angle": 0.0,
             "typed": "",
             "armed": False,
             "last_label": "",
@@ -228,8 +261,35 @@ class PaperGumball:
             return 1.0
         return max(float(np.linalg.norm(now - anchor)) / start_radius, 0.01)
 
-    def _scale_notes_to(self, factor: float):
-        """Scale note typography and placement from the drag-start state."""
+    def _wanted_angle(self, px: float, py: float, modifiers=None) -> float:
+        """Signed paper-plane angle from the ring press to the cursor."""
+        d = self.drag
+        anchor = np.asarray(d["anchor"], float)
+        start = np.asarray(d["start"], float) - anchor
+        now = np.asarray(self.lv.screen_to_paper(px, py), float) - anchor
+        if np.linalg.norm(start) < 1e-9 or np.linalg.norm(now) < 1e-9:
+            return d["angle"]
+        cross = float(start[0] * now[1] - start[1] * now[0])
+        dot = float(start @ now)
+        angle = float(np.degrees(np.arctan2(cross, dot)))
+        if modifiers is not None and _shift_held(modifiers):
+            angle = round(angle / 15.0) * 15.0
+        return angle
+
+    def _rotate_items_to(self, angle: float):
+        """Rotate paper objects from their drag-start shapes."""
+        from ..core import geometry
+        d = self.drag
+        anchor = d["anchor"]
+        centre = (float(anchor[0]), float(anchor[1]), 0.0)
+        for obj, shape in d["rotation_originals"]:
+            obj.shape = geometry.rotate(shape, centre, (0.0, 0.0, 1.0),
+                                        angle)
+        d["angle"] = float(angle)
+        self.vp.scene.notify("layouts")
+
+    def _scale_items_to(self, factor: float):
+        """Scale supported sheet items from their drag-start state."""
         d = self.drag
         anchor = np.asarray(d["anchor"], float)
         for note, state, bounds in d["note_originals"]:
@@ -255,6 +315,13 @@ class PaperGumball:
                                     float)
             note.x += float(wanted_centre[0] - new_centre[0])
             note.y += float(wanted_centre[1] - new_centre[1])
+        if d["object_originals"]:
+            from ..core import geometry
+            centre = (float(anchor[0]), float(anchor[1]), 0.0)
+            factors = (factor, factor, 1.0)
+            for obj, shape in d["object_originals"]:
+                obj.shape = geometry.scale(
+                    shape, centre, factor, factors=factors)
         d["scale"] = factor
         self.vp.scene.notify("layouts")
 
@@ -278,11 +345,16 @@ class PaperGumball:
     def drag_to(self, px: float, py: float, modifiers=None) -> str:
         if self.drag is None:
             return ""
-        self.drag["typed"] = ""
+        if self.drag["typed"]:
+            return self.drag["last_label"]
         self.drag["armed"] = False
-        if self.drag["note_originals"]:
+        if self.drag["rotation_originals"]:
+            angle = self._wanted_angle(px, py, modifiers)
+            self._rotate_items_to(angle)
+            label = f"rotate {angle:.1f}\N{DEGREE SIGN}"
+        elif self.drag["scaling"]:
             factor = self._wanted_scale(px, py)
-            self._scale_notes_to(factor)
+            self._scale_items_to(factor)
             label = f"{factor:.3f}x"
         else:
             self._move_to(self._wanted(px, py))
@@ -298,15 +370,91 @@ class PaperGumball:
         d = self.drag
         if d is None:
             return
-        moved = (abs(d["scale"] - 1.0) >= 1e-9
-                 if d["note_originals"]
-                 else (abs(d["offset"][0]) >= 1e-9
-                       or abs(d["offset"][1]) >= 1e-9))
+        if d["rotation_originals"]:
+            moved = abs(d["angle"]) >= 1e-9
+        elif d["scaling"]:
+            moved = abs(d["scale"] - 1.0) >= 1e-9
+        else:
+            moved = (abs(d["offset"][0]) >= 1e-9
+                     or abs(d["offset"][1]) >= 1e-9)
         if not moved:
             # Nothing went anywhere, so nothing is worth an undo step.
             self._remove_copies(d)
             self.vp.window_discard_checkpoint()
+        elif d["copies"]:
+            lay = self.lv.layout
+            self._copy_undo_selection = {
+                "layout": None if lay is None else lay.id,
+                "copies": [(kind, obj.id) for kind, obj in d["copies"]],
+                "originals": [(kind, obj.id)
+                              for kind, obj in d["original_selection"]],
+            }
         self.drag = None
+
+    def _restore_alt_copy_selection(self):
+        """Keep an Alt-copy selection attached across Undo and Redo.
+
+        Scene restore clones layouts, so even when the selected IDs survive,
+        their Python objects do not.  Track both sides of the copy operation
+        until the user selects something else, and rebind the selection to
+        whichever side exists in the restored layout.
+        """
+        state = self._copy_undo_selection
+        if state is None or self.drag is not None:
+            return
+
+        selected = list(self.lv.selected)
+        selected_ids = [(kind, obj.id) for kind, obj in selected]
+        if selected_ids not in (state["copies"], state["originals"]):
+            self._copy_undo_selection = None
+            return
+        lay = next((item for item in self.vp.scene.layouts
+                    if item.id == state["layout"]), None)
+        if lay is None:
+            self._copy_undo_selection = None
+            return
+        pools = sheet_pools(lay)
+
+        def resolve(ids):
+            items = []
+            for kind, oid in ids:
+                obj = next((item for item in pools.get(kind, ())
+                            if item.id == oid), None)
+                if obj is None:
+                    return None
+                items.append((kind, obj))
+            return items
+
+        originals = resolve(state["originals"])
+        copies = resolve(state["copies"])
+        selected_are_live = (
+            originals if selected_ids == state["originals"] else copies)
+        selection_is_current = (
+            selected_are_live is not None
+            and all(old is live for (_kind, old), (_kind2, live)
+                    in zip(selected, selected_are_live)))
+
+        if selected_ids == state["copies"]:
+            restored = copies if copies is not None else originals
+        elif not selection_is_current:
+            # Originals selected before a restore means Redo should put the
+            # handles back on the copies; without copies, merely rebind the
+            # originals cloned by an unrelated restored snapshot.
+            restored = copies if copies is not None else originals
+        elif copies is not None:
+            # Both sides still exist and the user deliberately picked the
+            # originals.  Stop tracking so a later layout edit cannot steal
+            # that explicit selection back.
+            self._copy_undo_selection = None
+            return
+
+        if restored is None:
+            self._copy_undo_selection = None
+            return
+        if selection_is_current and restored is selected_are_live:
+            return
+        self.lv.selected = restored
+        self.vp.layoutSelectionChanged.emit()
 
     def _remove_copies(self, d):
         """Remove copies made provisionally when an Alt drag is abandoned."""
@@ -328,8 +476,10 @@ class PaperGumball:
         if self.drag is None:
             return
         d = self.drag
-        if d["note_originals"]:
-            self._scale_notes_to(1.0)
+        if d["rotation_originals"]:
+            self._rotate_items_to(0.0)
+        elif d["scaling"]:
+            self._scale_items_to(1.0)
         else:
             self._move_to((0.0, 0.0))
         self._remove_copies(d)
@@ -348,7 +498,8 @@ class PaperGumball:
     def accepts_typing(self) -> bool:
         """One number can say how far along one axis. It cannot say how far
         in two directions at once, so the pad takes nothing."""
-        return self.drag is not None and self.drag["handle"][0] == "move"
+        return (self.drag is not None
+                and self.drag["handle"][0] in ("move", "rot"))
 
     def type_char(self, ch: str) -> bool:
         d = self.drag
@@ -369,14 +520,17 @@ class PaperGumball:
         value = self._parse_typed()
         if value is None:
             return
-        axis = self.drag["handle"][1]
-        self._move_to((value, 0.0) if axis == X else (0.0, value))
+        if self.drag["handle"][0] == "rot":
+            self._rotate_items_to(value)
+        else:
+            axis = self.drag["handle"][1]
+            self._move_to((value, 0.0) if axis == X else (0.0, value))
 
     def commit_typed(self) -> bool:
         if self.drag is None or self._parse_typed() is None:
             return False
         self._preview_typed()
-        self.drag = None
+        self.end_drag()
         return True
 
     def readout(self):
@@ -385,10 +539,13 @@ class PaperGumball:
         d = self.drag
         if d is None:
             return None
+        rotating = d["handle"][0] == "rot"
         if d["typed"]:
-            text = f"distance: {d['typed']}"
+            text = (f"angle: {d['typed']}\N{DEGREE SIGN}" if rotating
+                    else f"distance: {d['typed']}")
         elif d["armed"]:
-            text = "type a distance, Enter"
+            text = ("type an angle, Enter" if rotating
+                    else "type a distance, Enter")
         else:
             text = d["last_label"]
         if not text:
@@ -413,10 +570,22 @@ class PaperGumball:
         s = self._size_mm()
         painter.save()
         painter.setRenderHint(painter.RenderHint.Antialiasing)
+        if self._can_rotate():
+            self._paint_rotation_ring(painter, at)
         self._paint_pad(painter, at, s)
         for axis in (X, Y):
             self._paint_arrow(painter, at, s, axis)
         painter.restore()
+
+    def _paint_rotation_ring(self, painter, at):
+        centre = QPointF(*self.lv.paper_to_screen(*at))
+        radius = ARC_R * SIZE_PX
+        painter.setPen(QPen(self._colour("rot", PAD_AXIS), 1.6))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawArc(centre.x() - radius, centre.y() - radius,
+                        radius * 2, radius * 2,
+                        round(_ROT_START_DEG * 16),
+                        round((_ROT_END_DEG - _ROT_START_DEG) * 16))
 
     def _colour(self, kind: str, axis: int, alpha: int = 255) -> QColor:
         if self.hover == (kind, axis):

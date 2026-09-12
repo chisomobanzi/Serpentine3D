@@ -17,16 +17,20 @@ from __future__ import annotations
 
 import copy
 import inspect
+import math
 
+import numpy as np
 import pytest
 from PySide6.QtCore import Qt
 
 import serpentine3d.commands  # registers all commands  # noqa: F401
 from serpentine3d.app import MainWindow
+from serpentine3d.core import geometry as g
 from serpentine3d.core.layout import (DetailView, Layout, TextNote,
                                      annotation_bounds)
+from serpentine3d.core.picture import PictureShape
 from serpentine3d.ui.camera import STANDARD_VIEWS
-from serpentine3d.ui.gumball import CONE1, PAD0, PAD1, SHAFT0
+from serpentine3d.ui.gumball import ARC_R, CONE1, PAD0, PAD1, SHAFT0, SIZE_PX
 
 
 @pytest.fixture
@@ -70,6 +74,87 @@ def _handle(lv, kind: str, axis: int) -> tuple[float, float]:
         mid = (PAD0 + PAD1) / 2 * s
         px, py = ax + mid, ay + mid
     return lv.paper_to_screen(px, py)
+
+
+def _rotation_handle(lv, required=True):
+    """Find the paper rotation ring through the public hit-test boundary.
+
+    Its exact radius is presentation, not behaviour, so the interaction tests
+    look for the ring around the visible gumball instead of duplicating a
+    drawing constant from production.
+    """
+    ax, ay = lv.gumball.anchor()
+    cx, cy = lv.paper_to_screen(ax, ay)
+    for radius in range(12, 101, 2):
+        for degrees in range(0, 360, 4):
+            angle = math.radians(degrees)
+            point = (cx + radius * math.cos(angle),
+                     cy - radius * math.sin(angle))
+            if lv.gumball.hit_test(*point) == ("rot", 2):
+                return point
+    if required:
+        raise AssertionError(
+            "selected paper geometry should offer a Z-axis rotation ring")
+    return None
+
+
+def _rotation_point(lv, degrees):
+    """A point on the visible paper rotation radius.
+
+    Positive angles run from the red +X arrow towards the green +Y arrow,
+    matching paper coordinates even though screen Y runs downwards.
+    """
+    ax, ay = lv.gumball.anchor()
+    cx, cy = lv.paper_to_screen(ax, ay)
+    angle = math.radians(degrees)
+    radius = ARC_R * SIZE_PX
+    return (cx + radius * math.cos(angle),
+            cy - radius * math.sin(angle))
+
+
+def _rotated(points, centre, degrees):
+    points = np.asarray(points, float)
+    centre = np.asarray(centre, float)
+    angle = math.radians(degrees)
+    matrix = np.array([[math.cos(angle), -math.sin(angle)],
+                       [math.sin(angle), math.cos(angle)]])
+    out = points.copy()
+    out[:, :2] = centre + (points[:, :2] - centre) @ matrix.T
+    return out
+
+
+def _turn_ring(lv, degrees, modifiers=None):
+    """Take the ring and move through `degrees` in paper coordinates."""
+    gb = lv.gumball
+    sx, sy = _rotation_handle(lv)
+    anchor = np.asarray(gb.anchor(), float)
+    start = np.asarray(lv.screen_to_paper(sx, sy), float)
+    direction = start - anchor
+    angle = math.radians(degrees)
+    turned = np.array([
+        direction[0] * math.cos(angle) - direction[1] * math.sin(angle),
+        direction[0] * math.sin(angle) + direction[1] * math.cos(angle),
+    ])
+    assert gb.begin_drag(("rot", 2), sx, sy, modifiers)
+    label = gb.drag_to(*lv.paper_to_screen(*(anchor + turned)), modifiers)
+    return gb, label
+
+
+def _paper_geometry(sheet):
+    """An ordinary curve and a picture, spaced so they share one pivot."""
+    _w, lv, _det, _note = sheet
+    lay = lv.layout
+    line = lay.add(g.make_line((20.0, 20.0, 0.0),
+                               (40.0, 20.0, 0.0)), name="Line")
+    picture = lay.add(PictureShape({
+        "origin": [80.0, 40.0, 0.0],
+        "u": [20.0, 0.0, 0.0],
+        "v": [0.0, 10.0, 0.0],
+        "image_data": b"picture bytes",
+        "alpha": 1.0,
+    }), name="Picture")
+    lv.selected = [("object", line), ("object", picture)]
+    return line, picture
 
 
 # ------------------------------------------------------------- when it shows
@@ -323,6 +408,301 @@ def test_shift_dragging_the_pad_scales_a_note_uniformly_about_its_centre(
     assert vars(restored) == original_state
     assert annotation_bounds("note", restored, w.scene) == pytest.approx(
         original_bounds)
+
+
+# ------------------------------------------------------------- rotating it
+
+def test_paper_geometry_gets_a_visible_blue_rotation_ring(sheet):
+    _w, lv, _det, _note = sheet
+    _line, picture = _paper_geometry(sheet)
+    lv.selected = [("object", picture)]
+
+    sx, sy = _rotation_point(lv, 45)
+    assert lv.gumball.hit_test(sx, sy) == ("rot", 2)
+
+    # Paint through the same overlay path the user sees.  At least one pixel
+    # around the hit target must carry the blue Z-axis ink of the ring.
+    from PySide6.QtGui import QColor, QImage, QPainter
+    img = QImage(lv.vp.width(), lv.vp.height(), QImage.Format.Format_RGB32)
+    img.fill(0xFFFFFFFF)
+    painter = QPainter(img)
+    lv.gumball.paint(painter)
+    painter.end()
+    colours = [QColor.fromRgba(img.pixel(int(sx) + dx, int(sy) + dy))
+               for dx in range(-5, 6) for dy in range(-5, 6)]
+    assert any(c.blue() > c.red() + 20 and c.blue() > c.green() + 20
+               for c in colours), "the Z rotation ring should be blue"
+
+
+@pytest.mark.parametrize("degrees", [10, 80, 135, 225, 315])
+def test_rotation_is_only_hit_on_the_arc_between_the_positive_arrows(
+        sheet, degrees):
+    """The handle is a short first-quadrant arc with room at both ends."""
+    _w, lv, _det, _note = sheet
+    _line, picture = _paper_geometry(sheet)
+    lv.selected = [("object", picture)]
+
+    assert lv.gumball.hit_test(*_rotation_point(lv, degrees)) \
+        != ("rot", 2)
+
+
+def test_rotation_ink_ends_where_its_hit_target_ends(sheet):
+    """No invisible ring target remains where the blue arc is absent."""
+    _w, lv, _det, _note = sheet
+    _line, picture = _paper_geometry(sheet)
+    lv.selected = [("object", picture)]
+
+    from PySide6.QtGui import QColor, QImage, QPainter
+    img = QImage(lv.vp.width(), lv.vp.height(), QImage.Format.Format_RGB32)
+    img.fill(0xFFFFFFFF)
+    painter = QPainter(img)
+    lv.gumball.paint(painter)
+    painter.end()
+
+    def blue_near(point):
+        px, py = map(int, point)
+        colours = [QColor.fromRgba(img.pixel(px + dx, py + dy))
+                   for dx in range(-3, 4) for dy in range(-3, 4)]
+        return any(c.blue() > c.red() + 20 and c.blue() > c.green() + 20
+                   for c in colours)
+
+    assert blue_near(_rotation_point(lv, 45))
+    for degrees in (10, 80, 135, 225, 315):
+        point = _rotation_point(lv, degrees)
+        assert lv.gumball.hit_test(*point) != ("rot", 2)
+        assert not blue_near(point)
+
+
+def test_rotation_arc_preserves_arrow_and_pad_hit_priority(sheet):
+    _w, lv, _det, _note = sheet
+    _line, picture = _paper_geometry(sheet)
+    lv.selected = [("object", picture)]
+
+    assert lv.gumball.hit_test(*_handle(lv, "move", 0)) == ("move", 0)
+    assert lv.gumball.hit_test(*_handle(lv, "move", 1)) == ("move", 1)
+    assert lv.gumball.hit_test(*_handle(lv, "pad", 2)) == ("pad", 2)
+
+
+@pytest.mark.parametrize("selection", ["detail", "note", "mixed"])
+def test_items_without_a_rotation_representation_offer_no_ring(sheet,
+                                                                selection):
+    _w, lv, det, note = sheet
+    if selection == "detail":
+        lv.selected = [("detail", det)]
+    elif selection == "note":
+        lv.selected = [("note", note)]
+    else:
+        line, _picture = _paper_geometry(sheet)
+        lv.selected = [("object", line), ("note", note)]
+    assert _rotation_handle(lv, required=False) is None
+
+
+def test_dragging_the_ring_rotates_geometry_live_about_its_shared_centre(
+        sheet):
+    w, lv, _det, _note = sheet
+    line, picture = _paper_geometry(sheet)
+    centre = np.asarray(lv.gumball.anchor(), float)
+    line_before = np.asarray(line.polylines[0], float).copy()
+    picture_before = picture.shape.vertices.copy()
+    picture_data = picture.shape.plane["image_data"]
+    undo0 = len(w.history._undo)
+
+    gb, label = _turn_ring(lv, 90.0)
+
+    # This is asserted before mouse-up: rotation is a live preview, and the
+    # positive drag direction is counter-clockwise on the paper.
+    np.testing.assert_allclose(
+        line.polylines[0], _rotated(line_before, centre, 90.0), atol=1e-6)
+    np.testing.assert_allclose(
+        picture.shape.vertices,
+        _rotated(picture_before, centre, 90.0), atol=1e-6)
+    assert picture.shape.plane["image_data"] == picture_data
+    assert "90" in label
+    assert "°" in label or "deg" in label.lower()
+
+    gb.end_drag()
+    assert len(w.history._undo) == undo0 + 1
+    assert lv.selected == [("object", line), ("object", picture)]
+
+    w.history.undo()
+    restored_line, restored_picture = w.scene.layouts[0].objects
+    np.testing.assert_allclose(restored_line.polylines[0], line_before,
+                               atol=1e-6)
+    np.testing.assert_allclose(restored_picture.shape.vertices,
+                               picture_before, atol=1e-6)
+
+
+def test_alt_dragging_the_ring_rotates_fresh_copies_as_one_undo(sheet):
+    w, lv, _det, _note = sheet
+    line, picture = _paper_geometry(sheet)
+    line.color = (0.2, 0.4, 0.6)
+    line.linetype = "Dashed"
+    line.lineweight = 0.7
+    centre = np.asarray(lv.gumball.anchor(), float)
+    line_before = np.asarray(line.polylines[0], float).copy()
+    picture_before = picture.shape.vertices.copy()
+    original_ids = {line.id, picture.id}
+    original_selection = list(lv.selected)
+    undo0 = len(w.history._undo)
+
+    gb, _label = _turn_ring(
+        lv, 90.0, Qt.KeyboardModifier.AltModifier)
+
+    objects = w.scene.layouts[0].objects
+    originals = {obj.id: obj for obj in objects if obj.id in original_ids}
+    duplicates = [obj for obj in objects if obj.id not in original_ids]
+    assert len(duplicates) == 2
+    duplicate_line = next(obj for obj in duplicates if obj.name == line.name)
+    duplicate_picture = next(obj for obj in duplicates
+                             if obj.name == picture.name)
+
+    # Alt-copy leaves the source geometry exactly where it was and previews
+    # the turn on the fresh, selected copies around the original shared pivot.
+    np.testing.assert_allclose(originals[line.id].polylines[0], line_before,
+                               atol=1e-6)
+    np.testing.assert_allclose(originals[picture.id].shape.vertices,
+                               picture_before, atol=1e-6)
+    np.testing.assert_allclose(
+        duplicate_line.polylines[0],
+        _rotated(line_before, centre, 90.0), atol=1e-6)
+    np.testing.assert_allclose(
+        duplicate_picture.shape.vertices,
+        _rotated(picture_before, centre, 90.0), atol=1e-6)
+    assert [obj.id for _kind, obj in lv.selected] == [
+        duplicate_line.id, duplicate_picture.id]
+
+    # A copy keeps everything the user sees and everything needed to render
+    # an embedded picture, while its identity is independent of the source.
+    assert duplicate_line.id != line.id
+    assert duplicate_line.name == line.name
+    assert duplicate_line.color == line.color
+    assert duplicate_line.linetype == line.linetype
+    assert duplicate_line.lineweight == line.lineweight
+    assert duplicate_picture.id != picture.id
+    assert duplicate_picture.name == picture.name
+    assert duplicate_picture.shape.plane["image_data"] \
+        == picture.shape.plane["image_data"]
+    assert duplicate_picture.shape.plane["alpha"] \
+        == picture.shape.plane["alpha"]
+
+    gb.end_drag()
+    assert len(w.history._undo) == undo0 + 1
+
+    w.history.undo()
+    restored = w.scene.layouts[0].objects
+    assert {obj.id for obj in restored} == original_ids
+    restored_by_id = {obj.id: obj for obj in restored}
+    np.testing.assert_allclose(restored_by_id[line.id].polylines[0],
+                               line_before, atol=1e-6)
+    np.testing.assert_allclose(restored_by_id[picture.id].shape.vertices,
+                               picture_before, atol=1e-6)
+    assert [obj.id for _kind, obj in lv.selected] == [
+        obj.id for _kind, obj in original_selection]
+
+
+def test_alt_clicking_the_rotation_arc_without_turning_abandons_the_copies(
+        sheet):
+    w, lv, _det, _note = sheet
+    line, picture = _paper_geometry(sheet)
+    original_ids = [line.id, picture.id]
+    undo0 = len(w.history._undo)
+    sx, sy = _rotation_handle(lv)
+
+    gb = lv.gumball
+    assert gb.begin_drag(("rot", 2), sx, sy,
+                         Qt.KeyboardModifier.AltModifier)
+    assert len(w.scene.layouts[0].objects) == 4
+    assert all(obj.id not in original_ids for _kind, obj in lv.selected)
+
+    gb.end_drag()
+
+    assert [obj.id for obj in w.scene.layouts[0].objects] == original_ids
+    assert [obj.id for _kind, obj in lv.selected] == original_ids
+    assert len(w.history._undo) == undo0
+
+
+def test_escape_abandons_live_alt_rotation_copies(sheet):
+    w, lv, _det, _note = sheet
+    line, picture = _paper_geometry(sheet)
+    line_before = np.asarray(line.polylines[0], float).copy()
+    picture_before = picture.shape.vertices.copy()
+    original_ids = [line.id, picture.id]
+    undo0 = len(w.history._undo)
+
+    gb, _label = _turn_ring(
+        lv, 38.0, Qt.KeyboardModifier.AltModifier)
+    assert len(w.scene.layouts[0].objects) == 4
+    assert all(obj.id not in original_ids for _kind, obj in lv.selected)
+
+    gb.cancel_drag()
+
+    assert [obj.id for obj in w.scene.layouts[0].objects] == original_ids
+    assert [obj.id for _kind, obj in lv.selected] == original_ids
+    np.testing.assert_allclose(line.polylines[0], line_before, atol=1e-6)
+    np.testing.assert_allclose(picture.shape.vertices, picture_before,
+                               atol=1e-6)
+    assert len(w.history._undo) == undo0
+
+
+def test_shift_snaps_paper_rotation_to_fifteen_degrees(sheet):
+    _w, lv, _det, _note = sheet
+    _line, picture = _paper_geometry(sheet)
+    lv.selected = [("object", picture)]
+    original_u = np.asarray(picture.shape.plane["u"], float)
+    shift = Qt.KeyboardModifier.ShiftModifier
+
+    gb, label = _turn_ring(lv, 22.0, shift)
+    turned_u = np.asarray(picture.shape.plane["u"], float)
+    angle = math.degrees(math.atan2(
+        original_u[0] * turned_u[1] - original_u[1] * turned_u[0],
+        original_u[:2] @ turned_u[:2]))
+
+    assert angle == pytest.approx(15.0, abs=1e-6)
+    assert "15" in label
+    assert "°" in label or "deg" in label.lower()
+    gb.end_drag()
+
+
+def test_escape_restores_paper_geometry_after_a_live_rotation(sheet):
+    _w, lv, _det, _note = sheet
+    line, picture = _paper_geometry(sheet)
+    line_before = np.asarray(line.polylines[0], float).copy()
+    picture_before = picture.shape.vertices.copy()
+
+    gb, _label = _turn_ring(lv, -38.0)
+    assert not np.allclose(line.polylines[0], line_before)
+    gb.cancel_drag()
+
+    np.testing.assert_allclose(line.polylines[0], line_before, atol=1e-6)
+    np.testing.assert_allclose(picture.shape.vertices, picture_before,
+                               atol=1e-6)
+    assert gb.drag is None
+
+
+def test_the_paper_rotation_ring_takes_a_typed_angle(sheet):
+    _w, lv, _det, _note = sheet
+    _line, picture = _paper_geometry(sheet)
+    lv.selected = [("object", picture)]
+    original_u = np.asarray(picture.shape.plane["u"], float)
+    gb = lv.gumball
+    sx, sy = _rotation_handle(lv)
+
+    assert gb.begin_drag(("rot", 2), sx, sy)
+    gb.arm()
+    assert gb.accepts_typing()
+    for char in "30":
+        assert gb.type_char(char)
+    text, _position = gb.readout()
+    assert "30" in text
+    assert "angle" in text.lower() or "°" in text or "deg" in text.lower()
+    assert gb.commit_typed()
+
+    turned_u = np.asarray(picture.shape.plane["u"], float)
+    angle = math.degrees(math.atan2(
+        original_u[0] * turned_u[1] - original_u[1] * turned_u[0],
+        original_u[:2] @ turned_u[:2]))
+    assert angle == pytest.approx(30.0, abs=1e-6)
+    assert gb.drag is None
 
 
 # ------------------------------------------------------------ typing a value

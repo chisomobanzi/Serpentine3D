@@ -332,11 +332,11 @@ def main():
     c.call("command", command="cylinder", inputs=["0,0,80", "120", "300"])
     c.call("command", command="layout",
            inputs=["New", "E2E Sheet", "A3", "Landscape"])
-    # view and scale first, then the frame — see cmd_detail
+    # Optional view and scale settings before drawing each frame.
     c.call("command", command="detail",
-           inputs=["Top", "1:5", "20,20", "200,180"])
+           inputs=["View", "Top", "Scale", "1:5", "20,20", "200,180"])
     c.call("command", command="detail",
-           inputs=["Front", "1:5", "220,20", "400,180"])
+           inputs=["View", "Front", "Scale", "1:5", "220,20", "400,180"])
     c.call("command", command="text",
            inputs=["20,270", "E2E TEST SHEET", "5"])
     c.call("command", command="dim", inputs=["50,40", "170,40", "110,30"])

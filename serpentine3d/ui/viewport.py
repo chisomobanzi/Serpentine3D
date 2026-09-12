@@ -1732,6 +1732,10 @@ class Viewport(QOpenGLWidget):
                     if obj.kind == "picture"]
         if self._ghost_picture is not None:
             pictures.append(PictureShape(self._ghost_picture))
+        self._draw_pictures(pictures, mvp)
+
+    def _draw_pictures(self, pictures, mvp):
+        """Draw already-resolved picture shapes in the caller's space."""
         if not pictures:
             return
         for picture in pictures:
@@ -2895,8 +2899,10 @@ class Viewport(QOpenGLWidget):
         """
         from ..core.layout import DetailView, TextNote
         from ..core.picture import PictureShape
-        had_picture = self._ghost_picture is not None
+        had_picture = (self._ghost_picture is not None
+                       or self.layout_view._ghost_picture is not None)
         self._ghost_picture = None
+        self.layout_view._ghost_picture = None
         had_note = self.layout_view._ghost_note is not None
         self.layout_view._ghost_note = None
         if isinstance(shape, TextNote):
@@ -2913,8 +2919,14 @@ class Viewport(QOpenGLWidget):
         self.layout_view.set_ghost_detail(None)
         if isinstance(shape, PictureShape):
             self._ghost = None
-            self._ghost_picture = dict(shape.plane)
-            self._ghost_picture["alpha"] = float(shape.plane.get("alpha", 1.0)) * 0.55
+            plane = dict(shape.plane)
+            plane["alpha"] = float(shape.plane.get("alpha", 1.0)) * 0.55
+            ghost = PictureShape(plane)
+            if (self.space != "model"
+                    and self.layout_view.entered_detail is None):
+                self.layout_view._ghost_picture = ghost
+            else:
+                self._ghost_picture = plane
             self.update()
             return
         if shape is None:
@@ -3540,11 +3552,31 @@ class Viewport(QOpenGLWidget):
                     entered, x, y,
                     self.grid_snap_step if self.grid_snap else 0.0)
             snap = self.layout_view.note_snap(px, py, self.snaps)
+            locked = self._locked_axis() or self.point_axis
+            if locked is not None:
+                base, axis = (np.asarray(v, float) for v in locked)
+                unit = normalize(axis)
+                hit = np.asarray(snap[0] if snap is not None else (x, y, 0.0))
+                distance = float(np.dot(hit - base, unit))
+                if snap is not None:
+                    self._active_snap = snap
+                elif self.grid_snap and self.grid_snap_step > 0:
+                    distance = round(distance / self.grid_snap_step) * self.grid_snap_step
+                return tuple(float(c) for c in base + distance * unit)
             if snap is not None:
                 self._active_snap = snap
                 return snap[0]
-            if self.grid_snap:
-                x, y = round(x), round(y)
+            if self.grid_snap and self.grid_snap_step > 0:
+                step = self.grid_snap_step
+                x, y = round(x / step) * step, round(y / step) * step
+            shift = bool(QApplication.queryKeyboardModifiers()
+                         & Qt.KeyboardModifier.ShiftModifier)
+            if self.snap_base is not None and (self.ortho != shift):
+                bx, by, _ = self.snap_base
+                if abs(x - bx) >= abs(y - by):
+                    y = by
+                else:
+                    x = bx
             return (float(x), float(y), 0.0)
         locked = self._locked_axis() or self.point_axis
         if locked is not None:

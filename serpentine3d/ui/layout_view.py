@@ -207,6 +207,7 @@ class LayoutView:
         self.entered_detail: str | None = None
         self.ghost_detail = None                 # detail a command is sizing
         self._ghost_note = None
+        self._ghost_picture = None
         self.selected: list = []                 # [(kind, obj)] on this sheet
         self.corners: list = []                  # [(detail, index)] grips
         self.box: tuple | None = None            # live band, screen px
@@ -216,6 +217,7 @@ class LayoutView:
         self._press_corner: tuple | None = None
         self._drag_last: tuple | None = None
         self._drag_moved = False
+        self._drag_checkpoint: str | None = None
         self._fitted_for: str | None = None
         self._hlr_cache: dict = {}
         from .paper_gumball import PaperGumball
@@ -256,42 +258,11 @@ class LayoutView:
 
     def note_snap(self, sx: float, sy: float, snaps,
                   radius_px: float = 12.0):
-        """Nearest enabled semantic snap on layout text, in paper space."""
-        lay = self.layout
-        if lay is None or not snaps.enabled:
-            return None
-
-        from ..core.layout import annotation_bounds
-
-        candidates = []
-        for note in lay.notes:
-            x0, y0, x1, y1 = annotation_bounds(
-                "note", note, self.vp.scene)
-            cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
-            candidates.extend([
-                ((note.x, note.y), "point"),
-                ((x0, y0), "end"), ((x1, y0), "end"),
-                ((x1, y1), "end"), ((x0, y1), "end"),
-                ((cx, y0), "mid"), ((x1, cy), "mid"),
-                ((cx, y1), "mid"), ((x0, cy), "mid"),
-                ((cx, cy), "center"),
-            ])
-
-        priority = {"end": 0, "point": 0, "mid": 4, "center": 5}
-        best = None
-        best_score = None
-        for (x, y), kind in candidates:
-            if not snaps.types.get(kind):
-                continue
-            tx, ty = self.paper_to_screen(x, y)
-            d2 = (tx - sx) ** 2 + (ty - sy) ** 2
-            if d2 >= radius_px ** 2:
-                continue
-            score = (priority[kind], d2)
-            if best_score is None or score < best_score:
-                best = ((float(x), float(y), 0.0), kind)
-                best_score = score
-        return best
+        """Shared paper snap query (name retained for existing callers)."""
+        if not hasattr(self, "_paper_snaps"):
+            from .paper_snaps import PaperSnaps
+            self._paper_snaps = PaperSnaps(self)
+        return self._paper_snaps.pick(sx, sy, snaps, radius_px)
 
     def _paper_mvp(self) -> np.ndarray:
         """Ortho MVP mapping paper mm -> clip space."""
@@ -473,9 +444,23 @@ class LayoutView:
             self._paint_detail(lay, detail, mvp)
         self._paint_ghost_detail(mvp)
 
+        self._paint_pictures(lay, mvp)
+
         # after the details: a border or a bubble drawn over a view is meant
         # to be seen, the same way the annotations on top of it are
         self._paint_objects(lay, mvp)
+
+    def _paint_pictures(self, lay, mvp):
+        """Embedded pictures that belong to the sheet, including its ghost."""
+        from ..core.picture import PictureShape
+        pictures = [obj.shape for obj in lay.objects
+                    if isinstance(obj.shape, PictureShape)]
+        if self._ghost_picture is not None:
+            pictures.append(self._ghost_picture)
+        if pictures:
+            GL.glDisable(GL.GL_DEPTH_TEST)
+            self.vp._draw_pictures(pictures, mvp)
+            GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _object_ink(self, obj) -> tuple:
         """What colour to draw paper geometry in, picked or not.
@@ -1113,7 +1098,7 @@ class LayoutView:
                     if det.locked or (det, i) not in self.corners:
                         return True
                     self._press_corner = None if add else (det, i)
-                    self.vp.window_checkpoint("resize detail")
+                    self._drag_checkpoint = "resize detail"
                     self._drag = ("resize", [c for _, c in self.corners],
                                   [("detail", det)])
                     self._drag_last = (px, py)
@@ -1136,7 +1121,7 @@ class LayoutView:
                        if k != "detail" or not o.locked]
             if movable and hit in self.selected:
                 self._press_hit = None if add else hit
-                self.vp.window_checkpoint("move sheet item")
+                self._drag_checkpoint = "move sheet item"
                 self._drag = ("move", -1, movable)
                 self._drag_last = (px, py)
             return True
@@ -1157,6 +1142,9 @@ class LayoutView:
         dx = px - self._drag_last[0]
         dy = py - self._drag_last[1]
         mode, corners, picks = self._drag
+        if self._drag_checkpoint is not None:
+            self.vp.window_checkpoint(self._drag_checkpoint)
+            self._drag_checkpoint = None
         from ..core.layout import move_sheet_item, nudge_detail_corners
         for kind, obj in picks:
             if kind == "detail" and mode != "move":
@@ -1236,7 +1224,6 @@ class LayoutView:
         if self._drag is None:
             return
         if not self._drag_moved:
-            self.vp.window_discard_checkpoint()
             # The press held the whole group together in case it was the
             # start of a drag. It wasn't, so it was a choice: keep the one.
             if self._press_hit is not None:
@@ -1245,6 +1232,7 @@ class LayoutView:
                 self.corners = [self._press_corner]
         self._drag = None
         self._drag_moved = False
+        self._drag_checkpoint = None
         self._press_hit = None
         self._press_corner = None
 

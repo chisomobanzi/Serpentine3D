@@ -66,7 +66,7 @@ def cmd_open(ctx):
         ctx.viewport.zoom_extents()
 
 
-@command("import", aliases=("imp",), mutates=True)
+@command("import", aliases=("imp",), mutates=True, space="any")
 def cmd_import(ctx):
     path = yield FileReq("File to import (model or image)", title="Import",
                          filters=fileio.import_filter(pictures=True))

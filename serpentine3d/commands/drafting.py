@@ -119,6 +119,36 @@ def _frame(a, b) -> tuple:
             abs(b[0] - a[0]), abs(b[1] - a[1]))
 
 
+def _fit_pending_detail(detail, bounds):
+    """Fit a preview without notifying or changing the document."""
+    if bounds is None:
+        return
+    import math
+    import numpy as np
+    from ..ui.layout_view import detail_direction, ZOOM_PAD
+
+    lo, hi = bounds
+    detail.target = [(a + b) / 2 for a, b in zip(lo, hi)]
+    points = np.asarray([(x, y, z) for x in (lo[0], hi[0])
+                         for y in (lo[1], hi[1])
+                         for z in (lo[2], hi[2])]) - detail.target
+    direction, right, up = detail_direction(detail)
+    xs, ys = points @ right, points @ up
+    if detail.perspective:
+        # The same 45-degree vertical field of view as detail_matrices.
+        tangent = math.tan(math.radians(22.5))
+        aspect = detail.w / detail.h
+        depth = points @ direction
+        distance = np.max(depth + ZOOM_PAD * np.maximum(
+            np.abs(xs) / (tangent * aspect), np.abs(ys) / tangent))
+        detail.perspective_distance = max(float(distance), 1e-6)
+    else:
+        span = max(float(np.ptp(xs)) / detail.w,
+                   float(np.ptp(ys)) / detail.h)
+        if span > 1e-9:
+            detail.scale_denom = max(span * ZOOM_PAD, 1e-6)
+
+
 @command("detail", space="paper")
 def cmd_detail(ctx):
     lay = _active_layout(ctx)
@@ -126,66 +156,81 @@ def cmd_detail(ctx):
         ctx.echo("Switch to a layout first (create one with 'layout').")
         return
         yield  # pragma: no cover
-    # The view and the scale come before the frame: they are what a frame is
-    # a window onto, so until they are answered there is nothing to show
-    # inside the rectangle being dragged — and knowing whether the model fits
-    # is the whole reason for dragging it slowly.
-    view = yield OptionReq(
-        "View direction",
-        options=["Top", "Front", "Right", "Left", "Back", "Bottom",
-                 "Perspective"],
-        default="Top")
-    scale_text = yield TextReq("Scale (e.g. 1:10, 1:50)", default="1:10")
-    denom = parse_scale(scale_text)
-    if denom is None:
-        ctx.echo(f"Could not parse scale '{scale_text}' — using 1:10.")
-        denom = 10.0
-
-    az, el = _VIEW_ANGLES[view.lower()]
+    owner = _window(ctx) or ctx
+    view, denom = getattr(owner, "_detail_placement_settings", ("Top", 100.0))
     bounds = ctx.scene.bbox()
     target = [0.0, 0.0, 0.0]
     if bounds is not None:
         target = [(a + b) / 2 for a, b in zip(bounds[0], bounds[1])]
-    # One detail, sized as the cursor moves and then placed: the sheet caches
-    # a detail's hidden lines under its id, so a preview that made a new one
-    # every mouse move would re-project the whole model every mouse move.
+    az, el = _VIEW_ANGLES[view.lower()]
+    # Keep one identity throughout placement, for the detail rendering cache.
     detail = DetailView(azimuth=az, elevation=el, target=target,
                         perspective=(view == "Perspective"),
-                        scale_denom=float(denom),
-                        display_mode="wireframe")
-    if view == "Perspective" and bounds is not None:
-        import numpy as np
-        radius = float(np.linalg.norm(
-            np.subtract(bounds[1], bounds[0]))) / 2 or 10.0
+                        scale_denom=float(denom), display_mode="wireframe")
+    if bounds is not None:
+        import math
+        radius = math.dist(bounds[0], bounds[1]) / 2 or 10.0
         detail.perspective_distance = radius * 2.5
-
-    c1 = yield PointReq("First corner of detail (on the paper)")
+    c1 = None
+    fit_model = False
 
     def _frame_to(p):
         x, y, w, h = _frame(c1, p)
         if w < 1 or h < 1:
-            return None                  # nothing a frame that thin can show
+            return None
         detail.x, detail.y, detail.w, detail.h = x, y, w, h
+        if fit_model:
+            _fit_pending_detail(detail, bounds)
         return detail
 
-    # No rubber band: the gold frame already shows both corners, and a green
-    # diagonal drawn across the view being framed hides the one thing the
-    # preview is for.
-    c2 = yield PointReq("Opposite corner", preview_fn=_frame_to)
+    while True:
+        stage = ("First corner of detail (on the paper)" if c1 is None
+                 else "Opposite corner")
+        setting = "Fit model" if fit_model else detail.scale_text()
+        value = yield PointReq(
+            f"{stage} · {view} · {setting}",
+            extra_options=("View", "Scale", "Fit"),
+            preview_fn=_frame_to if c1 is not None else None)
+        if isinstance(value, str) and value == "View":
+            view = yield OptionReq(
+                "View direction",
+                options=["Top", "Front", "Right", "Left", "Back", "Bottom",
+                         "Perspective"], default=view)
+            detail.azimuth, detail.elevation = _VIEW_ANGLES[view.lower()]
+            detail.perspective = view == "Perspective"
+        elif isinstance(value, str) and value == "Scale":
+            scale_text = yield TextReq("Scale (e.g. 1:10, 1:50)",
+                                       default=detail.scale_text())
+            denom = parse_scale(scale_text)
+            if denom is None:
+                ctx.echo(f"Could not parse scale '{scale_text}' — keeping "
+                         f"{detail.scale_text()}.")
+            else:
+                detail.scale_denom = float(denom)
+                fit_model = False
+        elif isinstance(value, str) and value == "Fit":
+            fit_model = True
+            ctx.echo("Fit model to the frame. Choose Scale to return to a fixed scale.")
+        elif c1 is None:
+            c1 = value
+        else:
+            c2 = value
+            break
 
     x, y, w, h = _frame(c1, c2)
     if w < 5 or h < 5:
         ctx.echo("Detail too small (min 5mm).")
         return
-    detail.x, detail.y, detail.w, detail.h = x, y, w, h
-    # Wireframe was for keeping up with the cursor; the detail that stays on
-    # the sheet is a drawing.
+    _frame_to(c2)
     detail.display_mode = "hidden"
     lay.details.append(detail)
-    ctx.scene.notify()
+    owner._detail_placement_settings = (view, detail.scale_denom)
+    lv = ctx.viewport.layout_view
+    lv.selected = [("detail", detail)]
+    lv.corners = []
+    ctx.scene.notify("layouts")
     ctx.echo(f"Detail created: {view} at {detail.scale_text()} "
-             f"({w:g}x{h:g}mm). Double-click to enter it; "
-             "'detailmode' changes its display.")
+             f"({w:g}x{h:g}mm). Edit it in Properties or double-click to enter.")
 
 
 @command("detailscale")

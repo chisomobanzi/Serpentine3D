@@ -1666,7 +1666,7 @@ class MainWindow(QMainWindow):
         if path:
             self._open_path(path)
 
-    def _import_showing_progress(self, path: str) -> int:
+    def _import_showing_progress(self, path: str, scene=None) -> int:
         """Import `path`, showing what it is doing and offering a way out.
 
         A set-design .3dm is minutes of work; with no dialog the window simply
@@ -1692,7 +1692,7 @@ class MainWindow(QMainWindow):
             return not dlg.wasCanceled()
 
         try:
-            return fileio.import_file(self.scene, path,
+            return fileio.import_file(scene or self.scene, path,
                                       progress=fileio.throttled(report))
         finally:
             dlg.close()
@@ -1832,7 +1832,13 @@ class MainWindow(QMainWindow):
         event.accept()
         if self.processor.busy:
             self.processor.cancel()
-        self._pending_import_paths = paths
+        paper_drop = None
+        if self.ctx.on_bare_paper():
+            lv = self.ctx.viewport.layout_view
+            pos = event.position()
+            px, py = lv.screen_to_paper(pos.x(), pos.y())
+            paper_drop = (lv.layout.id, px, py)
+        self._pending_import_paths = [(path, paper_drop) for path in paths]
         self._continue_dropped_imports()
 
     def _resume_dropped_imports(self):
@@ -1843,9 +1849,10 @@ class MainWindow(QMainWindow):
     def _continue_dropped_imports(self):
         while (self._pending_import_paths and not self.processor.busy
                and not self._importing_file):
-            self._import_path(self._pending_import_paths.pop(0))
+            path, paper_drop = self._pending_import_paths.pop(0)
+            self._import_path(path, paper_drop=paper_drop)
 
-    def _import_path(self, path):
+    def _import_path(self, path, paper_drop=None):
         """Share Import's undo, progress and error handling with file drops."""
         if self._importing_file:
             return
@@ -1863,6 +1870,40 @@ class MainWindow(QMainWindow):
         self._importing_file = True
         try:
             self.history.checkpoint("import")
+            ext = os.path.splitext(path)[1].lower()
+            if paper_drop is not None and ext in {".dxf", ".svg"}:
+                layout_id, px, py = paper_drop
+                layout = next((lay for lay in self.scene.layouts
+                               if lay.id == layout_id), None)
+                if layout is None:
+                    raise ValueError("The target layout is no longer available.")
+                imported = Scene()
+                imported.units = self.scene.units
+                n = self._import_showing_progress(path, scene=imported)
+                objects = imported.all()
+                if not objects:
+                    self.history.discard_checkpoint()
+                    self.command_line.echo("Imported 0 object(s).")
+                    return
+                boxes = np.asarray([obj.bbox() for obj in objects], float)
+                centre = (boxes[:, 0].min(axis=0)
+                          + boxes[:, 1].max(axis=0)) / 2
+                offset = np.asarray((px, py, 0.0), float) - centre
+                from .core import geometry
+                for source in objects:
+                    paper = layout.add(
+                        geometry.translate(source.shape, tuple(offset)),
+                        name=source.name)
+                    layer = imported.layers.get(source.layer_id)
+                    paper.color = source.color or layer.color
+                    paper.linetype = (layer.linetype
+                                      if source.linetype == "ByLayer"
+                                      else source.linetype)
+                    if layer.print_width > 0:
+                        paper.lineweight = layer.print_width
+                self.scene.notify("layouts")
+                self.command_line.echo(f"Imported {n} object(s).")
+                return
             n = self._import_showing_progress(path)
             self.command_line.echo(f"Imported {n} object(s).")
             self.viewport.zoom_extents()

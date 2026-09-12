@@ -185,7 +185,17 @@ class PaperObject:
         if cached is not None and cached[0] is self.shape:
             return cached[1]
         from . import geometry, hlr
-        lines = hlr.edges_to_polylines(geometry.edges_of(self.shape))
+        from .picture import PictureShape
+        if isinstance(self.shape, PictureShape):
+            if self.shape.plane.get("region_brep"):
+                lines = hlr.edges_to_polylines(
+                    geometry.edges_of(self.shape.face()))
+            else:
+                import numpy as np
+                vertices = self.shape.vertices
+                lines = [np.vstack((vertices, vertices[0]))]
+        else:
+            lines = hlr.edges_to_polylines(geometry.edges_of(self.shape))
         self._plines = (self.shape, lines)
         return lines
 
@@ -205,7 +215,12 @@ class PaperObject:
         if cached is not None and cached[0] is self.shape:
             return cached[1]
         from . import geometry
-        pts = geometry.free_points(self.shape)
+        from .picture import PictureShape
+        # Pictures use a lightweight textured mesh rather than an OpenCascade
+        # shape.  Their four corners already live in ``polylines`` for picking
+        # and outlining; they have no free-standing point marks to draw.
+        pts = [] if isinstance(self.shape, PictureShape) \
+            else geometry.free_points(self.shape)
         self._pts = (self.shape, pts)
         return pts
 
@@ -521,7 +536,16 @@ def paper_object_at(layout, px: float, py: float, tol: float = 2.0):
     encloses is the rest of the sheet, and a click in the middle of the page
     means the page.
     """
+    from .picture import PictureShape
     for obj in reversed(layout.objects):        # drawn last, so on top
+        # A picture has visible ink throughout its textured triangles.  Its
+        # rectangular outline remains useful for snaps and trimmed edges, but
+        # making that thin outline the only pick target is unlike clicking any
+        # other filled object on screen.
+        if isinstance(obj.shape, PictureShape):
+            for triangle in obj.shape.triangles:
+                if _point_in_poly(px, py, obj.shape.vertices[triangle]):
+                    return obj
         for poly in obj.polylines:
             for a, b in zip(poly[:-1], poly[1:]):
                 if _dist_seg(px, py, a, b) <= tol:

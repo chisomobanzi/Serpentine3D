@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Layout placement, transforms and snapping.** Drop pictures, DXF and SVG
+  onto sheets; pictures support direct selection and transforms. The paper
+  gumball has a compact rotation arc, Alt-rotate copies, and Shift-pad scaling
+  applies to paper geometry and pictures. Point commands share direction locks,
+  Ortho and grid spacing. Detail starts with two corners and live contents,
+  with optional View, Scale and Fit settings; view and scale remain editable in
+  Properties. Paper geometry, annotations, detail frames and the page itself
+  offer object snaps with visible markers.
 - **Gumball copy and two-axis scale gestures.** Alt-drag a layout gumball
   arrow or plane pad to move a duplicate while leaving the source in place.
   Shift-drag the pad on layout text to scale it uniformly about its visible
