@@ -206,6 +206,7 @@ class LayoutView:
         self.px_per_mm = 2.0
         self.entered_detail: str | None = None
         self.ghost_detail = None                 # detail a command is sizing
+        self._ghost_note = None
         self.selected: list = []                 # [(kind, obj)] on this sheet
         self.corners: list = []                  # [(detail, index)] grips
         self.box: tuple | None = None            # live band, screen px
@@ -252,6 +253,45 @@ class LayoutView:
         x = (sx - w / 2) / self.px_per_mm + self.pan[0]
         y = -(sy - h / 2) / self.px_per_mm + self.pan[1]
         return x, y
+
+    def note_snap(self, sx: float, sy: float, snaps,
+                  radius_px: float = 12.0):
+        """Nearest enabled semantic snap on layout text, in paper space."""
+        lay = self.layout
+        if lay is None or not snaps.enabled:
+            return None
+
+        from ..core.layout import annotation_bounds
+
+        candidates = []
+        for note in lay.notes:
+            x0, y0, x1, y1 = annotation_bounds(
+                "note", note, self.vp.scene)
+            cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+            candidates.extend([
+                ((note.x, note.y), "point"),
+                ((x0, y0), "end"), ((x1, y0), "end"),
+                ((x1, y1), "end"), ((x0, y1), "end"),
+                ((cx, y0), "mid"), ((x1, cy), "mid"),
+                ((cx, y1), "mid"), ((x0, cy), "mid"),
+                ((cx, cy), "center"),
+            ])
+
+        priority = {"end": 0, "point": 0, "mid": 4, "center": 5}
+        best = None
+        best_score = None
+        for (x, y), kind in candidates:
+            if not snaps.types.get(kind):
+                continue
+            tx, ty = self.paper_to_screen(x, y)
+            d2 = (tx - sx) ** 2 + (ty - sy) ** 2
+            if d2 >= radius_px ** 2:
+                continue
+            score = (priority[kind], d2)
+            if best_score is None or score < best_score:
+                best = ((float(x), float(y), 0.0), kind)
+                best_score = score
+        return best
 
     def _paper_mvp(self) -> np.ndarray:
         """Ortho MVP mapping paper mm -> clip space."""
@@ -304,7 +344,8 @@ class LayoutView:
         box = [0.0, 0.0, float(lay.paper_w), float(lay.paper_h)]
         for kind, pool in self._pools(lay).items():
             for obj in pool:
-                x0, y0, x1, y1 = sheet_item_bounds(kind, obj)
+                x0, y0, x1, y1 = sheet_item_bounds(
+                    kind, obj, self.vp.scene)
                 box = [min(box[0], x0), min(box[1], y0),
                        max(box[2], x1), max(box[3], y1)]
         return tuple(box)
@@ -340,7 +381,8 @@ class LayoutView:
         if not self.selected:
             return False
         from ..core.layout import sheet_item_bounds
-        boxes = [sheet_item_bounds(k, o) for k, o in self.selected]
+        boxes = [sheet_item_bounds(k, o, self.vp.scene)
+                 for k, o in self.selected]
         self.zoom_paper(min(b[0] for b in boxes), min(b[1] for b in boxes),
                         max(b[2] for b in boxes), max(b[3] for b in boxes))
         return True
@@ -743,6 +785,12 @@ class LayoutView:
             lambda x, y: self.paper_to_screen(x, y),
             self.px_per_mm, lay, scene,
             sheet_index=idx, sheet_count=max(len(scene.layouts), 1))
+        if self._ghost_note is not None:
+            painter.save()
+            painter.setOpacity(.55)
+            annot_paint.draw_note(painter, self.paper_to_screen,
+                                  self.px_per_mm, self._ghost_note, scene)
+            painter.restore()
         # Last of all, over the ink and under nothing: a handle is a thing to
         # take hold of, so a detail's own linework must not cover it.
         self.gumball.paint(painter)
@@ -822,9 +870,15 @@ class LayoutView:
                 x1, y1 = self.paper_to_screen(obj.x + obj.w, obj.y + obj.h)
             else:
                 from ..core.layout import annotation_bounds
-                bx0, by0, bx1, by1 = annotation_bounds(kind, obj)
-                x0, y0 = self.paper_to_screen(bx0 - 1, by0 - 1)
-                x1, y1 = self.paper_to_screen(bx1 + 1, by1 + 1)
+                bx0, by0, bx1, by1 = annotation_bounds(
+                    kind, obj, self.vp.scene)
+                # Formatted text already has exact visible glyph bounds, and
+                # its semantic snaps use those same corners. Keeping the old
+                # one-millimetre selection padding made the two rectangles
+                # diverge dramatically when the sheet was zoomed in.
+                pad = 0.0 if kind == "note" else 1.0
+                x0, y0 = self.paper_to_screen(bx0 - pad, by0 - pad)
+                x1, y1 = self.paper_to_screen(bx1 + pad, by1 + pad)
             painter.drawRect(int(min(x0, x1)), int(min(y0, y1)),
                              int(abs(x1 - x0)), int(abs(y0 - y1)))
         # Grips resize, and resizing several rectangles at once from one
@@ -954,14 +1008,22 @@ class LayoutView:
         self.pan -= np.array([dx, -dy]) / self.px_per_mm
         return True
 
-    def double_click(self, sx: float, sy: float) -> bool:
+    def double_click(self, sx: float, sy: float):
         lay = self.layout
         if lay is None:
-            return False
+            return None
         px, py = self.screen_to_paper(sx, sy)
+        from ..core.layout import annotation_at
+        hit = annotation_at(lay, px, py, scene=self.vp.scene)
+        if hit is not None and hit[0] == "note":
+            self.selected = [hit]
+            self.corners = []
+            self.entered_detail = None
+            self.vp.layoutSelectionChanged.emit()
+            return hit[1]
         detail = lay.detail_at(px, py)
         self.entered_detail = detail.id if detail else None
-        return True
+        return None
 
     def step_into_detail(self, sx: float, sy: float):
         """Enter the detail under the cursor, and say which one, or None.
@@ -1060,7 +1122,8 @@ class LayoutView:
         from ..core.layout import annotation_at, paper_object_at
         # In paint order, topmost first: annotations sit over the geometry, the
         # geometry sits over the detail frames it is drawn across.
-        hit = annotation_at(lay, px, py, tol=max(tol, 2.0))
+        hit = annotation_at(lay, px, py, tol=max(tol, 2.0),
+                            scene=self.vp.scene)
         if hit is None:
             obj = paper_object_at(lay, px, py, tol=max(tol, 2.0))
             hit = ("object", obj) if obj is not None else None
@@ -1143,7 +1206,7 @@ class LayoutView:
                 elif kind == "object":
                     b = paper_object_bounds(obj)
                 else:
-                    b = annotation_bounds(kind, obj)
+                    b = annotation_bounds(kind, obj, self.vp.scene)
                 if crossing:
                     inside = (b[0] <= hi[0] and b[2] >= lo[0]
                               and b[1] <= hi[1] and b[3] >= lo[1])

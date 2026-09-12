@@ -73,6 +73,10 @@ NOTHING_TO_SHOW = {
     ("arc", "Start of arc"): _FIRST_OF_ITS_FLOW,
     ("ellipse", "Start of first axis"): _FIRST_OF_ITS_FLOW,
     ("sphere", "Start of diameter"): _FIRST_OF_ITS_FLOW,
+    ("textobject", "Position (baseline start)"):
+        "the first spatial pick of the legacy scripted flow; the editor's "
+        "placement pick is in an alternative branch that returns before "
+        "this one, and scripted text height is chosen with a preview next",
 }
 
 

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
 
 from serpentine3d.app import MainWindow
 from serpentine3d.core.layout import (
@@ -23,6 +25,7 @@ from serpentine3d.core.layout import (
     detail_project,
     detail_unproject,
 )
+from tests import test_paper_text_is_edited_in_place as paper_text
 
 # a detail at 1:2 looking down at a target away from the origin, so that
 # paper millimetres, model units and the sheet's own corner cannot be
@@ -228,10 +231,20 @@ def test_the_refusal_waits_for_the_point_it_cannot_answer(sheet):
     assert not w.processor.busy
 
 
+def _place_section_note(w):
+    """GUI text is written and formatted directly after its paper position."""
+    w.run_command("text")
+    w.processor.provide_text("60,70,0")
+    inline = paper_text._multiline_editor(w.viewport)
+    paper_text._replace_text(inline, ["SECTION A-A"])
+    w.properties.text_height.setValue(5.)
+    QTest.keyClick(inline, Qt.Key.Key_Escape)
+
+
 def test_a_paper_command_still_works_on_bare_paper(sheet):
     w, lv, lay = sheet
     lv.entered_detail = None
-    _run(w, "text", "60,70,0", "SECTION A-A", "5")
+    _place_section_note(w)
     assert len(lay.notes) == 1
     assert (lay.notes[0].x, lay.notes[0].y) == pytest.approx((60.0, 70.0))
 
@@ -241,7 +254,7 @@ def test_a_paper_command_inside_a_detail_still_writes_on_the_paper(sheet):
     the sheet, at the millimetres you pointed at."""
     w, lv, lay = sheet
     lv.entered_detail = lay.details[0].id
-    _run(w, "text", "60,70,0", "SECTION A-A", "5")
+    _place_section_note(w)
     assert len(lay.notes) == 1
     assert (lay.notes[0].x, lay.notes[0].y) == pytest.approx((60.0, 70.0))
     assert w.scene.all() == []

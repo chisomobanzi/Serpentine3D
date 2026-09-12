@@ -48,7 +48,7 @@ gumball goes back to holding the model objects inside it.
 
 ## Annotations
 
-`text` (multiline with `\n`), `leader`, `dim`, `dimradius`,
+`text`, `leader`, `dim`, `dimradius`,
 `dimdiameter`, `dimangle`, `hatch` (corner picks or **Mode=Region** to
 click inside linework), `scalebar`, `titleblock`, `sheetindex`,
 `revision`.
@@ -62,6 +62,45 @@ scale. Hand-moving the dimension breaks the anchor on purpose.
 
 **Styles**: `dimstyle` creates named text/arrow sizes shared by the
 document (`Standard`, `Small`, `Heading` are built in).
+
+## Text and lettering
+
+Use `text` for a layout note or `textobject` for lettering in the model.
+Click the baseline position, then type multiple lines directly beside the text
+in the drawing. Press Escape or click back in the drawing to finish.
+Double-click existing text to edit it in place, or use the live **Content**
+field in Properties. Font family and style, letter height and left, centre or
+right alignment are available there without opening another window. Text edits
+support Undo and Redo.
+
+Letter height measures capital letters: model lettering uses the document's
+units, and layout notes use paper millimetres. Each line aligns to the picked
+baseline origin. Font metrics determine the spacing between lines.
+
+Keep model lettering as **Editable text** to change its words and formatting
+later. Place it on the active CPlane, a selected planar face or a plane facing
+the current view. **Look at text** temporarily turns the camera square to an
+angled text plane while editing and restores the previous view afterward; it
+does not move the object. Placement survives moving, rotating, scaling, saving
+and Undo, and saved geometry preserves its appearance when reopening the file.
+Editable model text snaps cleanly at its baseline insertion point, four
+oriented corners, four edge midpoints and centre. These references follow the
+text plane when the object moves or rotates; converted curves expose their
+ordinary outline snaps instead. Layout notes expose the same references in
+paper space, with a high-contrast square marker at the insertion point and
+corners. The selection rectangle and snap bounds are identical and follow the
+actual font, alignment and named annotation style drawn on the sheet.
+
+Choose **Curves**, **Planar surfaces** or **Solid** in Properties when you need
+ordinary modelling geometry. Curves and surfaces are grouped by default, so
+selecting one contour selects the whole string; use `ungroup` to work with
+individual pieces. Every output preserves the counters in letters such as B,
+O and R. Solid output adds a positive depth along the text plane normal and is
+capped. Conversion is one Undo step; geometry output no longer retains editable
+words or font settings.
+
+Native documents and PDF output retain the formatted notes. DXF note export
+still uses plain text and does not retain the new font, style or alignment settings.
 
 ## Output
 

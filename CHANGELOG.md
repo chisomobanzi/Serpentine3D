@@ -4,6 +4,20 @@
 
 ### Added
 
+- **Direct text editing and 3D lettering (#18).** Place a note or model label,
+  then type directly beside it in the drawing—no text dialog. Content, installed
+  font families and styles, physical letter height and alignment stay live in
+  Properties and on the rendered lettering. Click back in the drawing to
+  commit and close the inline editor. Model text can sit on the CPlane, a
+  selected planar face or the
+  view plane; **Look at text** temporarily faces awkward lettering toward the
+  camera. Keep words editable or create grouped curves, planar surfaces or a
+  capped solid at a chosen depth. Smooth outlines preserve letter holes, and
+  placement, conversion, saving and recovery remain undoable. Editable model
+  text and layout notes offer clean snaps at their insertion point, bounds,
+  edge midpoints and centre for drawing and Move. Layout snap markers and
+  selection rectangles share the same visible bounds and remain legible on
+  pale paper; both follow the height resolved from named annotation styles.
 - **Import E57 point clouds (#15).** Open, import or drag in `.e57` scans with
   their names, registered positions and RGB colours. Cartesian and spherical
   coordinates convert from metres to model units; invalid points are omitted.

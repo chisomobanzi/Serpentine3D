@@ -127,6 +127,24 @@ class FileReq(TextReq):
 
 
 @dataclass
+class TextEditorReq(TextReq):
+    """Typography answered by the live window's multiline editor."""
+    values: dict = field(default_factory=dict)
+    curve_output: bool = False
+    units: str = "mm"
+    shape_fn: object = None
+    target_id: str | None = None
+    anchor: tuple[float, float, float] = (0., 0., 0.)
+    paper_layout: object = None
+
+
+def has_text_editor(ctx):
+    """Scripted and replayed commands keep their ordinary text prompts."""
+    processor = getattr(ctx.window, "processor", None)
+    return processor is not None and not processor.headless
+
+
+@dataclass
 class OptionReq(Req):
     prompt: str
     options: list[str] = field(default_factory=list)
@@ -244,6 +262,7 @@ class CommandContext:
         # answers with, standing in for the viewport that recorded them
         self.replay_cplane = None
         self.replay_aim = None
+        self.replay_space = None
 
     def held_control_points(self) -> dict:
         """{obj_id: [index, ...]} — the control points the selection holds.

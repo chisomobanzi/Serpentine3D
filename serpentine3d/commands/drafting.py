@@ -10,7 +10,8 @@ from ..core.layout import (
 # a detail view named "front" should look where the front view looks
 from ..ui.camera import STANDARD_VIEWS as _VIEW_ANGLES
 from .base import (
-    FileReq, NumberReq, OptionReq, PointReq, SelectReq, TextReq, command,
+    FileReq, NumberReq, OptionReq, PointReq, SelectReq, TextReq, TextEditorReq,
+    command, has_text_editor,
 )
 
 
@@ -19,11 +20,12 @@ def _window(ctx):
 
 
 def _active_layout(ctx):
-    vp = ctx.viewport
-    if vp is None or vp.space == "model":
+    space = (ctx.replay_space if ctx.replay_space is not None
+             else getattr(ctx.viewport, "space", "model"))
+    if space == "model":
         return None
     for lay in ctx.scene.layouts:
-        if lay.id == vp.space:
+        if lay.id == space:
             return lay
     return None
 
@@ -354,7 +356,13 @@ def cmd_text(ctx):
         ctx.echo("Text notes go on layouts — switch to one first.")
         return
         yield  # pragma: no cover
-    pos = yield PointReq("Text position")
+    pos = yield PointReq("Text position (baseline anchor)")
+    if has_text_editor(ctx) or getattr(ctx, "replay_text_inline", False):
+        answer = yield TextEditorReq(
+            "Text", units="mm", anchor=pos, paper_layout=lay)
+        if isinstance(answer, dict):
+            ctx.echo("Note placed.")
+            return
     content = yield TextReq(r"Text (\n for a new line)")
     content = content.replace("\\n", "\n")
     height = yield NumberReq("Text height (mm)", default=4.0, minimum=0.5,
@@ -757,15 +765,31 @@ def cmd_annotedit(ctx):
         yield  # pragma: no cover
     from ..core.layout import annotation_at
     p = yield PointReq("Pick an annotation")
-    hit = annotation_at(lay, p[0], p[1], tol=3.0)
+    hit = annotation_at(lay, p[0], p[1], tol=3.0, scene=ctx.scene)
     if hit is None:
         ctx.echo("Nothing there. Click on a note, dimension, leader or "
                  "hatch.")
         return
     kind, obj = hit
     if kind in ("note", "leader"):
-        new = yield TextReq("Text", default=obj.text.replace("\n", "\\n"))
-        obj.text = new.replace("\\n", "\n")
+        req = TextReq("Text", default=obj.text.replace("\n", "\\n"))
+        if kind == "note" and has_text_editor(ctx):
+            from ..ui.text_editor import typography_of
+            req = TextEditorReq(
+                "Edit text", values=typography_of(obj),
+                anchor=(obj.x, obj.y, 0.), paper_layout=lay,
+                target_id=obj.id)
+        new = yield req
+        if kind == "note" and isinstance(new, dict):
+            values = dict(new)
+            values.pop("output", None)
+            values.pop("group_output", None)
+            values.pop("solid_depth", None)
+            for name, value in values.items():
+                setattr(obj, name, value)
+            obj.style = ""
+        else:
+            obj.text = new.replace("\\n", "\n")
     elif kind in ("dim", "rdim"):
         new = yield TextReq("Override text (Enter for measured)",
                             default=obj.text)

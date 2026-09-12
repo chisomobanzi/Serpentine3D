@@ -55,6 +55,10 @@ def _static_snap_points(shape) -> list[tuple[tuple, str]]:
         add(*shape.centroid(), "center")
         return out
 
+    from .text_object import TextShape
+    if isinstance(shape, TextShape):
+        return shape.snap_points()
+
     if shape.ShapeType() == occ.VERTEX:
         x, y, z = geometry.point_coords(shape)
         add(x, y, z, "point")
@@ -296,7 +300,7 @@ class SnapIndex:
 
     def _points(self, obj) -> list:
         entry = self._cache.get(obj.id)
-        mesh_key = id(obj.mesh)
+        mesh_key = obj.mesh.uid
         if entry is None or entry[0] != mesh_key:
             entry = (mesh_key, _static_snap_points(obj.shape))
             self._cache[obj.id] = entry

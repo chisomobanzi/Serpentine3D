@@ -52,6 +52,7 @@ class Replayer:
         self.proc = CommandProcessor(self.ctx)
         self.idmap: dict[str, str] = {}
         self._before_cmd: set = set()
+        self._before_layouts: set = set()
         self._mismatches: list[str] = []
         self.fingerprints_checked = 0
         self.on_event = None            # hook for the renderer: fn(event)
@@ -116,6 +117,23 @@ class Replayer:
         if sub:
             self.selection.set_subobjects(sub)
         self._before_cmd = set(self.scene.objects)
+        self._before_layouts = {lay.id for lay in self.scene.layouts}
+        # Inline lettering records its anchor before its typography.  Keep
+        # older journals, whose first value was the editor dictionary, on
+        # their original command path.
+        nxt = self.events[i + 1] if i + 1 < len(self.events) else {}
+        value = nxt.get("v") if nxt.get("ev") == "val" else None
+        after = self.events[i + 2] if i + 2 < len(self.events) else {}
+        after_value = after.get("v") if after.get("ev") == "val" else None
+        anchor_first = isinstance(value, dict) and "p" in value
+        # Model text used to ask for its string before its anchor, so a point
+        # first identifies the inline form.  Paper text has always asked for
+        # its anchor first; only the new form follows it with editor data.
+        self.ctx.replay_text_inline = (
+            (name == "textobject" and anchor_first)
+            or (name == "text" and anchor_first
+                and isinstance(after_value, dict)
+                and "data" in after_value))
         self.proc.run(name)
 
     def _ev_val(self, e, i):
@@ -145,6 +163,10 @@ class Replayer:
             self.proc.provide(float(v["n"]))
         elif "s" in v:
             self.proc.provide(v["s"])
+        elif "data" in v:
+            # A legacy note command first asks for a point; its recorded
+            # editor answer is typography and must not replace last_point.
+            self.proc._advance(v["data"])
 
     def _ev_opt(self, e, i):
         self.proc.set_option(e["name"], e.get("value"))
@@ -165,6 +187,12 @@ class Replayer:
                 f"replay made {len(new)}")
         for a, b in zip(rec, new):
             self.idmap[a] = b
+        if "layouts" in e:
+            layouts = [lay.id for lay in self.scene.layouts
+                       if lay.id not in self._before_layouts]
+            if len(layouts) != len(e["layouts"]):
+                raise ReplayError(f"desync at event {i}: layout count changed")
+            self.idmap.update(zip(e["layouts"], layouts))
 
     def _ev_ckpt(self, e, i):
         self.history.checkpoint(e.get("label", ""))
@@ -182,6 +210,15 @@ class Replayer:
             x = self.idmap.get(oid, oid)
             if x in self.scene.objects:
                 self.scene.remove(x)
+        if e.get("notes"):
+            from .layout import TextNote, _rebuild
+            layouts = {lay.id: lay for lay in self.scene.layouts}
+            for lid, notes in e["notes"]:
+                layout = layouts.get(self.idmap.get(lid, lid))
+                if layout is None:
+                    raise ReplayError(f"desync at event {i}: missing note layout")
+                layout.notes = [_rebuild(TextNote, note) for note in notes]
+            self.scene.notify("layouts")
 
     def _ev_load(self, e, i):
         from .. import fileio
@@ -233,6 +270,8 @@ class Replayer:
         return [self.idmap.get(i, i) for i in ids]
 
     def _apply_ctx(self, e):
+        if "space" in e:
+            self.ctx.replay_space = self.idmap.get(e["space"], e["space"])
         if "cp" in e:
             cp = e["cp"]
             self.ctx.replay_cplane = CPlane(origin=cp["o"], normal=cp["n"],

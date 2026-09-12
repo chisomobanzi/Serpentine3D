@@ -158,6 +158,15 @@ class MainWindow(QMainWindow):
             self.scene, self.selection, self.history,
             # a sheet's selection belongs to whichever pane is showing it
             viewport_source=lambda: self.active_viewport)
+        self.properties.modelTextChanged.connect(
+            self._model_text_changed_from_properties)
+        self.properties.textTypographyChanged.connect(
+            self._text_typography_changed_from_properties)
+        self.properties.textPlacementChanged.connect(
+            self._text_placement_changed)
+        self.properties.lookAtTextRequested.connect(self._look_at_text)
+        self._text_placement_choice = "CPlane"
+        self._look_at_text_restore = None
         self._prop_dock = QDockWidget("Properties", self)
         self._prop_dock.setObjectName("propertiesDock")
         self._prop_dock.setWidget(self.properties)
@@ -617,6 +626,12 @@ class MainWindow(QMainWindow):
         vp.boxSelected.connect(self._on_box_selected)
         vp.pointPicked.connect(self._on_point_picked)
         vp.detailEntered.connect(self._on_detail_entered)
+        vp.textEditRequested.connect(
+            lambda obj_id, pane=vp: self._edit_model_text_in_viewport(
+                pane, obj_id))
+        vp.paperTextEditRequested.connect(
+            lambda note_id, pane=vp: self._edit_paper_text_in_viewport(
+                pane, note_id))
         vp.mouseWorldMoved.connect(self._on_mouse_world)
         vp.cvEditBegan.connect(
             lambda: self.history.checkpoint("edit control point"))
@@ -1054,6 +1069,17 @@ class MainWindow(QMainWindow):
     def _sync_command_state(self):
         busy = self.processor.busy
         req = self.processor.request
+        active = self.processor.active
+        self.properties.set_model_text_command_active(
+            active is not None and active.name == "textobject")
+        if (active is not None and active.name == "textobject"
+                and isinstance(req, PointReq)):
+            if (self._text_placement_choice == "Selected face"
+                    and self._selected_text_face() is None):
+                req.prompt = ("Select a planar face first, then pick the "
+                              "text position")
+            else:
+                req.prompt = "Text position (baseline anchor)"
         self.command_line.set_prompt(self.processor.prompt_text())
         self.command_line.set_options(self.processor.option_chips())
         self.command_line.set_keywords(self.processor.keyword_chips())
@@ -1098,6 +1124,254 @@ class MainWindow(QMainWindow):
         self.osnap_bar.refresh()
         self._update_status()
         self._offer_file_picker(req)
+        self._offer_text_editor(req)
+
+    def _selected_text_face(self):
+        """The held planar face used as a lettering plane, if there is one."""
+        from .core import geometry as g
+        for obj_id, kind, index in reversed(self.selection.subobjects):
+            if kind != "face":
+                continue
+            obj = self.scene.get(obj_id)
+            if obj is None:
+                continue
+            faces = g.faces_of(obj.shape)
+            if not 0 <= index < len(faces):
+                continue
+            face = faces[index]
+            try:
+                g.face_normal(face)
+            except g.GeometryError:
+                continue
+            return face
+        return None
+
+    def model_text_frame(self, anchor):
+        """Placement frame chosen by the model-text contextual controls."""
+        from .core import geometry as g
+        from .core.cplane import CPlane
+
+        choice = self._text_placement_choice
+        pane = self.active_viewport
+        if choice == "View plane":
+            right, up = pane.camera.right_up()
+            normal = pane.camera.position - pane.camera.target
+            normal /= np.linalg.norm(normal)
+            plane = CPlane(anchor, normal=normal, xdir=right,
+                           name="View plane")
+        elif choice == "Selected face":
+            face = self._selected_text_face()
+            if face is None:
+                plane = pane.active_cplane()
+            else:
+                normal = np.asarray(g.face_normal(face), float)
+                # Keep lettering horizontal relative to the current drawing
+                # plane where possible, while projecting that axis onto the
+                # selected face.
+                xdir = np.asarray(pane.active_cplane().xdir, float)
+                xdir -= np.dot(xdir, normal) * normal
+                if np.linalg.norm(xdir) < 1e-9:
+                    xdir = pane.camera.right_up()[0]
+                plane = CPlane(anchor, normal=normal, xdir=xdir,
+                               name="Selected face")
+        else:
+            current = pane.active_cplane()
+            plane = CPlane(anchor, normal=current.normal,
+                           xdir=current.xdir, name=current.name)
+        return plane.basis_matrix()
+
+    def _text_placement_changed(self, choice):
+        self._text_placement_choice = choice
+        req = self.processor.request
+        active = self.processor.active
+        if active is not None and active.name == "textobject" \
+                and isinstance(req, PointReq):
+            if choice == "Selected face" and self._selected_text_face() is None:
+                req.prompt = ("Select a planar face first, then pick the text "
+                              "position")
+            else:
+                req.prompt = "Text position (baseline anchor)"
+            self.command_line.set_prompt(self.processor.prompt_text())
+            return
+
+        # The same control can re-plane an existing editable label. This is
+        # an ordinary model edit and therefore gets one undo step.
+        from .core.text import TextShape
+        obj = self.properties._selected()
+        if obj is None or not isinstance(obj.shape, TextShape):
+            return
+        if choice == "Selected face" and self._selected_text_face() is None:
+            self.command_line.set_prompt(
+                "Hold a planar face, then choose Selected face")
+            return
+        values = obj.shape._typography()
+        from .core import geometry as g
+        frame = self.model_text_frame(obj.shape.origin)
+        self.history.checkpoint("place text on plane")
+        self.scene.replace_shape(
+            obj.id, g.apply_matrix(TextShape(**values), frame))
+
+    def _look_at_text(self):
+        """Temporarily face the selected label without editing the model."""
+        from .core.text import TextShape
+        obj = self.properties._selected()
+        if obj is None or not isinstance(obj.shape, TextShape):
+            return
+        pane = self.active_viewport
+        saved = self._look_at_text_restore
+        if saved is not None and saved[0] is pane and saved[1] == obj.id:
+            pane.camera.restore(saved[2])
+            self._look_at_text_restore = None
+            self.properties.look_at_text.setText("Look at text")
+            pane.update()
+            return
+
+        self._look_at_text_restore = (pane, obj.id, pane.camera.state())
+        origin = np.asarray(obj.shape.origin, float)
+        normal = np.asarray(obj.shape.plane_normal, float)
+        pane.camera.target = origin.copy()
+        pane.camera.azimuth = float(np.arctan2(normal[1], normal[0]))
+        pane.camera.elevation = float(np.arcsin(np.clip(normal[2], -1., 1.)))
+        self.properties.look_at_text.setText("Restore view")
+        pane.update()
+
+    def _offer_text_editor(self, req):
+        from .commands.base import TextEditorReq
+        if (not isinstance(req, TextEditorReq) or self.processor.headless
+                or getattr(self, "_text_editor_open", False)
+                or self.processor.request is not req):
+            return
+        from .ui.text_editor import default_typography
+        values = default_typography(req.values)
+        # Properties edits arrive through MainWindow while this closure owns
+        # the creation values. Keep both names on the same mapping so later
+        # content edits and the final command answer retain live typography.
+        req.values = values
+        pane = self.active_viewport
+        paper = req.paper_layout
+        self._text_editor_open = True
+
+        def changed(text):
+            values["text"] = text
+            if not text.strip():
+                return
+            if paper is not None:
+                note = next((item for item in paper.notes
+                             if item.id == req.target_id), None)
+                if note is None:
+                    from .core.layout import TextNote
+                    note = TextNote(x=req.anchor[0], y=req.anchor[1],
+                                    **values)
+                    paper.notes.append(note)
+                    req.target_id = note.id
+                    pane._inline_text_id = note.id
+                    pane.layout_view.selected = [("note", note)]
+                    self.properties.begin_live_text(note.id)
+                    pane.layoutSelectionChanged.emit()
+                else:
+                    for name, value in values.items():
+                        setattr(note, name, value)
+                    note.style = ""
+                self.scene.notify("layouts")
+                return
+            if req.shape_fn is None:
+                return
+            shape = req.shape_fn(values)
+            if req.target_id is None:
+                obj = self.scene.add(shape, name="Text")
+                req.target_id = obj.id
+                pane._inline_text_id = obj.id
+                self.properties.begin_live_text(obj.id)
+                self.selection.set([obj.id])
+            else:
+                self.scene.replace_shape(req.target_id, shape)
+
+        def finished():
+            pane.end_inline_text()
+            self._text_editor_open = False
+            if req.target_id is not None:
+                self.properties.end_live_text(req.target_id)
+            if self.processor.request is not req:
+                return
+            if req.target_id is None or not values["text"].strip():
+                self.processor.cancel()
+                return
+            self.processor.provide(
+                dict(values, **self.properties.model_text_output()))
+
+        pane.begin_inline_text(None, values["text"], req.anchor,
+                               changed, finished)
+
+    def _edit_paper_text_in_viewport(self, pane, note_id):
+        """Edit a rendered layout note where it sits on the sheet."""
+        lay = pane.layout_view.layout
+        note = (next((item for item in lay.notes if item.id == note_id), None)
+                if lay is not None else None)
+        if self.processor.busy or note is None:
+            return
+        self.history.checkpoint("edit text")
+        start_revision = self.scene.revision
+        pane.layout_view.selected = [("note", note)]
+        pane.layoutSelectionChanged.emit()
+        self.properties.begin_live_text(note.id)
+
+        def changed(text):
+            if text.strip() and text != note.text:
+                note.text = text
+                note.style = ""
+                self.scene.notify("layouts")
+
+        def finished():
+            pane.end_inline_text()
+            self.properties.end_live_text(note.id)
+            if self.scene.revision == start_revision:
+                self.history.discard_checkpoint()
+
+        pane.begin_inline_text(note.id, note.text,
+                               (note.x, note.y, 0.), changed, finished)
+
+    def _edit_model_text_in_viewport(self, pane, obj_id):
+        from .core.text import TextShape
+        obj = self.scene.get(obj_id)
+        if (self.processor.busy or obj is None
+                or not isinstance(obj.shape, TextShape)):
+            return
+        self.history.checkpoint("edit text")
+        start_revision = self.scene.revision
+        self.selection.set([obj.id])
+        self.properties.begin_live_text(obj.id)
+
+        def changed(text):
+            current = self.scene.get(obj.id)
+            if (current is not None and text.strip()
+                    and text != current.shape.text):
+                self.scene.replace_shape(
+                    obj.id, current.shape.edited(text=text))
+
+        def finished():
+            pane.end_inline_text()
+            self.properties.end_live_text(obj.id)
+            if self.scene.revision == start_revision:
+                self.history.discard_checkpoint()
+
+        pane.begin_inline_text(obj.id, obj.shape.text, obj.shape.origin,
+                               changed, finished)
+
+    def _model_text_changed_from_properties(self, obj_id, text):
+        from .commands.base import TextEditorReq
+        req = self.processor.request
+        if isinstance(req, TextEditorReq) and req.target_id == obj_id:
+            req.values["text"] = text
+        for pane in self.all_viewports():
+            pane.set_inline_text(obj_id, text)
+
+    def _text_typography_changed_from_properties(self, obj_id, values):
+        from .commands.base import TextEditorReq
+        req = self.processor.request
+        if isinstance(req, TextEditorReq) and req.target_id == obj_id:
+            req.values.update(values)
+        for pane in self.all_viewports():
+            pane.set_inline_text_typography(obj_id, values)
 
     def _offer_file_picker(self, req):
         """Let a live command's pending FileReq use the window chooser."""

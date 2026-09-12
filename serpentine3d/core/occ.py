@@ -112,7 +112,12 @@ def point_of_vertex(vertex) -> gp_Pnt:
     return BRep_Tool.Pnt_s(vertex)
 
 def bbox_add(shape, box: Bnd_Box):
-    BRepBndLib.Add_s(shape, box)
+    # Triangulation carries its meshing deflection as an isotropic gap, so a
+    # shape's reported bounds used to grow after it had first been drawn.
+    # Geometry bounds must stay tied to the B-rep and independent of display.
+    # Include the B-rep's own modelling tolerance so mathematically exact
+    # extents do not land a fraction below their boundary through conversion.
+    BRepBndLib.AddOptimal_s(shape, box, False, True)
 
 def linear_properties(shape) -> GProp_GProps:
     props = GProp_GProps()

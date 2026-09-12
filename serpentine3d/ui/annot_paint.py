@@ -8,9 +8,9 @@ import math
 
 import numpy as np
 from PySide6.QtCore import Qt, QPointF
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QTransform
 
-from ..core.layout import (DEFAULT_STYLES, hatch_region,
+from ..core.layout import (annotation_style, hatch_region, note_text_height,
                            resolve_associative)
 
 INK = QColor(25, 25, 30)
@@ -23,12 +23,7 @@ SOLID_FILL = QColor(120, 122, 130, 120)
 
 def style_of(scene, name: str) -> dict:
     """Named annotation style merged over the Standard defaults."""
-    props = dict(DEFAULT_STYLES["Standard"])
-    if name:
-        props.update(DEFAULT_STYLES.get(name, {}))
-        if scene is not None:
-            props.update(getattr(scene, "annot_styles", {}).get(name, {}))
-    return props
+    return annotation_style(scene, name)
 
 
 def _font(k: float, height_mm: float) -> QFont:
@@ -55,9 +50,16 @@ def _arrow(painter, to_dev, tip, direction, size=2.2):
 
 
 def draw_note(painter, to_dev, k, note, scene=None):
-    height = note.height
-    if getattr(note, "style", ""):
-        height = style_of(scene, note.style)["text_height"]
+    height = note_text_height(note, scene)
+    if note.font_family:
+        from ..core.text import text_path
+        path = text_path(note.text, height, note.font_family,
+                         font_style=note.font_style, alignment=note.alignment)
+        x, y = to_dev(note.x, note.y)
+        # The glyph path and device coordinates both point down from the
+        # baseline; the paper mapper supplies the baseline's device position.
+        painter.fillPath(QTransform().translate(x, y).scale(k, k).map(path), INK)
+        return
     painter.setPen(QPen(INK))
     painter.setFont(_font(k, height))
     for i, line in enumerate((note.text or "").split("\n")):

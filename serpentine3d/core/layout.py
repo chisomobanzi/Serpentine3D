@@ -72,6 +72,11 @@ class TextNote:
     text: str = ""             # may contain newlines
     height: float = 4.0        # mm
     style: str = ""            # named style overrides height when set
+    # Empty family identifies old notes, whose em sizing and line spacing
+    # must remain unchanged until the user edits their typography.
+    font_family: str = ""
+    font_style: str = ""
+    alignment: str = "left"
 
 
 @dataclass
@@ -350,6 +355,23 @@ DEFAULT_STYLES = {
 }
 
 
+def annotation_style(scene, name: str) -> dict:
+    """Named annotation style merged over the Standard defaults."""
+    props = dict(DEFAULT_STYLES["Standard"])
+    if name:
+        props.update(DEFAULT_STYLES.get(name, {}))
+        if scene is not None:
+            props.update(getattr(scene, "annot_styles", {}).get(name, {}))
+    return props
+
+
+def note_text_height(note, scene=None) -> float:
+    """Paper height used to render a note's text."""
+    if getattr(note, "style", ""):
+        return float(annotation_style(scene, note.style)["text_height"])
+    return float(note.height)
+
+
 def _on_axis(v, tol: float = 5e-3):
     """`v` with components a whisker from 0 or ±1 rounded to them."""
     import numpy as np
@@ -442,15 +464,22 @@ def _dist_seg(px, py, a, b) -> float:
     return float(np.linalg.norm(p - (a + t * ab)))
 
 
-def annotation_at(layout, px: float, py: float, tol: float = 2.0):
+def annotation_at(layout, px: float, py: float, tol: float = 2.0,
+                  scene=None):
     """Topmost annotation near a paper point -> (kind, obj) or None.
 
     Kinds: note, leader, dim, rdim, adim, hatch (dims before hatches so
     outlines don't shadow them)."""
     for note in reversed(layout.notes):
+        if note.font_family:
+            x0, y0, x1, y1 = annotation_bounds("note", note, scene)
+            if x0 - tol <= px <= x1 + tol and y0 - tol <= py <= y1 + tol:
+                return ("note", note)
+            continue
+        height = note_text_height(note, scene)
         w = max(len(line) for line in (note.text or " ").split("\n")) \
-            * note.height * 0.62
-        h = note.height * (1 + (note.text or "").count("\n") * 1.6)
+            * height * 0.62
+        h = height * (1 + (note.text or "").count("\n") * 1.6)
         if note.x - tol <= px <= note.x + w + tol \
                 and note.y - tol <= py <= note.y + h + tol:
             return ("note", note)
@@ -719,13 +748,21 @@ def delete_annotation(layout, kind: str, obj) -> bool:
     return False
 
 
-def annotation_bounds(kind: str, obj) -> tuple:
+def annotation_bounds(kind: str, obj, scene=None) -> tuple:
     """Rough paper-space bbox (x0, y0, x1, y1) of an annotation."""
     if kind == "note":
+        height = note_text_height(obj, scene)
+        if obj.font_family:
+            from .text import text_path
+            rect = text_path(obj.text, height, obj.font_family,
+                             font_style=obj.font_style,
+                             alignment=obj.alignment).boundingRect()
+            return (obj.x + rect.left(), obj.y - rect.bottom(),
+                    obj.x + rect.right(), obj.y - rect.top())
         lines = (obj.text or " ").split("\n")
-        w = max(len(line) for line in lines) * obj.height * 0.62
-        return (obj.x, obj.y - (len(lines) - 1) * obj.height * 1.6,
-                obj.x + w, obj.y + obj.height)
+        w = max(len(line) for line in lines) * height * 0.62
+        return (obj.x, obj.y - (len(lines) - 1) * height * 1.6,
+                obj.x + w, obj.y + height)
     if kind == "dim":
         import numpy as np
         a = np.array([obj.x1, obj.y1])
@@ -749,7 +786,7 @@ def annotation_bounds(kind: str, obj) -> tuple:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def sheet_item_bounds(kind: str, obj) -> tuple:
+def sheet_item_bounds(kind: str, obj, scene=None) -> tuple:
     """Paper-space bbox (x0, y0, x1, y1) of anything a sheet holds.
 
     The three kinds each already knew their own bounds; what was missing was
@@ -760,7 +797,7 @@ def sheet_item_bounds(kind: str, obj) -> tuple:
         return (obj.x, obj.y, obj.x + obj.w, obj.y + obj.h)
     if kind == "object":
         return paper_object_bounds(obj)
-    return annotation_bounds(kind, obj)
+    return annotation_bounds(kind, obj, scene)
 
 
 def enclosing_polygon(polylines: list, px: float, py: float):

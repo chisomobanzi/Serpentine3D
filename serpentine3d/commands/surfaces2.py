@@ -3,8 +3,8 @@ unroll."""
 
 from ..core import geometry as g
 from .base import (
-    NumberReq, OptionReq, PointReq, SelectReq, TextReq,
-    command,
+    NumberReq, OptionReq, PointReq, SelectReq, TextReq, TextEditorReq,
+    command, has_text_editor,
 )
 
 
@@ -121,9 +121,90 @@ def cmd_helix(ctx):
 
 @command("textobject", aliases=("textcurves",))
 def cmd_textobject(ctx):
-    from ..core.text import text_curves
+    """Place editable model text or grouped letter outline curves."""
+    from ..core.text import TextShape, text_curves
+    from ..core.text_object import output_shapes
     from . import dragging
+    if has_text_editor(ctx) or getattr(ctx, "replay_text_inline", False):
+        import numpy as np
+        import uuid
+        position = yield PointReq("Text position (baseline anchor)")
+        if ctx.window is not None and hasattr(ctx.window, "model_text_frame"):
+            frame = ctx.window.model_text_frame(position)
+        else:
+            plane = ctx.cplane
+            frame = np.eye(4)
+            frame[:3, 0] = plane.xdir
+            frame[:3, 1] = plane.ydir
+            frame[:3, 2] = plane.normal
+            frame[:3, 3] = position
+
+        def lettering(values):
+            return g.apply_matrix(TextShape(**values), frame)
+
+        req = TextEditorReq("Text", curve_output=True,
+                            units=ctx.scene.units, shape_fn=lettering,
+                            anchor=position)
+        content = yield req
+        values = dict(content)
+        output = values.pop("output", "editable")
+        grouped = values.pop("group_output", True)
+        solid_depth = values.pop("solid_depth", 1.)
+        obj = ctx.scene.get(req.target_id) if req.target_id else None
+        if obj is None:
+            obj = ctx.scene.add(lettering(values), name="Text")
+        if output != "editable":
+            ctx.scene.remove(obj.id)
+            group_id = (uuid.uuid4().hex if grouped
+                        and output in ("curves", "surface") else None)
+            made = []
+            for shape in output_shapes(obj.shape, output, solid_depth):
+                curve_obj = ctx.scene.add_from(shape, obj)
+                if group_id:
+                    curve_obj = ctx.scene.update(
+                        curve_obj.id, group_id=group_id)
+                made.append(curve_obj)
+            ctx.select_result(made)
+            ctx.echo(f"Text {output} created.")
+        else:
+            ctx.select_result([obj])
+            ctx.echo("Text placed. Double-click it or edit Content in Properties to change it.")
+        return
     content = yield TextReq("Text")
+    # Resolved editor answers also arrive during headless session recovery.
+    if isinstance(content, dict):
+        import numpy as np
+        import uuid
+        values = dict(content)
+        output = values.pop("output", "editable")
+        grouped = values.pop("group_output", True)
+        solid_depth = values.pop("solid_depth", 1.)
+        lettering = TextShape(**values)
+        plane = ctx.cplane
+        frame = np.eye(4)
+        frame[:3, 0] = plane.xdir
+        frame[:3, 1] = plane.ydir
+        frame[:3, 2] = plane.normal
+
+        def placed(position):
+            frame[:3, 3] = position
+            return g.apply_matrix(lettering, frame)
+
+        position = yield PointReq("Text position (baseline anchor)",
+                                  preview_fn=placed)
+        shape = placed(position)
+        if output != "editable":
+            group_id = (uuid.uuid4().hex if grouped
+                        and output in ("curves", "surface") else None)
+            for result in output_shapes(shape, output, solid_depth):
+                obj = ctx.scene.add(result)
+                if group_id:
+                    ctx.scene.update(obj.id, group_id=group_id)
+            ctx.echo(f"Text {output} created.")
+        else:
+            ctx.scene.add(shape, name="Text")
+            ctx.echo("Text placed. Double-click it or edit Content in Properties to change it.")
+        return
     # where before how big: the height is a size in the model, and there is
     # nothing to measure it against until the text has somewhere to sit
     position = yield PointReq("Position (baseline start)")

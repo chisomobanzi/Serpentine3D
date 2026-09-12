@@ -915,6 +915,8 @@ class Viewport(QOpenGLWidget):
     viewChanged = Signal(str)               # named view set (top/perspective/…)
     layoutSelectionChanged = Signal()       # sheet items picked or dropped
     detailEntered = Signal(object)           # stepped into a detail mid-command
+    textEditRequested = Signal(str)          # editable model text, by id
+    paperTextEditRequested = Signal(str)     # editable paper note, by id
     _tessDone = Signal()                    # a background mesh finished
 
     def __init__(self, scene, selection, config=None, parent=None):
@@ -1036,6 +1038,8 @@ class Viewport(QOpenGLWidget):
         self._preview_data = np.zeros((0, 3), np.float32)
         self._ghost = None                     # DisplayMesh of pending result
         self._ghost_picture = None             # textured pending picture
+        self._inline_text_editor = None
+        self._inline_text_id = None
         self._marker_points: list = []
         self._last_mouse = None
         self._mesh_prog = self._line_prog = self._bg_prog = 0
@@ -2603,11 +2607,14 @@ class Viewport(QOpenGLWidget):
             self._draw_lines(self._preview, mvp,
                              (*theme.SELECTION_COLOR, 0.9), 1.6)
         if snap is not None:
-            # A snap inside a detail is a model point drawn on the paper, so
-            # the marker comes back out through the window like the rest of
-            # the preview and is squared to the paper, not to the model.
-            if self.space != "model" and self._drawing_through() is not None:
-                at = self._on_paper([snap[0]])[0]
+            if self.space != "model":
+                # A snap inside a detail is a model point drawn on the paper,
+                # so bring it back through the window. Both it and a native
+                # paper snap use page axes for a visible square marker.
+                if self._drawing_through() is not None:
+                    at = self._on_paper([snap[0]])[0]
+                else:
+                    at = np.asarray(snap[0], np.float32)
                 axes = (np.array([1.0, 0.0, 0.0], np.float32),
                         np.array([0.0, 1.0, 0.0], np.float32))
             else:
@@ -2615,7 +2622,8 @@ class Viewport(QOpenGLWidget):
                 axes = self.camera.right_up()
             segs = _snap_marker(snap[1], at, *axes, size * 0.95)
             self._preview.update(rebased(segs, self._frame_anchor))
-            self._draw_lines(self._preview, mvp, (1.0, 1.0, 1.0, 0.95), 2.0)
+            self._draw_lines(self._preview, mvp,
+                             _snap_marker_color(self.space), 2.0)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _draw_control_points(self, mvp):
@@ -2885,10 +2893,18 @@ class Viewport(QOpenGLWidget):
         so there is nothing to tessellate: the sheet draws it the way it draws
         the details already on it.
         """
-        from ..core.layout import DetailView
+        from ..core.layout import DetailView, TextNote
         from ..core.picture import PictureShape
         had_picture = self._ghost_picture is not None
         self._ghost_picture = None
+        had_note = self.layout_view._ghost_note is not None
+        self.layout_view._ghost_note = None
+        if isinstance(shape, TextNote):
+            self.layout_view.set_ghost_detail(None)
+            self.layout_view._ghost_note = shape
+            self._ghost = None
+            self.update()
+            return
         if isinstance(shape, DetailView):
             self.layout_view.set_ghost_detail(shape)
             self._update_draw_readout()   # the frame's size is the readout
@@ -2902,7 +2918,7 @@ class Viewport(QOpenGLWidget):
             self.update()
             return
         if shape is None:
-            if self._ghost is not None or had_picture:
+            if self._ghost is not None or had_picture or had_note:
                 self._ghost = None
                 self.update()
             return
@@ -3523,6 +3539,10 @@ class Viewport(QOpenGLWidget):
                 return detail_model_point(
                     entered, x, y,
                     self.grid_snap_step if self.grid_snap else 0.0)
+            snap = self.layout_view.note_snap(px, py, self.snaps)
+            if snap is not None:
+                self._active_snap = snap
+                return snap[0]
             if self.grid_snap:
                 x, y = round(x), round(y)
             return (float(x), float(y), 0.0)
@@ -3903,16 +3923,106 @@ class Viewport(QOpenGLWidget):
 
     # ---------------------------------------------------------------- events
 
+    def begin_inline_text(self, obj_id, text, anchor, changed, finished):
+        """Edit lettering in a multiline overlay beside its visible anchor."""
+        from .text_editor import InlineTextEditor
+
+        self.end_inline_text()
+        editor = InlineTextEditor(self)
+        editor.setObjectName("model_text_content")
+        editor.setPlaceholderText("Type text…  Esc to finish")
+        editor.setPlainText(text)
+        editor.setStyleSheet(
+            "QPlainTextEdit { background: rgba(27,28,32,238); color: #f2f2f2;"
+            " border: 1px solid #d0a85c; border-radius: 4px; padding: 7px; }"
+        )
+        editor.textChanged.connect(lambda: changed(editor.toPlainText()))
+        editor.finished.connect(finished)
+        self._inline_text_editor = editor
+        self._inline_text_id = obj_id
+
+        if self.space == "model":
+            screen = self.camera.project(
+                np.asarray([anchor], float), self.width(), self.height())[0]
+        else:
+            screen = self.layout_view.paper_to_screen(anchor[0], anchor[1])
+        width, height = 320, 120
+        x = max(8, min(int(screen[0]) + 12, self.width() - width - 8))
+        y = max(8, min(int(screen[1]) - height - 12,
+                       self.height() - height - 8))
+        editor.setGeometry(x, y, width, height)
+        editor.show()
+        editor.raise_()
+        editor.setFocus()
+        return editor
+
+    def set_inline_text(self, obj_id, text):
+        editor = self._inline_text_editor
+        if (editor is None or self._inline_text_id != obj_id
+                or editor.toPlainText() == text):
+            return
+        editor.blockSignals(True)
+        editor.setPlainText(text)
+        editor.blockSignals(False)
+
+    def set_inline_text_typography(self, obj_id, values):
+        """Keep the direct editor visually matched to the selected text."""
+        editor = self._inline_text_editor
+        if editor is None or self._inline_text_id != obj_id:
+            return
+        from PySide6.QtGui import QFontDatabase
+        font = QFontDatabase.font(values["font_family"],
+                                  values["font_style"], 12)
+        alignment = {
+            "left": Qt.AlignmentFlag.AlignLeft,
+            "center": Qt.AlignmentFlag.AlignHCenter,
+            "right": Qt.AlignmentFlag.AlignRight,
+        }[values["alignment"]]
+        # Changing the document font or block format can emit textChanged.
+        # That signal means the user edited content, so keep presentation-only
+        # synchronization out of the content callback.
+        editor.blockSignals(True)
+        try:
+            editor.setFont(font)
+            editor.setAlignment(alignment)
+        finally:
+            editor.blockSignals(False)
+
+    def end_inline_text(self):
+        editor = self._inline_text_editor
+        self._inline_text_editor = None
+        self._inline_text_id = None
+        if editor is not None:
+            editor.hide()
+            editor.deleteLater()
+
     def mouseDoubleClickEvent(self, ev):
         if (self.space != "model" and not self.point_mode
                 and ev.button() == Qt.MouseButton.LeftButton):
             pos = ev.position()
-            self.layout_view.double_click(pos.x(), pos.y())
+            note = self.layout_view.double_click(pos.x(), pos.y())
+            if note is not None:
+                self.paperTextEditRequested.emit(note.id)
             self.update()
             return
+        if (self.space == "model" and not self.point_mode
+                and ev.button() == Qt.MouseButton.LeftButton):
+            obj_id = self.pick_object(ev.position().x(), ev.position().y())
+            obj = self.scene.get(obj_id) if obj_id else None
+            if obj is not None:
+                from ..core.text import TextShape
+                if isinstance(obj.shape, TextShape):
+                    self.textEditRequested.emit(obj.id)
+                    ev.accept()
+                    return
         super().mouseDoubleClickEvent(ev)
 
     def mousePressEvent(self, ev):
+        if (ev.button() == Qt.MouseButton.LeftButton
+                and self._inline_text_editor is not None):
+            # A click back in the drawing commits direct text editing before
+            # the same click selects or starts interacting with the model.
+            self._inline_text_editor.finished.emit()
         # Whatever this click turns out to mean, it means it in the view you
         # asked for: two quick swipes are two quarter turns, not one and a
         # bit of whatever the animation had reached.
@@ -4931,6 +5041,13 @@ def _snap_marker(kind: str, c: np.ndarray, right: np.ndarray,
         segs = [np.stack([c - r - u, c + r + u]),
                 np.stack([c - r, c + r])]
     return np.concatenate(segs).astype(np.float32)
+
+
+def _snap_marker_color(space: str) -> tuple[float, float, float, float]:
+    """High-contrast snap ink for dark model views and pale paper."""
+    if space == "model":
+        return (1.0, 1.0, 1.0, 0.95)
+    return (*theme.SELECTION_COLOR, 1.0)
 
 
 def _point_segment_dist2(p: np.ndarray, a: np.ndarray,

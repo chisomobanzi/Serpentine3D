@@ -6,8 +6,10 @@ from .base import NumberReq, PointReq, SelectReq, command
 
 @command("extrude", aliases=("ext", "extrudecrv"))
 def cmd_extrude(ctx):
+    from ..core.text import TextShape
     curves = yield SelectReq("Select curves to extrude", kinds=("curve",))
-    closed = any(g.is_closed_curve(c.shape) for c in curves)
+    closed = any(isinstance(c.shape, TextShape) or g.is_closed_curve(c.shape)
+                 for c in curves)
     direction = tuple(ctx.cplane.normal)
 
     def _make(dist, cap):

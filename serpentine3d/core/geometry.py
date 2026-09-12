@@ -408,8 +408,9 @@ def apply_matrix(shape, matrix):
     import numpy as np
     from .mesh import MeshShape
     from .pointcloud import PointCloudShape
+    from .text_object import TextShape
     m = np.asarray(matrix, float)
-    if isinstance(shape, (MeshShape, PointCloudShape)):
+    if isinstance(shape, (MeshShape, PointCloudShape, TextShape)):
         return shape.transformed(m)
     a = m[:3, :3]
     # a similarity is a rotation times a single scale, so A@A.T is that
@@ -531,6 +532,10 @@ def planar_regions(shapes: list) -> list[TopoDS_Shape]:
 def extrude_profiles(shapes: list, direction: Point, distance: float,
                      cap: bool = False) -> list[TopoDS_Shape]:
     """Extrude several curves, treating nested capped curves as one profile."""
+    from .text_object import TextShape
+    shapes = [curve for shape in shapes
+              for curve in (shape.to_curves() if isinstance(shape, TextShape)
+                            else [shape])]
     if not cap:
         return [extrude(shape, direction, distance, cap=False)
                 for shape in shapes]
@@ -2769,7 +2774,15 @@ def boolean_intersection(a, b) -> TopoDS_Shape:
 # --- transforms -------------------------------------------------------------
 
 def _apply_trsf(shape, trsf: gp_Trsf, copy: bool = True) -> TopoDS_Shape:
+    from .text_object import TextShape
+    if isinstance(shape, TextShape):
+        return shape.transformed(_transform_matrix(trsf))
     return BRepBuilderAPI_Transform(shape, trsf, copy).Shape()
+
+
+def _transform_matrix(trsf):
+    return [[trsf.Value(row, col) for col in range(1, 5)]
+            for row in range(1, 4)] + [[0., 0., 0., 1.]]
 
 
 def translate(shape, offset: Point) -> TopoDS_Shape:
@@ -2811,6 +2824,9 @@ def _gtransform(shape, gtrsf) -> TopoDS_Shape:
     triangulation (from a prior tessellation) silently produces faces
     with NULL surfaces, and any later OCCT call on them segfaults.
     Strip the triangulation first, then reject a degenerate result."""
+    from .text_object import TextShape
+    if isinstance(shape, TextShape):
+        return shape.transformed(_transform_matrix(gtrsf))
     from OCP.BRepTools import BRepTools
     BRepTools.Clean_s(shape)
     result = BRepBuilderAPI_GTransform(shape, gtrsf, True)
@@ -2903,7 +2919,8 @@ def mirror(shape, plane_point: Point, plane_normal: Point) -> TopoDS_Shape:
 def copy_shape(shape) -> TopoDS_Shape:
     from .mesh import MeshShape
     from .pointcloud import PointCloudShape
-    if isinstance(shape, (MeshShape, PointCloudShape)):
+    from .text_object import TextShape
+    if isinstance(shape, (MeshShape, PointCloudShape, TextShape)):
         return shape.copy()
     return BRepBuilderAPI_Copy(shape).Shape()
 
@@ -3028,6 +3045,9 @@ _CLOUD_TAG = b"SPCL\x01"
 
 
 def shape_to_bytes(shape) -> bytes:
+    from .text_object import TextShape
+    if isinstance(shape, TextShape):
+        return shape.to_bytes()
     from .picture import PictureShape
     if isinstance(shape, PictureShape):
         return shape.to_bytes()
@@ -3089,6 +3109,9 @@ def _cloud_unpack(data: bytes, offset: int):
 
 
 def shape_from_bytes(data: bytes):
+    from .text_object import TEXT_TAG, TextShape
+    if data.startswith(TEXT_TAG):
+        return TextShape.from_bytes(data)
     from .picture import PICTURE_TAG, PictureShape
     if data.startswith(PICTURE_TAG):
         return PictureShape.from_bytes(data)

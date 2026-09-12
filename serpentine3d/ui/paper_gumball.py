@@ -89,7 +89,9 @@ class PaperGumball:
         picks = self._picks()
         if not picks:
             return None
-        boxes = np.array([sheet_item_bounds(k, o) for k, o in picks], float)
+        boxes = np.array([
+            sheet_item_bounds(k, o, self.vp.scene) for k, o in picks
+        ], float)
         return ((boxes[:, 0].min() + boxes[:, 2].max()) / 2,
                 (boxes[:, 1].min() + boxes[:, 3].max()) / 2)
 

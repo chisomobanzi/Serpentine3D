@@ -117,11 +117,13 @@ class SessionJournal:
         self.history = None
         self.processor = None
         self._shadow: dict = {}
+        self._note_shadow: dict = {}
         self._dirty = False
         self._flushing = False
         self._in_command = False
         self._recorded = False       # has anybody built anything yet?
         self._cmd_ids_at_start: set = set()
+        self._cmd_layouts_at_start: set = set()
         self._pending_ckpts: list[str] = []
         self._last_cp = None
         from .. import __version__
@@ -167,7 +169,7 @@ class SessionJournal:
         self.scene = scene
         self.history = history
         processor.journal = self
-        scene.add_listener(self._on_scene, ("objects",))
+        scene.add_listener(self._on_scene, ("objects", "layouts"))
         history.on_checkpoint = self._on_checkpoint
         history.on_discard = self._on_discard
         self._refresh_shadow()
@@ -183,7 +185,9 @@ class SessionJournal:
         self._pending_ckpts.clear()
         self._in_command = True
         self._cmd_ids_at_start = set(self.scene.objects)
+        self._cmd_layouts_at_start = {lay.id for lay in self.scene.layouts}
         e = {"ev": "cmd", "name": name,
+             "space": getattr(ctx.viewport, "space", "model"),
              "sel": [o.id for o in ctx.selection.objects()],
              "sub": [list(s) for s in getattr(ctx.selection,
                                               "subobjects", [])]}
@@ -225,7 +229,10 @@ class SessionJournal:
     def finish(self, success: bool):
         made = [oid for oid in self.scene._order
                 if oid not in self._cmd_ids_at_start]
-        self._write({"ev": "fin", "ok": bool(success), "made": made})
+        layouts = [lay.id for lay in self.scene.layouts
+                   if lay.id not in self._cmd_layouts_at_start]
+        self._write({"ev": "fin", "ok": bool(success), "made": made,
+                     "layouts": layouts})
         self._in_command = False
         self._refresh_shadow()
         self._dirty = False
@@ -278,7 +285,9 @@ class SessionJournal:
         self._flushing = True
         try:
             made, chg, gone = self._delta()
-            if not (made or chg or gone):
+            notes = [[lid, values] for lid, values in self._note_state().items()
+                     if values != self._note_shadow.get(lid, [])]
+            if not (made or chg or gone or notes):
                 # conversions only. The markers stay: a drag that has
                 # not moved yet still owns its checkpoint.
                 self._refresh_shadow()
@@ -288,7 +297,7 @@ class SessionJournal:
                 self._write({"ev": "ckpt", "label": label})
             self._pending_ckpts.clear()
             self._write({"ev": "edit", "made": made, "chg": chg,
-                         "gone": gone})
+                         "gone": gone, "notes": notes})
             self._refresh_shadow()
             self._dirty = False
         finally:
@@ -400,6 +409,13 @@ class SessionJournal:
     def _refresh_shadow(self):
         self._shadow = {oid: self.scene.objects[oid]._shape
                         for oid in self.scene._order}
+        self._note_shadow = self._note_state()
+
+    def _note_state(self):
+        # The same note fields as native layout files. Typography and position
+        # are scalar values, so a copy also detects in-place Properties edits.
+        return {lay.id: [vars(note).copy() for note in lay.notes]
+                for lay in self.scene.layouts}
 
     @staticmethod
     def _encode(value):
@@ -409,6 +425,8 @@ class SessionJournal:
             return {"s": value}
         if isinstance(value, (int, float)):
             return {"n": float(value)}
+        if isinstance(value, dict):
+            return {"data": value}
         if isinstance(value, (list,)):
             return {"ids": [o if isinstance(o, str) else o.id
                             for o in value]}

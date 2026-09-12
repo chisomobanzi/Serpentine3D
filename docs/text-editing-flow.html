@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Interactive design study for direct text editing in Serpentine3D.">
+<title>Serpentine3D — Direct text editing</title>
+<style>
+:root {
+  --page: #e9ebe5;
+  --paper: #fbfbf7;
+  --ink: #172029;
+  --muted: #65717b;
+  --rule: #c9cec7;
+  --blue: #3276a8;
+  --blue-soft: #dcecf7;
+  --gold: #d7a642;
+  --green: #5fa87a;
+  --chrome: #1d2024;
+  --chrome-2: #25292e;
+  --chrome-3: #2d3238;
+  --chrome-4: #353b42;
+  --chrome-rule: #454b53;
+  --chrome-text: #e7e9e9;
+  --chrome-muted: #9ca4ad;
+  --shadow: 0 24px 70px rgba(15, 22, 28, .18);
+  --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+* { box-sizing: border-box; }
+html { background: var(--page); color: var(--ink); font-family: var(--sans); }
+body { margin: 0; background: linear-gradient(rgba(50,118,168,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(50,118,168,.035) 1px,transparent 1px),var(--page); background-size: 28px 28px; }
+button, input, textarea, select { font: inherit; }
+button, select { cursor: pointer; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, [contenteditable]:focus-visible { outline: 2px solid #70b7e7; outline-offset: 2px; }
+.page { width: min(1580px, calc(100% - 32px)); margin: 16px auto 48px; }
+.intro { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 520px); align-items: end; gap: 48px; padding: 42px 12px 30px; }
+.eyebrow { color: var(--blue); font: 700 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+h1 { max-width: 880px; margin: 15px 0 0; font-size: clamp(40px, 6vw, 82px); font-weight: 450; line-height: .98; letter-spacing: -.052em; }
+.intro p { margin: 0 0 5px; color: #4d5a64; font-size: 17px; line-height: 1.6; }
+.intro strong { color: var(--ink); font-weight: 650; }
+.prototype-label { display: flex; justify-content: space-between; gap: 24px; padding: 0 12px 10px; color: var(--muted); font-size: 12px; }
+.prototype-label strong { color: var(--ink); }
+
+.app { min-width: 1040px; height: 820px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #101317; border-radius: 9px; color: var(--chrome-text); background: var(--chrome); box-shadow: var(--shadow); user-select: none; }
+.app-scroll { overflow-x: auto; border-radius: 9px; }
+.titlebar { height: 44px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 14px 0 18px; border-bottom: 1px solid #101317; background: #181b1e; font-size: 12px; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; }
+.mark { width: 19px; height: 19px; border: 1px solid var(--gold); border-radius: 50%; position: relative; }
+.mark:after { content: ""; position: absolute; left: 4px; top: 4px; width: 9px; height: 9px; border-left: 1px solid var(--gold); border-bottom: 1px solid var(--gold); transform: rotate(-18deg); }
+.menus { color: var(--chrome-muted); word-spacing: 14px; }
+.workspace-switch { display: flex; gap: 3px; padding: 3px; border: 1px solid #343a40; border-radius: 5px; background: #202429; }
+.workspace-switch button { border: 0; border-radius: 3px; padding: 5px 9px; color: var(--chrome-muted); background: transparent; font-size: 10px; }
+.workspace-switch button[aria-pressed="true"] { color: #171a1d; background: var(--gold); font-weight: 700; }
+
+.contextbar { height: 50px; flex: 0 0 auto; display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-bottom: 1px solid #111519; background: var(--chrome-2); }
+.tool-kind { min-width: 92px; display: flex; align-items: center; gap: 8px; color: #f1d18c; font-size: 11px; font-weight: 650; }
+.tool-kind .t { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 4px; color: #1d2024; background: var(--gold); font: 800 15px Georgia, serif; }
+.divider { height: 24px; border-left: 1px solid var(--chrome-rule); margin: 0 3px; }
+.contextbar select, .contextbar input, .inspector select, .inspector input, .inspector textarea { height: 31px; border: 1px solid var(--chrome-rule); border-radius: 4px; color: var(--chrome-text); background: #20242a; }
+.contextbar select { padding: 0 27px 0 9px; }
+.font-family { width: 150px; }
+.font-style { width: 92px; }
+.size-wrap { display: flex; align-items: center; height: 31px; border: 1px solid var(--chrome-rule); border-radius: 4px; background: #20242a; }
+.size-wrap input { width: 57px; height: 27px; padding: 0 4px 0 8px; border: 0; background: transparent; }
+.size-wrap span { padding-right: 8px; color: var(--chrome-muted); font-size: 10px; }
+.align { display: flex; padding: 2px; border: 1px solid var(--chrome-rule); border-radius: 4px; background: #20242a; }
+.align button { width: 29px; height: 25px; display: grid; place-items: center; border: 0; border-radius: 3px; color: var(--chrome-muted); background: transparent; font: 600 12px var(--mono); }
+.align button[aria-pressed="true"] { color: white; background: #49515a; }
+.context-note { margin-left: auto; color: var(--chrome-muted); font-size: 10px; white-space: nowrap; }
+.new-text { height: 31px; padding: 0 11px; border: 1px solid #7f6c3d; border-radius: 4px; color: #f1d18c; background: #3b3325; font-size: 11px; }
+.model-control { display: none; align-items: center; gap: 6px; }
+.app[data-space="model"] .model-control { display: flex; }
+.app[data-space="model"] .context-note { display: none; }
+.placement-select { width: 122px; }
+.look-at { height: 31px; padding: 0 9px; border: 1px solid var(--chrome-rule); border-radius: 4px; color: #b9c1c8; background: #20242a; font-size: 10px; }
+.look-at[aria-pressed="true"] { border-color: #4f819d; color: #d8eef9; background: #263d4a; }
+
+.app-body { min-height: 0; flex: 1; display: grid; grid-template-columns: 45px minmax(0,1fr) 292px; }
+.tools { padding: 7px 5px; border-right: 1px solid #111519; background: #24282d; }
+.tools button { width: 34px; height: 34px; display: grid; place-items: center; margin: 2px 0; border: 1px solid transparent; border-radius: 4px; color: #abb2b9; background: transparent; font-size: 16px; }
+.tools button[aria-pressed="true"] { border-color: #8a733d; color: #f2d28a; background: #3a3325; }
+.tools .spacer { height: 8px; margin: 7px 5px; border-top: 1px solid #454b52; }
+
+.viewport { min-width: 0; position: relative; overflow: hidden; background: #202329; }
+.paper-stage { position: absolute; inset: 0; display: grid; place-items: center; padding: 34px 42px; background: #24272c; }
+.sheet { width: min(100%, 830px); aspect-ratio: 1.414 / 1; position: relative; overflow: hidden; color: #1d2227; background: var(--paper); box-shadow: 0 15px 34px #0007; }
+.sheet:before { content: ""; position: absolute; inset: 23px; border: 1px dashed #b8bdba; pointer-events: none; }
+.sheet-grid { position: absolute; inset: 0; opacity: 0; background-image: linear-gradient(#6b849013 1px,transparent 1px),linear-gradient(90deg,#6b849013 1px,transparent 1px); background-size: 18px 18px; transition: opacity .2s; }
+.app[data-space="model"] .paper-stage { background: radial-gradient(circle at 55% 42%,#323840,#1d2024 72%); perspective: 900px; }
+.app[data-space="model"] .sheet { width: 86%; height: 74%; aspect-ratio: auto; overflow: visible; border: 1px solid #4b555e; background: linear-gradient(150deg,#30363d,#22272c); box-shadow: none; transform: rotateX(52deg) rotateZ(-6deg); transform-style: preserve-3d; }
+.app[data-space="model"][data-plane="face"] .sheet { transform: rotateX(64deg) rotateZ(13deg); border-color: #786f55; }
+.app[data-space="model"][data-plane="view"] .sheet { width: 76%; height: 62%; transform: rotateX(0) rotateZ(0); border-style: dashed; }
+.app[data-space="model"].camera-facing .sheet { width: 76%; height: 62%; transform: rotateX(5deg) rotateZ(0); }
+.app[data-space="model"] .sheet:before { inset: -120%; border: 0; background-image: linear-gradient(#8696a31a 1px,transparent 1px),linear-gradient(90deg,#8696a31a 1px,transparent 1px); background-size: 24px 24px; }
+.app[data-space="model"] .sheet-grid { display: none; }
+.axis { position: absolute; left: 22px; bottom: 22px; color: #82909a; font: 10px var(--mono); }
+.axis i { display: inline-block; width: 27px; height: 1px; margin-right: 5px; vertical-align: middle; background: #c7635c; box-shadow: 0 -5px 0 -0.25px #5ea574; transform: rotate(-16deg); }
+
+.text-object { position: absolute; left: 29%; top: 34%; min-width: 170px; padding: 3px 5px 4px; transform-origin: left top; color: #1d2227; font-family: Arial, sans-serif; font-size: 34px; line-height: 1.12; white-space: pre-wrap; cursor: text; outline: none; user-select: text; }
+.text-object[data-align="center"] { text-align: center; transform: translateX(-50%); }
+.text-object[data-align="right"] { text-align: right; transform: translateX(-100%); }
+.text-object.selected:after { content: ""; position: absolute; inset: -6px -8px; border: 1px solid #3a8fc7; pointer-events: none; }
+.text-object.selected:before { content: ""; position: absolute; width: 7px; height: 7px; right: -12px; bottom: -10px; border: 1px solid white; background: #3a8fc7; pointer-events: none; }
+.text-object.editing:after { border-style: dashed; }
+.text-object.curves { color: transparent !important; -webkit-text-stroke: 1.2px #1d2227; cursor: default; user-select: none; }
+.app[data-space="model"] .text-object { color: #e0bb64; text-shadow: 0 0 1px #000; transform: none; }
+.app[data-space="model"] .text-object[data-align="center"] { transform: translateX(-50%); }
+.app[data-space="model"] .text-object[data-align="right"] { transform: translateX(-100%); }
+.app[data-space="model"] .text-object.curves { -webkit-text-stroke-color: #e0bb64; }
+.app[data-space="model"] .text-object.surface { color: #d8aa43aa; text-shadow: none; -webkit-text-stroke: 1px #f0cc76; }
+.app[data-space="model"] .text-object.solid { color: #e4b64f; text-shadow: 1px 1px #8d6725,2px 2px #815d21,3px 3px #76551e,4px 4px #694a1a,5px 5px 8px #0008; -webkit-text-stroke: .7px #f2d488; }
+.plane-tag { display: none; position: absolute; left: 14px; top: 13px; padding: 5px 7px; border: 1px solid #59636b; border-radius: 3px; color: #adb7bf; background: #252a2ed9; font: 9px var(--mono); }
+.app[data-space="model"] .plane-tag { display: block; }
+.baseline { position: absolute; height: 1px; width: 210px; left: 29%; top: calc(34% + 49px); background: #3a8fc799; pointer-events: none; }
+.baseline:before { content: ""; position: absolute; left: -3px; top: -3px; width: 7px; height: 7px; border-radius: 50%; background: #3a8fc7; }
+.app[data-space="model"] .baseline { display: none; }
+.edit-chip { position: absolute; z-index: 4; left: 29%; top: calc(34% - 32px); display: flex; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid #83b7d5; border-radius: 4px; color: #d9eef9; background: #244154ee; font-size: 10px; box-shadow: 0 4px 13px #0004; }
+.edit-chip i { width: 5px; height: 5px; border-radius: 50%; background: #78c4ed; }
+.edit-chip.hidden { display: none; }
+.placing-ghost { display: none; position: absolute; z-index: 5; color: #dda94299; font-size: 28px; pointer-events: none; }
+.viewport.placing .placing-ghost { display: block; }
+.hint { position: absolute; left: 15px; bottom: 13px; padding: 7px 9px; border: 1px solid #4b535a; border-radius: 4px; color: #b2bac1; background: #252a2fe8; font-size: 10px; }
+.hint b { color: #e9c879; font-weight: 650; }
+.zoom { position: absolute; right: 14px; bottom: 13px; color: #8f989f; font: 10px var(--mono); }
+
+.inspector { overflow: auto; border-left: 1px solid #111519; background: var(--chrome-2); scrollbar-width: thin; scrollbar-color: #515861 transparent; }
+.inspector-head { height: 37px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid var(--chrome-rule); color: var(--chrome-muted); font-size: 11px; }
+.inspector-head span:last-child { font-size: 9px; }
+.inspector-body { padding: 13px 12px 24px; }
+.object-title { display: flex; align-items: center; gap: 8px; margin-bottom: 13px; font-size: 15px; font-weight: 700; }
+.badge { padding: 3px 6px; border: 1px solid #52616c; border-radius: 999px; color: #aab8c3; font-size: 8px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.field { margin-bottom: 13px; }
+.field > label, .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: #abb3bb; font-size: 10px; }
+.field textarea { width: 100%; height: 88px; padding: 8px 9px; resize: vertical; line-height: 1.4; user-select: text; }
+.field select, .field input { width: 100%; padding: 0 8px; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.align-wide { display: grid; grid-template-columns: repeat(3,1fr); gap: 4px; }
+.align-wide button { height: 30px; border: 1px solid var(--chrome-rule); border-radius: 4px; color: #aeb6bd; background: #20242a; font-size: 10px; }
+.align-wide button[aria-pressed="true"] { border-color: #817045; color: #f0d08b; background: #3b3426; }
+.section-rule { margin: 17px -12px 13px; border-top: 1px solid #40464d; }
+.section-title { color: #e2e5e6; font-weight: 650; }
+.section-title small { color: var(--chrome-muted); font-weight: 400; }
+.output-copy { margin: 0 0 10px; color: #969fa7; font-size: 10px; line-height: 1.5; }
+.check { display: flex; align-items: center; gap: 8px; margin: 9px 0 12px; color: #c5cbd0; font-size: 10px; }
+.check input { accent-color: var(--gold); }
+.convert { width: 100%; height: 33px; border: 1px solid #756442; border-radius: 4px; color: #ebcb87; background: #383125; font-size: 11px; }
+.convert.undo { border-color: #536b59; color: #acd0b5; background: #27352c; }
+.output-types { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 12px; }
+.output-types button { height: 32px; border: 1px solid var(--chrome-rule); border-radius: 4px; color: #aeb6bd; background: #20242a; font-size: 10px; }
+.output-types button[aria-pressed="true"] { border-color: #817045; color: #f0d08b; background: #3b3426; }
+.conditional { display: none; }
+.conditional.visible { display: flex; }
+.depth-field { align-items: center; gap: 8px; margin: 4px 0 12px; }
+.depth-field label { flex: 1; color: #c5cbd0; font-size: 10px; }
+.depth-field .size-wrap { width: 104px; }
+.depth-field input { min-width: 0; }
+.non-modal-note { margin-top: 10px; color: #858e97; font-size: 9px; line-height: 1.5; }
+.paper-only, .model-only { display: none; }
+.app[data-space="paper"] .paper-only, .app[data-space="model"] .model-only { display: block; }
+
+.commandbar { height: 42px; flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-top: 1px solid #111519; background: #202429; }
+.command-mode { padding: 6px 9px; border-radius: 4px; color: #efcd84; background: #363024; font-size: 10px; }
+.command-prompt { color: #e5c476; font-size: 10px; font-weight: 650; }
+.command-copy { flex: 1; color: #969fa8; font: 10px var(--mono); }
+.statusbar { height: 24px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 11px; border-top: 1px solid #40464d; color: #8f989f; background: #292e33; font-size: 9px; }
+.statusbar b { color: #c8ced2; font-weight: 500; }
+
+.notes { display: grid; grid-template-columns: 1.1fr repeat(3,1fr); gap: 1px; margin-top: 30px; border: 1px solid var(--rule); background: var(--rule); }
+.note { min-height: 190px; padding: 24px; background: rgba(251,251,247,.92); }
+.note:first-child { background: #172029; color: white; }
+.note .no { color: var(--blue); font: 700 10px var(--mono); letter-spacing: .1em; }
+.note:first-child .no { color: #82b9dc; }
+.note h2 { margin: 31px 0 10px; font-size: 25px; line-height: 1.1; letter-spacing: -.03em; }
+.note h3 { margin: 31px 0 9px; font-size: 15px; }
+.note p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.note:first-child p { color: #b8c4cd; }
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 22px; color: var(--muted); font-size: 11px; }
+.flow span { padding: 8px 10px; border: 1px solid var(--rule); border-radius: 4px; background: rgba(251,251,247,.85); }
+.flow i { font-style: normal; color: var(--blue); }
+@media (max-width: 900px) { .intro { grid-template-columns: 1fr; gap: 20px; } .notes { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="intro">
+    <div><div class="eyebrow">Serpentine / interaction study / text</div><h1>Text belongs in place.</h1></div>
+    <p><strong>One surface for writing, previewing and editing.</strong> Place a caret on paper or on a plane in the model, then type and format without leaving the canvas. The inspector is a second entrance to the same live content—not a button that opens another window.</p>
+  </header>
+  <div class="prototype-label"><strong>Interactive prototype · try the highlighted controls</strong><span>Double-click the text, edit Properties, switch Paper / Model, or create another object</span></div>
+  <div class="app-scroll">
+    <section class="app" id="app" data-space="paper" aria-label="Interactive Serpentine text editing prototype">
+      <div class="titlebar">
+        <div class="brand"><span class="mark"></span>Serpentine <span style="color:#7f8991;font-weight:400">/ drawing-set.serp</span></div>
+        <div class="menus">File Edit View Drafting Tools</div>
+        <div class="workspace-switch" aria-label="Text context">
+          <button data-space="paper" aria-pressed="true">Paper note</button>
+          <button data-space="model" aria-pressed="false">Model lettering</button>
+        </div>
+      </div>
+      <div class="contextbar">
+        <div class="tool-kind"><span class="t">T</span><span>Point text</span></div>
+        <span class="divider"></span>
+        <select id="top-family" class="font-family" aria-label="Font family"><option>Inter</option><option>Source Sans 3</option><option>Source Serif 4</option><option>Space Grotesk</option><option>IBM Plex Mono</option></select>
+        <select id="top-style" class="font-style" aria-label="Font style"><option>Regular</option><option>Medium</option><option>Bold</option><option>Italic</option></select>
+        <div class="size-wrap"><input id="top-size" type="number" value="5" min="0.1" step="0.5" aria-label="Cap height"><span class="unit">mm</span></div>
+        <div class="align" aria-label="Text alignment"><button data-align="left" aria-pressed="true" title="Align left">≡</button><button data-align="center" aria-pressed="false" title="Align centre">≡</button><button data-align="right" aria-pressed="false" title="Align right">≡</button></div>
+        <div class="model-control"><span class="divider"></span><select id="placement-plane" class="placement-select" aria-label="Placement plane"><option value="cplane">CPlane</option><option value="face">Selected face</option><option value="view">View plane</option></select><button class="look-at" id="look-at" aria-pressed="false" title="Temporarily face this text toward the camera">◎ Look at text</button></div>
+        <span class="context-note">Double-click text to edit</span>
+        <button class="new-text" id="new-text">＋ New text</button>
+      </div>
+      <div class="app-body">
+        <nav class="tools" aria-label="Drawing tools">
+          <button title="Select">↖</button><button aria-pressed="true" title="Text">T</button><button title="Line">╱</button><button title="Rectangle">□</button><div class="spacer"></div><button title="Move">✥</button><button title="Rotate">↻</button>
+        </nav>
+        <div class="viewport" id="viewport">
+          <div class="paper-stage">
+            <div class="sheet" id="sheet">
+              <div class="sheet-grid"></div>
+              <div class="text-object selected" id="text-object" data-align="left" contenteditable="false" spellcheck="false">First floor<br>South wing</div>
+              <div class="baseline" id="baseline"></div>
+              <div class="edit-chip hidden" id="edit-chip"><i></i><span>Editing on canvas · Esc to finish</span></div>
+            </div>
+            <div class="axis"><i></i>XY</div>
+            <div class="plane-tag" id="plane-tag">ON CPlane · World Top</div>
+          </div>
+          <div class="placing-ghost" id="placing-ghost">Aa</div>
+          <div class="hint" id="hint"><b>Selected:</b> double-click to type · drag to move</div>
+          <div class="zoom">100%</div>
+        </div>
+        <aside class="inspector">
+          <div class="inspector-head"><span>Properties</span><span>▣</span></div>
+          <div class="inspector-body">
+            <div class="object-title">Text <span class="badge" id="space-badge">Paper</span></div>
+            <div class="field"><label for="content-field"><span>Content</span><span>live</span></label><textarea id="content-field" spellcheck="false">First floor&#10;South wing</textarea></div>
+            <div class="field"><label for="name-field">Object name <span>optional</span></label><input id="name-field" value="Level title"></div>
+            <div class="section-rule"></div>
+            <div class="section-title"><span>Typography</span><small>selection</small></div>
+            <div class="field-row">
+              <div class="field"><label for="panel-family">Family</label><select id="panel-family"><option>Inter</option><option>Source Sans 3</option><option>Source Serif 4</option><option>Space Grotesk</option><option>IBM Plex Mono</option></select></div>
+              <div class="field"><label for="panel-style">Style</label><select id="panel-style"><option>Regular</option><option>Medium</option><option>Bold</option><option>Italic</option></select></div>
+            </div>
+            <div class="field-row">
+              <div class="field"><label for="panel-size">Cap height</label><div class="size-wrap"><input id="panel-size" type="number" value="5" min="0.1" step="0.5"><span class="unit">mm</span></div></div>
+              <div class="field"><label>Alignment</label><div class="align-wide"><button data-align="left" aria-pressed="true">Left</button><button data-align="center" aria-pressed="false">Centre</button><button data-align="right" aria-pressed="false">Right</button></div></div>
+            </div>
+            <div class="paper-only">
+              <div class="section-rule"></div>
+              <div class="section-title"><span>Layout</span><small>paper</small></div>
+              <p class="output-copy">The note remains live text in the drawing and in exported PDF output.</p>
+            </div>
+            <div class="model-only">
+              <div class="section-rule"></div>
+              <div class="section-title"><span>Model output</span><small id="geometry-state">editable text</small></div>
+              <p class="output-copy">Choose what the lettering becomes in the model. New text uses this output too.</p>
+              <div class="output-types" aria-label="Text output">
+                <button data-output="editable" aria-pressed="true">Editable</button><button data-output="curves" aria-pressed="false">Curves</button>
+                <button data-output="surface" aria-pressed="false">Planar surfaces</button><button data-output="solid" aria-pressed="false">Solid</button>
+              </div>
+              <label class="check conditional" id="group-row"><input id="group-contours" type="checkbox" checked> Group contours as one object</label>
+              <div class="depth-field conditional" id="depth-row"><label for="solid-depth">Extrusion depth</label><div class="size-wrap"><input id="solid-depth" type="number" value="2" min="0.1" step="0.5"><span>mm</span></div></div>
+              <button class="convert" id="convert" disabled>Already editable</button>
+              <p class="non-modal-note" id="output-note">Double-click the lettering to edit it directly, even when its plane is angled in 3D.</p>
+            </div>
+          </div>
+        </aside>
+      </div>
+      <div class="commandbar"><span class="command-mode">⌘ Command</span><span class="command-prompt" id="command-prompt">Text selected</span><span class="command-copy" id="command-copy">Double-click to edit on canvas, or type in Properties</span><span style="color:#858e96;font-size:10px">Esc · finish</span></div>
+      <div class="statusbar"><span><b id="status-kind">1 paper text</b> · layer: Annotations · 5.000 mm</span><span>Snap: On · End · Point · Mid · Cen</span></div>
+    </section>
+  </div>
+
+  <section class="notes">
+    <article class="note"><div class="no">THE DECISION</div><h2>Remove the modal editor.</h2><p>The drawing is already the best preview. Text content and its visual result should not compete in two separate panes.</p></article>
+    <article class="note"><div class="no">01 / CREATE</div><h3>Click, then type</h3><p>The Text tool places a caret directly on paper or the current construction plane. Escape finishes; Undo removes the object.</p></article>
+    <article class="note"><div class="no">02 / EDIT</div><h3>Two doors, one value</h3><p>Double-click for a caret on canvas, or edit the multiline Content field in Properties. Both update the same object immediately.</p></article>
+    <article class="note"><div class="no">03 / MODEL</div><h3>Text has a plane</h3><p>Place editable lettering on the CPlane, a planar face, or the view plane. “Look at text” faces an awkward plane toward the camera while you edit.</p></article>
+  </section>
+  <div class="flow"><span>Text tool</span><i>→</i><span>choose plane</span><i>→</i><span>click position</span><i>→</i><span>type on canvas</span><i>→</i><span>format in context</span><i>→</i><span>keep editable or create geometry</span></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const app = $('#app'), object = $('#text-object'), content = $('#content-field');
+const families = {'Inter':'Inter, sans-serif','Source Sans 3':'Arial, sans-serif','Source Serif 4':'Georgia, serif','Space Grotesk':'Trebuchet MS, sans-serif','IBM Plex Mono':'Consolas, monospace'};
+let editing = false, placing = false, creating = false, converted = false, output = 'editable';
+
+function plainText() { return object.innerText.replace(/\n$/, ''); }
+function setContent(value, fromObject=false) {
+  if (!fromObject) object.innerText = value;
+  content.value = value;
+  if (!value.trim()) object.innerText = 'Type something…';
+}
+function fontWeight(style) { return style === 'Bold' ? '700' : style === 'Medium' ? '550' : '400'; }
+function applyTypography() {
+  const family = $('#top-family').value, style = $('#top-style').value;
+  const size = Math.max(.1, Number($('#top-size').value) || 5);
+  object.style.fontFamily = families[family];
+  object.style.fontWeight = fontWeight(style);
+  object.style.fontStyle = style === 'Italic' ? 'italic' : 'normal';
+  object.style.fontSize = (20 + Math.min(size, 20) * 2.5) + 'px';
+  $('#panel-family').value = family; $('#panel-style').value = style; $('#panel-size').value = size;
+  $$('.unit').forEach(el => el.textContent = app.dataset.space === 'paper' ? 'mm' : 'mm');
+  const modelKind = output === 'editable' ? 'model text' : output === 'curves' ? 'curve group' : output === 'surface' ? 'surface group' : 'text solid';
+  $('.statusbar span:first-child').innerHTML = `<b id="status-kind">1 ${app.dataset.space === 'paper' ? 'paper text' : modelKind}</b> · layer: ${app.dataset.space === 'paper' ? 'Annotations' : 'Default'} · ${size.toFixed(3)} mm`;
+}
+function align(value) {
+  object.dataset.align = value;
+  $$('.align button, .align-wide button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.align === value)));
+}
+function enterEdit(selectAll=false) {
+  if (converted) return;
+  editing = true; placing = false;
+  object.contentEditable = 'true'; object.classList.add('editing','selected');
+  $('#edit-chip').classList.remove('hidden'); $('#viewport').classList.remove('placing');
+  $('#hint').innerHTML = '<b>Editing:</b> type directly · Esc finishes';
+  $('#command-prompt').textContent = 'Editing text'; $('#command-copy').textContent = 'Typing changes the selected object directly';
+  object.focus({preventScroll:true});
+  if (selectAll) { const range=document.createRange(), sel=getSelection(); range.selectNodeContents(object); sel.removeAllRanges(); sel.addRange(range); }
+}
+function finishEdit() {
+  if (!editing) return;
+  editing = false; object.contentEditable = 'false'; object.classList.remove('editing');
+  $('#edit-chip').classList.add('hidden'); setContent(plainText(), true);
+  $('#hint').innerHTML = '<b>Selected:</b> double-click to type · drag to move';
+  $('#command-prompt').textContent = 'Text selected'; $('#command-copy').textContent = 'Double-click to edit on canvas, or type in Properties';
+  const finalizeOutput = creating && output !== 'editable'; creating = false;
+  if (finalizeOutput) convert();
+}
+function beginPlace() {
+  if (converted) { converted = false; object.classList.remove('curves','surface','solid'); content.disabled = false; }
+  finishEdit(); placing = true; $('#viewport').classList.add('placing');
+  $('#hint').innerHTML = '<b>Text:</b> click a position, then type';
+  $('#command-prompt').textContent = 'Text position'; $('#command-copy').textContent = 'Click on the page to place a live caret';
+}
+function setSpace(space) {
+  finishEdit(); placing = false; $('#viewport').classList.remove('placing');
+  app.dataset.space = space;
+  $$('.workspace-switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.space === space)));
+  $('#space-badge').textContent = space === 'paper' ? 'Paper' : 'Model';
+  $('#status-kind').textContent = space === 'paper' ? '1 paper text' : '1 model text';
+  $('#hint').innerHTML = space === 'paper' ? '<b>Selected:</b> double-click to type · drag to move' : '<b>Model text:</b> editable until you convert it';
+  applyTypography();
+}
+function toggleConversion() {
+  converted ? setOutput('editable', true) : convert();
+}
+function convert() {
+  if (output === 'editable') return;
+  finishEdit(); converted = true; object.classList.remove('curves','surface','solid'); object.classList.add(output); object.contentEditable = 'false';
+  const labels = {curves:'curve group',surface:'planar surface group',solid:'text solid'};
+  $('#geometry-state').textContent = labels[output];
+  $('#convert').textContent = 'Undo conversion'; $('#convert').classList.add('undo'); $('#convert').disabled = false;
+  content.disabled = true; $('#command-prompt').textContent = labels[output][0].toUpperCase()+labels[output].slice(1)+' selected';
+  $('#command-copy').textContent = output === 'solid' ? `${Number($('#solid-depth').value).toFixed(1)} mm deep · capped solid · Ctrl+Z returns editable text` : 'Closed contours · letter holes preserved · Ctrl+Z returns editable text'; applyTypography();
+}
+function undoConversion() {
+  setOutput('editable', true);
+}
+function setOutput(value, undo=false) {
+  output = value; converted = false; object.classList.remove('curves','surface','solid'); content.disabled = false;
+  $$('.output-types button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.output === value)));
+  $('#group-row').classList.toggle('visible', value === 'curves' || value === 'surface');
+  $('#depth-row').classList.toggle('visible', value === 'solid');
+  $('#geometry-state').textContent = value === 'editable' ? 'editable text' : `ready: ${value === 'surface' ? 'planar surfaces' : value}`;
+  $('#convert').disabled = value === 'editable'; $('#convert').textContent = value === 'editable' ? 'Already editable' : `Convert to ${value === 'surface' ? 'surfaces' : value}`; $('#convert').classList.remove('undo');
+  $('#output-note').textContent = value === 'editable' ? 'Double-click the lettering to edit it directly, even when its plane is angled in 3D.' : value === 'solid' ? 'The result is capped. Depth follows the text plane normal.' : 'Counters in B, O and R stay as separate closed contours inside the grouped object.';
+  $('#command-prompt').textContent = undo ? 'Editable text restored' : 'Text output'; $('#command-copy').textContent = value === 'editable' ? 'Double-click to edit on canvas, or type in Properties' : `Ready to convert this text to ${value}`;
+  applyTypography();
+}
+function setPlane(value) {
+  app.dataset.plane = value;
+  $('#placement-plane').value = value;
+  const labels = {cplane:'ON CPlane · World Top',face:'ON FACE · planar surface',view:'ON VIEW PLANE · camera aligned'};
+  $('#plane-tag').textContent = labels[value];
+  $('#command-prompt').textContent = 'Placement plane'; $('#command-copy').textContent = value === 'face' ? 'Click a planar face, then click the text origin' : `New text will be placed on the ${value === 'cplane' ? 'active construction plane' : 'camera plane'}`;
+}
+function toggleLookAt() {
+  const active = !app.classList.contains('camera-facing'); app.classList.toggle('camera-facing', active); $('#look-at').setAttribute('aria-pressed', String(active));
+  $('#look-at').textContent = active ? '↩ Return to plane' : '◎ Look at text';
+  $('#hint').innerHTML = active ? '<b>Editing view:</b> plane faced toward camera · object has not moved' : '<b>Model text:</b> editable on its original plane';
+}
+
+object.addEventListener('dblclick', e => { e.stopPropagation(); enterEdit(); });
+object.addEventListener('click', e => { e.stopPropagation(); object.classList.add('selected'); });
+object.addEventListener('input', () => setContent(plainText(), true));
+content.addEventListener('input', () => setContent(content.value));
+$('#new-text').addEventListener('click', beginPlace);
+$('#viewport').addEventListener('mousemove', e => { const r=$('#viewport').getBoundingClientRect(); $('#placing-ghost').style.left=(e.clientX-r.left+8)+'px'; $('#placing-ghost').style.top=(e.clientY-r.top-20)+'px'; });
+$('#sheet').addEventListener('click', e => {
+  if (!placing || e.target === object) return;
+  const r=$('#sheet').getBoundingClientRect(); object.style.left=((e.clientX-r.left)/r.width*100)+'%'; object.style.top=((e.clientY-r.top)/r.height*100)+'%';
+  $('#baseline').style.left=object.style.left; $('#baseline').style.top=`calc(${object.style.top} + 49px)`;
+  $('#edit-chip').style.left=object.style.left; $('#edit-chip').style.top=`calc(${object.style.top} - 32px)`;
+  creating = true; setContent(''); enterEdit(true);
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if (placing) { placing=false; $('#viewport').classList.remove('placing'); } finishEdit(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && converted) { e.preventDefault(); undoConversion(); }
+});
+$$('.workspace-switch button').forEach(b => b.addEventListener('click', () => setSpace(b.dataset.space)));
+$$('.align button, .align-wide button').forEach(b => b.addEventListener('click', () => align(b.dataset.align)));
+[['top-family','panel-family'],['top-style','panel-style'],['top-size','panel-size']].forEach(([top,panel]) => {
+  $('#'+top).addEventListener('input', () => { $('#'+panel).value=$('#'+top).value; applyTypography(); });
+  $('#'+panel).addEventListener('input', () => { $('#'+top).value=$('#'+panel).value; applyTypography(); });
+});
+$('#convert').addEventListener('click', toggleConversion);
+$$('.output-types button').forEach(b => b.addEventListener('click', () => setOutput(b.dataset.output)));
+$('#placement-plane').addEventListener('change', e => setPlane(e.target.value));
+$('#look-at').addEventListener('click', toggleLookAt);
+$('#solid-depth').addEventListener('input', () => { if (converted && output === 'solid') convert(); });
+applyTypography(); align('left');
+const demo = new URLSearchParams(location.search);
+if (demo.get('space') === 'model' || demo.has('curves')) setSpace('model');
+setPlane(demo.get('plane') || 'cplane');
+const demoOutput = demo.get('output') || (demo.has('curves') ? 'curves' : 'editable');
+if (demoOutput !== 'editable') { setOutput(demoOutput); convert(); }
+if (demo.has('look')) toggleLookAt();
+if (demo.has('edit')) enterEdit();
+if (demo.has('place')) beginPlace();
+</script>
+</body>
+</html>
