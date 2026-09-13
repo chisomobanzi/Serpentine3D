@@ -23,6 +23,11 @@ from .camera import STANDARD_VIEWS
 # is typed in and read by the same rules as the `detailscale` command
 SCALE_PRESETS = ["1:1", "1:2", "1:5", "1:10", "1:20", "1:50", "1:100", "1:200"]
 
+# what the Convert button says for each geometry output of model text
+CONVERT_LABELS = {"curves": "Convert to curves",
+                  "surface": "Convert to surfaces",
+                  "solid": "Convert to solid"}
+
 
 class PropertiesPanel(QWidget):
     modelTextChanged = Signal(str, str)
@@ -153,6 +158,9 @@ class PropertiesPanel(QWidget):
         self.text_output.addItem("Curves", "curves")
         self.text_output.addItem("Planar surfaces", "surface")
         self.text_output.addItem("Solid", "solid")
+        self.text_output.setToolTip(
+            "Keep the lettering editable, or choose curves, surfaces or a "
+            "solid and press the Convert button that appears")
         self.text_output.currentIndexChanged.connect(
             self._update_text_output_controls)
         form.addRow("Output", self.text_output)
@@ -188,7 +196,9 @@ class PropertiesPanel(QWidget):
         self.look_at_text = QPushButton("Look at text")
         self.look_at_text.setObjectName("look_at_text")
         self.look_at_text.setToolTip(
-            "Face the selected text while editing; click again to restore")
+            "Turn the camera square to the text plane so it reads upright "
+            "(Zoom Selected keeps the current angle); click again to "
+            "restore the view")
         self.look_at_text.clicked.connect(self.lookAtTextRequested)
         form.addRow(self.look_at_text)
 
@@ -384,9 +394,16 @@ class PropertiesPanel(QWidget):
         self.text_group_output.setEnabled(grouped)
         self.form.setRowVisible(self.text_solid_depth, solid)
         self.text_solid_depth.setEnabled(solid)
-        can_convert = (selected is not None and output != "editable"
+        # The button only exists once there is something to convert *to*:
+        # under "Editable text" a greyed "Convert to geometry" reads as a
+        # broken control (issue #24), so it is hidden rather than disabled,
+        # and when shown it names the output it will make.
+        label = CONVERT_LABELS.get(output)
+        can_convert = (selected is not None and label is not None
                        and self._live_text_id != selected.id)
-        self.form.setRowVisible(self.text_convert, selected is not None)
+        if label is not None:
+            self.text_convert.setText(label)
+        self.form.setRowVisible(self.text_convert, can_convert)
         self.text_convert.setEnabled(can_convert)
 
     def _convert_text_output(self):

@@ -107,8 +107,9 @@ paper space, with a high-contrast square marker at the insertion point and
 corners. The selection rectangle and snap bounds are identical and follow the
 actual font, alignment and named annotation style drawn on the sheet.
 
-Choose **Curves**, **Planar surfaces** or **Solid** in Properties when you need
-ordinary modelling geometry. Curves and surfaces are grouped by default, so
+Choose **Curves**, **Planar surfaces** or **Solid** under Output in Properties
+when you need ordinary modelling geometry, then press the Convert button that
+appears beneath it. Curves and surfaces are grouped by default, so
 selecting one contour selects the whole string; use `ungroup` to work with
 individual pieces. Every output preserves the counters in letters such as B,
 O and R. Solid output adds a positive depth along the text plane normal and is

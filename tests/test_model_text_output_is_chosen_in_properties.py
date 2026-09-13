@@ -162,9 +162,9 @@ def test_properties_exposes_contextual_non_modal_output_controls(
     assert {output.itemData(i) for i in range(output.count())} == {
         "editable", "curves", "surface", "solid"}
     assert output.currentData() == "editable"
-    assert convert is not None and not convert.isHidden()
-    assert not convert.isEnabled(), (
-        "Editable is already the current form, so there is nothing to convert")
+    assert convert is not None and convert.isHidden(), (
+        "Editable is already the current form, so a Convert button would be "
+        "a dead control (issue #24)")
     _control(window, QCheckBox, "text_group_output",
              visible=False, enabled=False)
     _control(window, QDoubleSpinBox, "text_solid_depth",
@@ -176,14 +176,45 @@ def test_properties_exposes_contextual_non_modal_output_controls(
         assert group.isChecked(), "Curve and surface output should group by default"
         _control(window, QDoubleSpinBox, "text_solid_depth",
                  visible=False, enabled=False)
-        assert convert.isEnabled()
+        _control(window, QPushButton, "text_convert")
 
     _choose(output, "solid")
     _control(window, QCheckBox, "text_group_output",
              visible=False, enabled=False)
     depth = _control(window, QDoubleSpinBox, "text_solid_depth")
     assert depth.value() > 0.
-    assert convert.isEnabled()
+    _control(window, QPushButton, "text_convert")
+
+    _choose(output, "editable")
+    _control(window, QPushButton, "text_convert", visible=False, enabled=False)
+
+
+def test_the_convert_button_names_what_the_text_will_become(
+        window, lettering_font, monkeypatch):
+    """A button that reads 'Convert to geometry' under 'Output: Editable
+    text' looks clickable and does nothing (issue #24). The button only
+    exists once a geometry output is chosen, and says which one."""
+    _forbid_modal_text_ui(monkeypatch)
+    obj = window.scene.add(_source_text(lettering_font), name="Lettering")
+    window.selection.set([obj.id])
+    QApplication.processEvents()
+    output, _group, _depth, convert = _output_controls(window)
+
+    for value, label in (("curves", "Convert to curves"),
+                         ("surface", "Convert to surfaces"),
+                         ("solid", "Convert to solid")):
+        _choose(output, value)
+        assert convert.text() == label
+        assert not convert.isHidden() and convert.isEnabled()
+
+    # Re-selecting the same text later starts from "Editable text" again
+    # with no dead button on show.
+    window.selection.clear()
+    QApplication.processEvents()
+    window.selection.set([obj.id])
+    QApplication.processEvents()
+    assert output.currentData() == "editable"
+    assert convert.isHidden()
 
 
 @pytest.mark.parametrize("output", ["curves", "surface", "solid"])
