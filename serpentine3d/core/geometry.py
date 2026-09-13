@@ -1886,6 +1886,46 @@ def _reach_along(shape, direction) -> tuple:
     return min(reach), max(reach)
 
 
+def _reaching_cutter(curve, target):
+    """The cutter stretched a little past both ends before it is swept.
+
+    A curve snapped so its ends sit on the surface's edges lands a micron
+    to a fraction of a millimetre inside them, and the splitter then finds
+    no crossing at all: only a cutter that overlapped the edges would work
+    (issue #22). Rhino counts a curve that gets to the edge within tolerance
+    as reaching it, and stretching the tool is harmless: past the edge there
+    is nothing left to cut, and a cutter that stops well short still fails
+    the way it should.
+    """
+    if is_closed_curve(curve):
+        return curve
+    lo, hi = bbox(target)
+    reach = max(100.0 * tol(), 1e-3 * math.dist(lo, hi))
+    try:
+        runs = _wire_bsplines(to_wire(curve))
+    except Exception:            # OCCT raises its own types for a bad wire
+        return curve
+    if not runs:
+        return curve
+    pieces = [curve]
+    for bs, t, sign in ((runs[0], runs[0].FirstParameter(), -1.0),
+                        (runs[-1], runs[-1].LastParameter(), 1.0)):
+        p = gp_Pnt()
+        v = gp_Vec()
+        bs.D1(t, p, v)
+        n = v.Magnitude()
+        if n < 1e-12:
+            continue
+        tip = (p.X() + sign * reach * v.X() / n,
+               p.Y() + sign * reach * v.Y() / n,
+               p.Z() + sign * reach * v.Z() / n)
+        pieces.append(make_line((p.X(), p.Y(), p.Z()), tip))
+    try:
+        return join_curves(pieces)
+    except GeometryError:
+        return curve
+
+
 def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
     """Split a curve or surface by cutting objects; returns the pieces.
 
@@ -1916,6 +1956,7 @@ def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
         if kind in ("surface", "solid") and shape_kind(c) == "curve":
             # sweep the cutter clear through the target, starting a little
             # behind whichever of the two comes first along the sweep
+            c = _reaching_cutter(c, target)
             tmn, tmx = _reach_along(target, d)
             cmn, cmx = _reach_along(c, d)
             t0, t1 = min(tmn, cmn) - 1.0, max(tmx, cmx) + 1.0
