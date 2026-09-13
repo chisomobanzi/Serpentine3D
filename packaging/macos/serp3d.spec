@@ -2,6 +2,9 @@
 # Build (from this directory, in a venv with serpentine3d + pyinstaller):
 #   pyinstaller --clean -y serp3d.spec
 # Produces dist/Serpentine3D.app.  See build-dmg.sh for the full flow.
+import importlib.util
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_dynamic_libs
 
 # OCP.so links the OCCT runtime via @loader_path/.dylibs/libTK*.dylib, and
@@ -10,12 +13,17 @@ from PyInstaller.utils.hooks import collect_dynamic_libs
 binaries = collect_dynamic_libs("OCP") + collect_dynamic_libs("vtkmodules")
 # libE57 needs the Xerces XML runtime shipped beside its extension.
 binaries += collect_dynamic_libs("pye57")
+dwg_root = Path(importlib.util.find_spec("serpentine3d").origin).parent / "_vendor/libredwg"
+dwg_target = "serpentine3d/_vendor/libredwg"
+binaries += [(str(dwg_root / "dwg2dxf"), dwg_target)]
+dwg_data = [(str(path), dwg_target) for path in dwg_root.iterdir()
+            if path.name != "dwg2dxf"]
 
 a = Analysis(
     ["serp3d_entry.py"],
     pathex=[],
     binaries=binaries,
-    datas=[],
+    datas=dwg_data,
     hiddenimports=[],
     excludes=[
         "tkinter",

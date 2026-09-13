@@ -6,6 +6,9 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
+& $Python ..\prepare_dwg.py
+if ($LASTEXITCODE -ne 0) { throw "DWG converter staging failed" }
+
 & $Python -m pip install --quiet pyinstaller
 # setuptools stages the package into the repo's build/ and never takes
 # anything out again, so a rename leaves the old tree there to be installed

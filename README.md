@@ -266,8 +266,9 @@ Settings live in `~/.config/serpentine3d/settings.json`.
 | `.stl` | ✓ | ✓ | 3D printing — watertight binary STL (or ASCII) for slicers, with draft→ultra mesh-quality presets on export; imports both |
 | `.3mf` | | ✓ | 3D printing — modern container (real units, colour, multi-part); Bambu Studio / PrusaSlicer / Cura prefer it over STL |
 | `.dxf` | ✓ | ✓ | Curves/meshes with layers; layout sheets export at paper scale |
+| `.dwg` | ✓ | — | Bundled reader; geometry import through DXF, including model/layout drag-and-drop |
 | `.svg` | ✓ | ✓ | Paths import as curves (béziers exact); layouts export as vector SVG |
-| `.glb` | | ✓ | Binary glTF with materials (Unreal/Blender/web) |
+| `.glb` | ✓ | ✓ | Binary glTF static meshes with base materials (Unreal/Blender/web) |
 | `.usda` | | ✓ | USD for virtual-production pipelines |
 | `.e57` | ✓ | | Point clouds: separate registered scans, RGB colours, Cartesian/spherical coordinates; metres converted to model units |
 

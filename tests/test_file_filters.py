@@ -145,10 +145,10 @@ def test_all_files_filter_invents_no_extension():
 
 
 def test_import_filter_does_not_advertise_export_only_formats():
-    """.3mf/.glb/.usd export but cannot be imported — offering them on Open
+    """.3mf/.usd export but cannot be imported — offering them on Open
     produces a confusing 'Unsupported import format' error."""
     offered = _exts_in(fileio.import_filter())
-    for ext in (".3mf", ".glb", ".usda"):
+    for ext in (".3mf", ".usda"):
         assert ext not in offered
 
 

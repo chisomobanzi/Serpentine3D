@@ -13,6 +13,9 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 DIST="$HERE/dist"
 PYVER="${SERP3D_APPIMAGE_PYTHON:-3.12}"
 
+# Bundle the reader; opening a DWG must never require a user-side download.
+python3 "$ROOT/packaging/prepare_dwg.py"
+
 # recipe directory: its basename is the fallback app name; the .desktop
 # Name= field (Serpentine3D) names the final AppImage.
 RECIPE="$DIST/serpentine3d"
@@ -101,9 +104,26 @@ if [ -n "$BUILT" ]; then
         exit 1
     fi
 
-    "$PROBE/squashfs-root/usr/bin/python$PYVER" -P - << 'PY'
+    "$PROBE/squashfs-root/usr/bin/python$PYVER" -P - "$ROOT/tests/fixtures/dwg/line-and-circle.dwg" << 'PY'
+import sys
+import tempfile
+from pathlib import Path
+import numpy as np
 import serpentine3d.app
 import pye57  # Load libE57 and its bundled Xerces runtime before handoff.
+from serpentine3d import fileio
+from serpentine3d.core.scene import Scene
+from serpentine3d.core import geometry
+# Exercise the shipped binary through the shipped importer, not just --version.
+assert fileio.import_file(Scene(), sys.argv[1]) == 2
+with tempfile.TemporaryDirectory() as directory:
+    source = Scene()
+    source.add(geometry.make_box((0, 0, 0), 10, 20, 30))
+    glb = str(Path(directory) / "box.glb")
+    fileio.export_file(source, glb)
+    loaded = Scene()
+    assert fileio.import_file(loaded, glb) == 1
+    assert np.allclose(loaded.all()[0].bbox(), ((0, 0, 0), (10, 20, 30)))
 PY
     echo "Packaged application import check passed"
 fi

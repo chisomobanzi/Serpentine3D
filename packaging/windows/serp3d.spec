@@ -11,6 +11,12 @@ from PyInstaller.utils.hooks import collect_dynamic_libs
 vtk_bins = collect_dynamic_libs("vtkmodules")
 # libE57 needs the Xerces XML runtime shipped beside its extension.
 e57_bins = collect_dynamic_libs("pye57")
+dwg_root = Path(importlib.util.find_spec("serpentine3d").origin).parent / "_vendor/libredwg"
+dwg_target = "serpentine3d/_vendor/libredwg"
+dwg_bins = [(str(dwg_root / name), dwg_target)
+            for name in ("dwg2dxf.exe", "libredwg-0.dll")]
+dwg_data = [(str(path), dwg_target) for path in dwg_root.iterdir()
+            if path.suffix not in {".dll", ".exe"}]
 
 # ProductName/ProductVersion on the .exe, generated from the package version.
 # SignPath enforces both at signing time; Windows shows them in Properties.
@@ -23,8 +29,8 @@ version_file = str(make_version_info.main())
 a = Analysis(
     ["serp3d_entry.py"],
     pathex=[],
-    binaries=vtk_bins + e57_bins,
-    datas=[],
+    binaries=vtk_bins + e57_bins + dwg_bins,
+    datas=dwg_data,
     hiddenimports=[],
     excludes=[
         "tkinter",

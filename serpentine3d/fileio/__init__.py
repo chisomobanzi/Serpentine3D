@@ -16,8 +16,10 @@ IMPORT_FORMATS = [
     ("Rhino", (".3dm",)),
     ("Wavefront OBJ", (".obj",)),
     ("Autodesk FBX", (".fbx",)),
+    ("glTF binary", (".glb",)),
     ("STL", (".stl",)),
     ("DXF", (".dxf",)),
+    ("DWG", (".dwg",)),
     ("SVG", (".svg",)),
     ("PLY point cloud", (".ply",)),
     ("E57 point cloud", (".e57",)),
@@ -177,9 +179,24 @@ def _import_file(scene, path: str, ext: str, report) -> int:
         for name, shape in named:
             scene.add(shape, name=name)
         return len(named)
+    if ext == ".glb":
+        from . import gltf_import
+        items = gltf_import.import_glb(path, units=scene.units,
+                                      progress=report.part(0.0, 0.95))
+        # Validate and offer cancellation before changing the drawing.
+        adding = report.part(0.95, 1.0)
+        for done, (name, shape, material) in enumerate(items, 1):
+            added = scene.add(shape, name=name)
+            added.material = material
+            added.color = material["color"]
+            adding.tick(done / len(items), f"Adding mesh {done} of {len(items)}")
+        return len(items)
     if ext == ".dxf":
         from . import dxf as dxf_mod
         return dxf_mod.import_dxf(scene, path)
+    if ext == ".dwg":
+        from . import dwg
+        return dwg.import_dwg(scene, path, report)
     if ext == ".svg":
         from . import svg as svg_mod
         return svg_mod.import_svg(scene, path)

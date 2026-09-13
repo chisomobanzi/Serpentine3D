@@ -1871,7 +1871,7 @@ class MainWindow(QMainWindow):
         try:
             self.history.checkpoint("import")
             ext = os.path.splitext(path)[1].lower()
-            if paper_drop is not None and ext in {".dxf", ".svg"}:
+            if paper_drop is not None and ext in {".dxf", ".dwg", ".svg"}:
                 layout_id, px, py = paper_drop
                 layout = next((lay for lay in self.scene.layouts
                                if lay.id == layout_id), None)

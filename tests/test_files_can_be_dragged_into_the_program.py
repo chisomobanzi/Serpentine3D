@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
@@ -127,7 +129,8 @@ def test_every_import_format_reaches_the_importer_with_its_local_path(
     assert drop is not None and drop.isAccepted()
     assert len(seen) == 1
     assert seen[0][0] is window.scene
-    assert seen[0][1] == str(path)
+    # QUrl uses forward slashes on Windows; both spellings name the same file.
+    assert Path(seen[0][1]) == path
     assert callable(seen[0][2]), "Dropped imports need the usual progress/cancel feedback"
 
 
@@ -175,7 +178,7 @@ def test_a_mixed_drop_imports_local_supported_files_only(window, tmp_path, monke
 
     assert enter.isAccepted()
     assert drop is not None and drop.isAccepted()
-    assert seen == [str(valid)]
+    assert [Path(path) for path in seen] == [valid]
     assert len(window.scene.all()) == 1
 
 
@@ -188,7 +191,7 @@ def test_an_import_error_is_reported_and_does_not_lose_other_dropped_files(
     warnings = []
 
     def import_with_one_error(scene, path, progress=None):
-        if path == str(broken):
+        if Path(path) == broken:
             raise ValueError("Cannot read broken.step")
         return original(scene, path, progress=progress)
 

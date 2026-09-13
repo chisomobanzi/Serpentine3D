@@ -26,7 +26,9 @@ jobs:
       - name: Unit tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: uv run pytest tests/ -q --ignore=tests/e2e_dod.py
+        run: |
+          uv run python packaging/prepare_dwg.py
+          uv run pytest tests/ -q --ignore=tests/e2e_dod.py
 
   headless-smoke:
     runs-on: ubuntu-latest

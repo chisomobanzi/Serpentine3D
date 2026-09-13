@@ -1,4 +1,5 @@
 .venv/
+serpentine3d/_vendor/libredwg/
 __pycache__/
 *.pyc
 *.egg-info/

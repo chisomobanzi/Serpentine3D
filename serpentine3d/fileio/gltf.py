@@ -11,12 +11,14 @@ import struct
 import numpy as np
 
 from ..core.tessellate import tessellate
+from ..utils.units import convert
 
 # Z-up -> Y-up: (x, y, z) -> (x, z, -y)
 _ZUP_TO_YUP = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], np.float32)
 
 
 def export_glb(scene, path: str, only_ids: list | None = None):
+    metre_scale = convert(1.0, scene.units, "m")
     objs = scene.all()
     if only_ids:
         objs = [o for o in objs if o.id in only_ids]
@@ -40,7 +42,7 @@ def export_glb(scene, path: str, only_ids: list | None = None):
         mesh = tessellate(obj.shape)
         if not mesh.has_faces:
             continue
-        verts = (mesh.vertices @ _ZUP_TO_YUP.T).astype(np.float32)
+        verts = (mesh.vertices @ _ZUP_TO_YUP.T * metre_scale).astype(np.float32)
         norms = (mesh.normals @ _ZUP_TO_YUP.T).astype(np.float32)
         idx = mesh.triangles.astype(np.uint32).ravel()
 

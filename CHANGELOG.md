@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Import GLB models.** Open, import or drag in binary glTF 2.0 static meshes
+  with object names, node transforms and base material properties. Models are
+  converted from glTF's Y-up metres into the current model units. GLB export
+  now writes metres as well, so round trips preserve physical size.
+- **Import DWG drawings (#21).** Choose File > Import or drag a DWG onto the
+  model or a layout sheet. Packaged applications include the converter, with
+  no separate installation or runtime download. Geometry uses the existing
+  DXF importer; layout drops land at the cursor and support Undo.
+
 ## 0.10.0 — 2026-09-13
 
 ### Added

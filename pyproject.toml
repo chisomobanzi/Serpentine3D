@@ -40,5 +40,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["serpentine3d*"]
 
+[tool.setuptools.package-data]
+serpentine3d = ["_vendor/libredwg/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

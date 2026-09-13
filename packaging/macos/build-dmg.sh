@@ -21,6 +21,8 @@ APPNAME="Serpentine3D"
 ARCH="$(uname -m)"
 DMG="${APPNAME}-${VERSION}-${ARCH}.dmg"
 
+"$PY" ../prepare_dwg.py
+
 echo "=== ensure pip (uv-created venvs ship without it) ==="
 if ! "$PY" -m pip --version >/dev/null 2>&1; then
     "$PY" -m ensurepip --upgrade >/dev/null 2>&1 \
