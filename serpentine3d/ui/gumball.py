@@ -206,6 +206,7 @@ class Gumball:
                 or self._cv_target() is not None
                 or self._pushpull_target() is not None
                 or self._multiface_target() is not None
+                or self._segment_target() is not None
                 or self._fillet_target() is not None)
 
     def _cv_target(self):
@@ -366,6 +367,44 @@ class Gumball:
         t2 = np.cross(axis, t1)
         return oid, idxs, anchor, (t1, t2, axis)
 
+    def _segment_target(self):
+        """({obj_id: [edge_index...]}, anchor) when what is held is one or
+        more segments of curves, else None.
+
+        Rhino's sub-object gumball on a polycurve: Ctrl+Shift-click one side
+        of a rectangle and drag it, and the sides it meets stretch after it.
+        A held edge of a solid is a fillet handle instead, so this only
+        answers when every held edge belongs to a curve, and a held control
+        point still comes first.
+        """
+        subs = getattr(self.vp.selection, "subobjects", None)
+        if not subs:
+            return None
+        return self._remembered(("segments", tuple(subs)),
+                                self._segment_target_of)
+
+    def _segment_target_of(self):
+        subs = list(getattr(self.vp.selection, "subobjects", ()))
+        held: dict = {}
+        mids = []
+        for oid, kind, idx in subs:
+            if kind != "edge":
+                return None
+            obj = self.vp.scene.get(oid)
+            if obj is None or obj.kind != "curve":
+                return None
+            try:
+                elist = g.edges_of(obj.shape)
+                if not (0 <= idx < len(elist)):
+                    return None
+                mids.append(np.asarray(g.centroid(elist[idx]), float))
+            except g.GeometryError:
+                return None
+            held.setdefault(oid, []).append(int(idx))
+        if not held:
+            return None
+        return held, np.mean(mids, axis=0)
+
     def _fillet_target(self):
         """For one or more selected edges on a single solid, return
         (obj_id, [edge_index...], anchor, (t1, t2, outward)); else None.
@@ -378,8 +417,8 @@ class Gumball:
         if not subs:
             return None
         edges = [(oid, idx) for (oid, kind, idx) in subs if kind == "edge"]
-        if not edges:
-            return None
+        if not edges or self._segment_target() is not None:
+            return None                       # a curve segment: whole gumball
         oid = edges[0][0]
         idxs = [idx for (o, idx) in edges if o == oid]   # one solid at a time
         obj = self.vp.scene.get(oid)
@@ -689,16 +728,23 @@ class Gumball:
             if ft is not None:               # then edge fillet
                 _, _, anchor, basis = ft
                 return anchor, basis
-        objs = self.vp.selection.objects()
-        if not objs:
-            return None
-        # Once per frame while you orbit, and again on every mouse move for
-        # the hover test — so it asks each object for bounds it has already
-        # been asked for. SceneObject.bbox remembers them; the union is one
-        # array operation because a per-object numpy loop over a whole
-        # drawing costs more than the measuring used to.
-        boxes = np.array([o.bbox() for o in objs], float)
-        anchor = (boxes[:, 0].min(axis=0) + boxes[:, 1].max(axis=0)) / 2
+        seg = (self._segment_target() if self.drag is None
+               else self.drag.get("segments"))
+        if seg is not None and self.drag is None:
+            anchor = seg[1]                  # a held curve segment: on it
+        elif seg is not None:
+            anchor = self.drag["anchor"]
+        else:
+            objs = self.vp.selection.objects()
+            if not objs:
+                return None
+            # Once per frame while you orbit, and again on every mouse move
+            # for the hover test — so it asks each object for bounds it has
+            # already been asked for. SceneObject.bbox remembers them; the
+            # union is one array operation because a per-object numpy loop
+            # over a whole drawing costs more than the measuring used to.
+            boxes = np.array([o.bbox() for o in objs], float)
+            anchor = (boxes[:, 0].min(axis=0) + boxes[:, 1].max(axis=0)) / 2
         if self.align == "world" and self.vp._detail_eye() is None:
             return anchor, (np.array([1.0, 0.0, 0.0]),
                             np.array([0.0, 1.0, 0.0]),
@@ -1162,14 +1208,19 @@ class Gumball:
         anchor, axes = state
         vp = self.vp
         cv = self._cv_target()
-        pp = None if cv is not None else self._pushpull_target()
-        mf = (None if (cv is not None or pp is not None)
+        seg = None if cv is not None else self._segment_target()
+        pp = None if (cv is not None or seg is not None) \
+            else self._pushpull_target()
+        mf = (None if (cv is not None or seg is not None or pp is not None)
               else self._multiface_target())
         ex = (None if (cv is not None or pp is not None or mf is not None)
               else self._extrude_target(handle, modifiers,
                                        axes[handle[1]]))
-        ft = (None if (cv is not None or pp is not None or mf is not None
-                       or ex is not None) else self._fillet_target())
+        if ex is not None:
+            seg = None                        # the box grows the segment
+        ft = (None if (cv is not None or seg is not None or pp is not None
+                       or mf is not None or ex is not None)
+              else self._fillet_target())
         if handle[0] == "ext" and ex is None and pp is None:
             # Nothing here grows. Doing nothing beats quietly moving the
             # thing you were trying to grow.
@@ -1179,6 +1230,15 @@ class Gumball:
         if cv is not None:                    # held control points
             originals = {}
             for oid in cv[0]:
+                obj = vp.scene.get(oid)
+                if obj is not None:
+                    originals[oid] = obj.shape
+            if not originals:
+                return False
+            self.vp.window_checkpoint("gumball " + handle[0])
+        elif seg is not None:                 # held curve segments
+            originals = {}
+            for oid in seg[0]:
                 obj = vp.scene.get(oid)
                 if obj is not None:
                     originals[oid] = obj.shape
@@ -1272,6 +1332,9 @@ class Gumball:
             "handle": handle, "anchor": anchor, "axes": axes,
             "originals": originals,
             "cvs": dict(cv[0]) if cv is not None else None,
+            "segments": ({k: list(v) for k, v in seg[0].items()}
+                         if seg is not None else None),
+            "segment_mids": {},
             "pp": (pp[0], pp[1]) if pp is not None else None,
             "pp_planar": bool(pp[4]) if pp is not None else True,
             "multiface": (mf[0], list(mf[1])) if mf is not None else None,
@@ -1563,34 +1626,38 @@ class Gumball:
     # shape transform says nothing about where a single pole should end up,
     # so each of these says it once, in the two ways it has to be said.
 
-    def _move_by(self, delta):
+    def _apply_points(self, at, whole):
+        """Held control points and held curve segments take the transform
+        as a point map `at`; whole objects take it as the shape transform
+        `whole`."""
         if self.drag.get("cvs"):
-            self._apply_cvs(lambda p: p + delta)
+            self._apply_cvs(at)
+        elif self.drag.get("segments"):
+            self._apply_segments(at)
         else:
-            self._apply(lambda s: g.translate(s, tuple(delta)))
+            self._apply(whole)
+
+    def _move_by(self, delta):
+        self._apply_points(lambda p: p + delta,
+                           lambda s: g.translate(s, tuple(delta)))
 
     def _turn_by(self, anchor, axis, degrees):
-        if self.drag.get("cvs"):
-            self._apply_cvs(lambda p: _turned(p, anchor, axis, degrees))
-        else:
-            self._apply(lambda s: g.rotate(s, tuple(anchor), tuple(axis),
-                                           degrees))
+        self._apply_points(
+            lambda p: _turned(p, anchor, axis, degrees),
+            lambda s: g.rotate(s, tuple(anchor), tuple(axis), degrees))
 
     def _scale_by(self, anchor, axis, value):
         """About `anchor`, along `axis`, or every way if `axis` is None."""
-        cvs = self.drag.get("cvs")
         if axis is None:
-            if cvs:
-                self._apply_cvs(lambda p: anchor + (p - anchor) * value)
-            else:
-                self._apply(lambda s: g.scale(s, tuple(anchor), value))
-        elif cvs:
-            self._apply_cvs(
-                lambda p: p + axis * float(np.dot(p - anchor, axis))
-                * (value - 1.0))
+            self._apply_points(
+                lambda p: anchor + (p - anchor) * value,
+                lambda s: g.scale(s, tuple(anchor), value))
         else:
-            self._apply(lambda s: g.scale_along_axis(
-                s, tuple(anchor), tuple(axis), value))
+            self._apply_points(
+                lambda p: p + axis * float(np.dot(p - anchor, axis))
+                * (value - 1.0),
+                lambda s: g.scale_along_axis(
+                    s, tuple(anchor), tuple(axis), value))
 
     def _scale_in_plane_by(self, anchor, normal, value):
         """Scale equally in the plane through `anchor`, preserving normal."""
@@ -1602,7 +1669,8 @@ class Gumball:
         matrix = np.eye(4)
         matrix[:3, :3] = linear
         matrix[:3, 3] = anchor - linear @ anchor
-        self._apply(lambda s: g.apply_matrix(s, matrix))
+        self._apply_points(lambda p: linear @ p + matrix[:3, 3],
+                           lambda s: g.apply_matrix(s, matrix))
 
     def _rebuild(self, oid, orig, value, make):
         """Show `make(value)` in place of the held solid, or the original
@@ -1720,6 +1788,26 @@ class Gumball:
             except (g.GeometryError, IndexError):
                 pass
 
+    def _apply_segments(self, at):
+        """Put each held segment where `at` says, from the shape the drag
+        began with every time (see _apply_cvs), and note where its middle
+        went so the selection can find it again when the drag ends."""
+        d = self.drag
+        vp = self.vp
+        for obj_id, idxs in d["segments"].items():
+            original = d["originals"].get(obj_id)
+            if original is None or vp.scene.get(obj_id) is None:
+                continue
+            try:
+                edges = g.edges_of(original)
+                mids = {i: at(np.asarray(g.centroid(edges[i]), float))
+                        for i in idxs}
+                vp.scene.replace_shape(
+                    obj_id, g.transform_segments(original, idxs, at))
+            except (g.GeometryError, IndexError):
+                continue
+            d["segment_mids"][obj_id] = mids
+
     def _apply(self, fn):
         d = self.drag
         vp = self.vp
@@ -1802,6 +1890,8 @@ class Gumball:
                 self._resync_face(d)         # curved offsets keep their index
             elif d.get("edge_move"):
                 self._resync_edge(d)
+            elif d.get("segments"):
+                self._resync_segments(d)
             elif d.get("fillet"):
                 self._clear_filleted_edges(d)
             elif d.get("made"):
@@ -1865,6 +1955,30 @@ class Gumball:
             sel.toggle_subobject(oid, "face", old)
         if (oid, "face", best_i) not in sel.subobjects:
             sel.toggle_subobject(oid, "face", best_i)
+
+    def _resync_segments(self, d):
+        """The curve was put back together, so a held segment's index may
+        point at a different segment now: hold the one whose middle is
+        where the drag left it."""
+        sel = self.vp.selection
+        for oid, mids in d["segment_mids"].items():
+            obj = self.vp.scene.get(oid)
+            if obj is None:
+                continue
+            try:
+                edges = g.edges_of(obj.shape)
+                centres = [np.asarray(g.centroid(e), float) for e in edges]
+            except g.GeometryError:
+                continue
+            for old, want in mids.items():
+                best = int(np.argmin([np.linalg.norm(c - want)
+                                      for c in centres]))
+                if best == old:
+                    continue
+                if (oid, "edge", old) in sel.subobjects:
+                    sel.toggle_subobject(oid, "edge", old)
+                if (oid, "edge", best) not in sel.subobjects:
+                    sel.toggle_subobject(oid, "edge", best)
 
     def _resync_edge(self, d):
         """Moving an edge rebuilds the solid and the picked index goes

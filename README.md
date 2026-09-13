@@ -211,6 +211,11 @@ handle — drag it outward, or type a radius, to round the edges; every
 selected edge fillets together at that radius, previewing live. Hold
 **Alt** while dragging to chamfer instead of fillet.
 
+Ctrl+Shift-click one **segment** of a polyline or polycurve and the whole
+gumball stands on that segment: move, turn or scale it and the segments it
+meets stretch after it, so dragging one side of a rectangle resizes the
+rectangle. A straight neighbour stays straight; an arc keeps its far end.
+
 ### Units
 
 `units` sets the document units (mm/cm/m/in/**feet-and-inches**) with an

@@ -2046,11 +2046,12 @@ def _bspline_of_edge(edge):
     return bs
 
 
-def _wire_bsplines(shape) -> list:
-    """The wire's edges as b-splines, in the order and the direction you
-    walk the wire. An edge stored back to front is reversed, so every one of
-    them starts where the one before it finished and the poles read along
-    the curve rather than in whatever order the file happened to hold."""
+def _wire_runs(shape) -> list:
+    """The wire's edges, each with its curve as a b-spline, in the order
+    and the direction you walk the wire. An edge stored back to front is
+    reversed, so every one of them starts where the one before it finished
+    and the poles read along the curve rather than in whatever order the
+    file happened to hold."""
     from OCP.BRepTools import BRepTools_WireExplorer
     out = []
     exp = BRepTools_WireExplorer(occ.to_wire(shape))
@@ -2061,11 +2062,74 @@ def _wire_bsplines(shape) -> list:
         if (_d3(pnt_tuple(bs.StartPoint()), here)
                 > _d3(pnt_tuple(bs.EndPoint()), here)):
             bs.Reverse()
-        out.append(bs)
+        out.append((edge, bs))
         exp.Next()
     if not out:
         raise GeometryError("Not a curve")
     return out
+
+
+def _wire_bsplines(shape) -> list:
+    """The wire's edges as b-splines, in walking order (see _wire_runs)."""
+    return [bs for _edge, bs in _wire_runs(shape)]
+
+
+def transform_segments(shape, indices, fn) -> TopoDS_Shape:
+    """The curve with the segments at `indices` (in edges_of order) put
+    through the point map `fn`, and the segments beside them stretched so
+    the curve stays in one piece.
+
+    Rhino's sub-object gumball on a polycurve: drag one side of a rectangle
+    and the rectangle resizes, because the two sides it meets follow their
+    shared corners. A neighbour that is not held keeps every pole but the
+    one at the corner it shares, so a straight neighbour stays straight
+    and an arc keeps its far end and its shape. A curve of one segment is
+    simply moved whole.
+    """
+    import numpy as np
+    edges = edges_of(shape)
+    held = sorted(set(int(i) for i in indices))
+    if not held or any(not (0 <= i < len(edges)) for i in held):
+        raise GeometryError("Segment index out of range")
+    runs = _wire_runs(to_wire(shape))
+    n = len(runs)
+    at = []                                    # walking position of each held edge
+    for i in held:
+        pos = next((k for k, (e, _bs) in enumerate(runs)
+                    if e.IsSame(edges[i])), None)
+        if pos is None:
+            raise GeometryError("Segment is not part of the curve")
+        at.append(pos)
+    held_pos = set(at)
+
+    def moved(p):
+        q = fn(np.array([p.X(), p.Y(), p.Z()], float))
+        return gp_Pnt(float(q[0]), float(q[1]), float(q[2]))
+
+    splines = [bs for _e, bs in runs]
+    for k in held_pos:
+        bs = splines[k]
+        for j in range(1, bs.NbPoles() + 1):
+            bs.SetPole(j, moved(bs.Pole(j)))
+    if n > 1:
+        closed = is_closed_curve(shape)
+        for k in held_pos:
+            before = k - 1 if k > 0 else (n - 1 if closed else None)
+            after = k + 1 if k < n - 1 else (0 if closed else None)
+            if before is not None and before not in held_pos:
+                nb = splines[before]
+                nb.SetPole(nb.NbPoles(), splines[k].StartPoint())
+            if after is not None and after not in held_pos:
+                nb = splines[after]
+                nb.SetPole(1, splines[k].EndPoint())
+    return _curve_from_splines(splines)
+
+
+def move_segments(shape, indices, delta: Point) -> TopoDS_Shape:
+    """`transform_segments` by a plain shift."""
+    import numpy as np
+    d = np.asarray(delta, float)
+    return transform_segments(shape, indices, lambda p: p + d)
 
 
 def curve_degree(shape) -> int:
