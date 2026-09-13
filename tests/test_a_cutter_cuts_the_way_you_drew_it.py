@@ -118,8 +118,14 @@ def test_trim_cuts_the_same_way(env):
     sel.set([line.id])
     proc.run("trim")
     proc.click_object(box.id)
-    proc.finish_selection()
+    # the pieces are on offer while Trim asks which to throw away
     pieces = _solids(scene)
     assert len(pieces) == 2
     zs = sorted(g.centroid(p.shape)[2] for p in pieces)
     assert zs == pytest.approx([1.5, 4.5], abs=1e-6)
+    top = max(pieces, key=lambda p: g.centroid(p.shape)[2])
+    proc.click_object(top.id)
+    proc.finish_selection()
+    kept = _solids(scene)
+    assert len(kept) == 1
+    assert g.centroid(kept[0].shape)[2] == pytest.approx(1.5, abs=1e-6)

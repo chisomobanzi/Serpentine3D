@@ -290,16 +290,38 @@ def cmd_trim(ctx):
     target = targets[0]
     pieces = g.split_shape(target.shape, [c.shape for c in cutters],
                            direction=tuple(ctx.cplane.normal))
+    if len(pieces) < 2:
+        ctx.echo(f"The cutters do not cross {target.name}; nothing to trim.")
+        return
     added = [_add_split_piece(ctx, p, target) for p in pieces]
     ctx.scene.remove(target.id)
-    doomed = yield SelectReq(
-        "Select the piece(s) to trim away", allow_preselected=False)
+    # Each click takes its piece away at once and the prompt comes back for
+    # the next, the way Rhino does it; Enter or Escape ends with whatever
+    # was trimmed staying trimmed (issue #23). Only the pieces are on offer,
+    # so the cutters and the rest of the model cannot be clicked away.
     piece_ids = {a.id for a in added}
-    doomed = [o for o in doomed if o.id in piece_ids]
-    for o in doomed:
-        ctx.scene.remove(o.id)
-    kept = sum(1 for a in added if ctx.scene.get(a.id))
-    ctx.echo(f"Trimmed {len(doomed)} piece(s); {kept} kept.")
+    trimmed = 0
+    try:
+        while len(piece_ids) > 1:
+            picked = yield SelectReq(
+                "Click the piece to trim away, Enter when done",
+                min_count=0, max_count=1, allow_preselected=False,
+                accept=lambda o: o.id in piece_ids)
+            if not picked:
+                break
+            ctx.scene.remove(picked[0].id)
+            piece_ids.discard(picked[0].id)
+            trimmed += 1
+    finally:
+        if trimmed == 0:
+            # nothing chosen: a trim that trims nothing must not leave the
+            # object split behind it
+            for a in added:
+                ctx.scene.remove(a.id)
+            whole = ctx.scene.add_from(target.shape, target)
+            ctx.scene.update(whole.id, name=target.name)
+    ctx.echo(f"Trimmed {trimmed} piece(s); {len(piece_ids)} kept."
+             if trimmed else f"{target.name} left as it was.")
 
 
 @command("rebuild")

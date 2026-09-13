@@ -160,6 +160,7 @@ class SelectReq(Req):
     allow_preselected: bool = True
     choices: dict | None = None
     preview_fn: object = None
+    accept: object = None                 # callable(obj) -> bool, extra filter
 
 
 def _kinds_phrase(kinds: tuple) -> str:
@@ -928,7 +929,9 @@ class CommandProcessor:
     def _matching(self, obj, req: SelectReq) -> bool:
         if not self.ctx.scene.is_selectable(obj.id):
             return False
-        return not req.kinds or obj.kind in req.kinds
+        if req.kinds and obj.kind not in req.kinds:
+            return False
+        return req.accept is None or bool(req.accept(obj))
 
     def click_object(self, obj_id: str):
         req = self.request
