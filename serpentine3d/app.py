@@ -1496,6 +1496,10 @@ class MainWindow(QMainWindow):
                 vp.set_frame_readout(
                     sides(cursor) if cursor is not None else None, cursor)
 
+    def _is_curve(self, obj_id) -> bool:
+        obj = self.scene.get(obj_id)
+        return obj is not None and obj.kind == "curve"
+
     def _delete_selected(self):
         if self.viewport.space != "model":
             # On a sheet the pick is the layout's own, not the scene's.
@@ -1503,10 +1507,13 @@ class MainWindow(QMainWindow):
                 self.viewport.update()
                 self._update_status()
             return
-        # A held control point or face is as much a pick as a whole object,
-        # and Delete means whichever of them you are holding.
+        # A held control point, face or curve segment is as much a pick as
+        # a whole object, and Delete means whichever of them you are
+        # holding. A solid's edge is not one of them: there is no segment
+        # of it to take away.
         held = any(kind in ("cv", "face")
-                   for (_, kind, _) in self.selection.subobjects)
+                   or (kind == "edge" and self._is_curve(oid))
+                   for (oid, kind, _) in self.selection.subobjects)
         if (self.selection.ids or held) and not self.processor.busy:
             self.run_command("delete")
 

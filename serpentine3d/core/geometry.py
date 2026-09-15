@@ -2132,6 +2132,47 @@ def move_segments(shape, indices, delta: Point) -> TopoDS_Shape:
     return transform_segments(shape, indices, lambda p: p + d)
 
 
+def remove_segments(shape, indices) -> list:
+    """What is left of the curve without the segments at `indices`.
+
+    Taking a side out of a closed curve opens it, and taking a middle
+    segment out of an open one leaves the runs either side with nothing
+    between them, so they come back as separate curves. An empty list
+    means every segment went and there is no curve left.
+    """
+    edges = edges_of(shape)
+    drop = set(int(i) for i in indices)
+    if any(not (0 <= i < len(edges)) for i in drop):
+        raise GeometryError("Segment index out of range")
+    if not drop:
+        return [copy_shape(shape)]
+    runs = _wire_runs(to_wire(shape))
+    n = len(runs)
+    gone = set()
+    for i in drop:
+        pos = next((k for k, (e, _bs) in enumerate(runs)
+                    if e.IsSame(edges[i])), None)
+        if pos is None:
+            raise GeometryError("Segment is not part of the curve")
+        gone.add(pos)
+    kept = [k for k in range(n) if k not in gone]
+    if not kept:
+        return []
+    groups = [[kept[0]]]
+    for k in kept[1:]:
+        if k == groups[-1][-1] + 1:
+            groups[-1].append(k)
+        else:
+            groups.append([k])
+    if (len(groups) > 1 and is_closed_curve(shape)
+            and groups[0][0] == 0 and groups[-1][-1] == n - 1):
+        # the curve ran on round the loop, so the last run and the first
+        # are one run with the join in the middle of it
+        groups[0] = groups.pop() + groups[0]
+    return [_curve_from_splines([runs[k][1] for k in group])
+            for group in groups]
+
+
 def curve_degree(shape) -> int:
     """The degree of a curve. A wire of mixed degree reports its highest,
     which is the one that decides what the whole thing can represent."""

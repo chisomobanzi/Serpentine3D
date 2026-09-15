@@ -215,6 +215,9 @@ Ctrl+Shift-click one **segment** of a polyline or polycurve and the whole
 gumball stands on that segment: move, turn or scale it and the segments it
 meets stretch after it, so dragging one side of a rectangle resizes the
 rectangle. A straight neighbour stays straight; an arc keeps its far end.
+Press **Delete** with a segment held and the segment goes: a side out of a
+closed curve opens it, and a middle segment out of an open one leaves the
+runs either side as separate curves.
 
 ### Units
 

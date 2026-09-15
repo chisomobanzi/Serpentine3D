@@ -96,6 +96,62 @@ def _delete_held_faces(ctx) -> bool:
     return True
 
 
+def _delete_held_segments(ctx) -> bool:
+    """Take out any Ctrl+Shift-picked segments of curves. True when that
+    is what Delete meant.
+
+    A segment is already something you hold: it is how the gumball takes
+    hold of one side of a rectangle. Holding one and pressing Delete
+    plainly means that segment, so it goes and the rest of the curve
+    stays. A solid's edge is not this: there is no segment of it to take
+    away, so a held edge of one is left alone.
+    """
+    held = [(oid, i) for (oid, kind, i) in ctx.selection.subobjects
+            if kind == "edge"]
+    if not held:
+        return False
+    by_obj: dict[str, list[int]] = {}
+    for oid, i in held:
+        by_obj.setdefault(oid, []).append(i)
+    done = 0
+    opened = []
+    touched = []
+    for oid, indices in by_obj.items():
+        obj = ctx.scene.get(oid)
+        if obj is None or obj.kind != "curve":
+            continue
+        try:
+            rest = g.remove_segments(obj.shape, indices)
+        except g.GeometryError as exc:
+            ctx.echo(f"{obj.name}: {exc}")
+            continue
+        was_closed = g.is_closed_curve(obj.shape)
+        done += len(set(indices))
+        touched.append(oid)
+        if not rest:
+            ctx.scene.remove(oid)
+            ctx.echo(f"{obj.name}: every segment deleted, "
+                     "so the curve went with it.")
+            continue
+        ctx.scene.replace_shape(oid, rest[0])
+        for piece in rest[1:]:
+            ctx.scene.add_from(piece, obj)
+        if len(rest) > 1:
+            opened.append(f"{obj.name} is now {len(rest)} curves")
+        elif was_closed:
+            opened.append(f"{obj.name} is open")
+    if not done:
+        return False
+    # the indices left behind would mean different segments of the curve
+    # that is there now, so let go of them
+    ctx.selection.set_subobjects(
+        [e for e in ctx.selection.subobjects
+         if not (e[1] == "edge" and e[0] in touched)])
+    tail = " — " + ", ".join(opened) if opened else ""
+    ctx.echo(f"Deleted {done} segment(s){tail}.")
+    return True
+
+
 @command("delete", aliases=("del", "erase"), space="any", repeatable=False)
 def cmd_delete(ctx):
     lv = ctx.sheet_view()
@@ -109,16 +165,19 @@ def cmd_delete(ctx):
             return
         ctx.echo(f"Deleted {count} sheet item(s).")
         return
-    # held control points or faces are the picked thing when no object is
+    # held control points, faces or curve segments are the picked thing
+    # when no object is
     if not ctx.selection.ids and (_delete_held_points(ctx)
-                                  or _delete_held_faces(ctx)):
+                                  or _delete_held_faces(ctx)
+                                  or _delete_held_segments(ctx)):
         return
     # min_count=0: a bare Enter comes back here, where clicking a control
     # point during the wait (which bypasses the request) can still answer
     objs = yield SelectReq("Select objects or control points to delete",
                            min_count=0)
     if not objs:
-        if _delete_held_points(ctx) or _delete_held_faces(ctx):
+        if (_delete_held_points(ctx) or _delete_held_faces(ctx)
+                or _delete_held_segments(ctx)):
             return
         ctx.echo("Nothing selected to delete.")
         return
