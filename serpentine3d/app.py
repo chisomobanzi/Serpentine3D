@@ -1809,19 +1809,56 @@ class MainWindow(QMainWindow):
         self._pending_import_paths.clear()
         self._import_path(path)
 
-    def _dropped_import_paths(self, event):
-        """Only local files supported by the normal Import dialog qualify."""
+    def _dropped_files(self, event):
+        """Every local file in the drop, whatever its format.
+
+        A file we cannot read is still a file someone dropped, and it is
+        answered rather than ignored (#21): refusing the drag means the
+        drop never arrives and the window stays silent, which reads as a
+        broken feature. A web link or a folder is not a file and is still
+        refused outright, since there is nothing to answer for.
+        """
         if (self._importing_file or self._pending_import_paths
                 or not event.possibleActions() & Qt.DropAction.CopyAction):
             return []
         return [url.toLocalFile() for url in event.mimeData().urls()
-                if url.isLocalFile()
-                and os.path.splitext(url.toLocalFile())[1].lower()
-                in (fileio.IMPORT_EXTS | fileio.PICTURE_EXTS)
-                and os.path.isfile(url.toLocalFile())]
+                if url.isLocalFile() and os.path.isfile(url.toLocalFile())]
+
+    @staticmethod
+    def _can_import(path) -> bool:
+        return (os.path.splitext(path)[1].lower()
+                in (fileio.IMPORT_EXTS | fileio.PICTURE_EXTS))
+
+    def _dropped_import_paths(self, event):
+        """Only local files supported by the normal Import dialog qualify."""
+        return [p for p in self._dropped_files(event) if self._can_import(p)]
+
+    def _say_what_was_not_opened(self, paths):
+        """Name the files that went nowhere, and why.
+
+        A DWG is the one worth advising on: it is Autodesk's own binary
+        format, which Serpentine3D does not read, and every CAD program
+        that writes it also writes DXF, which Serpentine3D does read.
+        """
+        if not paths:
+            return
+        names = ", ".join(os.path.basename(p) for p in paths)
+        exts = {os.path.splitext(p)[1].lower() for p in paths}
+        exts.discard("")
+        spelled = ", ".join(sorted(exts)) or "those"
+        self.command_line.echo(
+            f"Cannot open {names}: Serpentine3D does not read "
+            f"{spelled} files.")
+        if ".dwg" in exts:
+            self.command_line.echo(
+                "Save it as DXF in the program that wrote it and drop that "
+                "instead.")
+        self.command_line.echo(
+            "Import reads " + ", ".join(
+                name for name, _exts in fileio.IMPORT_FORMATS) + ".")
 
     def dragEnterEvent(self, event):
-        if self._dropped_import_paths(event):
+        if self._dropped_files(event):
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
         else:
@@ -1831,12 +1868,17 @@ class MainWindow(QMainWindow):
         self.dragEnterEvent(event)
 
     def dropEvent(self, event):
-        paths = self._dropped_import_paths(event)
-        if not paths:
+        files = self._dropped_files(event)
+        if not files:
             event.ignore()
             return
         event.setDropAction(Qt.DropAction.CopyAction)
         event.accept()
+        paths = [p for p in files if self._can_import(p)]
+        self._say_what_was_not_opened([p for p in files
+                                       if not self._can_import(p)])
+        if not paths:
+            return
         if self.processor.busy:
             self.processor.cancel()
         paper_drop = None

@@ -14,6 +14,14 @@
 
 ### Fixed
 
+- **A dropped file we cannot open says so (#21).** Dragging a DWG onto
+  the window did nothing at all, with no message, because the drag was
+  refused before the drop could be answered. A drop of local files is
+  now taken: whatever can be imported is, and anything that cannot is
+  named along with the reason and the formats Import does read. A DWG
+  is told to come back as DXF, which every program that writes DWG can
+  also write. Serpentine3D still does not read DWG itself.
+
 - **A cutting curve that reaches the edge splits the surface (#22).** Split
   and Trim on a surface or solid only worked when the curve overlapped the
   edges; one snapped so its ends sat on them did nothing, because a snapped

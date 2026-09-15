@@ -131,17 +131,17 @@ def test_every_import_format_reaches_the_importer_with_its_local_path(
     assert callable(seen[0][2]), "Dropped imports need the usual progress/cancel feedback"
 
 
-@pytest.mark.parametrize("kind", ["remote", "directory", "unsupported", "missing"])
+@pytest.mark.parametrize("kind", ["remote", "directory", "missing"])
 def test_non_importable_drags_are_rejected(window, tmp_path, monkeypatch, kind):
+    """What is not a local file is refused outright: there is nothing there
+    to import and nothing to say about it. A file in a format we cannot
+    read is a different matter and gets an answer (see
+    test_dropping_a_file_we_cannot_open_says_so.py)."""
     path = tmp_path / "not a model.obj"
     if kind == "remote":
         urls = [QUrl("https://example.com/model.obj")]
     elif kind == "directory":
         path.mkdir()
-        urls = _urls(path)
-    elif kind == "unsupported":
-        path = tmp_path / "notes.txt"
-        path.write_text("notes")
         urls = _urls(path)
     else:
         urls = _urls(path)
