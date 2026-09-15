@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **The gumball takes hold of a curve segment (#25).** Ctrl+Shift-click one
+  segment of a polyline or polycurve and the whole gumball stands on it:
+  move, turn or scale the segment and the segments either side stretch to
+  stay attached, so dragging one side of a rectangle resizes it. Delete with
+  a segment held takes that segment out: a side out of a closed curve opens
+  it, and a middle segment out of an open one leaves the runs either side as
+  separate curves. A held edge of a solid is still the fillet handle.
+
+### Fixed
+
+- **A cutting curve that reaches the edge splits the surface (#22).** Split
+  and Trim on a surface or solid only worked when the curve overlapped the
+  edges; one snapped so its ends sat on them did nothing, because a snapped
+  end lands a hair inside and the splitter found no crossing. The cutter is
+  now stretched a little past its ends (100 tolerances, or a thousandth of
+  the object's size) before it is swept into the cutting tool.
+
+- **Trim trims (#23).** After the cutters and the object are picked, each
+  click on a piece removes it at once and the prompt comes back for the next,
+  as in Rhino; Enter or Escape ends the command keeping what was trimmed.
+  Before, the pieces only went after a further Enter, and Escape at that
+  step left the object merely split. A trim with no piece clicked leaves the
+  object whole, and only the pieces can be clicked, never the cutters.
+
+- **Converting text to geometry is one visible step (#24).** Selecting
+  editable text no longer shows a greyed "Convert to geometry" button that
+  does nothing; the button appears once Curves, Planar surfaces or Solid is
+  chosen under Output, and reads "Convert to curves" (or surfaces, solid).
+  Tooltips now say how Look at text differs from Zoom Selected.
+
 ## 0.10.0 — 2026-09-13
 
 ### Added
