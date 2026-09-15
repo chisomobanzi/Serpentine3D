@@ -6,11 +6,26 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.9.0 was cut (2026-09-08).
+Last updated when 0.10.1 was cut (2026-09-15).
 
 ---
 
 ## Where things stand
+
+Version `0.10.1` is in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.10.1 section is dated 2026-09-15. It is a patch
+release answering the five issues Jonas Pedrotti filed against 0.10.0 on
+GitHub, four of them bugs he hit in ordinary drawing. Split and Trim now cut a
+surface when the cutting curve only reaches the edges instead of overlapping
+them (#22); Trim deletes the piece you click instead of merely splitting
+(#23); the text object's Convert button appears only once there is an output
+to convert to, and says which (#24); the gumball takes hold of one segment of
+a polycurve, moves it with its neighbours stretching after it, and Delete
+takes that segment out (#25). Dropping a file the program cannot read now says
+so and names the formats it does read, rather than ignoring the drop in
+silence (#21). That last one is not DWG support: DWG remains unread, and the
+message tells the user to come back with DXF. Release validation on Linux:
+3,427 tests passed under the offscreen runner on Mesa.
 
 Version `0.9.0` is in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.9.0 section is dated 2026-09-08. It is the format
@@ -54,6 +69,26 @@ defaults the field to empty, and `FORMAT_VERSION` did not have to move.
 
 0.7.3 was released on 2026-09-01: pushed, tagged, and published with the
 AppImage, the Windows `.exe` and the macOS `.dmg` all attached.
+
+### Jonas's 0.10.0 issues, released in 0.10.1
+
+Five issues in one sitting from the user who has given the most detailed
+feedback so far, all of them found by drawing rather than by reading the
+code. Four were bugs and one a feature request; the fifth, DWG drag and
+drop, turned out not to be a drag-and-drop bug at all.
+
+Worth keeping: three of the four bugs were about a control that looked
+alive and did nothing. A greyed Convert button, a Trim that split and
+stopped, a Delete that ignored a held segment, a drop that vanished. None
+of them were wrong geometry. The geometry under each was already right, or
+nearly so. What was missing was the program saying what it had done or why
+it could not. That is a class of defect worth looking for on purpose.
+
+The DWG answer is deliberately partial. Reading DWG means either the ODA
+File Converter, which the user installs and we shell out to, or LibreDWG,
+which is GPL-3 and cannot sit inside an MIT project. That decision is
+still open, so 0.10.1 replaces the silence with an explanation and leaves
+the format alone.
 
 ### Wayland, released in 0.8.2
 
