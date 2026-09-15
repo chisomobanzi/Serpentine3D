@@ -25,7 +25,12 @@ takes that segment out (#25). Dropping a file the program cannot read now says
 so and names the formats it does read, rather than ignoring the drop in
 silence (#21). That last one is not DWG support: DWG remains unread, and the
 message tells the user to come back with DXF. Release validation on Linux:
-3,427 tests passed under the offscreen runner on Mesa.
+3,427 tests passed under the offscreen runner on Mesa. Released on
+2026-09-15: pushed, tagged `v0.10.1`, published with the Linux AppImage,
+the Windows installer and the Apple Silicon DMG all attached. The
+packaged AppImage was checked before publishing: self-test passed, and
+the #22 and #23 fixes were driven through the running packaged build
+over RPC rather than only in the source tree.
 
 Version `0.9.0` is in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.9.0 section is dated 2026-09-08. It is the format
