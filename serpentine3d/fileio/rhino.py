@@ -231,15 +231,107 @@ def _r3_mesh_to_shape(mesh: r3.Mesh, as_mesh: bool = True, report=None):
 
 # -------------------------------------------------------------------- breps
 
-def _brep_edges_to_occ(brep) -> list:
-    edges = []
+def _brep_edge_table(brep) -> dict:
+    """{edge index: shape} for the brep's edges.
+
+    Keyed by index rather than packed into a list because a face's trims
+    name the edges they run along by index, and an edge that fails to
+    convert must not shift the ones after it.
+    """
+    table = {}
     for i in range(len(brep.Edges)):
         try:
-            shape = _r3_curve_to_shape(brep.Edges[i].ToNurbsCurve())
-            edges.append(shape)
-        except Exception:
+            table[i] = _r3_curve_to_shape(brep.Edges[i].ToNurbsCurve())
+        except Exception:                                       # noqa: BLE001
             continue
-    return edges
+    return table
+
+
+def _brep_edge_context(brep):
+    """(edges, boxes, table) shared by every face of one brep."""
+    table = _brep_edge_table(brep)
+    edges = [table[i] for i in sorted(table)]
+    return edges, _edge_boxes(edges), table
+
+
+def _face_from_loops(rface, surf, table: dict):
+    """The face trimmed by the loops the file itself carries, or None.
+
+    `BrepFace.Loops` gives each boundary as trims in order, and every trim
+    names the edge it runs along and whether the loop runs backwards along
+    it. That is the trim the file meant, so there is nothing to work out:
+    no searching for edges near the face, no projecting them onto the
+    surface to see which stuck, and no splitting the untrimmed surface
+    when the guess came up short.
+
+    A seam is why the guessing could not be made to work. The loop walks
+    the seam edge twice, once each way, so the boundary is not a set of
+    distinct edges at all, and no amount of joining them end to end closes
+    it. Only the trim's own direction tells the two passes apart.
+    """
+    from OCP.BRepBuilderAPI import (BRepBuilderAPI_MakeFace,
+                                    BRepBuilderAPI_MakeWire)
+    from OCP.ShapeFix import ShapeFix_Face
+    from OCP.TopoDS import TopoDS
+
+    loops = rface.Loops
+    if loops is None or len(loops) == 0:
+        return None
+    outer = None
+    inner = []
+    for li in range(len(loops)):
+        loop = loops[li]
+        mk = BRepBuilderAPI_MakeWire()
+        for ti in range(loop.TrimCount):
+            trim = loop.Trims[ti]
+            edge = table.get(trim.EdgeIndex)
+            if edge is None:
+                return None                 # a trim we cannot follow
+            occ_edge = geometry.occ.to_edge(edge)
+            mk.Add(TopoDS.Edge_s(occ_edge.Reversed()) if trim.IsReversed
+                   else occ_edge)
+        if not mk.IsDone():
+            return None
+        wire = mk.Wire()
+        if "Outer" in str(loop.LoopType):
+            if outer is not None:
+                return None                 # two outers is not one face
+            outer = wire
+        else:
+            inner.append(wire)
+    if outer is None:
+        return None
+
+    # Which side of the boundary the surface keeps is not written down, and
+    # the wrong choice is the rest of the surface, which is valid and finite
+    # when the surface is bounded. The patch's own extent is its boundary's;
+    # the complement runs on to the surface's natural edge.
+    lo, hi = geometry.bbox(outer)
+    want = float(np.linalg.norm(np.subtract(hi, lo)))
+    best = None
+    for flip in (False, True):
+        try:
+            rim = TopoDS.Wire_s(outer.Reversed()) if flip else outer
+            mk = BRepBuilderAPI_MakeFace(surf, rim, True)
+            if not mk.IsDone():
+                continue
+            for wire in inner:
+                mk.Add(wire if flip else TopoDS.Wire_s(wire.Reversed()))
+            fix = ShapeFix_Face(geometry.occ.to_face(mk.Face()))
+            fix.Perform()
+            face = fix.Face()
+            if face is None or face.IsNull() or not geometry.is_valid(face):
+                continue
+            area = geometry.surface_area(face)
+            if not (np.isfinite(area) and area > 1e-9):
+                continue
+            flo, fhi = geometry.bbox(face)
+            off = abs(float(np.linalg.norm(np.subtract(fhi, flo))) - want)
+        except Exception:                                       # noqa: BLE001
+            continue
+        if best is None or off < best[1]:
+            best = (face, off)
+    return best[0] if best is not None else None
 
 
 def _split_face_by_edges(face, edges: list) -> list:
@@ -527,7 +619,8 @@ def _trimmed_face(surf, edges: list):
         return None
 
 
-def _face_shapes(brep, fi: int, occ_edges: list, edge_boxes) -> list:
+def _face_shapes(brep, fi: int, occ_edges: list, edge_boxes,
+                 edge_table: dict | None = None) -> list:
     """One face of a Rhino brep as [shapes] — exactly trimmed when the trim
     can be rebuilt, its render mesh when it cannot.
 
@@ -554,10 +647,18 @@ def _face_shapes(brep, fi: int, occ_edges: list, edge_boxes) -> list:
     # ways of trimming below cost time per edge. Prune once, use twice.
     etol = max(span * 1e-4, 1e-6)
 
-    # Preferred path: rebuild the exact trim from the brep's 3D edges
+    surf = BRep_Tool.Surface_s(geometry.occ.to_face(face))
+
+    # Best path: the trim the file already describes. Everything below it
+    # is here for the faces whose loops cannot be followed.
+    if edge_table:
+        from_loops = _face_from_loops(brep.Faces[fi], surf, edge_table)
+        if from_loops is not None:
+            return [from_loops]
+
+    # Next best: rebuild the exact trim from the brep's 3D edges
     # that lie on this face's surface. Works with no render mesh and
     # for any face count, unlike the split-and-classify fallback.
-    surf = BRep_Tool.Surface_s(geometry.occ.to_face(face))
     boundary = _edges_on_surface(
         surf, _edges_bounding(face, occ_edges, edge_boxes, etol), etol)
     exact = _trimmed_face(surf, boundary) if boundary else None
@@ -583,8 +684,7 @@ def _face_shapes(brep, fi: int, occ_edges: list, edge_boxes) -> list:
 def _import_brep(brep, report=None) -> list:
     """Faces of a Rhino brep as OCC faces, recovering trims when possible."""
     report = report or Progress()
-    occ_edges = _brep_edges_to_occ(brep)
-    edge_boxes = _edge_boxes(occ_edges)
+    occ_edges, edge_boxes, edge_table = _brep_edge_context(brep)
     faces = []
     total = len(brep.Faces)
     # A handful of faces goes by too fast to read; naming them just makes the
@@ -595,7 +695,8 @@ def _import_brep(brep, report=None) -> list:
         # per face, not per object: one polysurface can be the whole import
         report(fi / total,
                f"{report.label} — face {fi + 1} of {total}" if detail else "")
-        faces.extend(_face_shapes(brep, fi, occ_edges, edge_boxes))
+        faces.extend(_face_shapes(brep, fi, occ_edges, edge_boxes,
+                                  edge_table))
 
     return _assemble_faces(faces)
 

@@ -378,8 +378,7 @@ def _brep_piece(job):
     brep = _MODEL.Objects[index].Geometry
     cached = _BREP_CACHE.get(index)
     if cached is None:
-        edges = rhino._brep_edges_to_occ(brep)
-        cached = (edges, rhino._edge_boxes(edges))
+        cached = rhino._brep_edge_context(brep)
         _BREP_CACHE.clear()
         _BREP_CACHE[index] = cached
     shapes = []
