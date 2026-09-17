@@ -5,7 +5,7 @@ from __future__ import annotations
 from itertools import product
 from math import atan, dist, isclose, pi, sin, tan
 
-from PySide6.QtCore import QSignalBlocker, Signal, Qt
+from PySide6.QtCore import QSignalBlocker, QTimer, Signal, Qt
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFontComboBox, QFormLayout, QLabel,
@@ -30,6 +30,12 @@ CONVERT_LABELS = {"curves": "Convert to curves",
 
 
 class PropertiesPanel(QWidget):
+    # How long a selection has to sit still before its exact volume and area
+    # are worked out. Long enough that clicking through a drawing measures
+    # none of what you pass over, short enough that resting on something
+    # feels like it answered at once.
+    measure_delay_ms = 150
+
     modelTextChanged = Signal(str, str)
     textTypographyChanged = Signal(str, object)
     textPlacementChanged = Signal(str)
@@ -45,6 +51,14 @@ class PropertiesPanel(QWidget):
         # pane is showing it, so the panel has to be able to go and ask.
         self._viewport_source = viewport_source
         self._updating = False
+        # {object id: (scene revision, what it measured)}. Exact mass
+        # properties cost between 86 and 486 ms on one solid of an ordinary
+        # NURBS model, and the same object used to pay it on every click.
+        self._measured: dict = {}
+        self._measure_timer = QTimer(self)
+        self._measure_timer.setSingleShot(True)
+        self._measure_timer.timeout.connect(self._measure_settled)
+        self._measuring: tuple | None = None      # (object id, revision)
         self._live_text_id = None
         self._text_checkpoint_id = None
         self._text_edit_selection_id = None
@@ -705,7 +719,48 @@ class PropertiesPanel(QWidget):
             self.history.checkpoint("object colour")
             self.scene.update(obj.id, color=None)
 
+    # Volume and area are integrated over the real NURBS geometry, which is
+    # the one thing in this panel that can take longer than a frame. Asking
+    # for it is what made clicking a solid feel slow, so it waits until the
+    # selection has settled and is then remembered.
+    _SLOW_KINDS = ("solid", "surface")
+
     def _measures(self, obj) -> str:
+        """What to show on the Info row now, measuring later if need be."""
+        revision = getattr(self.scene, "revision", 0)
+        remembered = self._measured.get(obj.id)
+        if remembered is not None and remembered[0] == revision:
+            return remembered[1]
+        if obj.kind in self._SLOW_KINDS:
+            self._measuring = (obj.id, revision)
+            self._measure_timer.start(max(0, int(self.measure_delay_ms)))
+            # the row keeps the last thing it knew about this object rather
+            # than going blank and coming back
+            return remembered[1] if remembered is not None else "Measuring…"
+        return self._remember(obj, revision)
+
+    def _remember(self, obj, revision) -> str:
+        text = self._measured_now(obj)
+        if len(self._measured) > 512:
+            self._measured.clear()
+        self._measured[obj.id] = (revision, text)
+        return text
+
+    def _measure_settled(self):
+        """The selection stopped moving, so it is worth the wait now."""
+        pending, self._measuring = self._measuring, None
+        if pending is None:
+            return
+        obj_id, revision = pending
+        obj = self.scene.get(obj_id)
+        if obj is None or getattr(self.scene, "revision", 0) != revision:
+            return
+        current = self._selected()
+        if current is None or current.id != obj_id:
+            return                       # you have picked something else
+        self.measure_label.setText(self._remember(obj, revision))
+
+    def _measured_now(self, obj) -> str:
         fmt = self.scene.format_length
         u = self.scene.units
         try:

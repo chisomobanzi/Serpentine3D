@@ -4,6 +4,19 @@
 
 ### Fixed
 
+- **Selecting a solid is no longer a wait.** Clicking one took about half
+  a second on an ordinary NURBS drawing. The repaint is 6ms and the hit test
+  under 1ms; the rest was Properties integrating the exact volume and surface
+  area of whatever had just been picked, on the interface thread, before the
+  click could finish. One solid of the openNURBS clip model costs 86 to 486ms,
+  and it was paid again on every click, even for an object measured moments
+  earlier. The measurement now waits until the selection has been still for
+  150ms and is remembered until the drawing changes, so clicking through a
+  model measures nothing you pass over and going back to something measured
+  earlier is free. The numbers are unchanged, and everything else about the
+  object still appears at once. Selecting a different solid went from 466ms
+  to 16ms, and re-selecting one from 116ms to 28ms.
+
 - **Rhino files whose faces have a seam no longer hang the import (#10).**
   A .3dm face is now trimmed by the loops the file itself carries, which
   name the edges the boundary runs along and which way round. The importer
