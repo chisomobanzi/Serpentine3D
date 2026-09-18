@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- **Holding an edge is as quick as holding a face.** Ctrl+Shift-clicking an
+  edge took four and a half seconds on an ordinary NURBS assembly, while
+  holding a face of the same solid took fourteen milliseconds. The fillet
+  handle points away from the solid, and it asked for the solid's exact
+  centre of mass to work out which way that is. Integrating that over real
+  NURBS geometry costs a few hundred milliseconds, the answer was not
+  remembered, and a frame asks for the handle about thirty times. The middle
+  of the object's bounds says the same thing and is already known, and the
+  answer is now kept between the questions one frame asks, as the face and
+  segment handles already did. 4438ms to 13ms.
+
 - **A click selects what you can see.** Clicking between two parts of a
   shaded assembly picked a different part entirely every few clicks, one
   nowhere near the cursor. An object counted as hit when any of its edges

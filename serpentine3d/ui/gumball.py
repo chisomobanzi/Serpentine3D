@@ -416,6 +416,11 @@ class Gumball:
         subs = getattr(self.vp.selection, "subobjects", None)
         if not subs:
             return None
+        return self._remembered(("fillet", tuple(subs)),
+                                self._fillet_target_of)
+
+    def _fillet_target_of(self):
+        subs = list(getattr(self.vp.selection, "subobjects", ()))
         edges = [(oid, idx) for (oid, kind, idx) in subs if kind == "edge"]
         if not edges or self._segment_target() is not None:
             return None                       # a curve segment: whole gumball
@@ -429,7 +434,8 @@ class Gumball:
             if any(not (0 <= i < len(elist)) for i in idxs):
                 return None
             mids = [np.asarray(g.centroid(elist[i]), float) for i in idxs]
-            solid_c = np.asarray(g.centroid(obj.shape), float)
+            lo, hi = obj.bbox()
+            solid_c = (np.asarray(lo, float) + np.asarray(hi, float)) / 2.0
         except g.GeometryError:
             return None
         anchor = np.mean(mids, axis=0)
