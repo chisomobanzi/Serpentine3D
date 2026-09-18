@@ -56,14 +56,6 @@
   reconstruction stays as the fallback for faces whose loops cannot be
   followed.
 
-### Added
-
-- **Open Mica spatial session records.** Mica `.serp` files now open as coloured
-  point clouds with camera routes. Untracked poses break the route, uncertain
-  spans appear as orange dashed segments, and save/reopen does not duplicate the
-  derived curves. Point-cloud Properties presents heuristic surface support,
-  camera/scale provenance, reconstruction backbone and producer limitations.
-
 ## 0.10.1 — 2026-09-15
 
 ### Added
