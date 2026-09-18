@@ -4,6 +4,19 @@
 
 ### Fixed
 
+- **A click selects what you can see.** Clicking between two parts of a
+  shaded assembly picked a different part entirely every few clicks, one
+  nowhere near the cursor. An object counted as hit when any of its edges
+  passed within the pick radius of seven pixels, and an edge hit was biased
+  slightly nearer so a curve drawn on a surface stays clickable. On a solid
+  that reached seven pixels past its own outline, so a solid whose edge ran
+  near the cursor and sat nearer the camera took clicks aimed at the surface
+  visible behind it. On one sample assembly, 21% of the pixels over a visible
+  surface selected something else; now none do. An object drawn with shaded
+  faces is picked by its faces, and since its edges are drawn on its own
+  surface, clicking an edge still selects it. Curves, which have nothing but
+  edges, and wireframe, which draws no faces, are unchanged.
+
 - **Selecting a solid is no longer a wait.** Clicking one took about half
   a second on an ordinary NURBS drawing. The repaint is 6ms and the hit test
   under 1ms; the rest was Properties integrating the exact volume and surface

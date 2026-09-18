@@ -3790,7 +3790,9 @@ class Viewport(QOpenGLWidget):
                 if pt_depth is not None:
                     found.append((pt_depth, obj.id))
                 continue
-            if mesh.has_faces and (obj.kind == "picture" or self._pick_mode() != "wireframe"):
+            shaded_faces = mesh.has_faces and (
+                obj.kind == "picture" or self._pick_mode() != "wireframe")
+            if shaded_faces:
                 tris, _ = self._near_triangles(mesh, px - r, py - r,
                                                px + r, py + r, w, h)
                 t = ray_triangle_hits(origin, direction,
@@ -3801,7 +3803,7 @@ class Viewport(QOpenGLWidget):
                 if np.isfinite(tmin):
                     depth = tmin
                     hit = True
-            if len(mesh.edge_segments):
+            if len(mesh.edge_segments) and not shaded_faces:
                 segs, _ = self._near_segments(mesh, px - r, py - r,
                                               px + r, py + r, w, h)
                 pts = segs.reshape(-1, 3)
