@@ -70,8 +70,17 @@ class SerpApi:
     def _objs(self, refs: list[str]) -> list:
         return [self._obj(r) for r in refs]
 
-    def _obj_info(self, obj) -> dict:
-        mn, mx = g.bbox(obj.shape)
+    def _obj_info(self, obj) -> dict | None:
+        """One object as a dict, or None if it turned out not to be one.
+
+        Reading an object's shape is what converts it, and a few convert
+        to nothing and are dropped on the spot. Asking the one being read
+        about itself a moment later then has nothing to ask (#10).
+        """
+        shape = obj.shape
+        if shape is None or self.scene.get(obj.id) is None:
+            return None
+        mn, mx = g.bbox(shape)
         return {
             "id": obj.id,
             "name": obj.name,
@@ -102,11 +111,14 @@ class SerpApi:
         return layer
 
     def scene_info(self) -> dict:
-        objs = self.scene.all()
+        # reading converts, and converting can drop an object, so the
+        # count is taken from what survived being read
+        rows = [row for row in (self._obj_info(o) for o in self.scene.all())
+                if row is not None]
         bounds = self.scene.bbox()
         return {
-            "object_count": len(objs),
-            "objects": [self._obj_info(o) for o in objs],
+            "object_count": len(rows),
+            "objects": rows,
             # `path` is what tells one Interior from another once layers
             # nest, and `visible` is the layer's own switch while `shown`
             # is whether the branch above it lets it onto the screen.
@@ -118,8 +130,8 @@ class SerpApi:
                  "visible": layer.visible,
                  "shown": self.scene.layers.is_visible(layer.id),
                  "current": layer.id == self.scene.layers.current_id,
-                 "object_count": sum(1 for o in objs
-                                     if o.layer_id == layer.id)}
+                 "object_count": sum(1 for row in rows
+                                     if row["layer"] == layer.name)}
                 for layer in self.scene.layers.all()
             ],
             "bounds": ([list(bounds[0]), list(bounds[1])]

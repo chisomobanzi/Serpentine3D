@@ -1058,6 +1058,16 @@ def object_to_shapes(geo, report=None) -> list:
     """
     step = report or Progress()
     shapes = []
+    if isinstance(geo, r3.Point):
+        # A point is an object in Rhino and an object here, so it has to
+        # convert to something. With no branch at all it converted to
+        # nothing, which dropped a visible point in silence and left a
+        # hidden one as a promise that could never be kept (#10).
+        try:
+            loc = geo.Location
+            return [geometry.make_point((loc.X, loc.Y, loc.Z))]
+        except Exception:                                       # noqa: BLE001
+            return []
     if isinstance(geo, r3.Curve):
         try:
             shapes = [_r3_curve_to_shape(geo)]

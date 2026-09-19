@@ -3126,6 +3126,11 @@ def unwrap_compound(shape) -> TopoDS_Shape:
 def bbox(shape) -> tuple[Point, Point]:
     from .mesh import MeshShape
     from .pointcloud import PointCloudShape
+    if shape is None:
+        # The kernel answers this with a TypeError about argument types,
+        # which reads like a version mismatch and sends you looking in the
+        # wrong place. It is only ever a shape that never arrived.
+        raise GeometryError("This object has no geometry to measure")
     if isinstance(shape, (MeshShape, PointCloudShape)):
         return shape.bbox()
     box = Bnd_Box()

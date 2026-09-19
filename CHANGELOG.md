@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A point in a Rhino file arrives, and cannot poison the session (#10).**
+  A `.3dm` point object had no branch in the importer, so it converted to
+  nothing. A visible one was dropped in silence. A hidden one was worse:
+  hidden objects are imported as a promise to convert later, so the scene
+  gained an object whose geometry never appeared, and the next thing to ask
+  for its bounds answered `TypeError: AddOptimal_s() ... Invoked with: None`
+  and kept doing so until the program was restarted. `v4_Wheel_PG.3dm` from
+  the openNURBS samples is one such file. Points now convert, reading the
+  scene survives an object that turns out to be nothing, and asking for the
+  bounds of nothing says so in words rather than in the kernel's.
+
+### Added
+
+- **Open Mica spatial session records.** Mica `.serp` files now open as coloured
+  point clouds with camera routes. Untracked poses break the route, uncertain
+  spans appear as orange dashed segments, and save/reopen does not duplicate the
+  derived curves. Point-cloud Properties presents heuristic surface support,
+  camera/scale provenance, reconstruction backbone and producer limitations.
+
 ## 0.10.2 — 2026-09-19
 
 ### Fixed
