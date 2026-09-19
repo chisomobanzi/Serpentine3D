@@ -20,8 +20,12 @@ and a hidden one, which is imported as a promise to convert later, left an
 object whose geometry never appeared. Anything that then asked for its bounds
 raised, and kept raising, which is what "this file needs a fresh start" was.
 Found by driving the program on the Mac and reproduced on Linux, so it was
-never the platform problem it looked like. Release validation on Linux: 3,458
-tests passed under the offscreen runner on Mesa.
+never the platform problem it looked like. Release validation on Linux: 3,455
+tests passed under the offscreen runner on Mesa. Released on 2026-09-19:
+pushed, tagged `v0.10.3`, published with the Linux AppImage, the Windows
+installer and the Apple Silicon DMG all attached. The packaged AppImage was
+checked first: self-test passed, and the file that caused the fault reads all
+13 of its objects, the point included.
 
 Version `0.10.2` is in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.10.2 section is dated 2026-09-19. Four fixes, three
