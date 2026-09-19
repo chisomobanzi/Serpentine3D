@@ -23,7 +23,11 @@ area of what was picked; it selects what is drawn under the cursor rather
 than a neighbour whose edge reaches within seven pixels of it; and holding an
 edge no longer weighs the solid it belongs to, which cost four and a half
 seconds. Release validation on Linux: 3,450 tests passed under the offscreen
-runner on Mesa.
+runner on Mesa. Released on 2026-09-19: pushed, tagged `v0.10.2`, published
+with the Linux AppImage, the Windows installer and the Apple Silicon DMG all
+attached. The packaged AppImage was checked before publishing: self-test
+passed, and the import and selection fixes were driven through the running
+packaged build over its own bridge rather than only in the source tree.
 
 Version `0.10.1` is in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.10.1 section is dated 2026-09-15. It is a patch
