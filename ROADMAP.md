@@ -6,11 +6,24 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.10.1 was cut (2026-09-15).
+Last updated when 0.10.2 was cut (2026-09-19).
 
 ---
 
 ## Where things stand
+
+Version `0.10.2` is in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.10.2 section is dated 2026-09-19. Four fixes, three
+of them found by using the program rather than reading it. Rhino files whose
+faces have a seam no longer hang the import (#10): a face is now trimmed by
+the loops the file itself carries instead of having its boundary worked out
+from nearby edges, which a seam defeats. The other three are the click. It no
+longer waits half a second while Properties integrates the exact volume and
+area of what was picked; it selects what is drawn under the cursor rather
+than a neighbour whose edge reaches within seven pixels of it; and holding an
+edge no longer weighs the solid it belongs to, which cost four and a half
+seconds. Release validation on Linux: 3,450 tests passed under the offscreen
+runner on Mesa.
 
 Version `0.10.1` is in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.10.1 section is dated 2026-09-15. It is a patch
@@ -74,6 +87,28 @@ defaults the field to empty, and `FORMAT_VERSION` did not have to move.
 
 0.7.3 was released on 2026-09-01: pushed, tagged, and published with the
 AppImage, the Windows `.exe` and the macOS `.dmg` all attached.
+
+### The click, released in 0.10.2
+
+Three separate faults, all reported as "selection feels slow" or "it
+selected the wrong thing", and none of them in the renderer or the hit
+test. Both of those were already fast: a repaint is 6ms and a pick under
+1ms. The cost was always something else asking an expensive geometric
+question on the interface thread, synchronously, and usually more than
+once.
+
+Properties integrated the exact volume and area of the selected solid, 86
+to 486ms, on every click and uncached. The fillet handle asked for a
+solid's centre of mass to decide which way to point, about thirty times a
+frame, which is why holding an edge took four and a half seconds while
+holding a face took fourteen milliseconds. The pick counted an object as
+hit when any of its edges came within seven pixels, so a neighbour could
+take a click aimed at the surface plainly in front of it, on 21% of the
+pixels of one sample assembly.
+
+Worth keeping: the instinct each time was to suspect the frame. Measure
+the click instead, and measure it on the real driver. Offscreen software
+rendering has a 31ms frame that hides all three of these.
 
 ### Jonas's 0.10.0 issues, released in 0.10.1
 
