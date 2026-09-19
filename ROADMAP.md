@@ -6,11 +6,22 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.10.2 was cut (2026-09-19).
+Last updated when 0.10.3 was cut (2026-09-19).
 
 ---
 
 ## Where things stand
+
+Version `0.10.3` is in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.10.3 section is dated 2026-09-19. One fix, for the
+half of #10 nobody had reproduced. A `.3dm` point object had no branch in the
+importer and converted to nothing, so a visible point was dropped in silence
+and a hidden one, which is imported as a promise to convert later, left an
+object whose geometry never appeared. Anything that then asked for its bounds
+raised, and kept raising, which is what "this file needs a fresh start" was.
+Found by driving the program on the Mac and reproduced on Linux, so it was
+never the platform problem it looked like. Release validation on Linux: 3,458
+tests passed under the offscreen runner on Mesa.
 
 Version `0.10.2` is in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.10.2 section is dated 2026-09-19. Four fixes, three
