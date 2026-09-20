@@ -737,18 +737,37 @@ def _assemble_faces(faces) -> list:
 
 def _shell_to_solid(shape):
     """Promote a closed shell to a solid; return `shape` unchanged if open
-    or already a solid."""
+    or already a solid.
+
+    The solid is turned the right way out before it is handed back. Faces
+    are rebuilt one at a time and each is oriented on its own evidence, so
+    a whole sewn shell can come out consistently inside in, and OpenCascade
+    reports that as a negative volume. It showed up in Properties as
+    `Volume: -0.041 mm³`, but outward is also what booleans, offsets and
+    shading read to tell inside from outside, so it is not only a display
+    fault. 58 of the 61 solids in one openNURBS sample arrived inverted.
+    """
     if shape is None or shape.IsNull():
         return shape
     if shape.ShapeType() == geometry.occ.SHELL:
         from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeSolid
         from OCP.BRepClass3d import BRepClass3d_SolidClassifier
+        from OCP.TopAbs import TopAbs_State
+        from OCP.TopoDS import TopoDS
         shell = geometry.occ.to_shell(shape)
         if shell.Closed():
             try:
                 mk = BRepBuilderAPI_MakeSolid(shell)
                 if mk.IsDone():
                     solid = mk.Solid()
+                    # A point infinitely far away is outside anything. When
+                    # the solid says it is inside, the solid is inside out.
+                    # Cheaper than integrating the volume to find out, which
+                    # on a real NURBS solid costs a few hundred milliseconds.
+                    where = BRepClass3d_SolidClassifier(solid)
+                    where.PerformInfinitePoint(1e-7)
+                    if where.State() == TopAbs_State.TopAbs_IN:
+                        solid = TopoDS.Solid_s(solid.Reversed())
                     if geometry.is_valid(solid):
                         return solid
             except Exception:

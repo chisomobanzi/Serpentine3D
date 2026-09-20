@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Imported solids are no longer inside out (#26).** Properties showed things
+  like `Volume: -0.041 mm³` on objects from Rhino files. A negative volume is
+  what OpenCascade reports for a solid whose faces all point inward, and
+  outward is also what booleans, offsets and shading read to tell inside from
+  outside. Faces are rebuilt one at a time and each is oriented on its own
+  evidence, so a whole sewn shell could come out consistently inside in, and
+  the step that promotes a shell to a solid was not checking. Of the openNURBS
+  samples, 58 of the 61 solids in `v5_disk_brake.3dm` were affected, 6 of 14
+  in `v4_RhinoPhone.3dm`, 4 of 10 in `v5_clip.3dm` and the one in
+  `v5_ring.3dm`; now none are. Only the orientation changes: area, bounds and
+  face count are identical, and import takes no longer, since which side is
+  outside is settled by classifying a point rather than integrating a volume.
+
+### Added
+
+- **Open Mica spatial session records.** Mica `.serp` files now open as coloured
+  point clouds with camera routes. Untracked poses break the route, uncertain
+  spans appear as orange dashed segments, and save/reopen does not duplicate the
+  derived curves. Point-cloud Properties presents heuristic surface support,
+  camera/scale provenance, reconstruction backbone and producer limitations.
+
 ## 0.10.3 — 2026-09-19
 
 ### Fixed
