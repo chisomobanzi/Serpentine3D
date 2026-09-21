@@ -24,6 +24,18 @@
   spans appear as orange dashed segments, and save/reopen does not duplicate the
   derived curves. Point-cloud Properties presents heuristic surface support,
   camera/scale provenance, reconstruction backbone and producer limitations.
+- **A scan reads as a room, not a lattice of dots.** Three things, none of
+  which touches the points. A point now draws as a disc sized in scene units
+  — about the spacing between it and its neighbours, estimated per cloud at
+  upload — projected to pixels at its own depth, so a scan closes into a
+  surface as you approach it and thins to single pixels as you leave. Discs
+  are round. And frames that show a scan are lit by eye-dome lighting: each
+  pixel is darkened by how far it stands in front of its neighbours in depth,
+  so folds and edges carry a contact shadow without anyone having estimated a
+  normal; overlays still test against the model, turntable and PDF renders
+  take the same pass, and a model with no scan draws exactly as before.
+  `display.cloud_shading = flat`, `edl_strength`, `edl_radius`,
+  `splat_spacings` and `splat_max_px` tune it.
 
 ## 0.10.3 — 2026-09-19
 

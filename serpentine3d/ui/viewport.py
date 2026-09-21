@@ -298,35 +298,111 @@ out vec4 frag;
 void main() { frag = uColor; }
 """
 
-# A scan's points: colour rides on the vertex, the size is pixels, and a
-# selected cloud is tinted towards the selection colour on the card rather
-# than recoloured point by point on the CPU.
+# A scan's points: colour rides on the vertex, and a selected cloud is
+# tinted towards the selection colour on the card rather than recoloured
+# point by point on the CPU. A point is drawn as a disc `uWorldSize`
+# across in scene units (about the spacing between it and its
+# neighbours, so the discs just close over the surface they sample), which
+# `uPixelsPerUnit / w` turns into pixels at that point's depth: a scan
+# closes into a surface as you approach it and thins to single pixels as
+# you leave, never below `uMinPx` and never above `uMaxPx`. A cloud with
+# no known spacing draws at `uMinPx` as it always did. Splats are round: a
+# square lattice reads as pixels, a round one as material.
 POINT_VERT = """
 #version 330 core
 layout(location=0) in vec3 pos;
 layout(location=1) in vec3 rgb;
 uniform mat4 uMVP;
-uniform float uPointSize;
+uniform float uWorldSize;
+uniform float uPixelsPerUnit;
+uniform float uMinPx;
+uniform float uMaxPx;
 uniform int uClipCount;
 uniform vec4 uClips[4];
 out vec3 vColor;
 out float gl_ClipDistance[4];
 void main() {
     gl_Position = uMVP * vec4(pos, 1.0);
-    gl_PointSize = uPointSize;
+    float w = max(gl_Position.w, 1e-6);
+    gl_PointSize = clamp(uWorldSize * uPixelsPerUnit / w, uMinPx, uMaxPx);
     for (int i = 0; i < uClipCount; ++i)
         gl_ClipDistance[i] = dot(uClips[i], vec4(pos, 1.0));
     vColor = rgb;
 }
 """
-
 POINT_FRAG = """
 #version 330 core
 in vec3 vColor;
-uniform vec3 uColor;        // the object's colour when points carry none
-uniform float uColorMix;    // 0 = vertex colour, 1 = uColor
+uniform vec3 uColor;      // the object's colour, for points that carry none
+uniform float uColorMix;  // 0 = vertex colour, 1 = uColor
 out vec4 frag;
-void main() { frag = vec4(mix(vColor, uColor, uColorMix), 1.0); }
+void main() {
+    vec2 d = gl_PointCoord - vec2(0.5);
+    if (dot(d, d) > 0.25) discard;
+    frag = vec4(mix(vColor, uColor, uColorMix), 1.0);
+}
+"""
+
+# Eye-dome lighting: the pass that makes a scan read as a building. The
+# scene is drawn to a texture with its depth, then each pixel is darkened
+# by how far it sits in front of its neighbours in log depth, so every
+# edge and fold in the cloud gets a contact shadow without anyone having
+# estimated a normal. This is what CloudCompare and Potree do. The pass
+# writes the scene's depth back to the screen so the overlays drawn after
+# it (gumball, control points, dots) still test against the model.
+EDL_VERT = """
+#version 330 core
+out vec2 vUV;
+void main() {
+    vec2 p = vec2((gl_VertexID & 1) * 2 - 1, (gl_VertexID & 2) - 1);
+    vUV = p * 0.5 + 0.5;
+    gl_Position = vec4(p, 0.0, 1.0);
+}
+"""
+EDL_FRAG = """
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uColorTex;
+uniform sampler2D uDepthTex;
+uniform vec2 uTexel;      // 1 / size in pixels
+uniform float uRadius;    // neighbour ring, pixels
+uniform float uStrength;
+uniform float uNear;
+uniform float uFar;
+uniform int uOrtho;
+uniform float uTolerance;  // scene units: depth steps this small are one splat, not an edge
+out vec4 frag;
+float linear_depth(float z) {
+    if (uOrtho == 1) return mix(uNear, uFar, z);
+    float ndc = z * 2.0 - 1.0;
+    return 2.0 * uNear * uFar / (uFar + uNear - ndc * (uFar - uNear));
+}
+float log_depth(vec2 uv) {
+    float z = texture(uDepthTex, uv).r;
+    if (z >= 1.0) return 0.0;    // background: never casts onto neighbours
+    return log2(max(linear_depth(z), 1e-6));
+}
+void main() {
+    vec4 color = texture(uColorTex, vUV);
+    float z = texture(uDepthTex, vUV).r;
+    gl_FragDepth = z;
+    if (z >= 1.0) { frag = color; return; }
+    float here = log_depth(vUV);
+    // A disc is flat and its neighbours sit a little before or behind it,
+    // so a surface of discs is a field of tiny steps. Steps under about a
+    // splat are the sampling, not the room: forgive them, in log depth.
+    float tol = uTolerance / max(linear_depth(z), 1e-6) * 1.4427;
+    float response = 0.0;
+    const vec2 ring[8] = vec2[8](vec2(1,0), vec2(-1,0), vec2(0,1), vec2(0,-1),
+                                 vec2(0.7071,0.7071), vec2(-0.7071,0.7071),
+                                 vec2(0.7071,-0.7071), vec2(-0.7071,-0.7071));
+    for (int i = 0; i < 8; ++i) {
+        float n = log_depth(vUV + ring[i] * uRadius * uTexel);
+        if (n > 0.0) response += max(0.0, here - n - tol);
+    }
+    float shade = exp(-response * 300.0 * uStrength / 8.0);
+    frag = vec4(color.rgb * shade, color.a);
+}
 """
 
 THICK_VERT = """
@@ -679,6 +755,7 @@ class _MeshBuffers:
         self.cloud_vbo = self.cloud_count = 0
         self.cloud_levels = None         # cumulative counts per LOD level
         self.cloud_colored = False       # points brought their own colour
+        self.cloud_spacing = 0.0         # typical neighbour distance
         self.nbytes = 0                  # what this mesh costs on the GPU
         self._buffers = []
         # Everything below goes up relative to this, and the draw folds
@@ -690,6 +767,7 @@ class _MeshBuffers:
             self.cloud_count = len(mesh.vertices)
             self.cloud_levels = mesh.cloud_levels
             self.cloud_colored = mesh.cloud_colors is not None
+            self.cloud_spacing = float(getattr(mesh, "cloud_spacing", 0.0))
         if mesh.has_faces:
             curv = mesh.curvature
             if len(curv) != len(mesh.vertices):
@@ -753,6 +831,7 @@ class _GpuObject:
         self.cloud_vao = self.cloud_count = 0
         self.cloud_levels = buf.cloud_levels
         self.cloud_colored = buf.cloud_colored
+        self.cloud_spacing = buf.cloud_spacing
         self.anchor = buf.anchor      # the drawer folds this back in
         if buf.cloud_count:
             self.cloud_vao = self._cloud_vertex_array(buf.cloud_vbo)
@@ -1045,8 +1124,37 @@ class Viewport(QOpenGLWidget):
         self._mesh_prog = self._line_prog = self._bg_prog = 0
         self._thick_prog = 0
         self._point_prog = 0
+        self._edl_prog = 0
+        self._edl_fbo = 0
+        self._edl_color = 0
+        self._edl_depth = 0
+        self._edl_size = (0, 0)
+        self._edl_vao = 0
+        self._edl_return = 0
+        # proj[1][1] * pixel height / 2: pixels per scene unit at w == 1,
+        # set per frame so a splat's size in the world becomes its size
+        # on this screen (see POINT_VERT)
+        self._frame_ppu = 1.0
+        self._frame_splat = 0.0      # largest splat drawn this frame, scene units
         # Point clouds: how big a point is on screen and how many the frame
         # may hold before the finer levels are dropped (display settings).
+        # "edl" shades scans by eye-dome lighting; "flat" draws the points
+        # as they are. Only frames that contain a cloud take the extra pass.
+        self.cloud_shading = str(config.get("display", "cloud_shading",
+                                            default="edl")
+                                 if config else "edl")
+        self.edl_strength = float(config.get("display", "edl_strength",
+                                             default=0.6)
+                                  if config else 0.6)
+        self.edl_radius = float(config.get("display", "edl_radius",
+                                           default=1.4)
+                                if config else 1.4)
+        self.splat_spacings = float(config.get("display", "splat_spacings",
+                                               default=1.6)
+                                    if config else 1.6)
+        self.splat_max_px = float(config.get("display", "splat_max_px",
+                                             default=24.0)
+                                  if config else 24.0)
         self.point_size = float(config.get("display", "point_size",
                                            default=POINT_SIZE_PX)
                                 if config else POINT_SIZE_PX)
@@ -1107,6 +1215,8 @@ class Viewport(QOpenGLWidget):
         self._line_prog = _compile(LINE_VERT, LINE_FRAG)
         self._thick_prog = _compile(THICK_VERT, LINE_FRAG)
         self._point_prog = _compile(POINT_VERT, POINT_FRAG)
+        self._edl_prog = _compile(EDL_VERT, EDL_FRAG)
+        self._edl_vao = GL.glGenVertexArrays(1)   # attribute-less quad
         self._bg_prog = _compile(BG_VERT, BG_FRAG)
         self._tex_prog = _compile(TEX_VERT, TEX_FRAG)
         self._tex_vao = GL.glGenVertexArrays(1)
@@ -1162,6 +1272,15 @@ class Viewport(QOpenGLWidget):
         # the point shader sets gl_PointSize; a core profile needs telling
         try:
             GL.glEnable(GL.GL_PROGRAM_POINT_SIZE)
+        except Exception:                        # noqa: BLE001
+            pass
+        # The point shader reads gl_PointCoord to draw a round splat. A core
+        # profile always supplies it; a compatibility context (the default
+        # when no one asked for core, which is what tests and scripts get)
+        # only fills it in with point sprites on, and rejects the enum in
+        # core, so the failure is the one to ignore.
+        try:
+            GL.glEnable(0x8861)                  # GL_POINT_SPRITE
         except Exception:                        # noqa: BLE001
             pass
 
@@ -1275,7 +1394,9 @@ class Viewport(QOpenGLWidget):
 
         self._refresh_camera_bounds()
         view = self.camera.view_matrix()
-        mvp64 = self.camera.proj_matrix(w, h) @ view
+        proj = self.camera.proj_matrix(w, h)
+        mvp64 = proj @ view
+        self._frame_ppu = float(proj[1, 1]) * self._edl_px()[1] / 2.0
         self._frame_anchor = view_anchor(self.camera.target)
         # One float32 matrix for every overlay, the frame anchor folded
         # in, and each overlay rebases what it uploads to match, so the
@@ -1288,11 +1409,23 @@ class Viewport(QOpenGLWidget):
             self._draw_selection_box(w, h)
             return
 
+        edl = self._edl_wanted()
+        if edl:
+            self._edl_begin()
+            # The background goes into the texture too, so the pass owns
+            # every pixel and the screen is simply what it wrote.
+            GL.glDisable(GL.GL_DEPTH_TEST)
+            self._use(self._bg_prog)
+            GL.glBindVertexArray(self._bg_vao)
+            GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+            GL.glEnable(GL.GL_DEPTH_TEST)
         if self.grid_visible:
             self._draw_grid(mvp64)
         self._draw_image_planes(mvp)
         self._sync_gpu()
         self._draw_objects(mvp64, view)
+        if edl:
+            self._edl_end()
         self._draw_pending(mvp)
         self._draw_control_points(mvp)
         self._draw_combs(mvp)
@@ -2377,6 +2510,126 @@ class Viewport(QOpenGLWidget):
         except Exception:                                # noqa: BLE001
             pass                    # a status line is never worth a frame
 
+    def _edl_wanted(self) -> bool:
+        """Eye-dome lighting is a per-frame decision: on when a scan is on
+        screen and the display asks for it, otherwise the frame is drawn
+        exactly as it always was."""
+        if self.cloud_shading != "edl" or not self._edl_prog:
+            return False
+        if self.display_mode not in ("shaded", "ghosted", "rendered",
+                                     "wireframe"):
+            return False
+        from ..core.pointcloud import PointCloudShape
+        return any(isinstance(o.shape, PointCloudShape)
+                   for o in self.scene.visible_objects())
+
+    def _edl_px(self) -> tuple[int, int]:
+        ratio = self.devicePixelRatioF()
+        return (max(1, int(self.width() * ratio)),
+                max(1, int(self.height() * ratio)))
+
+    def _edl_ensure(self, size):
+        if self._edl_fbo and self._edl_size == size:
+            return
+        self._edl_release()
+        w, h = size
+        self._edl_color = GL.glGenTextures(1)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._edl_color)
+        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA8, w, h, 0,
+                        GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, None)
+        for p in (GL.GL_TEXTURE_MIN_FILTER, GL.GL_TEXTURE_MAG_FILTER):
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, p, GL.GL_NEAREST)
+        for p in (GL.GL_TEXTURE_WRAP_S, GL.GL_TEXTURE_WRAP_T):
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, p, GL.GL_CLAMP_TO_EDGE)
+        self._edl_depth = GL.glGenTextures(1)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._edl_depth)
+        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_DEPTH_COMPONENT24, w, h, 0,
+                        GL.GL_DEPTH_COMPONENT, GL.GL_UNSIGNED_INT, None)
+        for p in (GL.GL_TEXTURE_MIN_FILTER, GL.GL_TEXTURE_MAG_FILTER):
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, p, GL.GL_NEAREST)
+        for p in (GL.GL_TEXTURE_WRAP_S, GL.GL_TEXTURE_WRAP_T):
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, p, GL.GL_CLAMP_TO_EDGE)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        self._edl_fbo = GL.glGenFramebuffers(1)
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, self._edl_fbo)
+        GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0,
+                                  GL.GL_TEXTURE_2D, self._edl_color, 0)
+        GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER, GL.GL_DEPTH_ATTACHMENT,
+                                  GL.GL_TEXTURE_2D, self._edl_depth, 0)
+        status = GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER,
+                             self.defaultFramebufferObject())
+        if status != GL.GL_FRAMEBUFFER_COMPLETE:
+            self._edl_release()
+            self.cloud_shading = "flat"       # this card cannot; draw plainly
+            return
+        self._edl_size = size
+
+    def _edl_release(self):
+        if self._edl_fbo:
+            GL.glDeleteFramebuffers(1, [self._edl_fbo])
+        for tex in (self._edl_color, self._edl_depth):
+            if tex:
+                GL.glDeleteTextures(1, [tex])
+        self._edl_fbo = self._edl_color = self._edl_depth = 0
+        self._edl_size = (0, 0)
+
+    def _edl_begin(self, size=None):
+        """Start drawing the scene into the lighting target. `size` is the
+        pixel size of the frame being made; the default is the pane's own.
+        Whatever framebuffer was bound is where the pass returns to, so an
+        offscreen export lights its scan the same way the screen does."""
+        size = size or self._edl_px()
+        self._edl_ensure(size)
+        if not self._edl_fbo:
+            return
+        self._edl_return = int(GL.glGetIntegerv(GL.GL_FRAMEBUFFER_BINDING))
+        self._frame_splat = 0.0
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, self._edl_fbo)
+        GL.glViewport(0, 0, *size)
+        GL.glClearColor(*theme.VIEWPORT_BG_BOTTOM, 1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+
+    def _edl_end(self, camera=None):
+        if not self._edl_fbo:
+            return
+        camera = camera or self.camera
+        w, h = self._edl_size
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, self._edl_return)
+        GL.glViewport(0, 0, w, h)
+        near, far = camera.clip_planes()
+        prog = self._edl_prog
+        self._use(prog)
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._edl_color)
+        GL.glActiveTexture(GL.GL_TEXTURE1)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._edl_depth)
+        GL.glUniform1i(self._uloc(prog, "uColorTex"), 0)
+        GL.glUniform1i(self._uloc(prog, "uDepthTex"), 1)
+        GL.glUniform2f(self._uloc(prog, "uTexel"), 1.0 / w, 1.0 / h)
+        # The ring is set in logical pixels so it reads the same on a
+        # high-density display as on a plain one.
+        GL.glUniform1f(self._uloc(prog, "uRadius"),
+                       self.edl_radius * float(self.devicePixelRatioF()))
+        GL.glUniform1f(self._uloc(prog, "uStrength"), self.edl_strength)
+        GL.glUniform1f(self._uloc(prog, "uNear"), float(near))
+        GL.glUniform1f(self._uloc(prog, "uFar"), float(far))
+        GL.glUniform1i(self._uloc(prog, "uOrtho"),
+                       1 if camera.projection == "parallel" else 0)
+        GL.glUniform1f(self._uloc(prog, "uTolerance"), self._frame_splat * 3.0)
+        # The pass writes every pixel's depth, background included, so it
+        # must not be tested against the cleared screen.
+        GL.glDepthFunc(GL.GL_ALWAYS)
+        GL.glDisable(GL.GL_BLEND)
+        GL.glBindVertexArray(self._edl_vao)
+        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+        GL.glEnable(GL.GL_BLEND)
+        GL.glDepthFunc(GL.GL_LESS)
+        GL.glActiveTexture(GL.GL_TEXTURE1)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+
     def _draw_cloud(self, gpu, obj, mvp, color, selected: bool,
                     max_level: int):
         count = gpu.cloud_count
@@ -2386,8 +2639,16 @@ class Viewport(QOpenGLWidget):
             prog = self._point_prog
             self._use(prog)
             self._set_mvp(prog, mvp)
-            GL.glUniform1f(self._uloc(prog, "uPointSize"),
-                           self.point_size * (1.5 if selected else 1.0))
+            px = self.point_size * (1.5 if selected else 1.0)
+            # 1.6 spacings: neighbouring discs overlap by enough that a
+            # surface reads as solid rather than as a sieve.
+            world = gpu.cloud_spacing * self.splat_spacings
+            self._frame_splat = max(self._frame_splat, world)
+            GL.glUniform1f(self._uloc(prog, "uWorldSize"), world)
+            GL.glUniform1f(self._uloc(prog, "uPixelsPerUnit"), self._frame_ppu)
+            GL.glUniform1f(self._uloc(prog, "uMinPx"), px)
+            GL.glUniform1f(self._uloc(prog, "uMaxPx"),
+                           self.splat_max_px * float(self.devicePixelRatioF()))
             GL.glUniform3f(self._uloc(prog, "uColor"), *color)
             # Coloured points keep their colour, tinted when selected so
             # the scan still reads as a scan; uncoloured ones take the
@@ -3460,7 +3721,18 @@ class Viewport(QOpenGLWidget):
             proj = camera.proj_matrix(px_w, px_h)
             view = camera.view_matrix()
             mvp64 = proj @ view
+            self._frame_ppu = float(proj[1, 1]) * px_h / 2.0
+            edl = self._edl_wanted()
+            if edl:
+                self._edl_begin((px_w, px_h))
+                GL.glDisable(GL.GL_DEPTH_TEST)
+                self._use(self._bg_prog)
+                GL.glBindVertexArray(self._bg_vao)
+                GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
+                GL.glEnable(GL.GL_DEPTH_TEST)
             self._draw_objects(mvp64, view)
+            if edl:
+                self._edl_end(camera)
             img = fbo.toImage()
             fbo.release()
             ratio = self.devicePixelRatioF()

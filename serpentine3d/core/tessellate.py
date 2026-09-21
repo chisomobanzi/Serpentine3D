@@ -55,6 +55,8 @@ class DisplayMesh:
     cloud_colors: object = field(default=None, repr=False, compare=False)
     cloud_levels: tuple | None = field(default=None, repr=False,
                                        compare=False)
+    # typical point-to-neighbour distance, scene units; 0 when unknown
+    cloud_spacing: float = field(default=0.0, repr=False, compare=False)
 
     has_curvature: bool = False
     # A serial number for this mesh, for caches that have to answer "is this

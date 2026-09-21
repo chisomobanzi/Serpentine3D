@@ -133,6 +133,38 @@ class PointCloudShape:
         return self._take(idx)
 
 
+def estimate_spacing(xyz, sample: int = 200_000, seed: int = 0) -> float:
+    """Typical distance between a point and its neighbours, in scene units.
+
+    A scan is a sampling of surfaces, and the size a point should draw at
+    is the size of the hole it has to fill: about that spacing. Found
+    without a tree: cut space into voxels a few spacings wide, count the
+    points per occupied voxel, and a surface lays (h / spacing)^2 of them
+    in each. One pass at a guess for h, a second at four spacings, and the
+    answer is within a few percent on anything shaped like a surface, and
+    a conservative (large) value on a volume, which only draws it bolder.
+    Returns 0 for fewer than two points.
+    """
+    pts = np.asarray(xyz, np.float32).reshape(-1, 3)
+    if len(pts) < 2:
+        return 0.0
+    if len(pts) > sample:
+        pts = pts[np.random.default_rng(seed).choice(len(pts), sample, replace=False)]
+    lo, hi = pts.min(0), pts.max(0)
+    diag = float(np.linalg.norm(hi - lo))
+    if diag <= 0:
+        return 0.0
+    h = diag / 100.0
+    spacing = h
+    for _ in range(2):
+        cell = np.floor((pts - lo) / h).astype(np.int64)
+        occupied = len(np.unique(cell, axis=0))
+        per_voxel = len(pts) / max(occupied, 1)
+        spacing = h / np.sqrt(max(per_voxel, 1.0))
+        h = max(spacing * 4.0, diag * 1e-6)
+    return float(spacing)
+
+
 def cloud_to_display(cloud: PointCloudShape):
     """DisplayMesh for the viewport: the points as vertices, no faces.
 
@@ -154,5 +186,6 @@ def cloud_to_display(cloud: PointCloudShape):
     dm.vertices = xyz
     dm.cloud_colors = rgb
     dm.cloud_levels = levels
+    dm.cloud_spacing = estimate_spacing(xyz)
     dm.is_cloud = True
     return dm
