@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 
 from ..core import geometry
 from ..core.layers import Layer
@@ -155,6 +156,10 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
             # In their own list below, so a reader older than version 3
             # opens the rest of the drawing with the scan simply absent.
             if obj.kind not in ("pointcloud", "picture")
+            # Camera routes are views derived from the authoritative
+            # trajectory records below. Rebuild them on load instead of
+            # serialising a second copy that would duplicate on every open.
+            and obj.id not in getattr(scene, "_trajectory_route_ids", ())
         ],
     }
     if clouds or trajectories or session:
@@ -411,7 +416,111 @@ def _load_doc(scene, doc: dict, blobs=None):
             record["output"] = object_id_map.get(record["output"], record["output"])
 
     scene.trajectories = list(doc.get("trajectories", []))
+    scene._trajectory_route_ids = _materialise_trajectory_routes(
+        scene, scene.trajectories, id_map)
     scene.session = doc.get("session") or None
+
+
+def _materialise_trajectory_routes(scene, trajectories, id_map) -> set[str]:
+    """Draw camera routes, exposing uncertain spans and tracking gaps."""
+    route_ids = set()
+    for trajectory in trajectories:
+        if not isinstance(trajectory, dict):
+            continue
+        frames = trajectory.get("frames", [])
+        if not isinstance(frames, (list, tuple)):
+            continue
+
+        # Pose support is the complete timeline: unlike ``frames``, it keeps
+        # an entry for a camera pose that could not be registered.  Merge on
+        # frame index so those null entries become real breaks in the route.
+        support = trajectory.get("pose_support", [])
+        indexed_frames = {
+            frame.get("index"): frame for frame in frames
+            if isinstance(frame, dict) and isinstance(frame.get("index"), int)
+        }
+        indexed_support = {
+            item.get("index"): item for item in support
+            if isinstance(item, dict) and isinstance(item.get("index"), int)
+        } if isinstance(support, (list, tuple)) else {}
+        if indexed_support:
+            timeline = [
+                (indexed_frames.get(index), indexed_support.get(index))
+                for index in sorted(set(indexed_frames) | set(indexed_support))
+            ]
+        else:
+            timeline = [(frame, None) for frame in frames
+                        if isinstance(frame, dict)]
+
+        samples = []
+        for frame, support_item in timeline:
+            status = (support_item or {}).get("status", "supported")
+            if status == "untracked":
+                samples.append((None, status))
+                continue
+            pose = ((frame or {}).get("c2w") or
+                    (support_item or {}).get("c2w"))
+            if not isinstance(pose, (list, tuple)) or len(pose) != 16:
+                samples.append((None, status))
+                continue
+            try:
+                matrix = tuple(float(value) for value in pose)
+            except (TypeError, ValueError, OverflowError):
+                samples.append((None, status))
+                continue
+            if not all(math.isfinite(value) for value in matrix):
+                samples.append((None, status))
+                continue
+            samples.append((tuple(matrix[index] for index in (3, 7, 11)),
+                            status))
+
+        name = trajectory.get("name")
+        layer = trajectory.get("layer")
+        layer_id = (id_map.get(layer, "default")
+                    if isinstance(layer, str) else "default")
+
+        # Classify edges rather than poses.  A run of two or more uncertain
+        # poses becomes a dashed interval with shared boundary points, while
+        # a null/untracked sample flushes the current path before either side
+        # can be joined.
+        edge_runs = []
+        current_kind = None
+        current_points = []
+        previous = None
+        for sample in samples + [(None, "untracked")]:
+            if sample[0] is None:
+                if len(current_points) >= 2:
+                    edge_runs.append((current_kind, current_points))
+                current_kind, current_points, previous = None, [], None
+                continue
+            if previous is None:
+                previous = sample
+                continue
+            edge_kind = ("uncertain" if previous[1] == sample[1] == "uncertain"
+                         else "supported")
+            if edge_kind != current_kind:
+                if len(current_points) >= 2:
+                    edge_runs.append((current_kind, current_points))
+                current_kind = edge_kind
+                current_points = [previous[0], sample[0]]
+            else:
+                current_points.append(sample[0])
+            previous = sample
+
+        for kind, positions in edge_runs:
+            try:
+                shape = geometry.make_polyline(positions)
+            except geometry.GeometryError:
+                continue
+            route_name = name if isinstance(name, str) else None
+            updates = {"visible": bool(trajectory.get("visible", True))}
+            if kind == "uncertain":
+                route_name = f"{route_name or 'Camera route'} — uncertain"
+                updates.update(color=(0.92, 0.34, 0.16), linetype="Dashed")
+            route = scene.add(shape, name=route_name, layer_id=layer_id)
+            scene.update(route.id, **updates)
+            route_ids.add(route.id)
+    return route_ids
 
 
 def _image_planes_from_json(planes, blobs=None) -> list[dict]:

@@ -182,15 +182,27 @@ def _spec_file(path, points: int = 200) -> tuple:
     rgb = (rng.random((points, 3)) * 255).astype(np.uint8)
     conf = rng.random(points).astype("<f4")
     level = rng.integers(0, 3, points).astype(np.uint8)
+    frames = [{"t_ns": 1000 * i, "index": i,
+               "c2w": [1.0, 0, 0, 0.1 * i, 0, 1.0, 0, 0,
+                       0, 0, 1.0, 0, 0, 0, 0, 1.0],
+               "vis": 0.9} for i in range(12)]
+    pose_support = [
+        {"t_ns": frame["t_ns"], "index": frame["index"],
+         "status": "uncertain" if frame["index"] == 5 else "supported",
+         "reasons": (["low_parallax"] if frame["index"] == 5 else []),
+         "c2w": frame["c2w"]}
+        for frame in frames
+    ] + [{
+        "t_ns": 12_000, "index": 12, "status": "untracked",
+        "reasons": ["registration_failed"], "c2w": None,
+    }]
     trajectories = [{
         "id": "traj-1", "name": "Wearer A", "layer": "scan", "visible": True,
         "stream": "stream-a",
         "intrinsics": [500.0, 0.0, 320.0, 0.0, 500.0, 240.0, 0.0, 0.0, 1.0],
         "image_size": [640, 480],
-        "frames": [{"t_ns": 1000 * i, "index": i,
-                    "c2w": [1.0, 0, 0, 0.1 * i, 0, 1.0, 0, 0,
-                            0, 0, 1.0, 0, 0, 0, 0, 1.0],
-                    "vis": 0.9} for i in range(12)],
+        "frames": frames,
+        "pose_support": pose_support,
     }]
     session = {
         "id": "sess-42", "engine": "mica 0.3", "backbone": "lingbot-map",
@@ -212,7 +224,7 @@ def _spec_file(path, points: int = 200) -> tuple:
         "current_layer": "default",
         "objects": [],
         "pointclouds": [{
-            "id": "pc-1", "name": "Room", "layer": "scan", "visible": True,
+            "id": "pc-1", "name": "Room", "layer": "scan", "visible": False,
             "count": points,
             "bbox": [xyz.min(axis=0).tolist(), xyz.max(axis=0).tolist()],
             "blobs": {"xyz": "blobs/pc-1/xyz.f32",
@@ -246,17 +258,38 @@ def test_a_v3_file_written_by_hand_from_the_spec_loads_and_round_trips_its_traje
     xyz, rgb, conf, level, trajectories, session = _spec_file(path)
 
     scene = Scene()
-    native.load_scene(scene, path)
+    opened = import_file(scene, path)
+    assert opened == 2, "the scan and its visible camera route are scene objects"
     assert scene.units == "m"
-    obj = scene.all()[0]
+    obj, = [item for item in scene.all() if item.kind == "pointcloud"]
     assert obj.kind == "pointcloud" and obj.name == "Room"
     assert scene.layers.get(obj.layer_id).name == "Scan"
+    assert obj.visible is False
     assert np.array_equal(obj.shape.xyz, xyz)
     assert np.array_equal(obj.shape.rgb, rgb)
     assert np.array_equal(obj.shape.conf, conf)
     assert np.array_equal(obj.shape.level, level)
-    assert obj.shape.provenance["backbone"] == "lingbot-map"
+    assert obj.shape.provenance == {
+        "session": "sess-42", "stream": "stream-a",
+        "backbone": "lingbot-map", "scale": "metric",
+        "created": "2026-09-03T10:12:00",
+    }
+
+    route, = [item for item in scene.all() if item.kind == "curve"]
+    assert route.name == "Wearer A" and route.visible is True
+    assert scene.layers.get(route.layer_id).name == "Scan"
+    positions = [tuple(frame["c2w"][i] for i in (3, 7, 11))
+                 for frame in trajectories[0]["frames"]]
+    assert np.allclose(g.get_control_points(route.shape), positions)
+
     assert scene.trajectories == trajectories
+    support = scene.trajectories[0]["pose_support"]
+    assert {status: sum(item["status"] == status for item in support)
+            for status in ("supported", "uncertain", "untracked")} == {
+                "supported": 11, "uncertain": 1, "untracked": 1,
+            }
+    assert support[-1]["c2w"] is None
+    assert support[-1]["reasons"] == ["registration_failed"]
     assert scene.session == session
 
     again = str(tmp_path / "again.serp")
@@ -273,7 +306,93 @@ def test_a_v3_file_written_by_hand_from_the_spec_loads_and_round_trips_its_traje
     native.load_scene(third, again)
     assert third.trajectories == trajectories
     assert third.session == session
-    assert np.array_equal(third.all()[0].shape.rgb, rgb)
+    cloud, = [item for item in third.all() if item.kind == "pointcloud"]
+    assert np.array_equal(cloud.shape.rgb, rgb)
+
+
+def test_a_mica_route_shows_uncertainty_and_breaks_at_an_untracked_pose(tmp_path):
+    path = str(tmp_path / "route-with-gap.serp")
+    _spec_file(path)
+    with zipfile.ZipFile(path) as source:
+        members = {name: source.read(name) for name in source.namelist()}
+    doc = json.loads(members["document.json"])
+
+    def pose_at(x):
+        return [1.0, 0, 0, float(x), 0, 1.0, 0, 0,
+                0, 0, 1.0, 0, 0, 0, 0, 1.0]
+
+    valid_indices = [0, 1, 2, 3, 4, 5, 7, 8]
+    trajectory = doc["trajectories"][0]
+    trajectory["frames"] = [
+        {"t_ns": 1000 * index, "index": index,
+         "c2w": pose_at(index), "vis": 0.9}
+        for index in valid_indices
+    ]
+    trajectory["pose_support"] = [
+        {"t_ns": 1000 * index, "index": index,
+         "status": ("untracked" if index == 6 else
+                    "uncertain" if 2 <= index <= 4 else "supported"),
+         "reasons": (["registration_failed"] if index == 6 else
+                     ["weak_transition"] if 2 <= index <= 4 else []),
+         "c2w": None if index == 6 else pose_at(index)}
+        for index in range(9)
+    ]
+    expected_trajectory = json.loads(json.dumps(trajectory))
+    members["document.json"] = json.dumps(doc).encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as target:
+        for name, data in members.items():
+            target.writestr(name, data)
+
+    scene = Scene()
+    opened = import_file(scene, path)
+    routes = [item for item in scene.all() if item.kind == "curve"]
+    assert opened == 1 + len(routes)
+    assert routes and all(route.visible for route in routes)
+    assert {scene.layers.get(route.layer_id).name for route in routes} == {"Scan"}
+    assert scene.trajectories == [expected_trajectory]
+    gap, = [item for item in scene.trajectories[0]["pose_support"]
+            if item["index"] == 6]
+    assert gap == {
+        "t_ns": 6000, "index": 6, "status": "untracked",
+        "reasons": ["registration_failed"], "c2w": None,
+    }
+
+    route_points = {
+        route.id: np.asarray(g.get_control_points(route.shape), dtype=float)
+        for route in routes
+    }
+    assert all(not ((points[:, 0] < 6).any() and (points[:, 0] > 6).any())
+               for points in route_points.values()), \
+        "a displayed route must stop at an untracked pose"
+
+    uncertain = [route for route in routes
+                 if "uncertain" in route.name.lower()]
+    supported = [route for route in routes if route not in uncertain]
+    assert uncertain, "the uncertain interval needs an identifiable route object"
+    uncertain_x = {
+        round(float(point[0]), 6)
+        for route in uncertain for point in route_points[route.id]
+    }
+    assert {2.0, 3.0, 4.0}.issubset(uncertain_x)
+
+    def appearance(route):
+        colour = tuple(round(float(value), 6)
+                       for value in scene.color_of(route))
+        return colour, route.linetype
+
+    assert supported
+    assert ({appearance(route) for route in uncertain}
+            .isdisjoint({appearance(route) for route in supported})), \
+        "uncertain route geometry must look distinct from supported geometry"
+
+    saved = str(tmp_path / "route-reopened.serp")
+    native.save_scene(scene, saved)
+    assert _doc(saved)["trajectories"] == [expected_trajectory]
+    reopened = Scene()
+    native.load_scene(reopened, saved)
+    reopened_routes = [item for item in reopened.all() if item.kind == "curve"]
+    assert len(reopened_routes) == len(routes)
+    assert reopened.trajectories == [expected_trajectory]
 
 
 def test_the_file_meta_says_how_many_points_without_loading_them(tmp_path):

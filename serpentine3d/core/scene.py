@@ -199,6 +199,9 @@ class Scene:
         # file gave, so a save writes them back unchanged; nothing here
         # draws or edits them yet.
         self.trajectories: list = []
+        # Scene objects derived from trajectories are display aids, not a
+        # second authoritative copy to write into ``objects`` on save.
+        self._trajectory_route_ids: set[str] = set()
         self.session: dict | None = None
 
     # -- notification --
@@ -542,6 +545,7 @@ class Scene:
         self.image_planes = []
         self.history_records = []
         self.trajectories = []
+        self._trajectory_route_ids.clear()
         self.session = None
         # units are a user preference as much as a document property: keep
         self.notify()

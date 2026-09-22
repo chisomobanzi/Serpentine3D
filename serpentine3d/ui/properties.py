@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from itertools import product
-from math import atan, dist, isclose, pi, sin, tan
+from math import atan, dist, isclose, isfinite, pi, sin, tan
 
 from PySide6.QtCore import QSignalBlocker, QTimer, Signal, Qt
 from PySide6.QtGui import QFont, QFontDatabase
@@ -885,4 +885,37 @@ def cloud_measures(obj, fmt) -> str:
             f"{n:,} at {lvl}" for lvl, n in enumerate(counts) if n))
     if cloud.rgb is None:
         lines.append("No colour: drawn in the layer colour")
+
+    if cloud.conf is not None and len(cloud.conf):
+        low = float(cloud.conf.min())
+        high = float(cloud.conf.max())
+        valid_bounds = (isfinite(low) and isfinite(high)
+                        and 0.0 <= low <= high <= 1.0)
+        support = float(cloud.conf.mean()) if valid_bounds else None
+        value = (f"{support:.0%}"
+                 if support is not None and isfinite(support)
+                 else "Unavailable")
+        lines.append(f"Heuristic surface support (mean): {value}")
+
+    provenance = cloud.provenance or {}
+    pose_source = provenance.get("pose_source")
+    if pose_source:
+        pose_label = {
+            "image_only": "Camera-only (image-only)",
+        }.get(str(pose_source), str(pose_source).replace("_", " "))
+        lines.append(f"Tracking: {pose_label}")
+
+    scale = provenance.get("scale")
+    if scale:
+        scale_label = {
+            "model_estimated_metric": "Model-estimated metric",
+        }.get(str(scale), str(scale).replace("_", " "))
+        lines.append(f"Scale: {scale_label}")
+
+    for key, label in (("scale_source", "Scale source"),
+                       ("backbone", "Backbone"),
+                       ("limitations", "Limitations")):
+        value = provenance.get(key)
+        if value:
+            lines.append(f"{label}: {value}")
     return "\n".join(lines)
