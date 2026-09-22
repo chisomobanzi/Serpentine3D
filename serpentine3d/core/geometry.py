@@ -1947,6 +1947,7 @@ def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
          else tuple(float(v) / length for v in direction))
 
     tools = TopTools_ListOfShape()
+    reaching = []               # the cutters as the splitter is shown them
     for c in cutters:
         if isinstance(c, PictureShape):
             c = c.face()
@@ -1962,6 +1963,11 @@ def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
             t0, t1 = min(tmn, cmn) - 1.0, max(tmx, cmx) + 1.0
             moved = translate(c, tuple((t0 - cmn) * v for v in d))
             tool = extrude(moved, d, (t1 - t0) + (cmx - cmn))
+        elif kind == "curve" and shape_kind(c) == "curve":
+            # a cutter stopping a whisker short of the curve is reaching it
+            # too, and the stretch is the whole fix here (issue #32)
+            tool = c = _reaching_cutter(c, target)
+        reaching.append(c)
         tools.Append(tool)
 
     args = TopTools_ListOfShape()
@@ -1975,7 +1981,9 @@ def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
     result = splitter.Shape()
 
     if kind == "curve":
-        pieces = _curve_pieces(edges_of(result), cutters)
+        # the stretched cutters, or a cut vertex sitting in the gap would
+        # measure as off the cutter and be threaded back into a join
+        pieces = _curve_pieces(edges_of(result), reaching)
     elif kind in ("surface", "solid"):
         if kind == "solid":
             pieces = []

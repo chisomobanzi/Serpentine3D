@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- **A cutting curve that reaches a curve splits it (#32).** The sibling of
+  #22, which was the same complaint about surfaces: a cutter only split the
+  curve if it overran it, so the only way through was to draw it longer.
+  "Exactly on" was never the failing case, and that is why it read as one.
+  A truly coincident end splits, and so does one overrunning by a
+  millionth; what fails is an end stopping a whisker *short*, where a gap
+  of one micron was already enough while the drawing's own tolerance is a
+  thousand times looser. The cutter is now stretched a little past its ends
+  first, exactly as it already was for a surface, so `split` and `trim`
+  treat a curve and a surface the same way. A gap you can see is still a
+  gap and still refuses.
+
 - **The transform commands reach what you are holding (#29).** Sub-objects
   could only be transformed with the gumball. `move`, `rotate` and `scale`
   asked only about held control points, so a held face, solid edge or curve
