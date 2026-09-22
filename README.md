@@ -106,7 +106,7 @@ commits a value mid-command, or repeats the last command.
 | **View** | `top` `front` `right` `perspective` `4view`/`1view` `zoomextents` `undoview`/`redoview` (a history for the camera, per pane) `wireframe` `shaded` `ghosted` `rendered` `technical` `grid` `snap` |
 | **Render** | `material` (Matte/Plastic/Metal/Glass/custom PBR — flows into GLB/USD export) `rendered` |
 | **Capture** | `turntable` (clean model clip) `turntableui` (portrait story with the app UI) |
-| **Layers** | `layer` (new/current/show/hide/rename/weight/**linetype**) — or use the Layers panel |
+| **Layers** | `layer` (new/current/show/hide/rename/weight/**linetype**) — or use the Layers panel; right-click a layer there to move whatever is selected onto it |
 | **Linetypes** | `linetype` — dashed/dotted/hidden/center/… per object or ByLayer (layers carry a linetype too); dashes render in the viewport *and* in exported layout sheets (PDF/SVG) |
 | **Meshes** | heavy OBJ/3DM/FBX props stay native meshes (instant display); `meshtobrep` / `breptomesh` convert |
 | **Files** | `new` `open` `save` `import` `export` (`.serp` is a zip container with thumbnail + metadata) |

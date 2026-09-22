@@ -303,10 +303,13 @@ class LayersPanel(QWidget):
 
     changed = Signal()
 
-    def __init__(self, scene, history, parent=None):
+    def __init__(self, scene, history, parent=None, selection=None):
         super().__init__(parent)
         self.scene = scene
         self.history = history
+        # what the drawing has selected, for moving it onto a layer from
+        # here; a panel built without one simply does not offer that
+        self.selection = selection
         # the guards the class docstring describes
         self._updating = False        # the panel is writing to the tree itself
         self._in_item_change = False  # Qt is still inside an edited item
@@ -726,6 +729,23 @@ class LayersPanel(QWidget):
         menu.addAction("New sublayer",
                        lambda: self._new_sublayer_under(layer_id))
         menu.addSeparator()
+        if self.selection is not None:
+            # The one entry about objects rather than layers: what the
+            # drawing has selected goes onto the row under the pointer
+            # (issue #27). Always offered, so it can be found; greyed
+            # when there is nothing it could do; and named for what it
+            # will do, the way "Move out of Walls" is.
+            moving = self._movable_to(layer_id)
+            if moving:
+                n = len(moving)
+                text = (f"Move {n} object{'s' if n != 1 else ''} "
+                        f"to {layers.get(layer_id).name}")
+            else:
+                text = "Move to layer"
+            act = menu.addAction(
+                text, lambda: self._move_selection_to(layer_id))
+            act.setEnabled(bool(moving))
+            menu.addSeparator()
         self._add_hatch_menu(menu, ids)
         menu.addSeparator()
         # Name the branch when they all sit in the same one, so the entry
@@ -745,6 +765,23 @@ class LayersPanel(QWidget):
             menu.addAction("Move to the top level",
                            lambda: self._move_out(ids, to_top=True))
         return menu
+
+    def _movable_to(self, layer_id) -> list[str]:
+        """The selected objects not already on this layer."""
+        if self.selection is None:
+            return []
+        return [i for i in self.selection.ids
+                if self.scene.get(i).layer_id != layer_id]
+
+    def _move_selection_to(self, layer_id):
+        """Put what the drawing has selected onto this layer: one undo
+        step, one notification, and the selection left as it was."""
+        ids = self._movable_to(layer_id)
+        if not ids:
+            return
+        self.history.checkpoint("move to layer")
+        self.scene.update_many(ids, layer_id=layer_id)
+        self.scene.notify("layers")
 
     def _add_hatch_menu(self, menu, ids):
         """The fill a hatch drawn on these layers starts out with.

@@ -58,6 +58,13 @@
 
 ### Added
 
+- **Right-click a layer to move the selection onto it (#27).** With
+  objects selected, the Layers panel's right-click menu offers to put them
+  on the layer under the pointer. The entry says what it will do, "Move 3
+  objects to Walls", counting only the ones not already there; it is
+  always present so it can be found, and greyed when there is nothing it
+  could do. One undo step, and the selection is left as it was.
+
 - **Ctrl+Shift and a band hold faces, edges and segments (#30).** The
   chord that clicks one part at a time now sweeps them up by the band-full:
   a row of edges, or the segments down one side of a drawing, in a single

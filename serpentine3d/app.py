@@ -173,7 +173,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
                            self._prop_dock)
 
-        self.layers_panel = LayersPanel(self.scene, self.history)
+        self.layers_panel = LayersPanel(self.scene, self.history,
+                                        selection=self.selection)
         self._layer_dock = QDockWidget("Layers", self)
         self._layer_dock.setObjectName("layersDock")
         self._layer_dock.setWidget(self.layers_panel)
