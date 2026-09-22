@@ -58,6 +58,17 @@
 
 ### Added
 
+- **Ctrl+Shift and a band hold faces, edges and segments (#30).** The
+  chord that clicks one part at a time now sweeps them up by the band-full:
+  a row of edges, or the segments down one side of a drawing, in a single
+  drag instead of a click each. A window, dragged left to right, holds a
+  part only when all of it lies inside. A crossing band, dragged right to
+  left, holds whatever it touches, and touching is measured rather than
+  guessed from the ends: a long edge passes through a small band with
+  neither end inside it, and a band dropped in the middle of a big face has
+  no corner inside it at all, and both count. Like the click, it adds to
+  what is held, takes no objects, and finds no faces in a wireframe view.
+
 - **Open Mica spatial session records.** Mica `.serp` files now open as coloured
   point clouds with camera routes. Untracked poses break the route, uncertain
   spans appear as orange dashed segments, and save/reopen does not duplicate the

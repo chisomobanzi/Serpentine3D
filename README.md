@@ -219,6 +219,13 @@ Press **Delete** with a segment held and the segment goes: a side out of a
 closed curve opens it, and a middle segment out of an open one leaves the
 runs either side as separate curves.
 
+Hold Ctrl+Shift and **drag a band** instead of clicking to take faces, edges
+and segments by the sweep. A band dragged left to right holds a part only
+when all of it lies inside; one dragged right to left holds whatever it
+touches, so a small band across the middle of an edge takes the edge and
+one dropped on a face takes the face. It adds to what you are already
+holding.
+
 Whatever you are holding, `move`, `rotate` and `scale` work on it as well as
 the gumball does, so you can type an exact distance or angle instead of
 dragging. A curve segment and a face of a solid take all three; an edge of a

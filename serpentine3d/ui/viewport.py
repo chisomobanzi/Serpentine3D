@@ -4652,6 +4652,16 @@ class Viewport(QOpenGLWidget):
         if hits:
             self._pick_boxed_cvs(hits, modifiers)
             return None
+        if (modifiers & Qt.KeyboardModifier.ControlModifier
+                and modifiers & Qt.KeyboardModifier.ShiftModifier):
+            # the chord that clicks one face, edge or segment sweeps them
+            # up by the band-full, adding to what is held (issue #30). It
+            # is asking for parts, so it never falls through to objects.
+            caught = self._box_pick_subobjects(x0, y0, x1, y1, crossing)
+            if caught:
+                self.selection.set_subobjects(
+                    list(self.selection.subobjects) + caught)
+            return None
         return self._box_pick(x0, y0, x1, y1, crossing)
 
     def _box_pick_cvs(self, x0, y0, x1, y1) -> list[tuple[str, int]]:
@@ -4700,6 +4710,77 @@ class Viewport(QOpenGLWidget):
             # the curve it belongs to would move both at once
             sel.set([])
         sel.set_subobjects(held + caught)
+
+    def _box_pick_subobjects(self, x0, y0, x1, y1, crossing: bool) -> list:
+        """The faces, edges and curve segments a band caught (issue #30).
+
+        Each part is judged on its own drawing: an edge on the segments it
+        was flattened to, a face on its triangles. A window holds a part
+        only when every one of those lies inside. A crossing band holds
+        it if any of them so much as touches, and touching is measured,
+        not guessed from the ends: a long edge passes through a small
+        band with neither end inside, and a band dropped in the middle
+        of a big face has no corner of any triangle inside it. Two convex
+        shapes overlap when a corner of one lies in the other or their
+        sides cross, so that is what is asked.
+
+        Whatever the click could take, the band can; a wireframe view
+        offers no faces to either.
+        """
+        rect = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+        w, h = self.width(), self.height()
+        eye = self._eye()
+        faces_shown = self._pick_mode() != "wireframe"
+        selectable = [obj for obj in self.scene.visible_objects()
+                      if self.scene.is_selectable(obj.id)
+                      and self.selection.filter_allows(obj.kind)]
+        caught = []
+        for obj in self._pick_candidates(selectable, *rect, w, h):
+            mesh = obj.mesh
+            if len(mesh.edge_of_segment) and len(mesh.edge_segments):
+                # only the segments whose chunk can reach the rect are
+                # projected; a chunk thrown out is outside it, which is an
+                # answer in itself for a window
+                segs, sub = self._near_segments(mesh, *rect, w, h)
+                owner = (mesh.edge_of_segment if sub is None
+                         else mesh.edge_of_segment[sub])
+                scr = eye.project(segs.reshape(-1, 3).astype(float),
+                                  w, h).reshape(-1, 2, 3)
+                ok = (scr[:, :, 2] > 0).all(axis=1)
+                ends_in = _inside_rect(scr[:, :, :2], rect)
+                if crossing:
+                    which = _touching(owner, ok & ends_in.any(axis=1),
+                                      lambda rest: _segments_touch_rect(
+                                          scr[rest, 0, :2], scr[rest, 1, :2],
+                                          rect))
+                else:
+                    which = _wholly(mesh.edge_of_segment, owner,
+                                    ok & ends_in.all(axis=1))
+                caught.extend((obj.id, "edge", int(i)) for i in which)
+            if (faces_shown and len(mesh.face_of_triangle)
+                    and len(mesh.triangles)):
+                tris, sub = self._near_triangles(mesh, *rect, w, h)
+                owner = (mesh.face_of_triangle if sub is None
+                         else mesh.face_of_triangle[sub])
+                if sub is None:
+                    scr = eye.project(mesh.vertices.astype(float), w, h)
+                    tri = scr[tris]                           # (T, 3, 3)
+                else:
+                    # project only the vertices the near triangles use
+                    vid, inv = np.unique(tris, return_inverse=True)
+                    scr = eye.project(mesh.vertices[vid].astype(float), w, h)
+                    tri = scr[inv.reshape(tris.shape)]
+                ok = (tri[:, :, 2] > 0).all(axis=1)
+                corners_in = _inside_rect(tri[:, :, :2], rect)
+                if crossing:
+                    which = _touching(owner, ok & corners_in.any(axis=1),
+                                      lambda rest: _triangles_touch_rect(
+                                          tri[rest, :, :2], rect))
+                else:
+                    which = _wholly(mesh.face_of_triangle, owner,
+                                    ok & corners_in.all(axis=1))
+                caught.extend((obj.id, "face", int(i)) for i in which)
+        return caught
 
     # -------------------------------------------------------- control points
 
@@ -5082,6 +5163,103 @@ def _snap_marker_color(space: str) -> tuple[float, float, float, float]:
     if space == "model":
         return (1.0, 1.0, 1.0, 0.95)
     return (*theme.SELECTION_COLOR, 1.0)
+
+
+def _inside_rect(pts: np.ndarray, rect) -> np.ndarray:
+    """Which of these 2D points (..., 2) lie in the screen rect."""
+    x, y = pts[..., 0], pts[..., 1]
+    return ((x >= rect[0]) & (x <= rect[2])
+            & (y >= rect[1]) & (y <= rect[3]))
+
+
+def _wholly(owner_all: np.ndarray, owner: np.ndarray,
+            inside: np.ndarray) -> np.ndarray:
+    """The owners (edge or face ids) every one of whose pieces is inside.
+
+    `owner_all` names each piece in the whole mesh and `owner` only the
+    pieces that were worth testing; the count has to be taken over the
+    whole, since a piece not worth testing is one that lies outside.
+    """
+    if not len(owner):
+        return np.zeros(0, np.int32)
+    n = int(owner_all.max()) + 1
+    total = np.bincount(owner_all, minlength=n)
+    held = np.bincount(owner[inside], minlength=n)
+    return np.flatnonzero((total > 0) & (held == total))
+
+
+def _touching(owner: np.ndarray, cheap: np.ndarray, expensive) -> np.ndarray:
+    """The owners any piece of which touches the band.
+
+    A piece with a corner inside settles its owner at once, and on a
+    dense mesh that is nearly all of them; the dearer question, whether
+    a piece touches with no corner inside, is only put to the pieces of
+    owners not yet settled.
+    """
+    held = np.unique(owner[cheap])
+    rest = np.flatnonzero(~np.isin(owner, held))
+    if len(rest):
+        more = np.unique(owner[rest[expensive(rest)]])
+        held = np.union1d(held, more)
+    return held
+
+
+def _segments_touch_rect(a: np.ndarray, b: np.ndarray, rect) -> np.ndarray:
+    """Which 2D segments a->b (N, 2) touch the screen rect at all.
+
+    Liang-Barsky: the part of each segment inside the rect is the
+    parameter range left after clipping against its four sides, and the
+    segment touches when that range is not empty. An endpoint inside
+    counts, and so does passing clean through with neither end in.
+    """
+    d = b - a
+    t0 = np.zeros(len(a))
+    t1 = np.ones(len(a))
+    alive = np.ones(len(a), bool)
+    for p, q in ((-d[:, 0], a[:, 0] - rect[0]), (d[:, 0], rect[2] - a[:, 0]),
+                 (-d[:, 1], a[:, 1] - rect[1]), (d[:, 1], rect[3] - a[:, 1])):
+        flat = np.abs(p) < 1e-12
+        alive &= ~(flat & (q < 0))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = np.where(flat, 0.0, q / np.where(flat, 1.0, p))
+        enters = (~flat) & (p < 0)
+        leaves = (~flat) & (p > 0)
+        t0 = np.where(enters, np.maximum(t0, t), t0)
+        t1 = np.where(leaves, np.minimum(t1, t), t1)
+    return alive & (t0 <= t1)
+
+
+def _triangles_touch_rect(tri: np.ndarray, rect) -> np.ndarray:
+    """Which 2D triangles (T, 3, 2) overlap the screen rect at all.
+
+    Two convex shapes overlap when a corner of one lies inside the other
+    or a side of one crosses a side of the other, so all three are asked:
+    a triangle corner in the rect, a triangle side through the rect, and
+    a rect corner in the triangle, which is the band dropped wholly
+    inside one big face.
+    """
+    if not len(tri):
+        return np.zeros(0, bool)
+    hit = _inside_rect(tri, rect).any(axis=1)
+    for i in range(3):
+        hit |= _segments_touch_rect(tri[:, i], tri[:, (i + 1) % 3], rect)
+    corners = ((rect[0], rect[1]), (rect[2], rect[1]),
+               (rect[2], rect[3]), (rect[0], rect[3]))
+    a, b, c = tri[:, 0], tri[:, 1], tri[:, 2]
+    for cx, cy in corners:
+        p = np.array([cx, cy])
+        s0 = _side(a, b, p)
+        s1 = _side(b, c, p)
+        s2 = _side(c, a, p)
+        hit |= ((s0 >= 0) & (s1 >= 0) & (s2 >= 0)) | \
+               ((s0 <= 0) & (s1 <= 0) & (s2 <= 0))
+    return hit
+
+
+def _side(a: np.ndarray, b: np.ndarray, p: np.ndarray) -> np.ndarray:
+    """Which side of each 2D line a->b the point p falls; 0 is on it."""
+    return ((b[:, 0] - a[:, 0]) * (p[1] - a[:, 1])
+            - (b[:, 1] - a[:, 1]) * (p[0] - a[:, 0]))
 
 
 def _point_segment_dist2(p: np.ndarray, a: np.ndarray,
