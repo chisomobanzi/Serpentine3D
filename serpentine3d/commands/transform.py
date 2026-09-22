@@ -17,36 +17,222 @@ def _ghost(objs, fn):
 
 
 def _what_to_transform(ctx, prompt, **kw):
-    """(held control points, objects) — whichever of the two is being used.
+    """(held parts, objects) — whichever of the two is being used.
 
-    Control points on are a way of working on part of an object, so when some
-    of them are held they are what the command is for and there is nothing
-    left to ask: putting the select prompt up anyway would throw them away,
-    since a select prompt clears the selection to take its answer.
+    Holding part of an object is a way of saying which part you mean, so
+    when something is held it is what the command is for and there is
+    nothing left to ask: putting the select prompt up anyway would throw it
+    away, since a select prompt clears the selection to take its answer.
+    That is what used to happen to everything except control points, and it
+    left the whole object transformed instead of the part (#29).
     """
-    held = ctx.held_control_points()
+    held = ctx.held_parts()
     objs = [] if held else (yield SelectReq(prompt, **kw))
     return held, objs
 
 
 def _preview_of(ctx, held, objs, fn):
-    """What the drawing would look like with `fn` applied to what is picked."""
-    return (ctx.control_point_ghost(held, fn) if held else _ghost(objs, fn))
+    """What the drawing would look like with `fn` applied to what is picked.
+
+    Only control points preview; the rest rebuild geometry to answer, which
+    is too much to do on every mouse move.
+    """
+    if not held:
+        return _ghost(objs, fn)
+    return ctx.control_point_ghost(held.get("cv", {}), fn)
 
 
-def _do(ctx, held, objs, fn, verb, tail=""):
-    """Apply `fn` to the held points or to the objects, and say what happened.
+def _point_map(fn):
+    """`fn`, written for shapes, as the map it makes of bare positions."""
+    return lambda p: g.transform_points([tuple(p)], fn)[0]
 
-    One transform for both, so a control point cannot be moved by a slightly
-    different rule from the curve it belongs to.
+
+def _face_moved(shape, index, delta):
+    """One face of a solid carried by `delta`.
+
+    Split into the part along the face's normal, which pushes it out or
+    carves it in, and the part across, which slides it within its own plane
+    while the faces beside it lean to keep hold of its edges. Sliding first
+    leaves the face where the push can still find it.
+    """
+    import numpy as np
+    faces = g.faces_of(shape)
+    normal = np.asarray(g.face_normal(faces[index]), float)
+    normal = normal / (np.linalg.norm(normal) or 1.0)
+    centre = np.asarray(g.centroid(faces[index]), float)
+    delta = np.asarray(delta, float)
+    along = float(np.dot(delta, normal))
+    across = delta - along * normal
+
+    out, want = shape, centre
+    if float(np.linalg.norm(across)) > 1e-9:
+        out = g.slide_face(out, index, tuple(across))
+        want = centre + across
+        index = _face_again(out, normal, want)
+    if abs(along) > 1e-9:
+        out = g.push_pull(out, index, along)
+    return out
+
+
+def _face_again(shape, normal, want):
+    """Where that face went: a rebuild renumbers them, so it is found by
+    facing the same way and lying nearest to where it was put."""
+    import numpy as np
+    best, score = None, float("inf")
+    for i, f in enumerate(g.faces_of(shape)):
+        try:
+            n = np.asarray(g.face_normal(f), float)
+            c = np.asarray(g.centroid(f), float)
+        except g.GeometryError:
+            continue
+        n = n / (np.linalg.norm(n) or 1.0)
+        if float(np.dot(n, normal)) < 0.9:
+            continue
+        d = float(np.linalg.norm(c - want))
+        if d < score:
+            best, score = i, d
+    if best is None:
+        raise g.GeometryError("The face moved out of reach")
+    return best
+
+
+def _do(ctx, held, objs, fn, verb, tail="", action=None):
+    """Apply `fn` to what is held, or to the objects, and say what happened.
+
+    `fn` transforms a shape, which is all a whole object or a control point
+    needs. A face or an edge of a solid is reshaped rather than carried, so
+    those need to know which transform this is: `action` says, as
+    ("move", delta), ("rotate", point, axis, degrees) or ("scale", factor).
+    Without one they are left alone and said so, which beats transforming
+    the whole solid behind your back.
     """
     if held:
-        n = ctx.apply_to_control_points(held, fn)
-        ctx.echo(f"{verb} {n} control point(s){tail}.")
+        _do_to_parts(ctx, held, fn, verb, tail, action)
         return
     for o in objs:
         ctx.scene.replace_shape(o.id, fn(o.shape))
     ctx.echo(f"{verb} {len(objs)} object(s){tail}.")
+
+
+def _do_to_parts(ctx, held, fn, verb, tail, action):
+    """What is rebuilt is let go of, what is not stays held.
+
+    A rebuilt solid or curve renumbers its faces and edges, so holding the
+    old index afterwards would leave you holding something else. Anything
+    refused was not touched, so it is still there to try another way on,
+    which is the whole point of saying no rather than doing something else.
+    """
+    done, refused, keep = [], [], []
+    kind = action[0] if action else None
+
+    cvs = held.get("cv")
+    if cvs:
+        n = ctx.apply_to_control_points(cvs, fn)
+        done.append(f"{n} control point(s)")
+
+    segments = held.get("segment")
+    if segments:
+        n = 0
+        at = _point_map(fn)
+        for obj_id, idxs in segments.items():
+            obj = ctx.scene.get(obj_id)
+            if obj is None:
+                continue
+            try:
+                ctx.scene.replace_shape(
+                    obj_id, g.transform_segments(obj.shape, idxs, at))
+                n += len(idxs)
+            except g.GeometryError as exc:
+                refused.append(f"{obj.name}: {exc}")
+                keep += [(obj_id, "edge", i) for i in idxs]
+        if n:
+            done.append(f"{n} curve segment(s)")
+
+    faces = held.get("face")
+    if faces:
+        n = 0
+        for obj_id, idxs in faces.items():
+            obj = ctx.scene.get(obj_id)
+            if obj is None:
+                continue
+            try:
+                shape = obj.shape
+                for i in idxs:
+                    shape = _face_by_action(shape, i, action)
+                ctx.scene.replace_shape(obj_id, shape)
+                n += len(idxs)
+            except g.GeometryError as exc:
+                refused.append(f"{obj.name}: {exc}")
+                keep += [(obj_id, "face", i) for i in idxs]
+        if n:
+            done.append(f"{n} face(s)")
+
+    edges = held.get("edge")
+    if edges:
+        if kind != "move":
+            refused.append(
+                "an edge of a solid can be moved, but not "
+                f"{verb.lower().rstrip('d')}d")
+            keep += [(oid, "edge", i)
+                     for oid, idxs in edges.items() for i in idxs]
+        else:
+            n = 0
+            for obj_id, idxs in edges.items():
+                obj = ctx.scene.get(obj_id)
+                if obj is None:
+                    continue
+                try:
+                    shape = obj.shape
+                    for i in idxs:
+                        shape = g.move_edge(shape, i, tuple(action[1]))
+                    ctx.scene.replace_shape(obj_id, shape)
+                    n += len(idxs)
+                except g.GeometryError as exc:
+                    refused.append(f"{obj.name}: {exc}")
+                    keep += [(obj_id, "edge", i) for i in idxs]
+            if n:
+                done.append(f"{n} solid edge(s)")
+
+    # control points keep their own indices through a move, so the
+    # framework's habit of handing them back still holds for them
+    ctx.result_subobjects = list(ctx.result_subobjects) + keep
+    if done:
+        ctx.echo(f"{verb} " + ", ".join(done) + tail + ".")
+    for why in refused:
+        ctx.echo(why + ".")
+    if not done and not refused:
+        ctx.echo("Nothing held could be transformed.")
+
+
+def _face_by_action(shape, index, action):
+    """One face of a solid put through whichever transform this is."""
+    if not action:
+        raise g.GeometryError(
+            "a face of a solid can be moved, turned or scaled, "
+            "but not by this command")
+    what = action[0]
+    if what == "move":
+        return _face_moved(shape, index, action[1])
+    if what == "rotate":
+        import numpy as np
+        _what, point, axis, degrees = action
+        normal = np.asarray(g.face_normal(g.faces_of(shape)[index]), float)
+        normal = normal / (np.linalg.norm(normal) or 1.0)
+        along = np.asarray(axis, float)
+        along = along / (np.linalg.norm(along) or 1.0)
+        if abs(float(np.dot(normal, along))) > 0.999:
+            # turning a plane about its own normal leaves the same plane, so
+            # the solid would come back unchanged and the message would be a
+            # lie. The gumball does not draw that ring for the same reason.
+            raise g.GeometryError(
+                "this face lies square to the axis, so turning it about "
+                "that axis would not change it")
+        return g.tilt_face(shape, index, tuple(point), tuple(axis),
+                           float(degrees))
+    if what == "scale":
+        return g.scale_face(shape, index, float(action[1]))
+    raise g.GeometryError(
+        "a face of a solid cannot be changed by this command")
 
 
 def _move_on_paper(ctx, lv):
@@ -89,7 +275,8 @@ def cmd_move(ctx):
     p2 = yield PointReq("Point to move to", rubber_from=p1,
                         preview_fn=_preview)
     offset = tuple(b - a for a, b in zip(p1, p2))
-    _do(ctx, held, objs, lambda s: g.translate(s, offset), "Moved")
+    _do(ctx, held, objs, lambda s: g.translate(s, offset), "Moved",
+        action=("move", offset))
 
 
 def _copy_on_paper(ctx, lv):
@@ -194,7 +381,8 @@ def cmd_rotate(ctx):
         ctx.echo(f"Rotated {len(objs)} paper object(s) by {angle:g} degrees.")
     else:
         _do(ctx, held, objs, lambda s: g.rotate(s, center, axis, angle),
-            "Rotated", f" by {angle:g} degrees")
+            "Rotated", f" by {angle:g} degrees",
+            action=("rotate", center, axis, angle))
 
 
 @command("scale", aliases=("sc",))
@@ -232,7 +420,7 @@ def cmd_scale(ctx):
         ctx.echo("Zero scale factor — cancelled.")
         return
     _do(ctx, held, objs, lambda s: g.scale(s, center, factor),
-        "Scaled", f" by {factor:g}")
+        "Scaled", f" by {factor:g}", action=("scale", factor))
 
 
 @command("scalenu")

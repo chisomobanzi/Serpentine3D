@@ -219,6 +219,12 @@ Press **Delete** with a segment held and the segment goes: a side out of a
 closed curve opens it, and a middle segment out of an open one leaves the
 runs either side as separate curves.
 
+Whatever you are holding, `move`, `rotate` and `scale` work on it as well as
+the gumball does, so you can type an exact distance or angle instead of
+dragging. A curve segment and a face of a solid take all three; an edge of a
+solid can be moved but not turned or scaled, and says so rather than
+transforming the solid behind it.
+
 ### Units
 
 `units` sets the document units (mm/cm/m/in/**feet-and-inches**) with an

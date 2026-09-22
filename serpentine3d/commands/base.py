@@ -281,6 +281,36 @@ class CommandContext:
             held.setdefault(obj_id, []).append(int(index))
         return held
 
+    def held_parts(self) -> dict:
+        """What the selection is holding, grouped by what can be done to it.
+
+        A command needs to tell a curve's segment from a solid's edge: both
+        arrive as ("edge", index) and they are not the same thing, so the
+        object's own kind decides which bucket a held edge lands in.
+
+        Empty in the ordinary case, which is what tells a command it is
+        working on whole objects as it always has. Must be read before the
+        command asks anything, since a select prompt clears the selection to
+        take its answer and everything held would go with it.
+        """
+        parts: dict = {}
+        for entry in getattr(self.selection, "subobjects", []):
+            obj_id, kind, index = entry
+            obj = self.scene.get(obj_id)
+            if obj is None:
+                continue
+            if kind == "cv":
+                bucket = "cv"
+            elif kind == "face":
+                bucket = "face"
+            elif kind == "edge":
+                bucket = "segment" if obj.kind == "curve" else "edge"
+            else:
+                continue
+            parts.setdefault(bucket, {}).setdefault(obj_id, []).append(
+                int(index))
+        return parts
+
     def control_point_ghost(self, held, fn):
         """Preview of those objects with their held points put through `fn`."""
         shapes = [s for _id, s in self._moved_control_points(held, fn)]

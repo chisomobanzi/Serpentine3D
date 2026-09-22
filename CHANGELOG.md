@@ -4,6 +4,19 @@
 
 ### Fixed
 
+- **The transform commands reach what you are holding (#29).** Sub-objects
+  could only be transformed with the gumball. `move`, `rotate` and `scale`
+  asked only about held control points, so a held face, solid edge or curve
+  segment was invisible to them; the command then put up its select prompt,
+  and a select prompt clears the selection to take its answer, so what you
+  were holding was thrown away and the whole object was transformed instead.
+  A held part is now what the command is for, and there is nothing left to
+  ask. A curve segment and a face of a solid can be moved, turned and
+  scaled; an edge of a solid can be moved. What cannot be done says so and
+  stays held, rather than doing something else to the object behind it. The
+  same helper serves `scalenu`, `mirror`, `rotate3d`, `setpt` and
+  `projecttocplane`, which refuse clearly for now.
+
 - **Imported solids are no longer inside out (#26).** Properties showed things
   like `Volume: -0.041 mm³` on objects from Rhino files. A negative volume is
   what OpenCascade reports for a solid whose faces all point inward, and
