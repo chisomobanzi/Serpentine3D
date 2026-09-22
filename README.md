@@ -224,7 +224,9 @@ and segments by the sweep. A band dragged left to right holds a part only
 when all of it lies inside; one dragged right to left holds whatever it
 touches, so a small band across the middle of an edge takes the edge and
 one dropped on a face takes the face. It adds to what you are already
-holding.
+holding. Whatever a band holds moves as one change, by the gumball's
+arrows or by `move`: a band across a box drags that side of the box, and
+a band round the whole of it drags the box.
 
 Whatever you are holding, `move`, `rotate` and `scale` work on it as well as
 the gumball does, so you can type an exact distance or angle instead of

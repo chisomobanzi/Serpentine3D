@@ -4,6 +4,24 @@
 
 ### Fixed
 
+- **Held faces and edges of a solid move together, as one change.** Found
+  through the band: a band across a box holds its faces and the edges
+  between them, and `move` on that, or on four rim edges, did something
+  wrong. The parts were moved one after another, and moving one tilts the
+  faces beside it, which carries the next held part some of the way before
+  it is moved its full distance again: four rim edges up 5 made a box 20
+  high, six faces up 5 made a box half the size. The question is now which
+  corners move, not where each part goes in turn. Every corner of a held
+  face or edge moves; a face all of whose corners move is carried whole, a
+  face none of whose move stays, and a face in between leans to the one
+  plane through its moved and unmoved corners, or the move is refused
+  rather than the face bent. Moving one face slantwise no longer leaves a
+  kink in the sides. Every face held means the solid itself, for any
+  transform. Turning or scaling several faces of one solid, which double
+  counted the same way, is refused with a plain sentence until a set can
+  be turned as one. And the gumball, which had nothing to offer several
+  faces held with edges, gives them three arrows that move them as one.
+
 - **An ellipse in a DXF arrives as that ellipse (#28).** Reported as an
   ellipse exported from Rhino not being one any more, with the tell that
   Serpentine's own DXF re-imported fine. That asymmetry was the clue: the

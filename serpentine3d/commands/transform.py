@@ -47,55 +47,6 @@ def _point_map(fn):
     return lambda p: g.transform_points([tuple(p)], fn)[0]
 
 
-def _face_moved(shape, index, delta):
-    """One face of a solid carried by `delta`.
-
-    Split into the part along the face's normal, which pushes it out or
-    carves it in, and the part across, which slides it within its own plane
-    while the faces beside it lean to keep hold of its edges. Sliding first
-    leaves the face where the push can still find it.
-    """
-    import numpy as np
-    faces = g.faces_of(shape)
-    normal = np.asarray(g.face_normal(faces[index]), float)
-    normal = normal / (np.linalg.norm(normal) or 1.0)
-    centre = np.asarray(g.centroid(faces[index]), float)
-    delta = np.asarray(delta, float)
-    along = float(np.dot(delta, normal))
-    across = delta - along * normal
-
-    out, want = shape, centre
-    if float(np.linalg.norm(across)) > 1e-9:
-        out = g.slide_face(out, index, tuple(across))
-        want = centre + across
-        index = _face_again(out, normal, want)
-    if abs(along) > 1e-9:
-        out = g.push_pull(out, index, along)
-    return out
-
-
-def _face_again(shape, normal, want):
-    """Where that face went: a rebuild renumbers them, so it is found by
-    facing the same way and lying nearest to where it was put."""
-    import numpy as np
-    best, score = None, float("inf")
-    for i, f in enumerate(g.faces_of(shape)):
-        try:
-            n = np.asarray(g.face_normal(f), float)
-            c = np.asarray(g.centroid(f), float)
-        except g.GeometryError:
-            continue
-        n = n / (np.linalg.norm(n) or 1.0)
-        if float(np.dot(n, normal)) < 0.9:
-            continue
-        d = float(np.linalg.norm(c - want))
-        if d < score:
-            best, score = i, d
-    if best is None:
-        raise g.GeometryError("The face moved out of reach")
-    return best
-
-
 def _do(ctx, held, objs, fn, verb, tail="", action=None):
     """Apply `fn` to what is held, or to the objects, and say what happened.
 
@@ -148,50 +99,50 @@ def _do_to_parts(ctx, held, fn, verb, tail, action):
         if n:
             done.append(f"{n} curve segment(s)")
 
-    faces = held.get("face")
-    if faces:
-        n = 0
-        for obj_id, idxs in faces.items():
-            obj = ctx.scene.get(obj_id)
-            if obj is None:
-                continue
-            try:
-                shape = obj.shape
-                for i in idxs:
-                    shape = _face_by_action(shape, i, action)
-                ctx.scene.replace_shape(obj_id, shape)
-                n += len(idxs)
-            except g.GeometryError as exc:
-                refused.append(f"{obj.name}: {exc}")
-                keep += [(obj_id, "face", i) for i in idxs]
-        if n:
-            done.append(f"{n} face(s)")
-
-    edges = held.get("edge")
-    if edges:
-        if kind != "move":
-            refused.append(
-                "an edge of a solid can be moved, but not "
-                f"{verb.lower().rstrip('d')}d")
-            keep += [(oid, "edge", i)
-                     for oid, idxs in edges.items() for i in idxs]
-        else:
-            n = 0
-            for obj_id, idxs in edges.items():
-                obj = ctx.scene.get(obj_id)
-                if obj is None:
-                    continue
-                try:
-                    shape = obj.shape
-                    for i in idxs:
-                        shape = g.move_edge(shape, i, tuple(action[1]))
-                    ctx.scene.replace_shape(obj_id, shape)
-                    n += len(idxs)
-                except g.GeometryError as exc:
-                    refused.append(f"{obj.name}: {exc}")
-                    keep += [(obj_id, "edge", i) for i in idxs]
-            if n:
-                done.append(f"{n} solid edge(s)")
+    # A solid's held faces and edges are one change, not a sequence: moving
+    # one part tilts the faces beside it and carries the next some of the
+    # way, so moving them in turn double counts (four rim edges up 5 made
+    # a box 20 high). geometry.move_parts asks which corners move instead.
+    faces = held.get("face") or {}
+    edges = held.get("edge") or {}
+    doing = verb.lower().rstrip("d")
+    for obj_id in dict.fromkeys(list(faces) + list(edges)):
+        obj = ctx.scene.get(obj_id)
+        if obj is None:
+            continue
+        fidx = list(faces.get(obj_id, []))
+        eidx = list(edges.get(obj_id, []))
+        hold = ([(obj_id, "face", i) for i in fidx]
+                + [(obj_id, "edge", i) for i in eidx])
+        try:
+            if fidx and len(fidx) == len(g.faces_of(obj.shape)):
+                # every face held is the solid itself, whatever the
+                # transform: a band round the whole thing means the thing
+                ctx.scene.replace_shape(obj_id, fn(obj.shape))
+                done.append(f"{obj.name} (every face held)")
+            elif kind == "move":
+                ctx.scene.replace_shape(obj_id, g.move_parts(
+                    obj.shape, fidx, eidx, tuple(action[1])))
+                what = []
+                if fidx:
+                    what.append(f"{len(fidx)} face(s)")
+                if eidx:
+                    what.append(f"{len(eidx)} solid edge(s)")
+                done.append(" and ".join(what))
+            else:
+                if eidx:
+                    raise g.GeometryError(
+                        f"an edge of a solid can be moved, but not {doing}d")
+                if len(fidx) > 1:
+                    # turning faces in turn double counts the same way;
+                    # until a set can be turned as one, say so
+                    raise g.GeometryError(f"{doing} one face at a time")
+                ctx.scene.replace_shape(
+                    obj_id, _face_by_action(obj.shape, fidx[0], action))
+                done.append("1 face")
+        except g.GeometryError as exc:
+            refused.append(f"{obj.name}: {exc}")
+            keep += hold
 
     # control points keep their own indices through a move, so the
     # framework's habit of handing them back still holds for them
@@ -212,7 +163,7 @@ def _face_by_action(shape, index, action):
             "but not by this command")
     what = action[0]
     if what == "move":
-        return _face_moved(shape, index, action[1])
+        return g.move_parts(shape, [index], [], tuple(action[1]))
     if what == "rotate":
         import numpy as np
         _what, point, axis, degrees = action

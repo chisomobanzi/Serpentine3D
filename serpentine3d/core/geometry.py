@@ -1268,6 +1268,114 @@ def move_edge(shape, edge_index: int, delta: Point) -> TopoDS_Shape:
     return out
 
 
+def move_parts(shape, faces, edges, delta: Point) -> TopoDS_Shape:
+    """Move a set of faces and edges of a solid together by `delta`.
+
+    Moving the parts one after another double counts: moving one tilts
+    the faces beside it, which carries the next held part some of the way
+    before it is moved its full distance again, so four rim edges moved up
+    5 made a box 20 high. The question is which corners move, not where
+    each part goes in turn. Every corner of a held face or edge moves by
+    `delta`. A face all of whose corners move is carried whole, which is
+    an offset along its normal; a face none of whose corners move stays;
+    a face in between leans to the one plane through its moved and unmoved
+    corners, or the move is refused if there is no such plane. The leans
+    are done first, each face once, and then the offsets in one operation,
+    so the neighbours extend along their new planes rather than being
+    pushed straight and left with a kink.
+
+    With one face or one edge held this is what push, slide and move_edge
+    already did; with every face held it is a translation.
+    """
+    from OCP.BRep import BRep_Tool
+    d = tuple(float(v) for v in delta)
+    _unit(d)                                  # "Distance is zero"
+    flist = faces_of(shape)
+    elist = edges_of(shape)
+    held_f = {int(i) for i in faces}
+    held_e = {int(i) for i in edges}
+    if any(not (0 <= i < len(flist)) for i in held_f):
+        raise GeometryError("Face index out of range")
+    if any(not (0 <= i < len(elist)) for i in held_e):
+        raise GeometryError("Edge index out of range")
+    if not held_f and not held_e:
+        raise GeometryError("Nothing held to move")
+    if len(held_f) == len(flist):
+        return translate(shape, d)
+
+    def key(p):
+        return (round(p[0], 6), round(p[1], 6), round(p[2], 6))
+
+    def corners(sub):
+        out = []
+        exp = TopExp_Explorer(sub, occ.VERTEX)
+        while exp.More():
+            p = BRep_Tool.Pnt_s(occ.to_vertex(exp.Current()))
+            out.append((p.X(), p.Y(), p.Z()))
+            exp.Next()
+        return out
+
+    moving = set()
+    for i in held_f:
+        moving.update(key(p) for p in corners(flist[i]))
+    for i in held_e:
+        moving.update(key(p) for p in corners(elist[i]))
+
+    drafts = []                               # (n, hinge, axis, n2, near)
+    offsets = {}                              # face index -> distance
+    for fi, face in enumerate(flist):
+        pts = corners(face)
+        mine = [key(p) in moving for p in pts]
+        if not any(mine):
+            continue
+        n, _ = _planar_frame(face)            # raises for a curved face
+        if all(mine):
+            along = sum(a * b for a, b in zip(d, n))
+            if abs(along) > tight():
+                offsets[fi] = along
+            continue
+        # a leaning face: the one plane through where its corners will be
+        import numpy as np
+        target = np.array([[p[k] + (d[k] if m else 0.0) for k in range(3)]
+                           for p, m in zip(pts, mine)], float)
+        centre = target.mean(axis=0)
+        _, sv, vt = np.linalg.svd(target - centre)
+        n2 = vt[-1]
+        if len(pts) > 3 and sv[-1] > tol() * 10:
+            raise GeometryError(
+                "Moving those together would bend a face beside them")
+        n2 = tuple(float(v) for v in n2)
+        if sum(a * b for a, b in zip(n2, n)) < 0:
+            n2 = tuple(-v for v in n2)
+        if sum(a * b for a, b in zip(n2, n)) > 1.0 - 1e-10:
+            continue                          # the plane already holds them
+        fixed = [p for p, m in zip(pts, mine) if not m]
+        near = tuple(float(v) for v in
+                     target[[m for m in mine]].mean(axis=0))
+        hinge = max(fixed, key=lambda p: math.dist(p, near))
+        axis = _unit((n[1] * n2[2] - n[2] * n2[1], n[2] * n2[0] - n[0] * n2[2],
+                      n[0] * n2[1] - n[1] * n2[0]))
+        drafts.append((n, hinge, axis, n2, near))
+    if not drafts and not offsets:
+        raise GeometryError("Distance is zero")
+
+    out = shape
+    for n, hinge, axis, n2, near in drafts:
+        face = _face_on_plane(out, n, hinge, near=near)
+        out, _ = _draft(out, face, hinge, axis, n2)
+    if offsets:
+        # the held faces' planes are untouched by the leans, so each is
+        # found again by its plane on whatever the leans left behind
+        again = {}
+        now = faces_of(out)
+        for fi, along in offsets.items():
+            n, c = _planar_frame(flist[fi])
+            face = _face_on_plane(out, n, c, near=c)
+            again[next(i for i, f in enumerate(now) if f.IsSame(face))] = along
+        out = offset_faces(out, again)
+    return out
+
+
 def _face_on_plane(shape, normal, point, near):
     """The planar face of `shape` lying in the plane (point, normal), the
     one nearest `near` if the plane carries more than one."""
