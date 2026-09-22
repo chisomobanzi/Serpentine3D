@@ -4,6 +4,20 @@
 
 ### Fixed
 
+- **An ellipse in a DXF arrives as that ellipse (#28).** Reported as an
+  ellipse exported from Rhino not being one any more, with the tell that
+  Serpentine's own DXF re-imported fine. That asymmetry was the clue: the
+  exporter writes every curve as a spline through 64 sampled points, so its
+  ellipse came back as an interpolated look-alike and never touched the
+  code that was wrong. A DXF can say "ellipse" two ways and both were read
+  carelessly. An `ELLIPSE` gives its major axis as a *vector*, and only the
+  length was read, so every ellipse arrived lying flat in world XY with its
+  long axis along world X, ignoring the plane it was drawn in; an
+  elliptical arc arrived as a whole ellipse. A `SPLINE` keeps a conic's
+  shape in its weights and its parameterisation in its knots, and both were
+  dropped for an invented uniform knot vector, which left an exact ellipse
+  missing itself by half a unit in ten. All four are now read as written.
+
 - **A cutting curve that reaches a curve splits it (#32).** The sibling of
   #22, which was the same complaint about surfaces: a cutter only split the
   curve if it overran it, so the only way through was to draw it longer.

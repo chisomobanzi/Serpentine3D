@@ -136,7 +136,9 @@ def make_circle_3pt(p1: Point, p2: Point, p3: Point) -> TopoDS_Shape:
 
 
 def make_ellipse_axis(center: Point, xdir: Point, r1: float, r2: float,
-                      normal: Point = (0, 0, 1)) -> TopoDS_Shape:
+                      normal: Point = (0, 0, 1),
+                      start: float | None = None,
+                      end: float | None = None) -> TopoDS_Shape:
     """Ellipse with its first axis pointed along `xdir`, radii r1 and r2.
 
     Unlike make_ellipse, which leaves the axes wherever the kernel puts
@@ -144,6 +146,10 @@ def make_ellipse_axis(center: Point, xdir: Point, r1: float, r2: float,
     major radius comes first, so when the named axis is the short one the
     frame is turned a quarter rather than letting the radii swap and drag
     the axis with them.
+
+    `start` and `end` trim it to an arc, measured in radians from `xdir`
+    the way a DXF states one. The quarter turn above carries the parameter
+    origin with it, so the trim turns by a quarter too.
     """
     if r1 <= 0 or r2 <= 0:
         raise GeometryError("Ellipse radii must be positive")
@@ -152,11 +158,19 @@ def make_ellipse_axis(center: Point, xdir: Point, r1: float, r2: float,
     if r1 >= r2:
         ax = gp_Ax2(_pnt(center), n, x)
         el = gp_Elips(ax, float(r1), float(r2))
+        shift = 0.0
     else:
         y = gp_Dir(n.Crossed(x).XYZ())
         ax = gp_Ax2(_pnt(center), n, y)
         el = gp_Elips(ax, float(r2), float(r1))
-    return BRepBuilderAPI_MakeEdge(el).Edge()
+        shift = -math.pi / 2
+    if start is None or end is None:
+        return BRepBuilderAPI_MakeEdge(el).Edge()
+    sweep = float(end) - float(start)
+    if sweep <= 1e-12 or sweep >= 2 * math.pi - 1e-12:
+        return BRepBuilderAPI_MakeEdge(el).Edge()
+    return BRepBuilderAPI_MakeEdge(
+        el, float(start) + shift, float(end) + shift).Edge()
 
 
 def make_ellipse(center: Point, major_radius: float, minor_radius: float,
@@ -192,6 +206,62 @@ def make_interp_curve(points: list[Point], closed: bool = False) -> TopoDS_Shape
     if not interp.IsDone():
         raise GeometryError("Curve interpolation failed")
     return BRepBuilderAPI_MakeEdge(interp.Curve()).Edge()
+
+
+def make_nurbs_curve(control_points: list[Point], degree: int = 3,
+                     knots: list[float] | None = None,
+                     weights: list[float] | None = None) -> TopoDS_Shape:
+    """NURBS curve from the whole description: poles, weights and knots.
+
+    make_control_curve invents a uniform clamped knot vector, which is what
+    you want for poles somebody clicked and wrong for a curve that arrived
+    in a file. A conic written as a NURBS keeps its shape in the weights
+    and its parameterisation in the knots, so dropping either turns an
+    exact ellipse into a blob that misses it by half a unit in ten
+    (issue #28).
+
+    Knots arrive flat, one entry per repeat, the way a DXF writes them;
+    OCCT wants each distinct value once with its multiplicity beside it.
+    """
+    n = len(control_points)
+    if n < 2:
+        raise GeometryError("Need at least 2 control points")
+    if not knots:
+        raise GeometryError("Need a knot vector")
+
+    values: list[float] = []
+    mults: list[int] = []
+    for k in knots:
+        if values and abs(float(k) - values[-1]) < 1e-12:
+            mults[-1] += 1
+        else:
+            values.append(float(k))
+            mults.append(1)
+    if sum(mults) != n + degree + 1:
+        # only a clamped curve is described this way; anything else (a
+        # periodic one, or a file that disagrees with itself) is not ours
+        # to guess at
+        raise GeometryError("Knot vector does not match the control points")
+
+    poles = TColgp_Array1OfPnt(1, n)
+    for i, p in enumerate(control_points, start=1):
+        poles.SetValue(i, _pnt(p))
+    karr = TColStd_Array1OfReal(1, len(values))
+    marr = TColStd_Array1OfInteger(1, len(values))
+    for i, (v, m) in enumerate(zip(values, mults), start=1):
+        karr.SetValue(i, v)
+        marr.SetValue(i, m)
+
+    if weights:
+        if len(weights) != n:
+            raise GeometryError("One weight per control point, or none")
+        warr = TColStd_Array1OfReal(1, n)
+        for i, w in enumerate(weights, start=1):
+            warr.SetValue(i, float(w))
+        curve = Geom_BSplineCurve(poles, warr, karr, marr, degree, False)
+    else:
+        curve = Geom_BSplineCurve(poles, karr, marr, degree, False)
+    return BRepBuilderAPI_MakeEdge(curve).Edge()
 
 
 def make_control_curve(control_points: list[Point], degree: int = 3,

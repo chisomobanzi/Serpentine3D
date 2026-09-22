@@ -130,8 +130,18 @@ def import_dxf(scene, path: str) -> int:
             elif kind == "SPLINE":
                 cps = [tuple(p) for p in e.control_points]
                 if len(cps) >= 2:
-                    shape = geometry.make_control_curve(
-                        cps, degree=e.dxf.degree)
+                    # a conic written as a NURBS carries its shape in the
+                    # weights and its parameterisation in the knots; with
+                    # neither, an ellipse reads as a blob (issue #28)
+                    try:
+                        shape = geometry.make_nurbs_curve(
+                            cps, degree=e.dxf.degree,
+                            knots=[float(k) for k in e.knots],
+                            weights=[float(w) for w in e.weights])
+                    except (geometry.GeometryError, AttributeError,
+                            ValueError, RuntimeError):
+                        shape = geometry.make_control_curve(
+                            cps, degree=e.dxf.degree)
                 else:
                     fit = [tuple(p) for p in e.fit_points]
                     if len(fit) >= 2:
@@ -146,11 +156,18 @@ def import_dxf(scene, path: str) -> int:
                         tris.append((f[0], f[k], f[k + 1]))
                 shape = _shell_from_triangles(verts, tris)
             elif kind == "ELLIPSE":
+                # the major axis is a vector, and only its length was being
+                # read: every ellipse came back lying flat in world XY with
+                # its long axis along world X, and an arc came back whole
                 c = tuple(e.dxf.center)
-                major = np.asarray(tuple(e.dxf.major_axis))
+                major = np.asarray(tuple(e.dxf.major_axis), float)
                 r1 = float(np.linalg.norm(major))
                 r2 = r1 * e.dxf.ratio
-                shape = geometry.make_ellipse(c, r1, r2)
+                shape = geometry.make_ellipse_axis(
+                    c, tuple(major), r1, r2,
+                    normal=tuple(e.dxf.extrusion),
+                    start=float(e.dxf.start_param),
+                    end=float(e.dxf.end_param))
         except geometry.GeometryError:
             continue
         if shape is not None:
