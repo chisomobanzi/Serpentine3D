@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- **A picture in the model is drawn in front of what is behind it.**
+  Pictures were drawn before everything else without writing depth, as
+  underlays, so any surface behind one painted over it: a graphic hung a few
+  millimetres in front of a wall could not be seen at all. They are drawn
+  after the objects now and depth-tested, so the wall loses and whatever
+  stands in front still hides them. Each sits a hair back in depth, so a
+  curve traced on the picture's own plane still shows whole on top of it.
+
 - **Snapping works with an imported mesh in the scene.** With an OBJ in the
   model and the pointer over the pane, asking for a point raised
   `'MeshShape' object has no attribute 'ShapeType'`: the snap gatherer knew

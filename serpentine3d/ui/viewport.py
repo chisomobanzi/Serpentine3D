@@ -1290,9 +1290,9 @@ class Viewport(QOpenGLWidget):
 
         if self.grid_visible:
             self._draw_grid(mvp64)
-        self._draw_image_planes(mvp)
         self._sync_gpu()
         self._draw_objects(mvp64, view)
+        self._draw_image_planes(mvp)
         self._draw_pending(mvp)
         self._draw_control_points(mvp)
         self._draw_combs(mvp)
@@ -1727,6 +1727,16 @@ class Viewport(QOpenGLWidget):
         return self._image_textures[cache_key]
 
     def _draw_image_planes(self, mvp):
+        """Pictures in the model, drawn after the objects and depth-tested.
+
+        Drawn first, with depth writes off, a picture was an underlay: any
+        surface behind it painted over it, so a graphic hung a few millimetres
+        in front of a wall could not be seen at all. Drawn after, the wall
+        loses and whatever stands in front of the picture still hides it. The
+        picture sits a hair back in depth (see _draw_pictures), so a curve
+        traced on its own plane still shows on top of it.
+        """
+        GL.glEnable(GL.GL_DEPTH_TEST)
         from ..core.picture import PictureShape
         pictures = [obj.shape for obj in self.scene.visible_objects()
                     if obj.kind == "picture"]
@@ -1764,7 +1774,10 @@ class Viewport(QOpenGLWidget):
             GL.glBufferData(GL.GL_ARRAY_BUFFER, quad.nbytes, quad,
                             GL.GL_DYNAMIC_DRAW)
             GL.glDepthMask(False)
+            GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
+            GL.glPolygonOffset(1.0, 1.0)
             GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(quad))
+            GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
             GL.glDepthMask(True)
 
     def _draw_grid(self, mvp):
