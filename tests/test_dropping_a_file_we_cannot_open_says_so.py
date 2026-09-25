@@ -111,9 +111,9 @@ def test_what_can_be_opened_still_is_and_the_rest_is_reported(
     seen = []
     original = fileio.import_file
 
-    def record(scene, path, progress=None):
+    def record(scene, path, progress=None, **kwargs):
         seen.append(path)
-        return original(scene, path, progress=progress)
+        return original(scene, path, progress=progress, **kwargs)
 
     monkeypatch.setattr(fileio, "import_file", record)
 

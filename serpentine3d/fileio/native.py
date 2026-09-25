@@ -264,6 +264,78 @@ def load_scene(scene, path: str):
         _load_doc(scene, doc)
 
 
+_CARRIED_FIELDS = ("visible", "locked", "group_id", "block_id", "color",
+                   "material", "clip_plane", "annotation", "linetype",
+                   "draw_order")
+
+
+def merge_scene(scene, path: str) -> int:
+    """Add a .serp file's objects to `scene`, keeping everything already there.
+
+    What Import means for every other format. The file is read into a scene
+    of its own and its objects are carried across onto layers found by path,
+    so `Kit::Parts` in the file lands on a `Kit::Parts` the scene already
+    has, or on one made for it under the same parents. The scene's own
+    settings stay the scene's: units, current layer, named views, layouts.
+    Returns the number of objects added.
+    """
+    from ..core.scene import Scene
+    incoming = Scene()
+    load_scene(incoming, path)
+    layer_for = {}
+
+    def target_layer(layer_id):
+        if layer_id in layer_for:
+            return layer_for[layer_id]
+        source = incoming.layers.get(layer_id)
+        found = scene.layers.find_by_path(incoming.layers.full_path(layer_id))
+        if found is None:
+            parent = target_layer(source.parent) if source.parent else None
+            found = scene.layers.create(source.name, source.color, parent=parent)
+            scene.layers.set_visible(found.id, source.visible)
+            scene.layers.set_locked(found.id, source.locked)
+            scene.layers.set_lineweight(found.id, source.lineweight)
+            scene.layers.set_linetype(found.id, source.linetype)
+            scene.layers.set_print_width(found.id, source.print_width)
+            scene.layers.set_hatch(found.id, source.hatch)
+        layer_for[layer_id] = found.id
+        return found.id
+
+    current = scene.layers.current_id
+    # What the objects lean on comes with them, but never over the scene's
+    # own: a block the file instances, a style its dimensions are drawn in,
+    # a view it named. Units, layouts and the current layer stay the scene's.
+    for block_id, shapes in incoming.block_defs.items():
+        scene.block_defs.setdefault(block_id, shapes)
+    for name, style in incoming.annot_styles.items():
+        scene.annot_styles.setdefault(name, style)
+    for name, view in incoming.named_views.items():
+        scene.named_views.setdefault(name, view)
+    # The whole layer tree comes in, empty layers too, as it does in Rhino:
+    # a layer is set up before anything is drawn on it.
+    for layer in incoming.layers.all():
+        target_layer(layer.id)
+    new_id = {}
+    for source in incoming.all():
+        obj = scene.add(source._shape, name=source.name,
+                        layer_id=target_layer(source.layer_id))
+        new_id[source.id] = obj.id
+        carried = {f: getattr(source, f) for f in _CARRIED_FIELDS
+                   if getattr(source, f) != getattr(obj, f)}
+        if carried:
+            scene.update(obj.id, **carried)
+    # History records rebuild objects from their inputs, so they follow the
+    # objects to their new ids.
+    for record in incoming.history_records:
+        record = dict(record)
+        record["inputs"] = [new_id.get(i, i) for i in record.get("inputs", [])]
+        if "output" in record:
+            record["output"] = new_id.get(record["output"], record["output"])
+        scene.history_records.append(record)
+    scene.layers.current_id = current
+    return len(incoming.all())
+
+
 def _check_version(doc: dict):
     """Refuse a file from the future by name, before touching the scene.
 

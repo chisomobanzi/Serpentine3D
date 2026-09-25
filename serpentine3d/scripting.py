@@ -90,7 +90,7 @@ class Document:
     # -- persistence --
 
     def open(self, path: str):
-        fileio.import_file(self.scene, path)
+        fileio.import_file(self.scene, path, replace=True)
 
     def save(self, path: str):
         if not path.endswith(".serp"):

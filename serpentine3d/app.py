@@ -1674,7 +1674,8 @@ class MainWindow(QMainWindow):
         if path:
             self._open_path(path)
 
-    def _import_showing_progress(self, path: str, scene=None) -> int:
+    def _import_showing_progress(self, path: str, scene=None,
+                                 replace: bool = False) -> int:
         """Import `path`, showing what it is doing and offering a way out.
 
         A set-design .3dm is minutes of work; with no dialog the window simply
@@ -1701,7 +1702,8 @@ class MainWindow(QMainWindow):
 
         try:
             return fileio.import_file(scene or self.scene, path,
-                                      progress=fileio.throttled(report))
+                                      progress=fileio.throttled(report),
+                                      replace=replace)
         finally:
             dlg.close()
 
@@ -1710,7 +1712,7 @@ class MainWindow(QMainWindow):
         welcome screen)."""
         try:
             self.history.checkpoint("open")
-            self._import_showing_progress(path)
+            self._import_showing_progress(path, replace=True)
             if self.journal is not None:
                 self.journal.note_load(path)
             if path.endswith(".serp"):
@@ -2897,7 +2899,7 @@ def run_app(app, splash=None):
     template = os.path.expanduser("~/.config/serpentine3d/template.serp")
     if os.path.exists(template):
         try:
-            fileio.import_file(window.scene, template)
+            fileio.import_file(window.scene, template, replace=True)
             window.mark_saved()
             window.command_line.echo("Started from template.serp.")
         except Exception:                                     # noqa: BLE001
@@ -2918,7 +2920,7 @@ def run_app(app, splash=None):
     for arg in app.arguments()[1:]:
         if not arg.startswith("-") and os.path.exists(arg):
             try:
-                fileio.import_file(window.scene, arg)
+                fileio.import_file(window.scene, arg, replace=True)
                 if arg.endswith(".serp"):
                     window.ctx.current_path = os.path.abspath(arg)
                 window.command_line.echo(

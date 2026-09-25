@@ -116,7 +116,7 @@ def test_every_import_format_reaches_the_importer_with_its_local_path(
     path.write_bytes(b"format dispatch is checked at the import boundary")
     seen = []
 
-    def record_import(scene, local_path, progress=None):
+    def record_import(scene, local_path, progress=None, **kwargs):
         seen.append((scene, local_path, progress))
         return 0
 
@@ -165,9 +165,9 @@ def test_a_mixed_drop_imports_local_supported_files_only(window, tmp_path, monke
     seen = []
     original = fileio.import_file
 
-    def record_import(scene, path, progress=None):
+    def record_import(scene, path, progress=None, **kwargs):
         seen.append(path)
-        return original(scene, path, progress=progress)
+        return original(scene, path, progress=progress, **kwargs)
 
     monkeypatch.setattr(fileio, "import_file", record_import)
     enter, drop = _drag(window.viewport, [QUrl("https://example.com/remote.obj")]
@@ -187,10 +187,10 @@ def test_an_import_error_is_reported_and_does_not_lose_other_dropped_files(
     original = fileio.import_file
     warnings = []
 
-    def import_with_one_error(scene, path, progress=None):
+    def import_with_one_error(scene, path, progress=None, **kwargs):
         if path == str(broken):
             raise ValueError("Cannot read broken.step")
-        return original(scene, path, progress=progress)
+        return original(scene, path, progress=progress, **kwargs)
 
     monkeypatch.setattr(fileio, "import_file", import_with_one_error)
     monkeypatch.setattr(QMessageBox, "warning",

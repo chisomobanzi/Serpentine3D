@@ -224,7 +224,7 @@ class Replayer:
         from .. import fileio
         before = set(self.scene.objects)
         self.history.checkpoint("open")
-        fileio.import_file(self.scene, e["path"])
+        fileio.import_file(self.scene, e["path"], replace=True)
         new = [oid for oid in self.scene._order if oid not in before]
         for a, b in zip(e.get("made", []), new):
             self.idmap[a] = b

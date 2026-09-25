@@ -4,6 +4,20 @@
 
 ### Fixed
 
+- **Importing a .serp adds it to the scene instead of replacing the scene.**
+  Import added every other format to what was there, and said it returned
+  the number of objects added, but a .serp went through the same call and
+  loaded the way Open does. Over the RPC bridge, importing a 72-object file
+  into an 83-object scene left 72, none of them the modeller's; undo got it
+  back. Open and Import had shared one call meaning two things, so now they
+  say which they mean: Open, the template, a file on the command line, a
+  script's `open` and a replayed load still replace; Import, a dropped file
+  and the bridge add. A .serp comes in on layers matched by path, creating
+  what is missing under the same parents, empty layers included, with its
+  blocks, styles, named views and history records following its objects to
+  their new ids. The scene's own units, layouts and current layer stay.
+  Dropping a .serp onto the window now adds it too.
+
 - **Held faces and edges of a solid move together, as one change.** Found
   through the band: a band across a box holds its faces and the edges
   between them, and `move` on that, or on four rim edges, did something

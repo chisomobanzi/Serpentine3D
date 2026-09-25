@@ -129,8 +129,12 @@ def ensure_suffix(path: str, name_filter: str) -> str:
     return f"{path}.{suffix}"
 
 
-def import_file(scene, path: str, progress=None) -> int:
+def import_file(scene, path: str, progress=None, *, replace: bool = False) -> int:
     """Import any supported file into the scene. Returns object count added.
+
+    A .serp is added to what is there, like every other format, unless
+    `replace` is set: that is Open, which swaps the scene for the file's.
+    Other formats always add; Open on one of them adds too, as it always has.
 
     `progress` is called as `progress(fraction, message)` while the work runs;
     answering False cancels it, raising `Cancelled`. E57 and Rhino report as
@@ -144,13 +148,15 @@ def import_file(scene, path: str, progress=None) -> int:
     # answer a change by reading the whole scene made a big import cost
     # objects squared — see Scene.batched.
     with scene.batched():
-        n = _import_file(scene, path, ext, report)
+        n = _import_file(scene, path, ext, report, replace)
     report.done()
     return n
 
 
-def _import_file(scene, path: str, ext: str, report) -> int:
+def _import_file(scene, path: str, ext: str, report, replace: bool = False) -> int:
     if ext == ".serp":
+        if not replace:
+            return native.merge_scene(scene, path)
         native.load_scene(scene, path)
         return len(scene.all())
     if ext in (".step", ".stp"):

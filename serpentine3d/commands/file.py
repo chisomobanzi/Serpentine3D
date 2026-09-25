@@ -59,7 +59,7 @@ def cmd_open(ctx):
     if not os.path.exists(path):
         ctx.echo(f"File not found: {path}")
         return
-    fileio.import_file(ctx.scene, path)
+    fileio.import_file(ctx.scene, path, replace=True)
     ctx.current_path = path if path.endswith(".serp") else None
     ctx.echo(f"Opened {path}: {len(ctx.scene.all())} object(s).")
     if ctx.viewport:
