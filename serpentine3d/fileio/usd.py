@@ -36,7 +36,7 @@ def export_usda(scene, path: str, only_ids: list | None = None):
     used = set()
     mat_blocks = []
     for obj in objs:
-        mesh = tessellate(obj.shape)
+        mesh = tessellate(obj.world_geometry())
         if not mesh.has_faces:
             continue
         name = _safe(obj.name)

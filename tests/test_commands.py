@@ -21,6 +21,27 @@ def env():
     return scene, selection, history, ctx, proc
 
 
+def _shown_bbox(scene, obj_id):
+    """The box an object occupies as *shown*: its stored transform, plus the
+    pose-in-place preview (drag_display) a running command may have set. The
+    whole-object preview is a matrix, not rebuilt geometry, so the box is the
+    object's own world corners mapped through that preview matrix."""
+    import numpy as np
+
+    o = scene.get(obj_id)
+    lo, hi = (np.asarray(v, float) for v in o.bbox())
+    m = scene.drag_display.get(obj_id)
+    if m is None:
+        return lo, hi
+    m = np.asarray(m, float)
+    corners = np.array([[x, y, z]
+                        for x in (lo[0], hi[0])
+                        for y in (lo[1], hi[1])
+                        for z in (lo[2], hi[2])])
+    world = corners @ m[:3, :3].T + m[:3, 3]
+    return world.min(axis=0), world.max(axis=0)
+
+
 def test_parse_point():
     assert parse_point("1,2,3") == (1, 2, 3)
     assert parse_point("1,2") == (1, 2, 0)
@@ -165,7 +186,7 @@ def test_move_command(env):
     proc.finish_selection()
     proc.provide_text("0,0,0")
     proc.provide_text("5,5,0")
-    mn, mx = g.bbox(scene.all()[0].shape)
+    mn, mx = scene.get(obj.id).bbox()   # the world box: the pose, not the shape
     assert mn[0] == pytest.approx(5, abs=1e-6)
 
 
@@ -191,7 +212,7 @@ def test_rotate_scale_mirror(env):
     proc.finish_selection()
     proc.provide_text("0,0,0")
     proc.provide_text("90")
-    mn, mx = g.bbox(scene.all()[0].shape)
+    mn, mx = scene.get(obj.id).bbox()   # the world box: the pose, not the shape
     assert mx[1] == pytest.approx(2, abs=1e-6)
 
     proc.run("scale")
@@ -199,7 +220,7 @@ def test_rotate_scale_mirror(env):
     proc.finish_selection()
     proc.provide_text("0,0,0")
     proc.provide_text("2")
-    assert g.volume(scene.all()[0].shape) == pytest.approx(8, rel=1e-5)
+    assert g.volume(scene.get(obj.id).world_geometry()) == pytest.approx(8, rel=1e-5)
 
     proc.run("mirror")
     proc.click_object(obj.id)
@@ -891,12 +912,12 @@ def test_orient_two_points(env):
     proc.provide_text("10,0,0")          # target 1
     proc.provide_text("10,4,0")          # target 2 (along +Y): 90deg turn
     assert not proc.busy
-    mn, mx = g.bbox(scene.all()[0].shape)
+    mn, mx = scene.get(box.id).bbox()    # the world box: the pose, not the shape
     assert mn[0] == pytest.approx(8, abs=1e-5)
     assert mx[0] == pytest.approx(10, abs=1e-5)
     assert mn[1] == pytest.approx(0, abs=1e-5)
     assert mx[1] == pytest.approx(4, abs=1e-5)
-    assert g.volume(scene.all()[0].shape) == pytest.approx(8)
+    assert g.volume(box.world_geometry()) == pytest.approx(8)
 
     # Scale=Yes stretches to the target spacing (uniform)
     sel.clear()
@@ -909,7 +930,7 @@ def test_orient_two_points(env):
     proc.provide_text("Scale=Yes")
     proc.provide_text("20,0,0")
     proc.provide_text("28,0,0")          # 8 units: scale factor 2
-    assert g.volume(scene.all()[-1].shape) == pytest.approx(8 * 8)
+    assert g.volume(scene.all()[-1].world_geometry()) == pytest.approx(8 * 8)
 
 
 def test_orient3pt_flips_onto_wall(env):
@@ -923,10 +944,10 @@ def test_orient3pt_flips_onto_wall(env):
               "0,0,0", "1,0,0", "0,0,1"):
         proc.provide_text(p)
     assert not proc.busy
-    mn, mx = g.bbox(scene.all()[0].shape)
+    mn, mx = scene.get(box.id).bbox()    # the world box: the pose, not the shape
     assert mx[2] == pytest.approx(2)     # old Y extent now points up Z
     assert mx[1] - mn[1] == pytest.approx(1, abs=1e-6)
-    assert g.volume(scene.all()[0].shape) == pytest.approx(8)
+    assert g.volume(box.world_geometry()) == pytest.approx(8)
 
 
 def test_closecrv(env):
@@ -1017,13 +1038,17 @@ def test_scale_by_reference_points(env):
     proc.finish_selection()
     proc.provide_text("0,0,0")           # base
     proc.provide_text("4,0,0")           # reference where it is now
-    ghost = proc.preview_for((8.0, 0.0, 0.0))   # dragging: factor 2
-    assert g.volume(ghost) == pytest.approx(64)
-    ghost = proc.preview_for(3.0)               # typed factor previews too
-    assert g.volume(ghost) == pytest.approx(8 * 27)
+    proc.preview_for((8.0, 0.0, 0.0))    # dragging: factor 2, shown in place
+    lo, hi = _shown_bbox(scene, box.id)
+    assert (hi - lo).prod() == pytest.approx(64)
+    assert g.volume(scene.get(box.id).shape) == pytest.approx(8)  # untouched
+    proc.preview_for(3.0)                # typed factor previews too
+    lo, hi = _shown_bbox(scene, box.id)
+    assert (hi - lo).prod() == pytest.approx(8 * 27)
     proc.provide_text("8,0,0")           # commit at factor 2
     assert not proc.busy
-    assert g.volume(scene.all()[0].shape) == pytest.approx(64)
+    assert not scene.drag_display        # the in-place preview is dropped
+    assert g.volume(scene.get(box.id).world_geometry()) == pytest.approx(64)
 
 
 def test_rotate_by_reference_direction(env):
@@ -1034,11 +1059,13 @@ def test_rotate_by_reference_direction(env):
     proc.finish_selection()
     proc.provide_text("0,0,0")           # center
     proc.provide_text("1,0,0")           # reference direction +X
-    ghost = proc.preview_for((0.0, 1.0, 0.0))   # dragged to +Y
-    assert g.bbox(ghost)[1][1] == pytest.approx(2, abs=1e-6)
+    proc.preview_for((0.0, 1.0, 0.0))    # dragged to +Y, shown in place
+    lo, hi = _shown_bbox(scene, box.id)
+    assert hi[1] == pytest.approx(2, abs=1e-6)
     proc.provide_text("0,1,0")           # commit 90 degrees
     assert not proc.busy
-    assert g.bbox(scene.all()[0].shape)[1][1] == pytest.approx(2, abs=1e-6)
+    assert not scene.drag_display        # the in-place preview is dropped
+    assert scene.get(box.id).bbox()[1][1] == pytest.approx(2, abs=1e-6)
 
 
 def test_move_and_mirror_previews(env):
@@ -1048,18 +1075,22 @@ def test_move_and_mirror_previews(env):
     proc.click_object(box.id)
     proc.finish_selection()
     proc.provide_text("0,0,0")
-    ghost = proc.preview_for((10.0, 0.0, 0.0))
-    assert g.bbox(ghost)[0][0] == pytest.approx(10)
+    proc.preview_for((10.0, 0.0, 0.0))
+    lo, _hi = _shown_bbox(scene, box.id)
+    assert lo[0] == pytest.approx(10)
     proc.provide_text("10,0,0")
     assert not proc.busy
+    assert not scene.drag_display        # the in-place preview is dropped
 
     proc.run("mirror")
     proc.click_object(box.id)
     proc.finish_selection()
     proc.provide_text("0,0,0")
-    ghost = proc.preview_for((0.0, 10.0, 0.0))   # mirror across Y axis
-    assert g.bbox(ghost)[0][0] == pytest.approx(-12)
+    proc.preview_for((0.0, 10.0, 0.0))   # mirror across Y axis
+    lo, _hi = _shown_bbox(scene, box.id)
+    assert lo[0] == pytest.approx(-12)
     proc.cancel()
+    assert not scene.drag_display        # cancelled: preview gone, it snaps back
 
 
 def test_extrude_click_distance(env):

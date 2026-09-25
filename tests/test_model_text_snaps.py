@@ -100,7 +100,7 @@ def test_move_can_snap_the_text_insertion_point_to_an_ordinary_curve_end(env):
     processor.provide(base_snap[0])
     processor.provide(target_snap[0])
 
-    moved = scene.get(label.id).shape
+    moved = scene.get(label.id).world_geometry()   # the pose carries the move
     assert isinstance(moved, TextShape)
     assert moved.origin == pytest.approx(target, abs=1e-7)
 

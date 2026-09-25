@@ -282,4 +282,4 @@ def test_with_nothing_held_it_still_asks_and_moves_whole_objects(env):
     proc.provide((0.0, 0.0, 0.0))
     proc.provide((0.0, 0.0, 5.0))
 
-    assert g.bbox(scene.get(box.id).shape)[0][2] == pytest.approx(5.0, abs=1e-6)
+    assert scene.get(box.id).bbox()[0][2] == pytest.approx(5.0, abs=1e-6)

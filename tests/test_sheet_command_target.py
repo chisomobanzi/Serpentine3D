@@ -107,7 +107,7 @@ def test_move_in_a_detail_moves_the_model_object(sheet):
     w.processor.provide_text("0,0,0")
     w.processor.provide_text("50,0,0")
     assert not w.processor.busy
-    lo, _hi = g.bbox(w.scene.get(box.id).shape)
+    lo, _hi = w.scene.get(box.id).bbox()   # the world box: the pose, not the shape
     assert lo[0] == pytest.approx(50.0, abs=1e-4)
 
 

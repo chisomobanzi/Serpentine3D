@@ -213,7 +213,7 @@ def test_copy_preserves_attributes(env):
     assert c.annotation == {"text": "PROP"}
     assert c.color == (1.0, 0.0, 0.0)
     assert c.material == {"opacity": 0.5}
-    assert g.point_coords(c.shape) == pytest.approx((10, 0, 0))
+    assert g.point_coords(c.world_geometry()) == pytest.approx((10, 0, 0))
 
 
 def test_mirror_copy_preserves_attributes(env):
@@ -243,7 +243,7 @@ def test_rotate3d_command(env):
     proc.provide_text("10,0,0")
     proc.provide_text("90")
     assert not proc.busy
-    assert g.point_coords(scene.get(tip.id).shape) == pytest.approx(
+    assert g.point_coords(scene.get(tip.id).world_geometry()) == pytest.approx(
         (5, 0, 3), abs=1e-6)
 
 
@@ -457,7 +457,7 @@ def test_scale1d_command(env):
     proc.provide_text("0,0,0")
     proc.provide_text("10,0,0")
     proc.provide_text("2")
-    (mn, mx) = g.bbox(scene.get(box.id).shape)
+    (mn, mx) = scene.get(box.id).bbox()   # the world box: the pose, not the shape
     assert mx[0] == pytest.approx(20, abs=1e-6)
     assert mx[1] == pytest.approx(10, abs=1e-6)
     assert mx[2] == pytest.approx(10, abs=1e-6)
@@ -471,7 +471,7 @@ def test_scale2d_command(env):
     proc.finish_selection()
     proc.provide_text("0,0,0")
     proc.provide_text("3")
-    (mn, mx) = g.bbox(scene.get(box.id).shape)
+    (mn, mx) = scene.get(box.id).bbox()   # the world box: the pose, not the shape
     assert mx[0] == pytest.approx(30, abs=1e-5)
     assert mx[1] == pytest.approx(30, abs=1e-5)
     assert mx[2] == pytest.approx(10, abs=1e-5)

@@ -107,9 +107,9 @@ def _run_arraypath(proc, scene, orientation, count=4, base="10,0,0"):
     assert not proc.busy, "arraypath did not finish"
 
 
-def _long_axis(shape):
-    """Which way the box's longest side points, as a unit vector."""
-    mn, mx = g.bbox(shape)
+def _long_axis(obj):
+    """Which way the object's longest side points, as a unit vector (world)."""
+    mn, mx = obj.bbox()
     span = np.array(mx) - np.array(mn)
     axis = np.zeros(3)
     axis[int(np.argmax(span))] = 1.0
@@ -128,7 +128,7 @@ def test_none_leaves_every_copy_facing_the_way_it_started(env):
     made = [o for o in scene.all() if o.id != box.id][1:]
     assert len(made) == 3
     for o in made:
-        assert np.allclose(_long_axis(o.shape), (1, 0, 0))
+        assert np.allclose(_long_axis(o), (1, 0, 0))
 
 
 def test_freeform_turns_each_copy_to_follow_the_curve(env):
@@ -142,7 +142,7 @@ def test_freeform_turns_each_copy_to_follow_the_curve(env):
     _run_arraypath(proc, scene, "Freeform")
 
     last = scene.all()[-1]
-    assert np.allclose(_long_axis(last.shape), (0, 1, 0)), \
+    assert np.allclose(_long_axis(last), (0, 1, 0)), \
         "the copy at the end of the arc did not turn with it"
 
 
@@ -179,8 +179,8 @@ def test_freeform_does_tip_where_roadlike_would_not(env):
     _run_arraypath(proc, scene, "Freeform", count=5, base="0,0,0")
 
     tallest = max(scene.all()[2:],
-                  key=lambda o: g.bbox(o.shape)[1][2] - g.bbox(o.shape)[0][2])
-    mn, mx = g.bbox(tallest.shape)
+                  key=lambda o: o.bbox()[1][2] - o.bbox()[0][2])
+    mn, mx = tallest.bbox()
     assert (mx[2] - mn[2]) > 1.5, "nothing tipped, so Freeform did nothing"
 
 
@@ -193,7 +193,7 @@ def test_roadlike_still_swings_round_in_plan(env):
 
     _run_arraypath(proc, scene, "Roadlike")
 
-    assert np.allclose(_long_axis(scene.all()[-1].shape), (0, 1, 0)), \
+    assert np.allclose(_long_axis(scene.all()[-1]), (0, 1, 0)), \
         "the copy at the end of the arc did not swing round with it"
 
 

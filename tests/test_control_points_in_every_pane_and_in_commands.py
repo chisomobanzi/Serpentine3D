@@ -33,7 +33,8 @@ CORNERS = [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (10.0, 10.0, 0.0),
 
 
 def _points(scene, obj):
-    return np.asarray(g.get_control_points(scene.get(obj.id).shape), float)
+    o = scene.get(obj.id)
+    return np.asarray(g.get_control_points(o.world_geometry()), float)
 
 
 def _near(a, b, tol=1e-6):

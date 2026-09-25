@@ -37,7 +37,7 @@ def export_glb(scene, path: str, only_ids: list | None = None):
         return len(buffer_views) - 1
 
     for obj in objs:
-        mesh = tessellate(obj.shape)
+        mesh = tessellate(obj.world_geometry())
         if not mesh.has_faces:
             continue
         verts = (mesh.vertices @ _ZUP_TO_YUP.T).astype(np.float32)

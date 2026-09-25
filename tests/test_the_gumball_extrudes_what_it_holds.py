@@ -174,7 +174,7 @@ def test_ctrl_and_the_arrow_along_the_line_moves_it_rather_than_growing_it(
     pane.gumball.apply_scalar(6.0)
     pane.gumball.end_drag()
     assert _others(pane, line) == []
-    lo, _hi = g.bbox(pane.scene.get(line.id).shape)
+    lo, _hi = pane.scene.get(line.id).bbox()      # the pose carries the move
     assert lo[0] == pytest.approx(6.0, abs=1e-6)
 
 
@@ -321,7 +321,8 @@ def test_a_solid_has_nowhere_to_grow_so_it_just_moves(pane):
     pane.gumball.apply_scalar(3.0)
     pane.gumball.end_drag()
     assert _others(pane, box) == []
-    lo, _hi = g.bbox(pane.scene.get(box.id).shape)
+    obj = pane.scene.get(box.id)
+    lo, _hi = obj.bbox()
     assert lo[2] == pytest.approx(3.0, abs=1e-6)
 
 
