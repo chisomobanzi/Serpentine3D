@@ -216,9 +216,10 @@ def serp_layers(action: str = "list", name: str = "", new_name: str = "",
 
 
 @mcp.tool()
-def serp_import(path: str) -> str:
-    """Import a file into the scene (.serp, .step/.stp, .obj)."""
-    return _call("import_file", path=path)
+def serp_import(path: str, zoom_extents: bool = False) -> str:
+    """Add a file to the scene (.serp, .step/.stp, .obj). What is already
+    there stays. The user's view is left alone unless zoom_extents is true."""
+    return _call("import_file", path=path, zoom_extents=zoom_extents)
 
 
 @mcp.tool()

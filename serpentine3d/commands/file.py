@@ -7,7 +7,7 @@ request when run with ``--headless`` or through the API.
 import os
 
 from .. import fileio
-from .base import FileReq, OptionReq, SelectReq, command
+from .base import FileReq, OptionReq, SelectReq, command, has_text_editor
 
 
 def _expand(path: str) -> str:
@@ -80,7 +80,9 @@ def cmd_import(ctx):
         return
     n = fileio.import_file(ctx.scene, path)
     ctx.echo(f"Imported {n} object(s) from {os.path.basename(path)}.")
-    if ctx.viewport:
+    # Fit the view for the person who asked; a script or an assistant
+    # driving the command headless leaves the modeller's camera alone.
+    if ctx.viewport and has_text_editor(ctx):
         ctx.viewport.zoom_extents()
 
 

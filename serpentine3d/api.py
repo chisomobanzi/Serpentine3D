@@ -442,7 +442,9 @@ class SerpApi:
 
     # -------------------------------------------------------------- file i/o
 
-    def import_file(self, path: str) -> dict:
+    def import_file(self, path: str, zoom_extents: bool = False) -> dict:
+        """Add a file to the scene. The view stays where the modeller left
+        it unless `zoom_extents` asks for it to fit what is there."""
         path = os.path.abspath(os.path.expanduser(path))
         if not os.path.exists(path):
             raise ApiError(f"File not found: {path}")
@@ -452,7 +454,8 @@ class SerpApi:
         except Exception as exc:
             self.history.discard_checkpoint()
             raise ApiError(f"Import failed: {exc}") from exc
-        self.viewport.zoom_extents()
+        if zoom_extents:
+            self.viewport.zoom_extents()
         return {"imported": n}
 
     def export_file(self, path: str, selected_only: bool = False) -> dict:

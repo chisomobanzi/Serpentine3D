@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Importing over RPC or MCP leaves the camera where the modeller put it.**
+  Every import zoomed to fit, which from outside the window means someone
+  else's view jumping each time an assistant adds a part. The bridge's
+  import and a headless `import` keep the view; `zoom_extents` asks for the
+  fit. Import from the menu, a drop or a typed command still fits the view.
+
 - **A script adds a picture with the same inputs whatever the scene holds.**
   Picture frame asks Add/RemoveAll only when there is already a picture. A
   script can't see that, so "Add" sent into an empty scene was taken as the
