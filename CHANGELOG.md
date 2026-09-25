@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Objects in an OBJ stay separate when they share a name.** Faces were
+  gathered by name, so three headsets exported as three objects called
+  Meta_Quest came back as one, and three tablets of 22 parts as 22. Every
+  `o` line starts a new object whatever it is called; a `g` name met again
+  inside one object still adds to that group.
+
 - **Importing over RPC or MCP leaves the camera where the modeller put it.**
   Every import zoomed to fit, which from outside the window means someone
   else's view jumping each time an assistant adds a part. The bridge's

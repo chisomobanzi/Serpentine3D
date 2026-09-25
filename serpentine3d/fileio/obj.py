@@ -57,8 +57,12 @@ def import_obj(path: str, as_mesh: bool = True) -> list:
     """Returns [(name, shape)] — native MeshShape objects by default
     (instant), or sewn BREP shells with as_mesh=False."""
     verts: list = []
-    groups: dict[str, list] = {}
-    current = "obj"
+    # Keyed by (object number, name), not name: every `o` line starts a new
+    # object even when its name repeats, which copies of one part always do,
+    # while a `g` name met again inside the same object adds to that group.
+    groups: dict[tuple[int, str], list] = {}
+    obj_no = 0
+    current = (obj_no, "obj")
     with open(path, encoding="utf-8") as f:
         for line in f:
             parts = line.split()
@@ -66,8 +70,11 @@ def import_obj(path: str, as_mesh: bool = True) -> list:
                 continue
             if parts[0] == "v":
                 verts.append([float(x) for x in parts[1:4]])
-            elif parts[0] in ("o", "g") and len(parts) > 1:
-                current = parts[1]
+            elif parts[0] == "o" and len(parts) > 1:
+                obj_no += 1
+                current = (obj_no, parts[1])
+            elif parts[0] == "g" and len(parts) > 1:
+                current = (obj_no, parts[1])
             elif parts[0] == "f":
                 idx = []
                 for token in parts[1:]:
@@ -80,7 +87,7 @@ def import_obj(path: str, as_mesh: bool = True) -> list:
 
     va = np.asarray(verts, float)
     out = []
-    for name, tris in groups.items():
+    for (_obj_no, name), tris in groups.items():
         if as_mesh:
             from ..core.mesh import MeshShape
             # compact vertices used by this group
