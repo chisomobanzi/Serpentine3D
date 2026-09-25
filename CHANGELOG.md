@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **Snapping works with an imported mesh in the scene.** With an OBJ in the
+  model and the pointer over the pane, asking for a point raised
+  `'MeshShape' object has no attribute 'ShapeType'`: the snap gatherer knew
+  pictures, text and point clouds by name and took everything else for a
+  CAD shape. A mesh has triangles, not CAD edges, so it brings no end, mid
+  or centre points of its own; the nearest point on its outline still snaps.
+
 - **A command started over RPC or MCP that fails part-way is cancelled.**
   When one of its inputs raised, the command sat at its prompt and every
   later outside call, undo included, was refused with "Finish or cancel the
