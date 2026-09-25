@@ -379,7 +379,16 @@ class SerpApi:
             self.selection.clear()
             return {"selected": []}
         if names:
-            ids = [self._obj(n).id for n in names]
+            ids = []
+            for ref in names:
+                # An id is one object; a name is every object that has it,
+                # since copies of one part share a name.
+                found = ([self.scene.get(ref)] if self.scene.get(ref)
+                         else [o for o in self.scene.all()
+                               if o.name.lower() == ref.lower()])
+                if not found:
+                    raise ApiError(f"No object named or id '{ref}'")
+                ids += [o.id for o in found if o.id not in ids]
         else:
             candidates = self.scene.visible_objects()
             if kind:

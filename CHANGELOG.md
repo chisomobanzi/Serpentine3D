@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Selecting by name over RPC or MCP selects every object of that name.**
+  With three booths each holding a "Headset", `select(names=["Headset"])`
+  took the first, and the delete after it removed one of three. A name now
+  means every object that has it, an id still means just that one, and the
+  two can be mixed.
+
 - **Objects in an OBJ stay separate when they share a name.** Faces were
   gathered by name, so three headsets exported as three objects called
   Meta_Quest came back as one, and three tablets of 22 parts as 22. Every
