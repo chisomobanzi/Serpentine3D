@@ -321,28 +321,28 @@ def export_file(scene, path: str, only_ids: list | None = None,
 def _export_shapes(scene, path, ext, objs, only_ids, thumbnail, stl_quality,
                    rhino_version):
     if ext in (".step", ".stp"):
-        n = step.export_step([o.shape for o in objs], path)
+        n = step.export_step([o.world_geometry() for o in objs], path)
         return (f"{n} mesh object(s) left out: STEP cannot carry them"
                 if n else None)
     if ext == ".obj":
-        obj.export_obj([(o.name, o.shape, scene.color_of(o))
+        obj.export_obj([(o.name, o.world_geometry(), scene.color_of(o))
                         for o in objs], path)
         return
     if ext == ".fbx":
         from . import fbx
-        fbx.export_fbx([(o.name, o.shape, scene.color_of(o))
+        fbx.export_fbx([(o.name, o.world_geometry(), scene.color_of(o))
                         for o in objs], path)
         return
     if ext == ".stl":
         from . import stl
-        stl.export_stl([(o.name, o.shape) for o in objs], path,
+        stl.export_stl([(o.name, o.world_geometry()) for o in objs], path,
                        quality=stl_quality)
         return
     if ext == ".3mf":
         from . import threemf
         threemf.export_3mf(
-            [(o.name, o.shape, scene.color_of(o)) for o in objs], path,
-            unit=threemf.UNIT_3MF.get(scene.units, "millimeter"))
+            [(o.name, o.world_geometry(), scene.color_of(o)) for o in objs],
+            path, unit=threemf.UNIT_3MF.get(scene.units, "millimeter"))
         return
     if ext == ".3dm":
         from . import rhino

@@ -288,6 +288,31 @@ def test_an_idle_edit_replays(rig):
     assert mx[0] == pytest.approx(15.0, abs=1e-6)
 
 
+def test_a_transform_only_edit_rides_as_a_matrix(rig):
+    """A committed gumball drag moves the pose, not the shape: the journal
+    records the matrix (cheap, no BREP dump) and the replay lands the
+    object where the matrix put it, with the shape still where it was made."""
+    scene, sel, hist, ctx, proc, journal = rig
+    proc.run("box 0,0,0 10,10,0 10")
+    box = scene.all()[0]
+    hist.checkpoint("gumball move")
+    import numpy as np
+    m = np.eye(4)
+    m[:3, 3] = (5.0, 0.0, 0.0)
+    scene.set_transforms({box.id: m})     # what a committed drag writes
+    journal.flush()
+    ev = _events(journal)
+    edit = next(e for e in ev if e["ev"] == "edit")
+    assert edit["chg"] == []              # the shape never changed
+    assert len(edit["tr"]) == 1
+    assert edit["tr"][0][0] == box.id
+    r = _replay(journal)
+    back = r.scene.all()[0]
+    mn, _mx = back.bbox()                 # the world box the pose made
+    assert mn[0] == pytest.approx(5.0, abs=1e-6)
+    assert g.bbox(back.shape)[0][0] == pytest.approx(0.0, abs=1e-6)
+
+
 def test_an_idle_edit_that_makes_and_removes_objects_replays(rig):
     """A gumball extrude births geometry outside any command, and a panel
     delete takes it away the same route; both travel as delta entries."""

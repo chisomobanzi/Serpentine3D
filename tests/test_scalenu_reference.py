@@ -42,9 +42,26 @@ def _box(window):
 
 def _size(window, obj):
     """Bounding size, to within the slack OCC leaves around a box."""
-    lo, hi = g.bbox(window.scene.get(obj.id).shape)
+    lo, hi = window.scene.get(obj.id).bbox()   # the world box: the pose, not the shape
     return pytest.approx([float(h - lo_) for lo_, h in zip(lo, hi)],
                          abs=1e-4)
+
+
+def _shown_bbox(window, obj_id):
+    """World box as shown: the stored pose with the in-place preview
+    (drag_display) applied on top — whole objects preview in place now,
+    not as a ghost."""
+    import numpy as np
+    o = window.scene.get(obj_id)
+    lo, hi = (np.asarray(v, float) for v in o.bbox())
+    m = window.scene.drag_display.get(obj_id)
+    if m is None:
+        return lo, hi
+    m = np.asarray(m, float)
+    corners = np.array([[x, y, z] for x in (lo[0], hi[0])
+                        for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+    world = corners @ m[:3, :3].T + m[:3, 3]
+    return world.min(axis=0), world.max(axis=0)
 
 
 def _start(window, *answers):
@@ -80,12 +97,14 @@ def test_an_axis_the_reference_does_not_move_along_is_left_alone(window):
 
 
 def test_the_second_point_previews_while_you_drag(window):
-    _start(window, "0,0,0", "10,0,0")
+    obj = _start(window, "0,0,0", "10,0,0")
     req = window.processor.request
     assert req.preview_fn is not None
     window._ghost_timer = None
     window._on_mouse_world((20.0, 0.0, 0.0))
-    assert window.viewport._ghost is not None
+    # whole objects preview in place (drag_display), not as a ghost
+    assert window.viewport._ghost is None
+    assert window.scene.drag_display.get(obj.id) is not None
 
 
 def test_the_band_hangs_off_the_base_point(window):
@@ -107,12 +126,18 @@ def test_typing_a_factor_still_asks_for_the_other_two(window):
 def test_the_typed_factors_preview_as_you_type(window):
     """The other half of the same complaint: three numbers and no picture
     of what they do until the command is over."""
-    _start(window, "0,0,0")
-    assert window.processor.preview_shape("2") is not None   # X factor
+    obj = _start(window, "0,0,0")
+    window.processor.preview_shape("2")
+    lo, hi = _shown_bbox(window, obj.id)
+    assert float(hi[0] - lo[0]) == pytest.approx(20, abs=1e-6)   # X doubled
     window.processor.provide_text("2")
-    assert window.processor.preview_shape("3") is not None   # Y factor
+    window.processor.preview_shape("3")
+    lo, hi = _shown_bbox(window, obj.id)
+    assert float(hi[1] - lo[1]) == pytest.approx(60, abs=1e-6)   # Y tripled
     window.processor.provide_text("3")
-    assert window.processor.preview_shape("0.5") is not None  # Z factor
+    window.processor.preview_shape("0.5")
+    lo, hi = _shown_bbox(window, obj.id)
+    assert float(hi[2] - lo[2]) == pytest.approx(20, abs=1e-6)   # Z halved
 
 
 def test_a_reference_point_on_the_base_is_no_reference_at_all(window):

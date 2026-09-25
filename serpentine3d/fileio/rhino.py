@@ -1355,16 +1355,17 @@ def export_3dm(scene, path: str, only_ids: list | None = None,
             attrs.MaterialIndex = _write_material(model, materials,
                                                   obj.material)
             attrs.MaterialSource = r3.ObjectMaterialSource.MaterialFromObject
+        world = obj.world_geometry()
         if obj.kind == "curve":
             exported = False
-            for edge in geometry.edges_of(obj.shape):
+            for edge in geometry.edges_of(world):
                 nc = _shape_to_r3_curve(edge)
                 if nc is not None:
                     model.Objects.AddCurve(nc, attrs)
                     exported = True
             if exported:
                 continue
-        mesh = tessellate(obj.shape)
+        mesh = tessellate(world)
         if not mesh.has_faces:
             continue
         rm = r3.Mesh()

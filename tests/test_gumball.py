@@ -31,24 +31,46 @@ def _begin(vp, kind, axis):
 
 def test_gumball_follows_geometry_during_move():
     """The reported bug: mid-move the gumball must track the geometry,
-    not stay frozen at the drag-start anchor."""
+    not stay frozen at the drag-start anchor. The move rides as a display
+    offset until release, and the gumball tracks where it is shown."""
     vp, scene, sel = _vp()
     box = scene.add(g.make_box((-2, -2, -2), 4, 4, 4))
     sel.set([box.id])
     start_anchor = vp.gumball.anchor_and_axes()[0].copy()
     _begin(vp, "move", 2)                      # Z arrow
     vp.gumball.apply_scalar(10.0)              # move +10 along Z
-    # geometry actually moved
-    assert g.bbox(scene.get(box.id).shape)[0][2] == pytest.approx(8)
-    # the drawn gumball anchor tracks it (was the bug: stayed at start)
+    # the move is shown, not written: the scene keeps the shape as it was
+    assert g.bbox(scene.get(box.id).shape)[0][2] == pytest.approx(-2)
+    assert _is_translation(scene.drag_display[box.id], (0.0, 0.0, 10.0))
+    # the drawn gumball anchor tracks the shown position (was the bug:
+    # stayed at start)
     drawn = vp.gumball._draw_anchor()[0]
     assert drawn[2] == pytest.approx(start_anchor[2] + 10, abs=1e-6)
-    assert np.linalg.norm(drawn - g_center(scene.get(box.id).shape)) < 1e-6
+    assert np.linalg.norm(
+        drawn - (g_center(scene.get(box.id).shape)
+                 + np.asarray(scene.drag_display[box.id][:3, 3]))) < 1e-6
+    vp.gumball.end_drag()                      # release folds in the pose
+    obj = scene.get(box.id)
+    assert g.bbox(obj.shape)[0][2] == pytest.approx(-2, abs=1e-5)  # shape untouched
+    assert _is_translation(obj.transform, (0.0, 0.0, 10.0))
+    assert obj.bbox()[0][2] == pytest.approx(8)
+    assert not scene.drag_display
+    drawn = vp.gumball._draw_anchor()[0]
+    wmin, wmax = obj.bbox()
+    assert np.linalg.norm(drawn - (np.asarray(wmin) + np.asarray(wmax)) / 2) < 1e-6
 
 
 def g_center(shape):
     mn, mx = g.bbox(shape)
     return (np.asarray(mn) + np.asarray(mx)) / 2
+
+
+def _is_translation(m, off):
+    """drag_display carries 4x4 poses; a whole-object move is the one
+    whose linear part is the identity."""
+    m = np.asarray(m, float)
+    return (np.allclose(m[:3, :3], np.eye(3), atol=1e-9)
+            and np.allclose(m[:3, 3], off, atol=1e-9))
 
 
 def test_rotate_and_scale_anchor_stays_put():
@@ -69,11 +91,16 @@ def test_typed_move_commits_exact_distance():
     _begin(vp, "move", 0)                      # X arrow
     for ch in "1", "2", ".", "5":
         assert vp.gumball.type_char(ch)
-    # previews live while typing
-    assert g.bbox(scene.get(box.id).shape)[0][0] == pytest.approx(12.5)
+    # previews live while typing, as a display offset: the scene is not
+    # written until Enter
+    assert g.bbox(scene.get(box.id).shape)[0][0] == pytest.approx(0, abs=1e-5)
+    assert _is_translation(scene.drag_display[box.id], (12.5, 0.0, 0.0))
     assert vp.gumball.commit_typed()
     assert vp.gumball.drag is None
-    assert g.bbox(scene.get(box.id).shape)[0][0] == pytest.approx(12.5)
+    assert not scene.drag_display
+    obj = scene.get(box.id)
+    assert g.bbox(obj.shape)[0][0] == pytest.approx(0, abs=1e-5)  # shape untouched
+    assert obj.bbox()[0][0] == pytest.approx(12.5)                  # pose carries it
 
 
 def test_typed_rotate_and_scale():
@@ -84,16 +111,17 @@ def test_typed_rotate_and_scale():
     for ch in "9", "0":
         vp.gumball.type_char(ch)
     vp.gumball.commit_typed()
-    mn, mx = g.bbox(scene.get(box.id).shape)
+    mn, mx = scene.get(box.id).bbox()      # the world box: the pose, not the shape
     assert (mx[1] - mn[1]) == pytest.approx(4, abs=1e-4)   # 90deg: X->Y
 
     box2 = scene.get(box.id)
     sel.set([box2.id])
+    vp.camera.target = np.asarray((0.0, 1.0, 1.0))  # on the scale axis line {(t,1,1)}
     _begin(vp, "scale", 0)
     for ch in "3":
         vp.gumball.type_char(ch)
     vp.gumball.commit_typed()
-    mn, mx = g.bbox(scene.get(box.id).shape)
+    mn, mx = scene.get(box.id).bbox()
     # after the 90deg turn the X extent is the old width 2; x3 along X -> 6
     assert (mx[0] - mn[0]) == pytest.approx(6, abs=1e-4)
 
@@ -104,9 +132,12 @@ def test_typed_backspace_and_revert():
     sel.set([box.id])
     _begin(vp, "move", 0)
     vp.gumball.type_char("5")
-    assert g.bbox(scene.get(box.id).shape)[0][0] == pytest.approx(5)
+    # the preview is a display offset; the scene is written on no keypress
+    assert g.bbox(scene.get(box.id).shape)[0][0] == pytest.approx(0, abs=1e-5)
+    assert _is_translation(scene.drag_display[box.id], (5.0, 0.0, 0.0))
     vp.gumball.type_char("back")              # buffer empty -> revert
     assert g.bbox(scene.get(box.id).shape)[0][0] == pytest.approx(0, abs=1e-5)
+    assert not scene.drag_display
     vp.gumball.cancel_drag()
 
 
@@ -121,7 +152,12 @@ def test_move_grid_snaps(monkeypatch):
     # calling apply_scalar with the snapped value the drag path would use
     snapped = round(12.3 / vp.grid_snap_step) * vp.grid_snap_step
     vp.gumball.apply_scalar(snapped)
-    assert g.bbox(scene.get(box.id).shape)[0][0] == pytest.approx(10)
+    # the snapped value is what the display transform carries
+    assert _is_translation(scene.drag_display[box.id], (10.0, 0.0, 0.0))
+    vp.gumball.end_drag()
+    obj = scene.get(box.id)
+    assert g.bbox(obj.shape)[0][0] == pytest.approx(0, abs=1e-5)  # shape untouched
+    assert obj.bbox()[0][0] == pytest.approx(10)
 
 
 def test_pad_move_follows_and_cancels():
@@ -130,15 +166,19 @@ def test_pad_move_follows_and_cancels():
     sel.set([box.id])
     anchor0 = vp.gumball.anchor_and_axes()[0].copy()
     _begin(vp, "pad", 2)                       # XY plane pad
-    # simulate an applied in-plane delta
+    # simulate an applied in-plane delta, as the drag path does: the offset
+    # is shown, the scene is not written
     d = vp.gumball.drag
     d["offset"] = np.array([3.0, 4.0, 0.0])
-    vp.gumball._apply(lambda s: g.translate(s, (3.0, 4.0, 0.0)))
+    m = np.eye(4)
+    m[:3, 3] = d["offset"]
+    vp.scene.set_drag_display({box.id: m})
     drawn = vp.gumball._draw_anchor()[0]
     assert drawn[0] == pytest.approx(anchor0[0] + 3)
     assert drawn[1] == pytest.approx(anchor0[1] + 4)
     vp.gumball.cancel_drag()
     assert g.bbox(scene.get(box.id).shape)[0][0] == pytest.approx(0, abs=1e-5)
+    assert not scene.drag_display
 
 
 def test_pad_and_rot_reject_typing():
@@ -215,3 +255,59 @@ def test_gumball_scale_across_axes_no_crash():
         tessellate(obj.shape)                 # what the viewport does
         assert not _has_null_surface(obj.shape)
     assert g.volume(scene.get(box.id).shape) > 0
+
+
+# -- many-object rot / scale: transform carries, shape untouched ------
+
+def test_rot_many_objects():
+    """Rotating several objects writes a display matrix per object and
+    commits a batched transform on release; the shapes are untouched."""
+    vp, scene, sel = _vp()
+    boxes = [scene.add(g.make_box((0, 0, 0), 4, 2, 1)) for _ in range(3)]
+    sel.set([b.id for b in boxes])
+    _begin(vp, "rot", 2)                       # Z rotation
+    vp.gumball.apply_scalar(90.0)              # 90° about Z
+    # mid-drag: each object carries a display rotation matrix;
+    # no shape has been rewritten
+    for b in boxes:
+        assert b.id in scene.drag_display
+        assert scene.drag_display[b.id].shape == (4, 4)
+        lo, _hi = g.bbox(b.shape)
+        assert lo == pytest.approx(np.array([0, 0, 0]), abs=1e-5)  # unchanged
+    vp.gumball.end_drag()
+    for b in boxes:
+        obj = scene.get(b.id)
+        lo, _hi = g.bbox(obj.shape)
+        assert lo == pytest.approx(np.array([0, 0, 0]), abs=1e-5)  # untouched
+        assert obj.transform is not None
+        # 90° about Z swaps the box extents: the 4-long way now lies on Y
+        mn, mx = obj.bbox()
+        assert mx[1] - mn[1] == pytest.approx(4, abs=1e-5)
+        assert mx[0] - mn[0] == pytest.approx(2, abs=1e-5)
+    assert not scene.drag_display
+
+
+def test_scale_many_objects():
+    """Scaling several objects writes a display scale matrix per object
+    and commits a batched transform on release; the shapes are untouched."""
+    vp, scene, sel = _vp()
+    boxes = [scene.add(g.make_box((0, 0, 0), 2, 2, 2)) for _ in range(3)]
+    sel.set([b.id for b in boxes])
+    _begin(vp, "scale", 0)                     # X scale
+    vp.gumball.apply_scalar(3.0)               # 3× along X
+    for b in boxes:
+        assert b.id in scene.drag_display
+        assert scene.drag_display[b.id].shape == (4, 4)
+        lo, _hi = g.bbox(b.shape)
+        assert lo == pytest.approx(np.array([0, 0, 0]), abs=1e-5)  # unchanged
+    vp.gumball.end_drag()
+    for b in boxes:
+        obj = scene.get(b.id)
+        lo, _hi = g.bbox(obj.shape)
+        assert lo == pytest.approx(np.array([0, 0, 0]), abs=1e-5)  # untouched
+        assert obj.transform is not None
+        # scaled 3× about its centre (1,1,1): x now spans -2..4
+        mn, mx = obj.bbox()
+        assert mx[0] == pytest.approx(4, abs=1e-5)
+        assert mn[0] == pytest.approx(-2, abs=1e-5)
+    assert not scene.drag_display

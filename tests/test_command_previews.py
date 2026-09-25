@@ -25,6 +25,23 @@ def env():
     return scene, selection, history, ctx, CommandProcessor(ctx)
 
 
+def _shown_bbox(scene, obj_id):
+    """World box as shown: the stored pose with any in-place preview
+    (drag_display) applied on top — whole objects preview in place now,
+    not as a ghost."""
+    import numpy as np
+    o = scene.get(obj_id)
+    lo, hi = (np.asarray(v, float) for v in o.bbox())
+    m = scene.drag_display.get(obj_id)
+    if m is None:
+        return lo, hi
+    m = np.asarray(m, float)
+    corners = np.array([[x, y, z] for x in (lo[0], hi[0])
+                        for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+    world = corners @ m[:3, :3].T + m[:3, 3]
+    return world.min(axis=0), world.max(axis=0)
+
+
 def test_orient3pt_shows_where_the_objects_land(env):
     """The first target point decides where the objects go, so it should
     show them going there — the turn comes with the next two picks."""
@@ -36,10 +53,10 @@ def test_orient3pt_shows_where_the_objects_land(env):
         proc.provide(tuple(float(c) for c in p))
     assert "first target" in proc.request.prompt.lower()
     ghost = proc.preview_for((10, 0, 0))
-    assert ghost is not None, "no ghost while placing the first target point"
-    lo, hi = g.bbox(ghost)
+    assert ghost is None, "whole objects preview in place, not as a ghost"
+    lo, hi = _shown_bbox(scene, obj.id)
     assert lo[0] == pytest.approx(10, abs=1e-6), (
-        "the ghost should sit where the cursor is")
+        "the object should sit where the cursor is")
     assert hi[0] - lo[0] == pytest.approx(2, abs=1e-6)
 
 
@@ -108,5 +125,5 @@ def test_orient3pt_still_completes(env):
               (10, 0, 0), (11, 0, 0), (10, 1, 0)):
         proc.provide(tuple(float(c) for c in p))
     assert not proc.busy
-    lo, _hi = g.bbox(scene.get(obj.id).shape)
+    lo, _hi = scene.get(obj.id).bbox()   # the world box: the pose, not the shape
     assert lo[0] == pytest.approx(10, abs=1e-6)

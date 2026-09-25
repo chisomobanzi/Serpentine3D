@@ -7,9 +7,12 @@ from .base import (
 
 
 def _ghost(objs, fn):
-    """Compound preview of every object transformed by fn(shape)."""
+    """Compound preview of every object transformed by fn(shape).
+
+    The preview is of what is seen, so it starts from the geometry as it
+    stands — any pose an object carries included."""
     from ..core.picture import PictureShape
-    shapes = [fn(o.shape) for o in objs]
+    shapes = [fn(o.world_geometry()) for o in objs]
     if len(shapes) == 1 and isinstance(shapes[0], PictureShape):
         return shapes[0]
     return g.make_compound([s.face() if isinstance(s, PictureShape) else s
@@ -42,12 +45,154 @@ def _preview_of(ctx, held, objs, fn):
     return ctx.control_point_ghost(held.get("cv", {}), fn)
 
 
+def _preview_pose(ctx, held, objs, matrix, fn):
+    """Preview a whole-object operation as a pose in place, not a rebuilt
+    shape.
+
+    The matrix rides on the scene's drag_display and the viewport composes it
+    on top of each object's stored transform — exactly the pose the commit
+    will write — so the eye sees the result with no kernel work at all. Held
+    parts still preview their control points, built from `fn`.
+    """
+    if not held:
+        ctx.scene.set_drag_display({o.id: matrix for o in objs})
+        return None
+    return ctx.control_point_ghost(held.get("cv", {}), fn)
+
+
+def _ghost_display(pairs, cap=1_000_000):
+    """Ghost of copies that do not exist yet, built from the originals' own
+    tessellations moved by numpy alone — no kernel, so a ring or grid of
+    meshed objects costs a matrix multiply per vertex, not a B-rep transform
+    per copy. `pairs` is (object, the copy's full world matrix).
+
+    Above `cap` total vertices the ghost is dropped rather than freezing the
+    frame: the copies are still created on the click, only the preview goes
+    away.
+    """
+    import numpy as np
+
+    from ..core.tessellate import DisplayMesh
+    usable, total = [], 0
+    for o, m in pairs:
+        # o.mesh tessellates once if it has not been drawn yet and caches it;
+        # afterwards this is pure numpy
+        dm = o.mesh
+        if dm is None or not len(dm.vertices):
+            continue
+        total += len(dm.vertices)
+        if total > cap:
+            return None
+        usable.append((o, m, dm))
+    if not usable:
+        return None
+    verts, tris, segs = [], [], []
+    off = 0
+    for o, m, dm in usable:
+        full = m @ o.transform if o.transform is not None else m
+        A = np.asarray(full[:3, :3], float)
+        t = np.asarray(full[:3, 3], float)
+        nv = len(dm.vertices)
+        verts.append(dm.vertices @ A.T + t)
+        if len(dm.triangles):
+            tris.append(dm.triangles + off)
+        if len(dm.edge_segments):
+            segs.append(dm.edge_segments @ A.T + t)
+        off += nv
+    kw = {"vertices": np.concatenate(verts, axis=0)}
+    if tris:
+        kw["triangles"] = np.concatenate(tris, axis=0).astype(np.uint32)
+    if segs:
+        kw["edge_segments"] = np.concatenate(segs, axis=0)
+    return DisplayMesh(**kw)
+
+
 def _point_map(fn):
     """`fn`, written for shapes, as the map it makes of bare positions."""
     return lambda p: g.transform_points([tuple(p)], fn)[0]
 
 
-def _do(ctx, held, objs, fn, verb, tail="", action=None):
+# -- whole-object operations, as 4x4 poses ---------------------------------
+#
+# The same operations `fn` performs on a shape, written as matrices: for a
+# whole object the operation rides on the object instead of being written
+# into the B-rep (Scene.set_transforms), the same deal a gumball drag
+# makes — moving a hundred objects costs a hundred matrices, not a hundred
+# re-transforms, re-meshes and B-rep dumps. The builders mirror the
+# geometry functions they replace, point for point.
+
+def _matrix_translate(offset):
+    import numpy as np
+    m = np.eye(4)
+    m[:3, 3] = np.asarray(offset, float)
+    return m
+
+
+def _matrix_about(center, axis, degrees):
+    """Turn `degrees` about `axis` through `center`: T(c) @ R @ T(-c)."""
+    import math
+
+    import numpy as np
+    a = np.asarray(axis, float)
+    a = a / (np.linalg.norm(a) or 1.0)
+    ang = math.radians(float(degrees))
+    kx = np.array([[0.0, -a[2], a[1]],
+                   [a[2], 0.0, -a[0]],
+                   [-a[1], a[0], 0.0]])
+    R = (np.eye(3) + math.sin(ang) * kx
+         + (1.0 - math.cos(ang)) * (kx @ kx))
+    c = np.asarray(center, float)
+    m = np.eye(4)
+    m[:3, :3] = R
+    m[:3, 3] = c - R @ c
+    return m
+
+
+def _matrix_scale_about(center, factor, factors=None):
+    """Scale about `center`, uniform by `factor` or per-axis by `factors`."""
+    import numpy as np
+    f = np.asarray(factors if factors is not None
+                   else (factor, factor, factor), float)
+    c = np.asarray(center, float)
+    m = np.eye(4)
+    m[:3, :3] = np.diag(f)
+    m[:3, 3] = c - f * c
+    return m
+
+
+def _matrix_scale_axis(base, axis, factor):
+    """Stretch by `factor` along `axis`, holding `base` fixed."""
+    import numpy as np
+    a = np.asarray(axis, float)
+    a = a / (np.linalg.norm(a) or 1.0)
+    A = np.eye(3) + (float(factor) - 1.0) * np.outer(a, a)
+    b = np.asarray(base, float)
+    m = np.eye(4)
+    m[:3, :3] = A
+    m[:3, 3] = b - A @ b
+    return m
+
+
+def _matrix_mirror(point, normal):
+    """Reflect in the plane through `point` with `normal`."""
+    import numpy as np
+    n = np.asarray(normal, float)
+    n = n / (np.linalg.norm(n) or 1.0)
+    p = np.asarray(point, float)
+    A = np.eye(3) - 2.0 * np.outer(n, n)
+    m = np.eye(4)
+    m[:3, :3] = A
+    m[:3, 3] = p - A @ p
+    return m
+
+
+def _pose_of(o, matrix):
+    """The pose a copy or moved object takes on: `matrix` composed onto any
+    pose the object already carries (world = matrix @ (pose @ local))."""
+    return matrix @ o.transform if o.transform is not None else matrix
+
+
+def _do(ctx, held, objs, fn, verb, tail="", action=None, matrix=None):
     """Apply `fn` to what is held, or to the objects, and say what happened.
 
     `fn` transforms a shape, which is all a whole object or a control point
@@ -56,9 +201,17 @@ def _do(ctx, held, objs, fn, verb, tail="", action=None):
     ("move", delta), ("rotate", point, axis, degrees) or ("scale", factor).
     Without one they are left alone and said so, which beats transforming
     the whole solid behind your back.
+
+    `matrix` is the same operation for a whole object, as a 4x4: it is the
+    fast path — the pose rides on the object, the B-rep stays as the file
+    made it.
     """
     if held:
         _do_to_parts(ctx, held, fn, verb, tail, action)
+        return
+    if matrix is not None:
+        ctx.scene.set_transforms({o.id: _pose_of(o, matrix) for o in objs})
+        ctx.echo(f"{verb} {len(objs)} object(s){tail}.")
         return
     for o in objs:
         ctx.scene.replace_shape(o.id, fn(o.shape))
@@ -78,6 +231,10 @@ def _do_to_parts(ctx, held, fn, verb, tail, action):
 
     cvs = held.get("cv")
     if cvs:
+        # Held parts are edited where they are seen, so a pose is folded
+        # into the shape first (a no-op for an object with none).
+        for obj_id in cvs:
+            ctx.scene.bake(obj_id)
         n = ctx.apply_to_control_points(cvs, fn)
         done.append(f"{n} control point(s)")
 
@@ -90,7 +247,8 @@ def _do_to_parts(ctx, held, fn, verb, tail, action):
             if obj is None:
                 continue
             try:
-                ctx.scene.replace_shape(
+                obj = ctx.scene.bake(obj_id)      # pose folded in: the edit
+                ctx.scene.replace_shape(          # lands in the world
                     obj_id, g.transform_segments(obj.shape, idxs, at))
                 n += len(idxs)
             except g.GeometryError as exc:
@@ -115,7 +273,8 @@ def _do_to_parts(ctx, held, fn, verb, tail, action):
         hold = ([(obj_id, "face", i) for i in fidx]
                 + [(obj_id, "edge", i) for i in eidx])
         try:
-            if fidx and len(fidx) == len(g.faces_of(obj.shape)):
+            obj = ctx.scene.bake(obj_id)      # pose folded in: the edit
+            if fidx and len(fidx) == len(g.faces_of(obj.shape)):   # lands in the world
                 # every face held is the solid itself, whatever the
                 # transform: a band round the whole thing means the thing
                 ctx.scene.replace_shape(obj_id, fn(obj.shape))
@@ -221,13 +380,14 @@ def cmd_move(ctx):
 
     def _preview(p):
         off = tuple(b - a for a, b in zip(p1, p))
-        return _preview_of(ctx, held, objs, lambda s: g.translate(s, off))
+        return _preview_pose(ctx, held, objs, _matrix_translate(off),
+                             lambda s: g.translate(s, off))
 
     p2 = yield PointReq("Point to move to", rubber_from=p1,
                         preview_fn=_preview)
     offset = tuple(b - a for a, b in zip(p1, p2))
     _do(ctx, held, objs, lambda s: g.translate(s, offset), "Moved",
-        action=("move", offset))
+        action=("move", offset), matrix=_matrix_translate(offset))
 
 
 def _copy_on_paper(ctx, lv):
@@ -266,7 +426,7 @@ def cmd_copy(ctx):
 
     def _preview(p):
         off = tuple(b - a for a, b in zip(p1, p))
-        return _ghost(objs, lambda s: g.translate(s, off))
+        return _ghost_display([(o, _matrix_translate(off)) for o in objs])
 
     count = 0
     while True:
@@ -276,8 +436,15 @@ def cmd_copy(ctx):
         if p2 is None:
             break
         offset = tuple(b - a for a, b in zip(p1, p2))
-        for o in objs:
-            ctx.scene.add_from(g.translate(o.shape, offset), o)
+        m = _matrix_translate(offset)
+        updates = {}
+        with ctx.scene.batched():            # one notification, not one a copy
+            for o in objs:
+                # the copy shares the original's local shape; the offset
+                # rides as its pose, not a re-written B-rep
+                c = ctx.scene.add_from(o.shape, o)
+                updates[c.id] = _pose_of(o, m)
+            ctx.scene.set_transforms(updates)
         count += 1
     ctx.echo(f"Copied {len(objs)} object(s) {count} time(s).")
 
@@ -318,8 +485,9 @@ def cmd_rotate(ctx):
 
         def _preview(p):
             a = p if isinstance(p, float) else _angle(p)
-            return _preview_of(ctx, held, objs,
-                               lambda s: g.rotate(s, center, axis, a))
+            return _preview_pose(ctx, held, objs,
+                                 _matrix_about(center, axis, a),
+                                 lambda s: g.rotate(s, center, axis, a))
 
         p2 = yield PointReq("Angle, or second reference point",
                             rubber_from=center, allow_number=True,
@@ -333,7 +501,8 @@ def cmd_rotate(ctx):
     else:
         _do(ctx, held, objs, lambda s: g.rotate(s, center, axis, angle),
             "Rotated", f" by {angle:g} degrees",
-            action=("rotate", center, axis, angle))
+            action=("rotate", center, axis, angle),
+            matrix=_matrix_about(center, axis, angle))
 
 
 @command("scale", aliases=("sc",))
@@ -360,8 +529,9 @@ def cmd_scale(ctx):
             f = _factor(p)
             if f < 1e-9:
                 return None
-            return _preview_of(ctx, held, objs,
-                               lambda s: g.scale(s, center, f))
+            return _preview_pose(ctx, held, objs,
+                                 _matrix_scale_about(center, f),
+                                 lambda s: g.scale(s, center, f))
 
         p2 = yield PointReq("Second reference point (drag to scale)",
                             rubber_from=center, allow_number=True,
@@ -371,7 +541,8 @@ def cmd_scale(ctx):
         ctx.echo("Zero scale factor — cancelled.")
         return
     _do(ctx, held, objs, lambda s: g.scale(s, center, factor),
-        "Scaled", f" by {factor:g}", action=("scale", factor))
+        "Scaled", f" by {factor:g}", action=("scale", factor),
+        matrix=_matrix_scale_about(center, factor))
 
 
 @command("scalenu")
@@ -389,7 +560,10 @@ def cmd_scale_nu(ctx):
     def _preview(factors):
         if not all(abs(f) > 1e-9 for f in factors):
             return None
-        return _preview_of(ctx, held, objs, lambda s: _apply(s, factors))
+        return _preview_pose(ctx, held, objs,
+                             _matrix_scale_about(center, 1.0,
+                                                 factors=factors),
+                             lambda s: _apply(s, factors))
 
     ref = yield PointReq("X factor, or first reference point",
                          rubber_from=center, allow_number=True,
@@ -422,7 +596,8 @@ def cmd_scale_nu(ctx):
         ctx.echo("Zero scale factor — cancelled.")
         return
     _do(ctx, held, objs, lambda s: _apply(s, factors), "Scaled",
-        " by " + " × ".join(f"{f:g}" for f in factors))
+        " by " + " × ".join(f"{f:g}" for f in factors),
+        matrix=_matrix_scale_about(center, 1.0, factors=factors))
 
 
 @command("mirror", aliases=("mi",))
@@ -440,13 +615,15 @@ def cmd_mirror(ctx):
 
     def _preview(p):
         n = _mirror_normal(p)
-        return _preview_of(ctx, held, objs, lambda s: g.mirror(s, p1, n))
+        return _preview_pose(ctx, held, objs, _matrix_mirror(p1, n),
+                             lambda s: g.mirror(s, p1, n))
 
     p2 = yield PointReq("End of mirror line", rubber_from=p1,
                         preview_fn=_preview)
     # mirror across the plane through the picked line, perpendicular to
     # the construction plane
     normal = _mirror_normal(p2)
+    m = _matrix_mirror(p1, normal)
     if held:
         # Nothing to ask about keeping the original: a control point is part
         # of a curve, and a spare copy of a corner on its own is not
@@ -455,12 +632,17 @@ def cmd_mirror(ctx):
         return
     keep = yield OptionReq("Keep original?", options=["Yes", "No"],
                            default="Yes")
-    for o in objs:
-        mirrored = g.mirror(o.shape, p1, normal)
-        if keep == "Yes":
-            ctx.scene.add_from(mirrored, o)
-        else:
-            ctx.scene.replace_shape(o.id, mirrored)
+    updates = {}
+    with ctx.scene.batched():
+        for o in objs:
+            if keep == "Yes":
+                # the copy shares the original's local shape; the mirror
+                # rides as its pose
+                c = ctx.scene.add_from(o.shape, o)
+                updates[c.id] = _pose_of(o, m)
+            else:
+                updates[o.id] = _pose_of(o, m)
+        ctx.scene.set_transforms(updates)
     ctx.echo(f"Mirrored {len(objs)} object(s).")
 
 
@@ -474,8 +656,8 @@ def cmd_array_polar(ctx):
 
     def _ring(count, total):
         step = total / (count if abs(total - 360.0) < 1e-9 else count - 1)
-        return g.make_compound(
-            [g.rotate(o.shape, center, axis, step * i)
+        return _ghost_display(
+            [(o, _matrix_about(center, axis, step * i))
              for i in range(1, count) for o in objs])
 
     count = yield IntReq("Number of items", default=6, minimum=2,
@@ -485,11 +667,14 @@ def cmd_array_polar(ctx):
     step = total / (count if abs(total - 360.0) < 1e-9 else count - 1)
     n = 0
     with ctx.scene.batched():           # one notification, not one a copy
+        updates = {}
         for i in range(1, count):
+            m = _matrix_about(center, axis, step * i)
             for o in objs:
-                ctx.scene.add_from(
-                    g.rotate(o.shape, center, axis, step * i), o)
+                c = ctx.scene.add_from(o.shape, o)
+                updates[c.id] = _pose_of(o, m)
                 n += 1
+            ctx.scene.set_transforms(updates)
     ctx.echo(f"Created {n} arrayed object(s) around {center}.")
 
 
@@ -510,13 +695,16 @@ def cmd_array_path(ctx):
     up = tuple(float(a) for a in ctx.cplane.normal)
     n = 0
     with ctx.scene.batched():           # one notification, not one a copy
+        updates = {}
         for frame in frames:
             placement = _path_placement(frames[0], frame, base, how, up)
             if placement is None:       # the copy that lands on the original
                 continue
             for o in objs:
-                ctx.scene.add_from(g.apply_matrix(o.shape, placement), o)
+                c = ctx.scene.add_from(o.shape, o)
+                updates[c.id] = _pose_of(o, placement)
                 n += 1
+            ctx.scene.set_transforms(updates)
     ctx.echo(f"Placed {n} object(s) along {paths[0].name}.")
 
 
@@ -582,10 +770,10 @@ def cmd_array(ctx):
     ny = yield IntReq("Count Y", default=1, minimum=1)
 
     def _grid(dx, dy):
-        shapes = [g.translate(o.shape, (i * dx, j * dy, 0))
-                  for i in range(nx) for j in range(ny)
-                  if (i, j) != (0, 0) for o in objs]
-        return g.make_compound(shapes) if shapes else None
+        return _ghost_display(
+            [(o, _matrix_translate((i * dx, j * dy, 0)))
+             for i in range(nx) for j in range(ny)
+             if (i, j) != (0, 0) for o in objs])
 
     from . import dragging
     from .base import PointReq
@@ -612,14 +800,17 @@ def cmd_array(ctx):
     # One notification for the array, not one per copy: the counts are typed
     # by the user and 40x40 is an ordinary thing to type. See Scene.batched.
     with ctx.scene.batched():
+        updates = {}
         for i in range(nx):
             for j in range(ny):
                 if i == 0 and j == 0:
                     continue
+                m = _matrix_translate((i * dx, j * dy, 0))
                 for o in objs:
-                    ctx.scene.add_from(
-                        g.translate(o.shape, (i * dx, j * dy, 0)), o)
+                    c = ctx.scene.add_from(o.shape, o)
+                    updates[c.id] = _pose_of(o, m)
                     n += 1
+            ctx.scene.set_transforms(updates)
     ctx.echo(f"Created {n} arrayed object(s).")
 
 
@@ -680,13 +871,19 @@ def _similarity(rot3, scale, src_origin, dst_origin):
 
 def _place(ctx, objs, matrix, copy: bool):
     made = []
-    for o in objs:
-        shape = g.apply_matrix(o.shape, matrix)
-        if copy:
-            made.append(ctx.scene.add_from(shape, o))
-        else:
-            ctx.scene.replace_shape(o.id, shape)
-            made.append(o)
+    updates = {}
+    with ctx.scene.batched():
+        for o in objs:
+            if copy:
+                # the copy shares the original's local shape; the pose
+                # rides on it
+                c = ctx.scene.add_from(o.shape, o)
+                updates[c.id] = _pose_of(o, matrix)
+                made.append(c)
+            else:
+                updates[o.id] = _pose_of(o, matrix)
+                made.append(o)
+        ctx.scene.set_transforms(updates)
     return made
 
 
@@ -715,7 +912,8 @@ def cmd_orient(ctx):
 
     def _preview(p):
         m = _matrix(p)
-        return g.make_compound([g.apply_matrix(o.shape, m) for o in objs])
+        return _preview_pose(ctx, {}, objs, m,
+                             lambda s: g.apply_matrix(s, m))
 
     t2 = yield PointReq("Second target point", rubber_from=t1,
                         preview_fn=_preview)
@@ -740,7 +938,8 @@ def cmd_orient3pt(ctx):
         # turn — so show them sliding across, and let the next two pick up
         # the rotation
         shift = tuple(a - b for a, b in zip(p, r1))
-        return g.make_compound([g.translate(o.shape, shift) for o in objs])
+        return _preview_pose(ctx, {}, objs, _matrix_translate(shift),
+                             lambda s: g.translate(s, shift))
 
     t1 = yield PointReq("First target point",
                         choices={"Copy": ["No", "Yes"]},
@@ -753,7 +952,8 @@ def cmd_orient3pt(ctx):
 
     def _preview(p):
         m = _matrix(p)
-        return g.make_compound([g.apply_matrix(o.shape, m) for o in objs])
+        return _preview_pose(ctx, {}, objs, m,
+                             lambda s: g.apply_matrix(s, m))
 
     t3 = yield PointReq("Third target point", rubber_from=t2,
                         preview_fn=_preview)
@@ -810,8 +1010,9 @@ def cmd_rotate3d(ctx):
 
         def _preview(p):
             a = p if isinstance(p, float) else _angle(p)
-            return _preview_of(ctx, held, objs,
-                               lambda s: g.rotate(s, p1, axis, a))
+            return _preview_pose(ctx, held, objs,
+                                 _matrix_about(p1, axis, a),
+                                 lambda s: g.rotate(s, p1, axis, a))
 
         p3 = yield PointReq("Angle, or second reference point",
                             rubber_from=p1, allow_number=True,
@@ -823,12 +1024,18 @@ def cmd_rotate3d(ctx):
         _do(ctx, held, objs, lambda s: g.rotate(s, p1, axis, angle),
             "Rotated", f" by {angle:g} degrees around the picked axis")
         return
-    for o in objs:
-        rotated = g.rotate(o.shape, p1, axis, angle)
-        if copy:
-            ctx.scene.add_from(rotated, o)
-        else:
-            ctx.scene.replace_shape(o.id, rotated)
+    m = _matrix_about(p1, axis, angle)
+    updates = {}
+    with ctx.scene.batched():
+        for o in objs:
+            if copy:
+                # the copy shares the original's local shape; the turn
+                # rides as its pose
+                c = ctx.scene.add_from(o.shape, o)
+                updates[c.id] = _pose_of(o, m)
+            else:
+                updates[o.id] = _pose_of(o, m)
+        ctx.scene.set_transforms(updates)
     verb = "Rotated a copy of" if copy else "Rotated"
     ctx.echo(f"{verb} {len(objs)} object(s) {angle:g} degrees "
              "around the picked axis.")
@@ -892,7 +1099,8 @@ def cmd_scale1d(ctx):
     def _stretch(axis, factor):
         _do(ctx, held, objs,
             lambda s: g.scale_along_axis(s, base, axis, factor),
-            "Scaled", f" by {factor:g} along the axis")
+            "Scaled", f" by {factor:g} along the axis",
+            matrix=_matrix_scale_axis(base, axis, factor))
 
     ref = yield PointReq("Scale factor, or first reference point",
                          rubber_from=base, allow_number=True)
@@ -924,8 +1132,9 @@ def cmd_scale1d(ctx):
         f = _factor(p)
         if abs(f) < 1e-9:
             return None
-        return _preview_of(ctx, held, objs,
-                           lambda s: g.scale_along_axis(s, base, axis, f))
+        return _preview_pose(ctx, held, objs,
+                             _matrix_scale_axis(base, axis, f),
+                             lambda s: g.scale_along_axis(s, base, axis, f))
 
     p2 = yield PointReq("New reference point (or type factor)",
                         rubber_from=base, allow_number=True,
@@ -965,8 +1174,13 @@ def cmd_scale2d(ctx):
 
         def _preview(p):
             f = _factor(p)
-            return None if abs(f) < 1e-9 \
-                else _preview_of(ctx, held, objs, lambda s: _apply(s, f))
+            if abs(f) < 1e-9:
+                return None
+            return _preview_pose(
+                ctx, held, objs,
+                _matrix_scale_axis(base, normal, 1.0 / f)
+                @ _matrix_scale_about(base, f),
+                lambda s: _apply(s, f))
 
         p2 = yield PointReq("Second reference point (drag to scale)",
                             rubber_from=base, allow_number=True,
@@ -976,4 +1190,6 @@ def cmd_scale2d(ctx):
         ctx.echo("Zero scale factor — cancelled.")
         return
     _do(ctx, held, objs, lambda s: _apply(s, factor), "Scaled",
-        f" by {factor:g} in the CPlane")
+        f" by {factor:g} in the CPlane",
+        matrix=_matrix_scale_axis(base, normal, 1.0 / factor)
+               @ _matrix_scale_about(base, factor))

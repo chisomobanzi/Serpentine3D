@@ -32,6 +32,26 @@ _APPARENT_LIMIT = 160
 _APPARENT_GAP = 1e-6
 
 
+def _apply(m, pts):
+    """Affine-transform local points through a 4x4 object transform.
+
+    Every candidate below is gathered from the shape's own (local)
+    tessellation, but a transform rides on the object, not the shape, so
+    the point is only where the object stands after it is passed through
+    the matrix. A translation is exact; a rotation over-covers the box
+    corner filters the way the world box does."""
+    p = np.asarray(pts, float)
+    return p @ np.asarray(m[:3, :3], float).T + np.asarray(m[:3, 3], float)
+
+
+def _wpt(obj, p):
+    """One local snap point, where the object's transform puts it."""
+    m = getattr(obj, "transform", None)
+    if m is None:
+        return p
+    return tuple(float(v) for v in _apply(m, p))
+
+
 def _static_snap_points(shape) -> list[tuple[tuple, str]]:
     """point / end / mid / center / quad candidates for one shape."""
     # Cloud samples are queried spatially, never expanded into CAD features.
@@ -112,23 +132,31 @@ def _static_snap_points(shape) -> list[tuple[tuple, str]]:
 
 
 def _intersections(objects) -> list[tuple]:
-    """Pairwise curve-curve intersection points (bbox-filtered)."""
+    """Pairwise curve-curve intersection points (bbox-filtered).
+
+    Run in world space: a transform rides on the object, not the shape, so
+    two curves that only cross where the matrices put them would be missed
+    against the local geometry. An untransformed curve is its own shape."""
     from OCP.BRepExtrema import BRepExtrema_DistShapeShape
-    curves = [(o, geometry.bbox(o.shape)) for o in objects
-              if o.kind == "curve"]
+    curves = []
+    for o in objects:
+        if o.kind != "curve":
+            continue
+        w = o.world_geometry()
+        curves.append((w, geometry.bbox(w)))
     pts = []
     checked = 0
     for i in range(len(curves)):
         for j in range(i + 1, len(curves)):
             if checked > 400:
                 return pts
-            (oa, (amn, amx)), (ob, (bmn, bmx)) = curves[i], curves[j]
+            (wa, (amn, amx)), (wb, (bmn, bmx)) = curves[i], curves[j]
             if any(amn[k] > bmx[k] + 1e-6 or bmn[k] > amx[k] + 1e-6
                    for k in range(3)):
                 continue
             checked += 1
             try:
-                dist = BRepExtrema_DistShapeShape(oa.shape, ob.shape)
+                dist = BRepExtrema_DistShapeShape(wa, wb)
                 if not dist.IsDone() or dist.Value() > 1e-6:
                     continue
                 for s in range(1, dist.NbSolution() + 1):
@@ -154,7 +182,7 @@ def _world_param(s, da, db, parallel):
     return np.where(flat, s, s * da / np.where(flat, 1.0, den))
 
 
-def _misses_the_cursor(mesh, camera, cursor, width, height, pad) -> bool:
+def _misses_the_cursor(obj, mesh, camera, cursor, width, height, pad) -> bool:
     """True if nothing in this mesh can reach the cursor, cheaply.
 
     Eight corners answered instead of every segment in the object. The
@@ -163,13 +191,17 @@ def _misses_the_cursor(mesh, camera, cursor, width, height, pad) -> bool:
     reads the mesh's own cached bounds and never the B-rep, because a
     drawing read from a file holds its shapes unconverted and asking one
     for a bounding box on every mouse move would convert the lot.
-    """
+    The bounds are local; the object's transform, when it has one, is
+    what stands the box where it actually is."""
     bounds = mesh.bounds() if hasattr(mesh, "bounds") else None
     if bounds is None:
         return False
     lo, hi = np.asarray(bounds[0], float), np.asarray(bounds[1], float)
     corners = np.array([[x, y, z] for x in (lo[0], hi[0])
                         for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+    m = getattr(obj, "transform", None)
+    if m is not None:
+        corners = _apply(m, corners)
     scr = camera.project(corners, width, height)
     if not (scr[:, 2] > 0).all():
         # part of it is behind the eye, where a corner's pixel means
@@ -198,11 +230,16 @@ def _cursor_segments(objects, camera, px, py, width, height, radius_px):
         # eight corners to save projecting the segments is only a saving
         # when there are more than eight of them, and a drawing made of
         # single lines has one each
-        if len(edges) > 32 and _misses_the_cursor(mesh, camera, cursor,
+        if len(edges) > 32 and _misses_the_cursor(obj, mesh, camera, cursor,
                                                   width, height, radius_px):
             continue
         e = np.asarray(edges, float)
         a3, b3 = e[:, 0, :], e[:, 1, :]
+        m = getattr(obj, "transform", None)
+        if m is not None:
+            # the tessellation is the shape's own, in its local frame;
+            # the object's transform is what stands it where it is
+            a3, b3 = _apply(m, a3), _apply(m, b3)
         sa = camera.project(a3, width, height)
         sb = camera.project(b3, width, height)
         ab = sb[:, :2] - sa[:, :2]
@@ -333,6 +370,12 @@ class SnapIndex:
             self._cloud_cache[obj.id] = entry
         _, index, corners = entry
         xyz = shape.xyz
+        m = obj.transform
+        if m is not None:
+            # the samples are the shape's own, in its local frame; the
+            # transform stands them where the object is
+            if corners is not None:
+                corners = _apply(m, corners)
         if index is not None:
             # Detail-frame clipping belongs to samples, not chunk corners:
             # a box can enclose the whole frame with every corner outside.
@@ -348,6 +391,8 @@ class SnapIndex:
             # A box crossing the eye plane can project beyond its corners.
             keep = front.any(axis=1) & (~front.all(axis=1) | overlaps)
             xyz = xyz[index.gather(keep)]
+        if m is not None:
+            xyz = _apply(m, xyz)
         if not len(xyz):
             return None
         screen = camera.project(xyz, width, height)
@@ -424,7 +469,7 @@ class SnapIndex:
                 continue
             for p, kind in self._points(obj):
                 if self.types.get(kind):
-                    pts.append(p)
+                    pts.append(_wpt(obj, p))
                     kinds.append(kind)
         if self.types.get("int"):
             for p in self._intersection_points(objects):
@@ -462,7 +507,11 @@ class SnapIndex:
         return best
 
     def _perp_feet(self, objects, base_point) -> list:
-        """Feet of perpendiculars from base_point onto visible curves."""
+        """Feet of perpendiculars from base_point onto visible curves.
+
+        The curves are tested in world space, where the base point lives:
+        a transformed curve would otherwise answer with a foot on the shape
+        it was made from, not on the curve you are seeing."""
         from OCP.BRepExtrema import BRepExtrema_DistShapeShape
         from .occ import BRepBuilderAPI_MakeVertex, gp_Pnt
         v = BRepBuilderAPI_MakeVertex(
@@ -472,7 +521,7 @@ class SnapIndex:
             if obj.kind != "curve":
                 continue
             try:
-                dist = BRepExtrema_DistShapeShape(v, obj.shape)
+                dist = BRepExtrema_DistShapeShape(v, obj.world_geometry())
                 if dist.IsDone():
                     for s in range(1, min(dist.NbSolution(), 4) + 1):
                         p = dist.PointOnShape2(s)
@@ -492,6 +541,9 @@ class SnapIndex:
                 continue
             seg = mesh.edge_segments
             a3, b3 = seg[:, 0, :].astype(float), seg[:, 1, :].astype(float)
+            m = getattr(obj, "transform", None)
+            if m is not None:
+                a3, b3 = _apply(m, a3), _apply(m, b3)
             sa = camera.project(a3, width, height)
             sb = camera.project(b3, width, height)
             valid = (sa[:, 2] > 0) & (sb[:, 2] > 0)

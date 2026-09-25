@@ -38,6 +38,12 @@ def load_events(path: str) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
+def _matrix_from_flat(flat) -> "np.ndarray":
+    """The 16 floats a journal `tr` entry carries, back into a 4x4."""
+    import numpy as np
+    return np.asarray(flat, float).reshape(4, 4)
+
+
 class Replayer:
     def __init__(self, events, echo=None):
         import serpentine3d.commands  # noqa: F401 — registers commands
@@ -198,9 +204,15 @@ class Replayer:
         self.history.checkpoint(e.get("label", ""))
 
     def _ev_edit(self, e, i):
-        for oid, name, b64 in e.get("made", []):
+        transforms = {}
+        for entry in e.get("made", []):
+            oid, name, b64 = entry[0], entry[1], entry[2]
+            tr = entry[3] if len(entry) > 3 else None    # older journals
             shape = geometry.shape_from_bytes(base64.b64decode(b64))
-            self.idmap[oid] = self.scene.add(shape, name=name).id
+            added = self.scene.add(shape, name=name).id
+            self.idmap[oid] = added
+            if tr is not None:
+                transforms[added] = _matrix_from_flat(tr)
         for oid, b64 in e.get("chg", []):
             x = self.idmap.get(oid, oid)
             if x in self.scene.objects:
@@ -210,6 +222,14 @@ class Replayer:
             x = self.idmap.get(oid, oid)
             if x in self.scene.objects:
                 self.scene.remove(x)
+        # A move rides as a matrix: the shape never changed, so apply the
+        # pose after every shape swap, one batched write.
+        for oid, tr in e.get("tr", []):
+            x = self.idmap.get(oid, oid)
+            if x in self.scene.objects:
+                transforms[x] = _matrix_from_flat(tr) if tr is not None else None
+        if transforms:
+            self.scene.set_transforms(transforms)
         if e.get("notes"):
             from .layout import TextNote, _rebuild
             layouts = {lay.id: lay for lay in self.scene.layouts}

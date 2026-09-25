@@ -45,6 +45,23 @@ def _start(proc, obj, axis_a="0,0,0", axis_b="10,0,0"):
     proc.provide_text(axis_b)
 
 
+def _shown_bbox(scene, obj_id):
+    """World box as shown: the stored pose with the in-place preview
+    (drag_display) applied on top — whole objects preview in place now,
+    not as a ghost."""
+    import numpy as np
+    o = scene.get(obj_id)
+    lo, hi = (np.asarray(v, float) for v in o.bbox())
+    m = scene.drag_display.get(obj_id)
+    if m is None:
+        return lo, hi
+    m = np.asarray(m, float)
+    corners = np.array([[x, y, z] for x in (lo[0], hi[0])
+                        for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+    world = corners @ m[:3, :3].T + m[:3, 3]
+    return world.min(axis=0), world.max(axis=0)
+
+
 # --- dragging the angle ----------------------------------------------------
 
 def test_two_reference_points_turn_the_object(env):
@@ -58,7 +75,7 @@ def test_two_reference_points_turn_the_object(env):
     proc.provide_text("0,0,5")               # send it round to +Z
 
     assert not proc.busy
-    assert g.point_coords(scene.get(tip.id).shape) == pytest.approx(
+    assert g.point_coords(scene.get(tip.id).world_geometry()) == pytest.approx(
         (0, 0, 5), abs=1e-6)
 
 
@@ -77,7 +94,7 @@ def test_the_angle_is_measured_square_to_the_picked_axis(env):
     proc.provide_text("10,1,0")
     proc.provide_text("10,0,1")
 
-    assert g.point_coords(scene.get(tip.id).shape) == pytest.approx(
+    assert g.point_coords(scene.get(tip.id).world_geometry()) == pytest.approx(
         (0, 0, 5), abs=1e-6), (
         "the part of each pick running along the axis was not taken out")
 
@@ -92,7 +109,7 @@ def test_the_turn_goes_the_way_the_picks_do(env):
     proc.provide_text("0,0,5")
     proc.provide_text("0,5,0")
 
-    assert g.point_coords(scene.get(tip.id).shape) == pytest.approx(
+    assert g.point_coords(scene.get(tip.id).world_geometry()) == pytest.approx(
         (0, 0, -5), abs=1e-6)
 
 
@@ -105,8 +122,8 @@ def test_the_second_reference_point_previews_the_turn(env):
 
     ghost = proc.preview_for((0.0, 0.0, 5.0))
 
-    assert ghost is not None, "no ghost while dragging the angle round"
-    lo, hi = g.bbox(ghost)
+    assert ghost is None, "whole objects preview in place, not as a ghost"
+    lo, hi = _shown_bbox(scene, obj.id)
     assert hi[1] == pytest.approx(1.0, abs=1e-6), (
         "a quarter turn about X should lay the box down in Z")
 
@@ -123,7 +140,7 @@ def test_typing_an_angle_still_works(env):
     proc.provide_text("90")
 
     assert not proc.busy
-    assert g.point_coords(scene.get(tip.id).shape) == pytest.approx(
+    assert g.point_coords(scene.get(tip.id).world_geometry()) == pytest.approx(
         (5, 0, 3), abs=1e-6)
 
 

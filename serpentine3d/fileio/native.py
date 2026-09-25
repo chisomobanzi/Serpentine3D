@@ -145,6 +145,11 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "draw_order": obj.draw_order,
                 "group": obj.group_id,
                 "block": obj.block_id,
+                # The pose, kept out of the B-rep: the shape in the file is
+                # the object as it was made, the matrix where it stands.
+                "transform": (None if obj.transform is None
+                              else [float(v) for v in
+                                    obj.transform.reshape(-1)]),
                 "brep": (None if obj.kind == "mesh" else
                          base64.b64encode(geometry.shape_to_bytes(
                              obj.shape)).decode("ascii")),
@@ -351,6 +356,7 @@ def _load_doc(scene, doc: dict, blobs=None):
                           doc.get("annot_styles", {}).items()}
     scene.history_records = list(doc.get("history_records", []))
 
+    object_transforms = {}
     for od in doc.get("objects", []):
         if od.get("mesh"):
             shape = _mesh_from_json(od["mesh"])
@@ -360,6 +366,10 @@ def _load_doc(scene, doc: dict, blobs=None):
                         layer_id=id_map.get(od["layer"], "default"))
         if od.get("id"):
             object_id_map[od["id"]] = obj.id
+        if od.get("transform"):
+            import numpy as np
+            object_transforms[obj.id] = np.asarray(
+                od["transform"], float).reshape(4, 4)
         updates = {}
         if not od.get("visible", True):
             updates["visible"] = False
@@ -383,6 +393,10 @@ def _load_doc(scene, doc: dict, blobs=None):
             updates["block_id"] = od["block"]
         if updates:
             scene.update(obj.id, **updates)
+
+    # One batched write for every pose in the file, not one per object.
+    if object_transforms:
+        scene.set_transforms(object_transforms)
 
     for cd in doc.get("pointclouds", []):
         cloud = _cloud_from_json(cd, blobs)

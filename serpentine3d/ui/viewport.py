@@ -567,6 +567,12 @@ def clip_plane_frames(objects):
             o = np.asarray(g.centroid(obj.shape), float)
         except Exception:                                  # noqa: BLE001
             continue
+        t = obj.transform
+        if t is not None:
+            # the shape is in the object's local frame; the plane and its
+            # arrow are where the object is shown
+            n = n @ t[:3, :3].T
+            o = o @ t[:3, :3].T + t[:3, 3]
         frames.append((tuple(o), tuple(n),
                        bool(obj.clip_plane.get("enabled"))))
     return frames
@@ -610,14 +616,56 @@ def clip_normal_arrows(frames, camera, width, height):
     return passes
 
 
-def anchored_clips(clips, anchor):
-    """Clip planes re-expressed around the anchor the shader dots with."""
-    if anchor is None or not clips:
+def anchored_clips(clips, anchor, wm=None):
+    """Clip planes re-expressed for the frame the shader dots with.
+
+    The GPU dots the rebased position, so a posed object needs the world
+    planes expressed in its GPU frame: W maps GPU space to the world (the
+    pose composed with the anchor shift) and the plane in GPU space is the
+    transpose product W^T of the world plane. A translation-only pose
+    never reaches here — the caller folds it into the anchor instead.
+    """
+    if anchor is None and wm is None:
         return clips
-    return [np.array([c[0], c[1], c[2],
-                      c[3] + float(np.dot(np.asarray(c[:3], float),
-                                          anchor))], np.float32)
-            for c in clips]
+    S = np.eye(4)
+    if anchor is not None:
+        S[:3, 3] = np.asarray(anchor, float)
+    W = (wm @ S) if wm is not None else S
+    return [np.asarray(W.T @ np.asarray(c, float), np.float32) for c in clips]
+
+
+def _pose_box(box, m):
+    """The eight corners of a local `box` in the world of a 4x4 `m`.
+
+    Exact for the poses this app makes (rigid, similarity); it over-covers
+    a shear, which only ever makes the box slightly too big.
+    """
+    lo, hi = np.asarray(box[0], float), np.asarray(box[1], float)
+    corners = np.array([
+        [lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]],
+        [lo[0], hi[1], lo[2]], [hi[0], hi[1], lo[2]],
+        [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]],
+        [lo[0], hi[1], hi[2]], [hi[0], hi[1], hi[2]]])
+    w = np.asarray(m, float)
+    return (corners @ w[:3, :3].T + w[:3, 3]).min(axis=0), \
+        (corners @ w[:3, :3].T + w[:3, 3]).max(axis=0)
+
+
+def _composed(dm, tm):
+    """The display matrix and the carried pose, as one world matrix."""
+    if dm is None:
+        return tm
+    if tm is None:
+        return dm
+    return dm @ tm
+
+
+def _wpts(t, pts):
+    """World points: a batch of local points under a 4x4 pose."""
+    if t is None:
+        return pts
+    t = np.asarray(t, float)
+    return np.asarray(pts, float) @ t[:3, :3].T + t[:3, 3]
 
 
 # A scan point on the card: xyz float32 then rgb uint8 and a pad byte.
@@ -1561,8 +1609,19 @@ class Viewport(QOpenGLWidget):
         """
         if not objects:
             return objects
-        bounds = [obj.mesh.bounds() if obj.mesh_ready else None
-                  for obj in objects]
+        drag = self.scene.drag_display
+        bounds = []
+        for obj in objects:
+            b = obj.mesh.bounds() if obj.mesh_ready else None
+            if b is not None:
+                # a drag or a carried pose: judge the box where the object
+                # is shown, not where the shape still is, or it could
+                # vanish mid-drag at the frustum edge
+                wm = _composed(drag.get(obj.id) if drag else None,
+                               obj.transform)
+                if wm is not None:
+                    b = _pose_box(b, wm)
+            bounds.append(b)
         boxes = [(i, b) for i, b in enumerate(bounds) if b is not None]
         if not boxes:
             return objects              # nothing to judge them on: draw them
@@ -1835,6 +1894,7 @@ class Viewport(QOpenGLWidget):
         line up with the list that was asked about.
         """
         cache = self._centre_cache
+        drag = self.scene.drag_display
         centres = np.zeros((len(objects), 3))
         valid = np.zeros(len(objects), bool)
         for i, obj in enumerate(objects):
@@ -1849,6 +1909,12 @@ class Viewport(QOpenGLWidget):
                 centre = (np.asarray(b[0], float)
                           + np.asarray(b[1], float)) / 2
                 cache[mesh.uid] = centre
+            wm = _composed(drag.get(obj.id) if drag else None,
+                           obj.transform)
+            if wm is not None:
+                # a drag or a carried pose: keep the back-to-front order
+                # where the object is shown, not where the shape still is
+                centre = (centre @ wm[:3, :3].T + wm[:3, 3])
             centres[i] = centre
             valid[i] = True
         return centres, valid
@@ -2114,7 +2180,13 @@ class Viewport(QOpenGLWidget):
         for prog in (self._mesh_prog, self._line_prog, self._thick_prog,
                      self._point_prog):
             self._set_clip_uniforms(prog, clips)
-        translucent = mode == "ghosted" or any(
+        drag = self.scene.drag_display
+        # Objects mid-move/rotate/scale (a gumball drag or a command
+        # preview) ride in drag_display: their geometry is not committed
+        # yet, so they are drawn ghosted — the same translucency the
+        # "ghosted" display mode gives every object.
+        ghosting = drag is not None and len(drag) > 0
+        translucent = mode == "ghosted" or ghosting or any(
             (o.material or {}).get("opacity", 1.0) < 1.0 for o in objects)
         if translucent:
             # translucency composits correctly back-to-front
@@ -2145,30 +2217,56 @@ class Viewport(QOpenGLWidget):
                        1 if mode == "rendered" else 0)
         for obj in objects:
             gpu = self._gpu.get(obj.id)
+            wm = _composed(drag.get(obj.id) if drag else None,
+                           obj.transform)
             if gpu is None:
                 entry = self._tess_pending.get(obj.id)
                 pend = entry[1] if entry is not None else None
                 if pend is not None and len(pend):
                     self._preview.update(pend)
                     self._set_line_uniforms(
-                        flat, (*self.scene.color_of(obj), 0.5))
+                        anchored(mvp @ wm, None) if wm is not None else flat,
+                        (*self.scene.color_of(obj), 0.5))
                     self._line_width(1.0)
                     GL.glBindVertexArray(self._preview.vao)
                     GL.glDrawArrays(GL.GL_LINES, 0, len(pend))
                 continue
-            omvp = flat if gpu.anchor is None else anchored(mvp, gpu.anchor)
-            oview = flat_view if gpu.anchor is None \
-                else anchored(view, gpu.anchor)
-            oclips = anchored_clips(clips, gpu.anchor)
-            if clips and (gpu.anchor is not None or clips_dirty):
+            anchor = gpu.anchor
+            if (wm is not None
+                    and not np.allclose(wm[:3, :3], np.eye(3), atol=1e-12)):
+                # A rotation or scale in flight, or a pose the object
+                # carries: fold the whole matrix in, in float64, before the
+                # anchor and the cast; the buffers stay where they were
+                # uploaded, and the rebased draws below keep their anchor.
+                omvp = anchored(mvp @ wm, anchor)
+                oview = anchored(view @ wm, anchor)
+                oclips = anchored_clips(clips, anchor, wm)
+                posed = True
+            else:
+                if wm is not None:
+                    # A gumball move in flight, or a plain translation: the
+                    # shape is still where it was, the picture is not. Fold
+                    # the offset into the anchor and every draw of this
+                    # object moves with it.
+                    anchor = (anchor + wm[:3, 3]) if anchor is not None \
+                        else np.asarray(wm[:3, 3], float)
+                omvp = flat if anchor is None else anchored(mvp, anchor)
+                oview = flat_view if anchor is None else anchored(view, anchor)
+                oclips = anchored_clips(clips, anchor)
+                posed = False
+            if clips and (anchor is not None or posed or clips_dirty):
                 # The GPU dots the planes with the rebased pos, so an
-                # anchored object needs them re-expressed around its
-                # anchor, and the next unanchored one needs them back.
+                # anchored or posed object needs them re-expressed around
+                # its frame, and the next plain one needs them back.
                 for prog in (self._mesh_prog, self._line_prog,
                              self._thick_prog, self._point_prog):
                     self._set_clip_uniforms(prog, oclips)
-                clips_dirty = gpu.anchor is not None
-            selected = self._looks_selected(obj.id)
+                clips_dirty = anchor is not None or posed
+            ghosted_obj = ghosting and obj.id in drag
+            # An object in motion keeps the selection highlight (the
+            # colour it is drawn in while selected) on top of the ghost
+            # translucency below.
+            selected = self._looks_selected(obj.id) or ghosted_obj
             color = theme.SELECTION_COLOR if selected else self.scene.color_of(obj)
             if obj.locked and not selected:
                 grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
@@ -2196,6 +2294,8 @@ class Viewport(QOpenGLWidget):
                 fill_alpha_obj = 0.0
             elif obj.clip_plane is not None:
                 fill_alpha_obj = 0.18
+            elif ghosted_obj:
+                fill_alpha_obj = 0.35
             else:
                 fill_alpha_obj = fill_alpha
             if fill_alpha_obj > 0 and gpu.tri_count:
@@ -2219,9 +2319,9 @@ class Viewport(QOpenGLWidget):
                 if opacity < 1.0:
                     GL.glUniform1f(
                         self._uloc(self._mesh_prog, "uAlpha"),
-                        fill_alpha * opacity)
+                        fill_alpha_obj * opacity)
                 if mode == "ghosted" or opacity < 1.0 \
-                        or obj.clip_plane is not None:
+                        or obj.clip_plane is not None or ghosted_obj:
                     GL.glDepthMask(False)
                 GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
                 GL.glPolygonOffset(1.0, 1.0)
@@ -2260,7 +2360,7 @@ class Viewport(QOpenGLWidget):
                 mask = np.isin(obj.mesh.edge_of_segment, subs)
                 if mask.any():
                     segs = rebased(obj.mesh.edge_segments[mask],
-                                   gpu.anchor)
+                                   anchor)
                     # Gold over a dark halo, the control-point markers'
                     # trick, through the screen-space quad shader: a
                     # width glLineWidth cannot cap to a hairline.
@@ -2279,7 +2379,7 @@ class Viewport(QOpenGLWidget):
                 if mask.any():
                     tris = obj.mesh.triangles[mask]
                     pts = obj.mesh.vertices[tris.ravel()]
-                    self._preview.update(rebased(pts, gpu.anchor))
+                    self._preview.update(rebased(pts, anchor))
                     self._set_line_uniforms(omvp,
                                             (*theme.SELECTION_COLOR, 0.45))
                     GL.glBindVertexArray(self._preview.vao)
@@ -2303,7 +2403,7 @@ class Viewport(QOpenGLWidget):
             if len(obj.mesh.points) and not obj.annotation:
                 self._draw_point_markers(omvp, obj.mesh.points,
                                          (*line_color, 1.0), selected,
-                                         anchor=gpu.anchor)
+                                         anchor=anchor)
         self._line_width(1.0)
         self._end_clips(clips)
 
@@ -2400,8 +2500,16 @@ class Viewport(QOpenGLWidget):
             GL.glBindVertexArray(gpu.cloud_vao)
             GL.glDrawArrays(GL.GL_POINTS, 0, int(count))
         if selected:
+            # The mvp handed in already carries the pose and the in-flight
+            # drag, so the box goes where the cloud is shown: the world
+            # box (the pose in it) with the drag's own matrix on top,
+            # rebased only for the anchor the buffer was uploaded with.
             mn, mx = obj.bbox()
-            segs = rebased(_bbox_segments(mn, mx), gpu.anchor)
+            dm = self.scene.drag_display.get(obj.id)
+            if dm is not None:
+                mn, mx = _pose_box((mn, mx), dm)
+            anchor = gpu.anchor
+            segs = rebased(_bbox_segments(mn, mx), anchor)
             self._preview.update(segs)
             self._set_line_uniforms(mvp, (*theme.SELECTION_COLOR, 1.0))
             self._line_width(1.0)
@@ -2418,6 +2526,7 @@ class Viewport(QOpenGLWidget):
         # flatten with the geometry's.
         base = np.asarray(mvp, np.float64) @ squash
         smvp = base.astype(np.float32)
+        drag = self.scene.drag_display
         self._use(self._line_prog)
         # through _set_mvp, so the squashed matrix is recorded as what the
         # program holds — the edge pass after this one has to know to put the
@@ -2428,12 +2537,18 @@ class Viewport(QOpenGLWidget):
             gpu = self._gpu.get(obj.id)
             if gpu is None or not gpu.tri_count:
                 continue
+            wm = _composed(drag.get(obj.id) if drag else None,
+                           obj.transform)
             b = obj.mesh.bounds() if obj.mesh_ready else None
+            if b is not None and wm is not None:
+                # the stamp and the "below the plane" test both go where
+                # the object is shown, not where the shape still is
+                b = _pose_box(b, wm)
             if b is None or b[0][2] < -1e-6:
                 continue                    # below the plane: no stamp
             self._set_mvp(self._line_prog,
-                          smvp if gpu.anchor is None
-                          else anchored(base, gpu.anchor))
+                          smvp if wm is None
+                          else anchored(base @ wm, gpu.anchor))
             GL.glBindVertexArray(gpu.tri_vao)
             GL.glDrawElements(GL.GL_TRIANGLES, gpu.tri_count,
                               GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
@@ -2933,6 +3048,13 @@ class Viewport(QOpenGLWidget):
             if self._ghost is not None or had_picture or had_note:
                 self._ghost = None
                 self.update()
+            return
+        from ..core.tessellate import DisplayMesh
+        if isinstance(shape, DisplayMesh):
+            # already tessellated (the copy-family ghost is built straight
+            # from the objects' own meshes, no kernel)
+            self._ghost = shape
+            self.update()
             return
         try:
             from ..core.tessellate import tessellate
@@ -3685,14 +3807,23 @@ class Viewport(QOpenGLWidget):
         tessellates it, and one that can never be picked should not be made
         to pay for that.
         """
-        boxed = [(obj, obj.mesh.bounds()) for obj in objects]
-        boxed = [(obj, b) for obj, b in boxed if b is not None]
+        boxed = []
+        for obj in objects:
+            b = obj.mesh.bounds()
+            if b is None:
+                continue
+            t = obj.transform
+            if t is not None:
+                # the mesh is in the object's local frame; judge the
+                # object where it is shown
+                b = _pose_box(b, t)
+            boxed.append((obj, b))
         if not boxed:
             return []
         drop = self._reject_boxes([b for _, b in boxed], x0, y0, x1, y1, w, h)
         return [obj for (obj, _), d in zip(boxed, drop) if not d]
 
-    def _near_primitives(self, index, x0, y0, x1, y1, w, h):
+    def _near_primitives(self, index, x0, y0, x1, y1, w, h, t=None):
         """Which of an indexed mesh's primitives can reach a screen rect.
 
         Narrowing the drawing to the objects near the cursor does nothing
@@ -3706,26 +3837,33 @@ class Viewport(QOpenGLWidget):
         """
         if index is None:
             return None
-        drop = self._reject_extents(index.mins, index.maxs,
-                                    x0, y0, x1, y1, w, h)
+        mins, maxs = index.mins, index.maxs
+        if t is not None:
+            # the chunk bounds are in the object's local frame
+            off = np.array([(i & 1, i >> 1 & 1, i >> 2 & 1) for i in range(8)])
+            corners = np.where(off[None, :, None], maxs[:, None, :],
+                               mins[:, None, :])
+            wc = corners @ t[:3, :3].T + t[:3, 3]
+            mins, maxs = wc.min(axis=1), wc.max(axis=1)
+        drop = self._reject_extents(mins, maxs, x0, y0, x1, y1, w, h)
         if not drop.any():
             return None
         return index.gather(~drop)
 
-    def _near_triangles(self, mesh, x0, y0, x1, y1, w, h) -> tuple:
+    def _near_triangles(self, mesh, x0, y0, x1, y1, w, h, t=None) -> tuple:
         """(triangles worth testing, where each sits in the mesh or None).
 
         The second half matters wherever the answer is an index — a winner
         found at position 3 of a narrowed set is not triangle 3 of the mesh.
         """
         sub = self._near_primitives(mesh.triangle_index(),
-                                    x0, y0, x1, y1, w, h)
+                                    x0, y0, x1, y1, w, h, t)
         return (mesh.triangles if sub is None else mesh.triangles[sub]), sub
 
-    def _near_segments(self, mesh, x0, y0, x1, y1, w, h) -> tuple:
+    def _near_segments(self, mesh, x0, y0, x1, y1, w, h, t=None) -> tuple:
         """(edge segments worth testing, where each sits in the mesh)."""
         sub = self._near_primitives(mesh.segment_index(),
-                                    x0, y0, x1, y1, w, h)
+                                    x0, y0, x1, y1, w, h, t)
         return ((mesh.edge_segments if sub is None
                  else mesh.edge_segments[sub]), sub)
 
@@ -3780,13 +3918,15 @@ class Viewport(QOpenGLWidget):
         for obj in self._pick_candidates(selectable, px - r, py - r,
                                          px + r, py + r, w, h):
             mesh = obj.mesh
+            t = obj.transform
             depth = np.inf
             hit = False
             if mesh.is_cloud:
                 # Nearest point within the pick radius, over an even
                 # sample of the cloud: a box test would select a room-sized
                 # scan from anywhere inside it, which is everywhere.
-                pt_depth = self._nearest_cloud_point(mesh, eye, px, py, w, h)
+                pt_depth = self._nearest_cloud_point(
+                    mesh, eye, px, py, w, h, t)
                 if pt_depth is not None:
                     found.append((pt_depth, obj.id))
                 continue
@@ -3794,19 +3934,20 @@ class Viewport(QOpenGLWidget):
                 obj.kind == "picture" or self._pick_mode() != "wireframe")
             if shaded_faces:
                 tris, _ = self._near_triangles(mesh, px - r, py - r,
-                                               px + r, py + r, w, h)
-                t = ray_triangle_hits(origin, direction,
-                                      mesh.vertices[tris[:, 0]].astype(float),
-                                      mesh.vertices[tris[:, 1]].astype(float),
-                                      mesh.vertices[tris[:, 2]].astype(float))
-                tmin = t.min() if len(t) else np.inf
-                if np.isfinite(tmin):
-                    depth = tmin
+                                               px + r, py + r, w, h, t)
+                # the mesh is in the object's local frame; the ray is not
+                v = [mesh.vertices[tris[:, i]].astype(float)
+                     for i in range(3)]
+                v = [_wpts(t, p) for p in v]
+                hh = ray_triangle_hits(origin, direction, v[0], v[1], v[2])
+                hmin = hh.min() if len(hh) else np.inf
+                if np.isfinite(hmin):
+                    depth = hmin
                     hit = True
             if len(mesh.edge_segments) and not shaded_faces:
                 segs, _ = self._near_segments(mesh, px - r, py - r,
-                                              px + r, py + r, w, h)
-                pts = segs.reshape(-1, 3)
+                                              px + r, py + r, w, h, t)
+                pts = _wpts(t, segs.reshape(-1, 3))
                 scr = eye.project(pts, w, h)
                 a, b = scr[0::2], scr[1::2]
                 d2 = _point_segment_dist2(np.array([px, py]), a[:, :2],
@@ -3821,7 +3962,8 @@ class Viewport(QOpenGLWidget):
                             depth = seg_depth
                         hit = True
             if len(mesh.points):
-                scr = eye.project(mesh.points.astype(float), w, h)
+                scr = eye.project(_wpts(t, mesh.points.astype(float)),
+                                  w, h)
                 d2 = ((scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2)
                 near = d2 < PICK_RADIUS_PX ** 2
                 if near.any():
@@ -3847,10 +3989,10 @@ class Viewport(QOpenGLWidget):
         stride = max(1, n // self.PICK_CLOUD_SAMPLE)
         return mesh.vertices[::stride].astype(float)
 
-    def _nearest_cloud_point(self, mesh, eye, px, py, w, h):
+    def _nearest_cloud_point(self, mesh, eye, px, py, w, h, t=None):
         """Depth of the cloud point nearest the cursor within the pick
         radius, or None when none is that close."""
-        pts = self._cloud_pick_points(mesh)
+        pts = _wpts(t, self._cloud_pick_points(mesh))
         if not len(pts):
             return None
         scr = eye.project(pts, w, h)
@@ -3881,11 +4023,12 @@ class Viewport(QOpenGLWidget):
             mesh = obj.mesh
             if not len(mesh.edge_segments):
                 continue
+            t = obj.transform
             segs, sub = self._near_segments(mesh, px - r, py - r,
-                                            px + r, py + r, w, h)
+                                            px + r, py + r, w, h, t)
             if not len(segs):
                 continue
-            scr = eye.project(segs.reshape(-1, 3), w, h)
+            scr = eye.project(_wpts(t, segs.reshape(-1, 3)), w, h)
             a, b = scr[0::2], scr[1::2]
             d2 = _point_segment_dist2(np.array([px, py]), a[:, :2],
                                       b[:, :2])
@@ -3925,15 +4068,15 @@ class Viewport(QOpenGLWidget):
                 mesh = obj.mesh
                 if not mesh.has_faces or not len(mesh.face_of_triangle):
                     continue
+                tm = obj.transform
                 tris, sub = self._near_triangles(mesh, px - r, py - r,
-                                                 px + r, py + r, w, h)
+                                                 px + r, py + r, w, h, tm)
                 if not len(tris):
                     continue
-                t = ray_triangle_hits(
-                    origin, direction,
-                    mesh.vertices[tris[:, 0]].astype(float),
-                    mesh.vertices[tris[:, 1]].astype(float),
-                    mesh.vertices[tris[:, 2]].astype(float))
+                # the mesh is in the object's local frame; the ray is not
+                v = [_wpts(tm, mesh.vertices[tris[:, i]].astype(float))
+                     for i in range(3)]
+                t = ray_triangle_hits(origin, direction, v[0], v[1], v[2])
                 i = int(np.argmin(t))
                 if np.isfinite(t[i]) and t[i] < best_t:
                     best_t = t[i]
