@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **A script adds a picture with the same inputs whatever the scene holds.**
+  Picture frame asks Add/RemoveAll only when there is already a picture. A
+  script can't see that, so "Add" sent into an empty scene was taken as the
+  image path. With no question asked, an "Add" given anyway still means
+  add, and "RemoveAll" says there is nothing to remove.
+
 - **A picture in the model is drawn in front of what is behind it.**
   Pictures were drawn before everything else without writing depth, as
   underlays, so any surface behind one painted over it: a graphic hung a few

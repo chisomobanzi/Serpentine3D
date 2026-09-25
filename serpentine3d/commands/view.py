@@ -776,6 +776,16 @@ def cmd_pictureframe(ctx):
     from .. import fileio
     path = yield FileReq("Image path (.png/.jpg/.jpeg/.webp)",
                          title="Choose picture", filters=fileio.picture_filter())
+    # With no picture in the scene the Add/RemoveAll question is not asked,
+    # but a script can't see that and may answer it anyway. The words mean
+    # what they would have meant; neither is a file anyone means to open.
+    if path.strip().lower() == "removeall":
+        ctx.echo("No picture frames to remove.")
+        return
+    if path.strip().lower() == "add":
+        path = yield FileReq("Image path (.png/.jpg/.jpeg/.webp)",
+                             title="Choose picture",
+                             filters=fileio.picture_filter())
     yield from place_picture(ctx, path)
 
 
