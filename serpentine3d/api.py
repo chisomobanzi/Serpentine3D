@@ -204,6 +204,13 @@ class SerpApi:
                 raise ApiError(
                     f"Command needs more input: '{prompt}'. "
                     f"Provide additional values in `inputs`.")
+        except Exception:
+            # The command this call started is this call's to clean up: left
+            # at its prompt, it would refuse every later external call, undo
+            # included, until someone at the window pressed Escape.
+            if self.processor.busy:
+                self.processor.cancel()
+            raise
         finally:
             self.window.ctx._echo_fns.remove(listener)
         return {"messages": messages}

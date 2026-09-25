@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- **A command started over RPC or MCP that fails part-way is cancelled.**
+  When one of its inputs raised, the command sat at its prompt and every
+  later outside call, undo included, was refused with "Finish or cancel the
+  active CAD command" until someone came back and pressed Escape. The call
+  that starts a command now cleans it up when it fails. A command the
+  modeller has running is still left alone: the call is refused before it
+  can start anything.
+
 - **Importing a .serp adds it to the scene instead of replacing the scene.**
   Import added every other format to what was there, and said it returned
   the number of objects added, but a .serp went through the same call and
