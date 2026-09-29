@@ -816,6 +816,10 @@ class CommandProcessor:
         if self.journal is not None:
             self.journal.finish(success)
         self.picked_points = []
+        # a pose-in-place preview (move/rotate/scale/...) rides in the
+        # scene's drag_display; drop it so a committed pose is not composed
+        # twice and a cancelled one snaps back
+        self.ctx.scene.clear_drag_display()
         was = self.active
         self.gen = None
         self.request = None

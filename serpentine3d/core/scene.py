@@ -79,6 +79,12 @@ class SceneObject:
     draw_order: int = 0                # higher draws on top (breaks depth ties)
     _mesh: DisplayMesh | None = field(default=None, repr=False, compare=False)
     _bounds: tuple | None = field(default=None, repr=False, compare=False)
+    # Where this object sits in the world, as a 4x4 (None = identity). The
+    # shape above is local geometry; a gumball drag changes this, not the
+    # shape, which is what keeps releasing a drag of many objects free of
+    # B-rep re-transforms (see Scene.set_transforms and Scene.bake).
+    # clone() carries the field, so undo/redo pick it up without geometry.
+    transform: np.ndarray | None = field(default=None, repr=False, compare=False)
     # The scene holding this object, so a bare `.shape` read on something
     # deferred can go through `Scene.realise` and get the whole job — an
     # object that converts to nothing removed, one that converts to two
@@ -116,29 +122,73 @@ class SceneObject:
         """
         return not isinstance(self._shape, DeferredShape)
 
+    def world_geometry(self):
+        """The geometry as it stands in the world: the local shape with the
+        pose folded in.
+
+        A plain object is its own shape. A moved, turned or scaled one is a
+        fresh copy the caller may keep. Anything that needs the geometry
+        where it is seen — exports first among them — goes through here, so
+        a part saved by its pose leaves through the door standing where it
+        was, not where the file made it."""
+        if self.transform is None:
+            return self.shape
+        return geometry.apply_matrix(self.shape, self.transform)
+
     def bbox(self) -> tuple[tuple, tuple]:
-        """This object's world bounding box, worked out at most once.
+        """This object's world bounding box, measured at most once.
 
         Measuring a B-rep walks the whole shape and a mesh reads every
-        vertex — about 100us an object, which is nothing until something
-        asks for all of them every frame. The gumball does exactly that,
-        and on the cave file it cost 747 ms of every frame you orbited
-        with the drawing selected.
+        vertex — about 100us an object on simple geometry, far worse on a
+        large one, and nothing until something asks for all of them in
+        one sweep. The camera-bounds refresh does exactly that after
+        every scene change, and on the cave file a committed drag of two
+        hundred solids used to pay two hundred kernel walks on the frame
+        after release: the box cache had stored the world answer, so a
+        new pose voided it and the shape was walked again.
 
-        Keyed on the shape it measured rather than cleared by hand:
-        geometry is changed here by swapping the shape for a new one, so
-        the answer expires by itself and there is no invalidation to
-        forget at a call site.
+        So the cache holds the local box, keyed on the shape's identity:
+        the kernel walk is paid once per shape, ever, and the pose is
+        re-applied on every read as a cheap eight-corner map. The pose
+        moves the answer, not the measurement, which is what lets
+        set_transforms commit a drag without invalidating anything.
+
+        A transformed object answers in world coordinates, so culling,
+        camera fit and the gumball all read the place it looks like it is.
         """
         shape = self.shape
         if shape is None:
             return ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+        t = self.transform
         cached = self._bounds
         if cached is not None and cached[0] is shape:
-            return cached[1]
-        box = geometry.bbox(shape)
-        self._bounds = (shape, box)
+            box = cached[1]              # the local box: the pose cannot move it
+        else:
+            box = geometry.bbox(shape)   # the one kernel walk, once per shape
+            self._bounds = (shape, box)
+        if t is not None:
+            box = self._world_box(box, t)
         return box
+
+    @staticmethod
+    def _world_box(box, m):
+        """World bounds of a local box under an affine transform.
+
+        The affine image of a box is a box whose corners are the images of
+        the eight, exact for the rigid and similarity matrices gumball
+        drags produce; for the shears gp_GTrsf can carry it over-covers,
+        which a bounding box is allowed to do.
+        """
+        mn, mx = np.asarray(box[0], float), np.asarray(box[1], float)
+        corners = np.array([
+            (mn[0], mn[1], mn[2]), (mx[0], mn[1], mn[2]),
+            (mn[0], mx[1], mn[2]), (mx[0], mx[1], mn[2]),
+            (mn[0], mn[1], mx[2]), (mx[0], mn[1], mx[2]),
+            (mn[0], mx[1], mx[2]), (mx[0], mx[1], mx[2]),
+        ])
+        world = corners @ m[:3, :3].T + m[:3, 3]
+        return (tuple(world.min(axis=0).tolist()),
+                tuple(world.max(axis=0).tolist()))
 
     @property
     def mesh(self) -> DisplayMesh:
@@ -186,6 +236,14 @@ class Scene:
         # long as `dir` runs. Which way a curve runs is a fact about the
         # drawing, not about the pane you happened to ask in.
         self.dir_enabled: set[str] = set()
+        # Where a live gumball drag shows the dragged objects while the
+        # scene still holds their shapes and poses as they were: id -> 4x4
+        # display transform. The drawing carries it rather than a viewport,
+        # because the drag lives in one pane and every pane draws it.
+        # Display only, so setting it bumps no revision and wakes no
+        # listener: that is what keeps a drag of a few hundred objects from
+        # re-meshing them on every mouse move (see Gumball._commit_whole).
+        self.drag_display: dict[str, np.ndarray] = {}
         self.layouts: list = []         # drafting sheets (core/layout.py)
         self.units: str = "mm"          # document units (utils/units.py)
         self.block_defs: dict = {}      # id -> {"name", "shapes": [TopoDS]}
@@ -384,11 +442,96 @@ class Scene:
             self._order.remove(obj_id)
             self.notify("objects")
 
-    def replace_shape(self, obj_id: str, shape) -> SceneObject:
-        """Swap an object's geometry (transform, boolean result, ...)."""
+    def set_drag_display(self, offsets):
+        """Show `offsets` (id -> translation) until the shapes move.
+
+        No revision, no notification: the viewports read it every frame,
+        and a drag must not cost the scene anything it does not then hold.
+        """
+        self.drag_display = dict(offsets)
+
+    def clear_drag_display(self):
+        """The drag is over; the shapes are all the truth again."""
+        self.drag_display = {}
+
+    @staticmethod
+    def _norm_transform(m):
+        """A 4x4 the way the scene stores it: float64, or None for the
+        identity — an identity kept as a matrix would read as a transform
+        and wake caches that nothing moved."""
+        if m is None:
+            return None
+        m = np.asarray(m, float)
+        if m.shape == (4, 4) and np.allclose(m, np.eye(4), atol=1e-12):
+            return None
+        return m
+
+    def set_transforms(self, transforms):
+        """Move objects by 4x4 transform, leaving their shapes untouched.
+
+        This is what a committed gumball drag writes: the B-reps stay as
+        the file made them, the matrices say where they are, and releasing
+        a drag of ten thousand parts costs a matrix each, not a re-
+        transform, a re-mesh and a B-rep dump in the journal. `bake` is
+        where a matrix becomes geometry, for the operations that need it
+        to be.
+        """
+        changed = False
+        with self.batched():
+            for obj_id, m in transforms.items():
+                obj = self.objects.get(obj_id)
+                if obj is None:
+                    continue
+                m = self._norm_transform(m)
+                if (m is None and obj.transform is None) or (
+                        m is not None and obj.transform is not None
+                        and np.array_equal(m, obj.transform)):
+                    continue
+                # The mesh and the box cache stay: both hold the local
+                # shape's answer, and the pose is applied where they are
+                # read. A pose change invalidates nothing, which is why a
+                # committed drag of a whole scene costs one notify.
+                self.objects[obj_id] = replace(obj, transform=m)
+                changed = True
+        if changed:
+            self.notify("objects")
+
+    def bake(self, obj_id: str) -> SceneObject | None:
+        """Make an object's transform part of its geometry.
+
+        Called before an operation that genuinely changes the shape (sub-
+        object edits, booleans), so the edit lands on the geometry as it
+        is seen. Afterwards the object reads plain. A pure translation
+        carries the mesh across instead of tessellating again: the shape
+        moved, not re-shaped.
+        """
+        obj = self.objects.get(obj_id)
+        if obj is None or obj.transform is None:
+            return obj
+        mesh = None
+        if obj._mesh is not None and np.array_equal(obj.transform[:3, :3],
+                                                    np.eye(3)):
+            mesh = obj._mesh.translated(obj.transform[:3, 3])
+        new = self.replace_shape(
+            obj_id, geometry.apply_matrix(obj.shape, obj.transform),
+            _mesh=mesh)
+        # replace_shape carries every field forward, among them the very
+        # transform being folded in; left alone the move would apply twice.
+        self.objects[obj_id] = new = replace(new, transform=None,
+                                             _bounds=None)
+        return new
+
+    def replace_shape(self, obj_id: str, shape,
+                      _mesh: DisplayMesh | None = None) -> SceneObject:
+        """Swap an object's geometry (transform, boolean result, ...).
+
+        `_mesh` carries a mesh across the swap, so a change that only moved
+        the geometry (a committed gumball drag) does not pay to tessellate
+        it again: the drag spent the whole mouse move showing this mesh.
+        """
         old = self.objects[obj_id]
         new = replace(old, _shape=shape, kind=geometry.shape_kind(shape),
-                      _mesh=None)
+                      _mesh=_mesh)
         self.objects[obj_id] = new
         self._regenerate_dependents(obj_id)
         self.notify("objects")

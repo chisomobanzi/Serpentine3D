@@ -98,6 +98,20 @@ def _b64(shape) -> str:
     return base64.b64encode(geometry.shape_to_bytes(shape)).decode("ascii")
 
 
+def _tr_repr(transform):
+    """A 4x4 as a 16-float tuple for the shadow and the journal, or None
+    when the object reads plain.
+
+    A committed gumball drag moves the pose, not the shape, so the shadow
+    must hold the matrix too: keyed on the shape alone a move of a thousand
+    parts is an idle scene the recorder never sees, and the replay lands
+    every part where the file made it."""
+    if transform is None:
+        return None
+    import numpy as np
+    return tuple(float(v) for v in np.asarray(transform, float).reshape(-1))
+
+
 def _cp_dict(cp) -> dict:
     return {"o": [round(float(v), 9) for v in cp.origin],
             "n": [round(float(v), 9) for v in cp.normal],
@@ -284,10 +298,10 @@ class SessionJournal:
             return
         self._flushing = True
         try:
-            made, chg, gone = self._delta()
+            made, chg, gone, tr = self._delta()
             notes = [[lid, values] for lid, values in self._note_state().items()
                      if values != self._note_shadow.get(lid, [])]
-            if not (made or chg or gone or notes):
+            if not (made or chg or gone or tr or notes):
                 # conversions only. The markers stay: a drag that has
                 # not moved yet still owns its checkpoint.
                 self._refresh_shadow()
@@ -297,7 +311,7 @@ class SessionJournal:
                 self._write({"ev": "ckpt", "label": label})
             self._pending_ckpts.clear()
             self._write({"ev": "edit", "made": made, "chg": chg,
-                         "gone": gone, "notes": notes})
+                         "gone": gone, "tr": tr, "notes": notes})
             self._refresh_shadow()
             self._dirty = False
         finally:
@@ -371,16 +385,20 @@ class SessionJournal:
     def _delta(self):
         """What changed since the shadow, conversions filtered out.
 
-        The shadow holds the very _shape object each id had, so it knows
-        exactly which changes are a DeferredShape realising — geometry
-        swapped by bookkeeping, not by anybody's hand — and those are
-        never edits. It used to be inferred from the undo checkpoint,
-        and a drag held still past the flush timer had already spent
-        its checkpoint, so the movement after the pause was swallowed
-        and the replay put the object wherever the timer had caught it.
+        The shadow holds the very _shape object each id had and the pose
+        it stood under, so it knows exactly which changes are a
+        DeferredShape realising — geometry swapped by bookkeeping, not by
+        anybody's hand — and those are never edits. It used to be inferred
+        from the undo checkpoint, and a drag held still past the flush
+        timer had already spent its checkpoint, so the movement after the
+        pause was swallowed and the replay put the object wherever the
+        timer had caught it.
+
+        A pose change is an edit even though the shape never moved: it
+        rides as a matrix, not a BREP dump — the point of the transform.
         """
         from .deferred import DeferredShape
-        made, chg, gone = [], [], []
+        made, chg, gone, tr = [], [], [], []
         realised = False
         for oid in self.scene._order:
             obj = self.scene.objects[oid]
@@ -388,15 +406,21 @@ class SessionJournal:
                 # an object that is itself still a promise was put there
                 # by a load, not a hand; note_load covers those
                 if not isinstance(obj._shape, DeferredShape):
-                    made.append([oid, obj.name, _b64(obj.shape)])
-            elif obj._shape is not self._shadow[oid]:
-                if isinstance(self._shadow[oid], DeferredShape):
-                    realised = True
-                else:
-                    chg.append([oid, _b64(obj.shape)])
+                    made.append([oid, obj.name, _b64(obj.shape),
+                                 _tr_repr(obj.transform)])
+            else:
+                old_shape, old_tr = self._shadow[oid]
+                new_tr = _tr_repr(obj.transform)
+                if obj._shape is not old_shape:
+                    if isinstance(old_shape, DeferredShape):
+                        realised = True
+                    else:
+                        chg.append([oid, _b64(obj.shape)])
+                if new_tr != old_tr:
+                    tr.append([oid, None if new_tr is None else list(new_tr)])
         for oid in self._shadow:
             if oid not in self.scene.objects:
-                if isinstance(self._shadow[oid], DeferredShape):
+                if isinstance(self._shadow[oid][0], DeferredShape):
                     realised = True     # converted to nothing, removed
                 else:
                     gone.append(oid)
@@ -404,10 +428,13 @@ class SessionJournal:
             # realise can add siblings (one shape converting to two);
             # with no drag in flight, whatever appeared came from it
             made = []
-        return made, chg, gone
+        return made, chg, gone, tr
 
     def _refresh_shadow(self):
-        self._shadow = {oid: self.scene.objects[oid]._shape
+        # The shape and the pose it stands under: a drag that only moved the
+        # matrix left the shape alone, and the shadow has to see the move.
+        self._shadow = {oid: (self.scene.objects[oid]._shape,
+                              _tr_repr(self.scene.objects[oid].transform))
                         for oid in self.scene._order}
         self._note_shadow = self._note_state()
 

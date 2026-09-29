@@ -36,6 +36,48 @@ def test_native_roundtrip(scene, tmp_path):
     assert layer.color == pytest.approx((0.9, 0.4, 0.2))
 
 
+def test_native_roundtrip_keeps_a_transformed_pose(scene, tmp_path):
+    """A moved object saves its pose as a matrix, and comes back standing
+    where it was — not where the file made it."""
+    import numpy as np
+    box = scene.find_by_name("Box A")
+    m = np.eye(4)
+    m[:3, 3] = (50.0, 20.0, -10.0)          # a pure move
+    scene.set_transforms({box.id: m})
+    path = str(tmp_path / "pose.serp")
+    fileio.export_file(scene, path)
+    loaded = Scene()
+    fileio.import_file(loaded, path)
+    back = loaded.find_by_name("Box A")
+    # the shape in the file is the local one; the pose rides the matrix
+    assert g.bbox(back.shape)[0][0] == pytest.approx(0.0, abs=1e-6)
+    assert back.transform is not None
+    mn, mx = back.bbox()
+    assert (mn[0], mn[1], mn[2]) == pytest.approx(
+        (50.0, 20.0, -10.0), abs=1e-6)
+    assert (mx[0], mx[1], mx[2]) == pytest.approx(
+        (60.0, 30.0, 0.0), abs=1e-6)
+
+
+def test_export_puts_a_moved_object_where_it_stands(scene, tmp_path):
+    """An export reads the geometry where the object is seen: a moved part
+    leaves through the door at its pose, not at the origin it was made at."""
+    import numpy as np
+    box = scene.find_by_name("Box A")
+    m = np.eye(4)
+    m[:3, 3] = (50.0, 0.0, 0.0)
+    scene.set_transforms({box.id: m})
+    path = str(tmp_path / "moved.step")
+    fileio.export_file(scene, path)
+    loaded = Scene()
+    fileio.import_file(loaded, path)
+    moved = [o for o in loaded.all() if o.kind == "solid"
+             and g.volume(o.shape) == pytest.approx(1000, rel=1e-3)]
+    assert moved, "the box should have exported"
+    mn = g.bbox(moved[0].shape)[0]
+    assert mn[0] == pytest.approx(50.0, abs=1e-3)
+
+
 def test_step_roundtrip(scene, tmp_path):
     path = str(tmp_path / "test.step")
     fileio.export_file(scene, path)

@@ -112,6 +112,40 @@ class DisplayMesh:
             self._bounds = (np.min(los, axis=0), np.max(his, axis=0))
         return self._bounds
 
+    def translated(self, offset) -> "DisplayMesh":
+        """This mesh shifted by `offset`, sharing what a translation
+        leaves alone.
+
+        A pure translation moves no normal and no index, so those arrays
+        are shared with this mesh rather than copied; only the vertex,
+        edge and point positions change. The bounds and spatial indexes
+        are rebuilt from the moved positions on first use, and the serial
+        is new, so the caches keyed on `uid` see a mesh they have not
+        been given before.
+        """
+        offset = np.asarray(offset, float)
+
+        def moved(a):
+            if len(a):
+                return (a.astype(np.float64) + offset).astype(np.float32)
+            return a
+
+        return DisplayMesh(
+            vertices=moved(self.vertices),
+            normals=self.normals,
+            triangles=self.triangles,
+            edge_segments=moved(self.edge_segments),
+            iso_segments=moved(self.iso_segments),
+            curvature=self.curvature,
+            edge_of_segment=self.edge_of_segment,
+            face_of_triangle=self.face_of_triangle,
+            points=moved(self.points),
+            is_cloud=self.is_cloud,
+            cloud_colors=self.cloud_colors,
+            cloud_levels=self.cloud_levels,
+            has_curvature=self.has_curvature,
+        )
+
 
 def _deflection_for(shape) -> float:
     (mn, mx) = geometry.bbox(shape)

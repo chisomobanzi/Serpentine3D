@@ -59,7 +59,7 @@ def _scaling(command, factor, aim=(1.0, 0.0, 0.0)):
 
 
 def _sides(obj):
-    lo, hi = g.bbox(obj.shape)
+    lo, hi = obj.bbox()    # the world box: the pose carries the scale
     return tuple(round(h - lo_, 6) for lo_, h in zip(lo, hi))
 
 

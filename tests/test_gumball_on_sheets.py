@@ -187,7 +187,8 @@ def test_dragging_an_arrow_moves_the_model_object(sheet):
     gb.drag_to(px + 40.0, py, Qt.KeyboardModifier.NoModifier)
     gb.end_drag()
     expected = 40.0 / lv.px_per_mm * det.scale_denom
-    lo, _hi = g.bbox(w.scene.get(box.id).shape)
+    obj = w.scene.get(box.id)
+    lo, _hi = obj.bbox()                      # the world box: the pose, not the shape
     assert lo[0] == pytest.approx(BOX_MIN[0] + expected, abs=0.5)
     assert lo[1] == pytest.approx(BOX_MIN[1], abs=1e-6), "only along the arrow"
 
@@ -212,7 +213,8 @@ def test_the_pad_flat_to_the_view_still_works(sheet):
     assert gb.begin_drag(("pad", 2), px, py, Qt.KeyboardModifier.NoModifier)
     gb.drag_to(px + 30.0, py - 20.0, Qt.KeyboardModifier.NoModifier)
     gb.end_drag()
-    lo, _hi = g.bbox(w.scene.get(box.id).shape)
+    obj = w.scene.get(box.id)
+    lo, _hi = obj.bbox()                      # the pose carries the move
     assert lo[0] > BOX_MIN[0] + 1.0
     assert lo[2] > BOX_MIN[2] + 1.0
 
@@ -224,7 +226,8 @@ def test_a_typed_distance_moves_it_exactly(sheet):
     assert gb.begin_drag(("move", 1), px, py, Qt.KeyboardModifier.NoModifier)
     gb.apply_scalar(25.0)
     gb.end_drag()
-    lo, _hi = g.bbox(w.scene.get(box.id).shape)
+    obj = w.scene.get(box.id)
+    lo, _hi = obj.bbox()                      # the pose carries the move
     assert lo[2] == pytest.approx(BOX_MIN[2] + 25.0, abs=1e-6)
 
 
@@ -259,7 +262,8 @@ def test_the_mouse_drags_and_lets_go(sheet):
                              QPointF(px + 50.0, py),
                              Qt.MouseButton.NoButton))
     assert vp.gumball.drag is None, "let go at the end of a real drag"
-    lo, _hi = g.bbox(w.scene.get(box.id).shape)
+    obj = w.scene.get(box.id)
+    lo, _hi = obj.bbox()                      # the pose carries the move
     assert lo[0] > BOX_MIN[0] + 1.0
 
 
@@ -357,7 +361,7 @@ def test_shift_dragging_a_model_pad_scales_in_its_two_axes(sheet):
     vp.camera.zoom_extents(g.bbox(box.shape), vp.width() / vp.height())
 
     gb = vp.gumball
-    original_lo, original_hi = map(np.asarray, g.bbox(box.shape))
+    original_lo, original_hi = map(np.asarray, box.bbox())
     original_size = original_hi - original_lo
     original_centre = (original_lo + original_hi) / 2
     original_anchor, axes = gb.anchor_and_axes()
@@ -379,7 +383,7 @@ def test_shift_dragging_a_model_pad_scales_in_its_two_axes(sheet):
     gb.end_drag()
 
     scaled = w.scene.get(box.id)
-    scaled_lo, scaled_hi = map(np.asarray, g.bbox(scaled.shape))
+    scaled_lo, scaled_hi = map(np.asarray, scaled.bbox())
     scaled_size = scaled_hi - scaled_lo
     factors = scaled_size / original_size
 
@@ -397,7 +401,7 @@ def test_shift_dragging_a_model_pad_scales_in_its_two_axes(sheet):
     w.history.undo()
     restored = w.scene.get(box.id)
     np.testing.assert_allclose(
-        np.asarray(g.bbox(restored.shape)),
+        np.asarray(restored.bbox()),
         np.asarray((original_lo, original_hi)),
     )
     assert w.selection.ids == [box.id]

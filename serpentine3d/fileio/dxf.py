@@ -39,7 +39,7 @@ def export_dxf(scene, path: str, only_ids: list | None = None):
             layer_name = "0"
         attribs = {"layer": layer_name}
         if obj.kind == "curve":
-            for edge in geometry.edges_of(obj.shape):
+            for edge in geometry.edges_of(obj.world_geometry()):
                 pts = geometry.sample_curve(edge, 64)
                 closed = geometry.is_closed_curve(edge)
                 if _is_straight(pts):
@@ -49,7 +49,7 @@ def export_dxf(scene, path: str, only_ids: list | None = None):
                     if closed:
                         pass
         else:
-            mesh = tessellate(obj.shape)
+            mesh = tessellate(obj.world_geometry())
             if not mesh.has_faces:
                 continue
             m = msp.add_mesh(dxfattribs=attribs)

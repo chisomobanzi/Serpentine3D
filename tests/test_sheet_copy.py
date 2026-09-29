@@ -199,5 +199,5 @@ def test_copy_in_a_detail_copies_the_model_object(sheet):
     _copy(w, "0,0,0", "50,0,0")
     assert len(w.scene.all()) == 2
     assert lay.objects == [lay.objects[0]]   # nothing landed on the paper
-    xs = sorted(g.bbox(o.shape)[0][0] for o in w.scene.all())
+    xs = sorted(o.bbox()[0][0] for o in w.scene.all())   # the world box: the pose, not the shape
     assert xs == pytest.approx([0.0, 50.0], abs=1e-4)
