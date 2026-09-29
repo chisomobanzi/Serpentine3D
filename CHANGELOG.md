@@ -4,6 +4,20 @@
 
 ### Fixed
 
+- **A surface with creases in it measures its true area and volume.**
+  Found on the openNURBS DinerMug while chasing #34: the mug's body read
+  30,852 in area against 38,845 in the render mesh Rhino stores for it, and
+  the whole mug's volume came out negative. The body is one surface whose
+  profile is a chain of patches meeting at creases, and OpenCascade's
+  default measurement samples each face as one smooth piece; across creases
+  the samples miss the short spans where the shape changes. A made-up
+  surface of the same kind read 98% low as a surface of revolution and 24%
+  high once converted to NURBS, with volumes off by as much as double.
+  Area, volume and centroid now split a face at its creases before
+  measuring, which makes each piece smooth and the measurement exact. The
+  mug now reads 42,281 against Rhino's 42,256, and 112,080 in volume
+  against 111,966. A shape with no crease is measured exactly as before.
+
 - **A Rhino face that runs to a pole or round a seam keeps its area (#34).**
   Some `.3dm` files arrived with a quarter or more of their surface missing,
   with no error. Keith Sloan compared the whole openNURBS sample set against

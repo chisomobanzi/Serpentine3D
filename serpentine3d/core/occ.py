@@ -124,14 +124,48 @@ def linear_properties(shape) -> GProp_GProps:
     BRepGProp.LinearProperties_s(shape, props)
     return props
 
+def without_creases(shape):
+    """`shape` with every face whose surface has a crease in it split there.
+
+    The default integration below samples each face as one smooth piece.
+    A surface built as a chain of patches meeting at creases (knots at full
+    multiplicity, as Rhino writes a revolved profile) is not one: the sample
+    points fall mostly in the long parameter spans and miss the short ones,
+    and a mug's body read 20% short, a synthetic one 98% (#34). Split at
+    the creases, each piece is smooth and the same method is exact.
+
+    A shape with no creased face comes back as it is, so everything else
+    measures exactly as before and pays nothing for the check.
+    """
+    from OCP.GeomAbs import GeomAbs_Shape
+    creased = False
+    exp = TopExp_Explorer(shape, FACE)
+    while exp.More() and not creased:
+        surf = BRep_Tool.Surface_s(TopoDS.Face_s(exp.Current()))
+        creased = surf is not None and surf.Continuity() == GeomAbs_Shape.GeomAbs_C0
+        exp.Next()
+    if not creased:
+        return shape
+    from OCP.ShapeUpgrade import ShapeUpgrade_ShapeDivideContinuity
+    try:
+        split = ShapeUpgrade_ShapeDivideContinuity(shape)
+        split.SetBoundaryCriterion(GeomAbs_Shape.GeomAbs_C1)
+        split.SetPCurveCriterion(GeomAbs_Shape.GeomAbs_C1)
+        split.SetSurfaceSegmentMode(True)
+        split.Perform()
+        out = split.Result()
+    except Exception:                                       # noqa: BLE001
+        return shape
+    return shape if out is None or out.IsNull() else out
+
 def surface_properties(shape) -> GProp_GProps:
     props = GProp_GProps()
-    BRepGProp.SurfaceProperties_s(shape, props)
+    BRepGProp.SurfaceProperties_s(without_creases(shape), props)
     return props
 
 def volume_properties(shape) -> GProp_GProps:
     props = GProp_GProps()
-    BRepGProp.VolumeProperties_s(shape, props)
+    BRepGProp.VolumeProperties_s(without_creases(shape), props)
     return props
 
 def brep_write(shape, path: str):
