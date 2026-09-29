@@ -46,6 +46,32 @@ _ORBIT_PX = 7.0
 _ZOOM_STEPS = 0.22
 
 
+_DIAL_TIMEOUT = 0.5   # seconds; a daemon that is there answers at once
+
+
+def _dial_spacenavd(path: str):
+    """A connected, non-blocking socket to spacenavd, or None.
+
+    A daemon that is running but wedged, its listen queue full and nothing
+    being accepted, makes a plain blocking connect wait for ever. That
+    froze the whole program at launch, and again on every retry, for
+    anyone whose daemon got into that state. So the connect is given a
+    moment and then given up, and the program carries on without the
+    SpaceMouse until the next retry.
+    """
+    if not hasattr(socket, "AF_UNIX") or not os.path.exists(path):
+        return None
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(_DIAL_TIMEOUT)
+        s.connect(path)
+        s.setblocking(False)
+        return s
+    except OSError:                  # refused, gone, or timed out
+        s.close()
+        return None
+
+
 class SpaceMouseNavigator(QObject):
     """Owns the event source and drives the active viewport's camera."""
 
@@ -73,16 +99,11 @@ class SpaceMouseNavigator(QObject):
         if self.source is not None:
             return
         fd = None
-        if os.path.exists(SPNAV_SOCKET):
-            try:
-                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                s.connect(SPNAV_SOCKET)
-                s.setblocking(False)
-                self.sock = s
-                fd = s.fileno()
-                self.source = "spacenavd"
-            except OSError:
-                self.sock = None
+        s = _dial_spacenavd(SPNAV_SOCKET)
+        if s is not None:
+            self.sock = s
+            fd = s.fileno()
+            self.source = "spacenavd"
         if fd is None:
             fd = self._open_evdev()
             if fd is not None:

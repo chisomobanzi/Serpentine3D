@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **A SpaceMouse daemon that stops answering no longer freezes the program
+  at launch.** On Linux the SpaceMouse is reached through spacenavd, and
+  the program connected to it with no time limit, at startup and again
+  every five seconds after. A daemon that was running but wedged, its
+  queue full and nothing being accepted, made that connection wait for
+  ever, so Serpentine3D hung at launch with no error, whether or not a
+  SpaceMouse was plugged in. It now gives up after half a second and
+  carries on without the SpaceMouse, trying again later as before.
+
 - **Selecting by name over RPC or MCP selects every object of that name.**
   With three booths each holding a "Headset", `select(names=["Headset"])`
   took the first, and the delete after it removed one of three. A name now
