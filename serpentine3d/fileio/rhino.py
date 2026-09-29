@@ -254,7 +254,417 @@ def _brep_edge_context(brep):
     return edges, _edge_boxes(edges), table
 
 
-def _face_from_loops(rface, surf, table: dict):
+def _face_from_loops(rface, surf, table: dict, vertices=None):
+    """The face trimmed by the loops the file itself carries, or None.
+
+    A loop that runs to a pole or walks a seam cannot be rebuilt from its
+    3D edges alone (issue #34), so with the brep's vertices to hand those
+    are built from their trims in the surface's own (u, v) instead. Every
+    other face keeps the path it always had.
+    """
+    if vertices is not None and _loops_need_trims(rface):
+        face = _face_from_trims(rface, surf, table, vertices)
+        if face is not None:
+            return face
+    return _face_from_edge_loops(rface, surf, table)
+
+
+def _loops_need_trims(rface) -> bool:
+    """Does a loop run to a pole or walk a seam?
+
+    A pole has no 3D edge, and the file marks its trim with edge index -1.
+    A seam is one edge a loop walks twice, once on each side of it.
+    """
+    for li in range(len(rface.Loops)):
+        loop = rface.Loops[li]
+        seen = set()
+        for ti in range(loop.TrimCount):
+            ei = loop.Trims[ti].EdgeIndex
+            if ei == -1 or ei in seen:
+                return True
+            seen.add(ei)
+    return False
+
+
+_TRIM_SAMPLES = 33
+_TRIM_FIT = 1e-5          # how far a rebuilt trim may stray from its edge
+
+
+def _face_from_trims(rface, surf, table: dict, vertices, tol=1e-6):
+    """The face built from its trims in (u, v), or None.
+
+    rhino3dm gives a face its surface, its trims in loop order, and each
+    trim's 3D edge and direction, but not the 2D trim curves the file keeps.
+    So the trims are rebuilt: each edge placed on the surface, and each
+    loop's ambiguities settled by the loop itself.
+
+    On a closed surface a point on the seam is two places in (u, v), one
+    each side. An edge whose inside lies within the surface has one place
+    only, and it anchors the loop. An edge on the seam, or one hugging it
+    beside a pole, where either side fits the 3D edge, takes whichever side
+    its anchored neighbour is on. A pole becomes an edge of no length that
+    runs along the pinched side between the trims either side of it.
+
+    Rhino writes outer loops anticlockwise in (u, v) and holes clockwise,
+    so the face so built already knows which side of its boundary it is.
+    """
+    try:
+        return _build_from_trims(rface, surf, table, vertices, tol)
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def _free_parameter(surf, uv, step=1e-3) -> int:
+    """At a pole one parameter moves nothing: 0 for u, 1 for v."""
+    u, v = uv
+    u0, u1, v0, v1 = surf.Bounds()
+    here = surf.Value(u, v)
+    dv, du = (v1 - v0) * step, (u1 - u0) * step
+    along_v = here.Distance(surf.Value(u, v + dv if v + dv <= v1 else v - dv))
+    along_u = here.Distance(surf.Value(u + du if u + du <= u1 else u - du, v))
+    return 1 if along_v < along_u else 0
+
+
+def _place_trim(sas, surf, pts, closed, at_pole, tol, seed=None) -> list:
+    """(u, v) of each 3D sample of one edge, by continuity from its middle.
+
+    Where a sample lies exactly on the seam the projector ignores the hint
+    and answers one side, so it takes its neighbour's side instead; where a
+    sample sits on a pole, its free parameter comes from its neighbour, so
+    the pole's own edge spans the pinched side properly.
+    """
+    from OCP.gp import gp_Pnt2d
+    n = len(pts)
+    mid = n // 2
+    uv = [None] * n
+    q = (sas.NextValueOfUV(seed, pts[mid], tol, 1e-3) if seed is not None
+         else sas.ValueOfUV(pts[mid], tol))
+    uv[mid] = (q.X(), q.Y())
+    outward = ((range(mid + 1, n), -1), (range(mid - 1, -1, -1), 1))
+    for rng, step in outward:
+        for k in rng:
+            q = sas.NextValueOfUV(gp_Pnt2d(*uv[k + step]), pts[k], tol, 1e-3)
+            uv[k] = (q.X(), q.Y())
+    for d, lo, hi in closed:
+        half = (hi - lo) / 2
+        for rng, step in outward:
+            for k in rng:
+                here, there = uv[k][d], uv[k + step][d]
+                on_line = min(abs(here - lo), abs(here - hi)) < 1e-6 * (hi - lo) + 1e-9
+                if on_line and abs(here - there) > half:
+                    side = hi if there > lo + half else lo
+                    uv[k] = tuple(side if j == d else uv[k][j] for j in (0, 1))
+    for k, nb in ((0, 1), (n - 1, n - 2)):
+        if at_pole[k == n - 1] or sas.IsDegenerated(pts[k], tol * 10):
+            free = _free_parameter(surf, uv[k])
+            fixed = list(uv[k])
+            fixed[free] = uv[nb][free]
+            uv[k] = tuple(fixed)
+    return uv
+
+
+def _trim_placements(sas, surf, pts, closed, at_pole, walked_twice, tol) -> list:
+    """Every place this edge could lie in (u, v), first the likeliest.
+
+    One, for an edge whose inside lies within the surface. Two, one each
+    side, for an edge on the seam: judged in 3D, because beside a pole the
+    seam parameter stops meaning anything, and taken as said for an edge
+    the loop walks twice, which is a seam whatever its samples show. Two as
+    well for an edge that fits either side of the seam as closely.
+    """
+    from OCP.gp import gp_Pnt2d
+    n = len(pts)
+    base = _place_trim(sas, surf, pts, closed, at_pole, tol)
+
+    def off_line(d, lo):
+        worst = 0.0
+        for k in range(n):
+            q = list(base[k])
+            q[d] = lo
+            worst = max(worst, pts[k].Distance(surf.Value(*q)))
+        return worst
+
+    seam = [d for d, lo, hi in closed if off_line(d, lo) < 1e-6]
+    if not seam and walked_twice and closed:
+        seam = [min(closed, key=lambda c: off_line(c[0], c[1]))[0]]
+    if seam:
+        # wholly on one side or wholly on the other: the sampler flips
+        # between them along a seam, the two being one place
+        out = []
+        for d in seam:
+            lo, hi = next((c[1], c[2]) for c in closed if c[0] == d)
+            for side in (lo, hi):
+                out.append([tuple(side if j == d else p[j] for j in (0, 1))
+                            for p in base])
+        return out
+
+    def stray(uv):
+        return max(pts[k].Distance(surf.Value(*uv[k])) for k in range(1, n - 1))
+
+    fit = stray(base)
+    out = [base]
+    for d, lo, hi in closed:
+        for side in (lo, hi):
+            seed = list(base[n // 2])
+            seed[d] = side
+            alt = _place_trim(sas, surf, pts, closed, at_pole, tol, gp_Pnt2d(*seed))
+            same = any(max(abs(a[0] - b[0]) + abs(a[1] - b[1])
+                           for a, b in zip(alt, k)) < 1e-6 for k in out)
+            if not same and stray(alt) <= max(fit * 10, 1e-6):
+                out.append(alt)
+    return out
+
+
+def _settle_sides(items) -> None:
+    """Give every edge in doubt the side its settled neighbour is on.
+
+    A seam the loop walks twice lies on opposite sides on its two walks,
+    which is what walking it twice means. A loop of nothing but seams and
+    poles, a whole sphere say, has no neighbour settled to begin from, so
+    one seam is put on one side and marked as chosen rather than known;
+    `_loop_turns_rightly` swaps the choice if the loop comes out backwards.
+    """
+    n = len(items)
+    for it in items:
+        if "edge" in it:
+            it["uv"] = it["places"][0]
+            it["settled"] = len(it["places"]) == 1
+            it["chosen"] = False
+
+    def twin_of(k):
+        ei = items[k]["edge"]
+        return next((j for j, o in enumerate(items)
+                     if j != k and o.get("edge") == ei and o["settled"]), None)
+
+    todo = [k for k, it in enumerate(items) if "edge" in it and not it["settled"]]
+    while todo:
+        left = []
+        for k in todo:
+            it, before, after = items[k], items[(k - 1) % n], items[(k + 1) % n]
+            twin = twin_of(k)
+            if twin is not None:
+                other = items[twin]["uv"][len(it["uv"]) // 2]
+                it["uv"] = max(it["places"], key=lambda uv: float(
+                    np.hypot(*np.subtract(uv[len(uv) // 2], other))))
+                it["chosen"] = items[twin]["chosen"]
+            elif "edge" in before and before["settled"]:
+                want = _trim_ends(before, before["uv"])[1]
+                it["uv"] = min(it["places"], key=lambda uv: float(
+                    np.hypot(*np.subtract(_trim_ends(it, uv)[0], want))))
+            elif "edge" in after and after["settled"]:
+                want = _trim_ends(after, after["uv"])[0]
+                it["uv"] = min(it["places"], key=lambda uv: float(
+                    np.hypot(*np.subtract(_trim_ends(it, uv)[1], want))))
+            else:
+                left.append(k)
+                continue
+            it["settled"] = True
+        if len(left) == len(todo):
+            # nothing settled in reach: choose for the first, and go on
+            first = items[left[0]]
+            first["uv"], first["settled"], first["chosen"] = first["places"][0], True, True
+            left = left[1:]
+        todo = left
+    _record_ends(items)
+
+
+def _trim_ends(it, uv):
+    """(start, end) in (u, v) in the direction the loop walks the trim."""
+    return (uv[-1], uv[0]) if it["rev"] else (uv[0], uv[-1])
+
+
+def _record_ends(items) -> None:
+    for it in items:
+        if "edge" in it:
+            it["start"], it["end"] = _trim_ends(it, it["uv"])
+
+
+def _loop_turns_rightly(items, outer: bool) -> None:
+    """Rhino writes an outer loop anticlockwise in (u, v) and a hole
+    clockwise. Where the sides were chosen rather than known, and the loop
+    turns the wrong way, the choice was the other one: swap it."""
+    if not any(it.get("chosen") for it in items if "edge" in it):
+        return
+    ring = []
+    for it in items:
+        if "edge" in it:
+            uv = it["uv"][::-1] if it["rev"] else it["uv"]
+            ring.extend(uv)
+    xs, ys = np.array([p[0] for p in ring]), np.array([p[1] for p in ring])
+    signed = 0.5 * float(np.sum(xs * np.roll(ys, -1) - np.roll(xs, -1) * ys))
+    if (signed > 0) == outer:
+        return
+    for it in items:
+        if "edge" in it and it.get("chosen"):
+            other = [uv for uv in it["places"] if uv is not it["uv"]]
+            if other:
+                it["uv"] = other[0]
+    _record_ends(items)
+
+
+def _fit_trim(it, sas, surf, closed, tol, rounds=4):
+    """The trim's curve on the surface through its samples, with more
+    samples wherever it strays from the edge: an edge that skims the seam
+    swings quickly in (u, v), and too few samples overshoot across it."""
+    from OCP.Geom2dAPI import Geom2dAPI_Interpolate
+    from OCP.gp import gp_Pnt2d
+    from OCP.TColgp import TColgp_HArray1OfPnt2d
+    from OCP.TColStd import TColStd_HArray1OfReal
+    ad, ts, uv = it["curve"], list(it["ts"]), list(it["uv"])
+    curve = None
+    for _ in range(rounds + 1):
+        n = len(ts)
+        pts2 = TColgp_HArray1OfPnt2d(1, n)
+        pars = TColStd_HArray1OfReal(1, n)
+        for i in range(n):
+            pts2.SetValue(i + 1, gp_Pnt2d(*uv[i]))
+            pars.SetValue(i + 1, float(ts[i]))
+        fit = Geom2dAPI_Interpolate(pts2, pars, False, 1e-9)
+        fit.Perform()
+        if not fit.IsDone():
+            return None
+        curve = fit.Curve()
+        strays = []
+        for i in range(n - 1):
+            tm = 0.5 * (ts[i] + ts[i + 1])
+            q = curve.Value(tm)
+            if ad.Value(tm).Distance(surf.Value(q.X(), q.Y())) > _TRIM_FIT:
+                strays.append(i)
+        if not strays:
+            return curve
+        for i in reversed(strays):
+            tm = 0.5 * (ts[i] + ts[i + 1])
+            q = sas.NextValueOfUV(gp_Pnt2d(*uv[i]), ad.Value(tm), tol, 1e-3)
+            m = [q.X(), q.Y()]
+            for d, lo, hi in closed:
+                if abs(m[d] - uv[i][d]) > (hi - lo) / 2:
+                    m[d] = hi if uv[i][d] > lo + (hi - lo) / 2 else lo
+            ts.insert(i + 1, tm)
+            uv.insert(i + 1, tuple(m))
+    return curve
+
+
+def _build_from_trims(rface, surf, table, vertices, tol):
+    from OCP.BRep import BRep_Builder, BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.BRepLib import BRepLib
+    from OCP.Geom2d import Geom2d_Line, Geom2d_TrimmedCurve
+    from OCP.ShapeAnalysis import ShapeAnalysis_Surface
+    from OCP.TopAbs import TopAbs_FORWARD, TopAbs_REVERSED
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import (TopoDS, TopoDS_Edge, TopoDS_Face,
+                            TopoDS_Vertex, TopoDS_Wire)
+    from OCP.gp import gp_Dir2d, gp_Pnt, gp_Pnt2d
+
+    sas = ShapeAnalysis_Surface(surf)
+    bb = BRep_Builder()
+    loc = TopLoc_Location()
+    u0, u1, v0, v1 = surf.Bounds()
+    closed = [c for c in ((0, u0, u1) if surf.IsUClosed() else None,
+                          (1, v0, v1) if surf.IsVClosed() else None) if c]
+    made = {}
+
+    def vertex(i):
+        if i not in made:
+            p = vertices[i].Location
+            v = TopoDS_Vertex()
+            bb.MakeVertex(v, gp_Pnt(p.X, p.Y, p.Z), tol)
+            made[i] = v
+        return made[i]
+
+    face = TopoDS_Face()
+    bb.MakeFace(face, surf, loc, tol)
+    for li in range(len(rface.Loops)):
+        loop = rface.Loops[li]
+        trims = [loop.Trims[ti] for ti in range(loop.TrimCount)]
+        # the file names its poles: every trim along one starts and ends there
+        poles = {t.StartVertexIndex for t in trims if t.EdgeIndex == -1}
+        walked = {}
+        for t in trims:
+            walked[t.EdgeIndex] = walked.get(t.EdgeIndex, 0) + 1
+        items = []
+        for t in trims:
+            if t.EdgeIndex == -1:
+                items.append({"pole": t.StartVertexIndex})
+                continue
+            src = table.get(t.EdgeIndex)
+            if src is None:
+                return None
+            ad = BRepAdaptor_Curve(TopoDS.Edge_s(src))
+            a, b = ad.FirstParameter(), ad.LastParameter()
+            ts = np.linspace(a, b, _TRIM_SAMPLES)
+            pts = [ad.Value(x) for x in ts]
+            # the edge's own start and end, whichever way the loop walks it
+            first, last = ((t.EndVertexIndex, t.StartVertexIndex) if t.IsReversed
+                           else (t.StartVertexIndex, t.EndVertexIndex))
+            items.append({
+                "edge": t.EdgeIndex, "rev": t.IsReversed, "src": src,
+                "curve": ad, "range": (a, b), "ts": ts,
+                "first": first, "last": last,
+                "places": _trim_placements(
+                    sas, surf, pts, closed, (first in poles, last in poles),
+                    walked[t.EdgeIndex] > 1, tol)})
+        _settle_sides(items)
+        _loop_turns_rightly(items, "Outer" in str(loop.LoopType))
+
+        wire = TopoDS_Wire()
+        bb.MakeWire(wire)
+        built = {}
+        n = len(items)
+        for k, it in enumerate(items):
+            if "pole" in it:
+                before = next((items[(k - j) % n] for j in range(1, n)
+                               if "edge" in items[(k - j) % n]), None)
+                after = next((items[(k + j) % n] for j in range(1, n)
+                              if "edge" in items[(k + j) % n]), None)
+                if before is None or after is None:
+                    continue
+                p, q = np.array(before["end"]), np.array(after["start"])
+                span = float(np.linalg.norm(q - p))
+                if span < 1e-12:
+                    continue
+                line = Geom2d_Line(gp_Pnt2d(*p), gp_Dir2d(*(q - p)))
+                e = TopoDS_Edge()
+                bb.MakeEdge(e)
+                bb.UpdateEdge(e, Geom2d_TrimmedCurve(line, 0.0, span), surf, loc, tol)
+                bb.Range(e, 0.0, span)
+                bb.Degenerated(e, True)
+                pole = vertex(it["pole"])
+                bb.Add(e, pole.Oriented(TopAbs_FORWARD))
+                bb.Add(e, pole.Oriented(TopAbs_REVERSED))
+                bb.Add(wire, e)
+                continue
+            curve = _fit_trim(it, sas, surf, closed, tol)
+            if curve is None:
+                return None
+            ei = it["edge"]
+            if ei not in built:
+                a, b = it["range"]
+                e = TopoDS_Edge()
+                bb.MakeEdge(e, BRep_Tool.Curve_s(TopoDS.Edge_s(it["src"]), 0.0, 0.0), tol)
+                bb.Range(e, a, b)
+                bb.Add(e, vertex(it["first"]).Oriented(TopAbs_FORWARD))
+                bb.Add(e, vertex(it["last"]).Oriented(TopAbs_REVERSED))
+                built[ei] = (e, {}, (a, b))
+            e, curves, _ = built[ei]
+            curves["R" if it["rev"] else "F"] = curve
+            bb.Add(wire, TopoDS.Edge_s(e.Reversed()) if it["rev"] else e)
+        for e, curves, (a, b) in built.values():
+            if "F" in curves and "R" in curves:
+                # a seam: one curve for each side, as OpenCascade keeps one
+                bb.UpdateEdge(e, curves["F"], curves["R"], surf, loc, tol)
+            else:
+                bb.UpdateEdge(e, next(iter(curves.values())), surf, loc, tol)
+            bb.Range(e, a, b)
+        bb.Add(face, wire)
+    BRepLib.SameParameter_s(face, tol, True)
+    area = geometry.surface_area(face)
+    if not (geometry.is_valid(face) and np.isfinite(area) and area > 0):
+        return None
+    return face
+
+
+def _face_from_edge_loops(rface, surf, table: dict):
     """The face trimmed by the loops the file itself carries, or None.
 
     `BrepFace.Loops` gives each boundary as trims in order, and every trim
@@ -652,7 +1062,8 @@ def _face_shapes(brep, fi: int, occ_edges: list, edge_boxes,
     # Best path: the trim the file already describes. Everything below it
     # is here for the faces whose loops cannot be followed.
     if edge_table:
-        from_loops = _face_from_loops(brep.Faces[fi], surf, edge_table)
+        from_loops = _face_from_loops(brep.Faces[fi], surf, edge_table,
+                                      brep.Vertices)
         if from_loops is not None:
             return [from_loops]
 
@@ -716,7 +1127,17 @@ def _assemble_faces(faces) -> list:
 
     out = []
     if len(brep_faces) == 1:
-        out.append(brep_faces[0])
+        # a face can close on itself, a sphere's round its seam and poles,
+        # and that is a solid as surely as a sewn shell is (#34)
+        from OCP.BRep import BRep_Builder
+        from OCP.TopoDS import TopoDS_Shell
+        shell = TopoDS_Shell()
+        builder = BRep_Builder()
+        builder.MakeShell(shell)
+        builder.Add(shell, brep_faces[0])
+        solid = _shell_to_solid(shell)
+        out.append(solid if geometry.shape_kind(solid) == "solid"
+                   else brep_faces[0])
     elif brep_faces:
         from ..core.occ import BRepBuilderAPI_Sewing
         import numpy as np
@@ -755,7 +1176,10 @@ def _shell_to_solid(shape):
         from OCP.TopAbs import TopAbs_State
         from OCP.TopoDS import TopoDS
         shell = geometry.occ.to_shell(shape)
-        if shell.Closed():
+        # measured, not read off the shell's flag: sewing does not always
+        # set it, and a watertight import then stayed open (#34)
+        from OCP.BRep import BRep_Tool
+        if BRep_Tool.IsClosed_s(shell):
             try:
                 mk = BRepBuilderAPI_MakeSolid(shell)
                 if mk.IsDone():

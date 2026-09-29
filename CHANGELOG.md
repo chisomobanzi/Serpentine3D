@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A Rhino face that runs to a pole or round a seam keeps its area (#34).**
+  Some `.3dm` files arrived with a quarter or more of their surface missing,
+  with no error. Keith Sloan compared the whole openNURBS sample set against
+  a face-preserving importer and found 17 files short; `v4_TreeFrog`, one
+  closed 83-face solid, came in as an open surface at 76% of its area, the
+  eyes gone. No face was being dropped. Three things were wrong at once. A
+  loop that runs along a surface's pinched side has a trim with no 3D edge,
+  which the file marks with edge index -1, and the loop builder took that for
+  a trim it could not follow and handed the whole face to the fallbacks,
+  which built the wrong side of it. A loop that walks a seam twice, once each
+  side, cannot be rebuilt from 3D edges alone at all, and the frog's body
+  skin came out at 2.5% of its size. And a watertight shell stayed open
+  because its closed flag, which sewing does not always set, was trusted
+  over measuring. Faces with a pole or a seam are now built from their
+  trims in the surface's own (u, v), where the two sides of a seam are two
+  places, settled by continuity with the trims either side; a face that
+  closes on itself, like a sphere, is now a solid. TreeFrog imports as one
+  solid at 100.2% of its area, the rhino logos from 69% to 96%, MatchSrf
+  from 86% to 97% and DinerMug from 11% to 97%. WishBone, SaltAndPepper,
+  Wheel_PG and the disk brake still read low against the other importer but
+  match the render meshes Rhino stored in the file to within half a percent.
+  T-Joint2 still reads 91% and is not yet explained; its files store no
+  render meshes to check against.
+
 ## 0.10.4 — 2026-09-29
 
 ### Fixed
