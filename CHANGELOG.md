@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.4 — 2026-09-29
 
 ### Fixed
 
@@ -163,12 +163,6 @@
   neither end inside it, and a band dropped in the middle of a big face has
   no corner inside it at all, and both count. Like the click, it adds to
   what is held, takes no objects, and finds no faces in a wireframe view.
-
-- **Open Mica spatial session records.** Mica `.serp` files now open as coloured
-  point clouds with camera routes. Untracked poses break the route, uncertain
-  spans appear as orange dashed segments, and save/reopen does not duplicate the
-  derived curves. Point-cloud Properties presents heuristic surface support,
-  camera/scale provenance, reconstruction backbone and producer limitations.
 
 ## 0.10.3 — 2026-09-19
 

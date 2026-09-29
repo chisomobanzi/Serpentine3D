@@ -6,11 +6,28 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.10.3 was cut (2026-09-19).
+Last updated when 0.10.4 was cut (2026-09-29).
 
 ---
 
 ## Where things stand
+
+Version `0.10.4` is in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.10.4 section is dated 2026-09-29. Three batches.
+Jonas Pedrotti's second, all five of his open issues: the transform commands
+reach what is held (#29), and a held set of faces and edges moves as one
+change rather than one part after another, which had been double counting;
+a cutting curve that stops a whisker short of a curve splits it (#32); a DXF
+ellipse is read as written (#28); Ctrl+Shift and a dragged band hold faces,
+edges and segments (#30); and a right-click on a layer moves the selection
+onto it (#27). With them, imported Rhino solids are no longer inside out
+(#26). The second batch came from driving the program from an assistant over
+RPC and MCP: importing a `.serp` adds to the scene instead of replacing it,
+pictures draw in front of the surface they hang on, a bridge command that
+fails cancels itself, snapping survives an imported mesh, and a bridge import
+leaves the camera alone. The third is one fix found while cutting this
+release: a wedged spacenavd hung the program at launch, and the suite with
+it. The turntable renderer still never draws pictures; logged, not fixed.
 
 Version `0.10.3` is in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.10.3 section is dated 2026-09-19. One fix, for the
