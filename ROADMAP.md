@@ -29,6 +29,12 @@ leaves the camera alone. The third is one fix found while cutting this
 release: a wedged spacenavd hung the program at launch, and the suite with
 it. The turntable renderer still never draws pictures; logged, not fixed.
 
+Release validation on Linux: 3,586 tests passed under the offscreen runner
+on Mesa. Released on 2026-09-29: pushed, tagged `v0.10.4`, published with the
+Linux AppImage, Windows installer and Apple Silicon DMG all attached. The
+packaged AppImage was checked first: `--version` read 0.10.4, the self-test
+passed, and a running copy opened a QA scene over RPC.
+
 Version `0.10.3` is in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.10.3 section is dated 2026-09-19. One fix, for the
 half of #10 nobody had reproduced. A `.3dm` point object had no branch in the
