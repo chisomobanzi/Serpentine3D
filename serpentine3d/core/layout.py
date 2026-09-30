@@ -695,7 +695,7 @@ def move_sheet_item(kind: str, obj, dx: float, dy: float):
 
 
 def transform_sheet_item(kind: str, obj, matrix, size: float = 1.0,
-                         scene=None) -> bool:
+                         scene=None, force: bool = False) -> bool:
     """Put anything a sheet holds through an affine map of the paper.
 
     `matrix` is a 3x3 map of paper millimetres, (x, y, 1) in and out; it
@@ -706,11 +706,22 @@ def transform_sheet_item(kind: str, obj, matrix, size: float = 1.0,
 
     A detail's frame is mapped and its drawing scale kept, so a 1:50 detail
     stays 1:50 and shows more or less of the model. A locked detail is left
-    alone, as it is by `move_sheet_item`; the return says whether the item
-    was changed.
+    alone, as it is by `move_sheet_item`, unless `force` says the caller
+    means it (a copy of a locked frame is not the frame the lock protects);
+    the return says whether the item was changed.
+
+    A reflection is drawn the way a drawing wants it rather than literally:
+    text keeps reading forwards and moves to where its mirror image would
+    be, a dimension stays on the mirrored side of what it measures, and a
+    detail frame, which cannot turn, moves to its mirrored place at its own
+    size. A hatch's lines turn with any rotation or reflection.
     """
     import numpy as np
     m = np.asarray(matrix, float)
+    linear = m[:2, :2]
+    flips = float(np.linalg.det(linear)) < 0
+    square = linear @ linear.T
+    similar = np.allclose(square, np.eye(2) * square[0, 0], atol=1e-9)
 
     def at(x, y):
         p = m @ np.array([float(x), float(y), 1.0])
@@ -721,8 +732,12 @@ def transform_sheet_item(kind: str, obj, matrix, size: float = 1.0,
 
     grow = abs(float(size) - 1.0) > 1e-12
     if kind == "detail":
-        if obj.locked:
+        if obj.locked and not force:
             return False
+        if flips:
+            cx, cy = at(obj.x + obj.w / 2, obj.y + obj.h / 2)
+            obj.x, obj.y = cx - obj.w / 2, cy - obj.h / 2
+            return True
         xs, ys = zip(*(at(x, y) for x, y in detail_corners(obj)))
         obj.x, obj.y = min(xs), min(ys)
         obj.w = max(max(xs) - obj.x, MIN_DETAIL_MM)
@@ -734,7 +749,14 @@ def transform_sheet_item(kind: str, obj, matrix, size: float = 1.0,
         m4[:2, 3] = m[:2, 2]
         obj.shape = geometry.apply_matrix(obj.shape, m4)
     elif kind in ("note", "leader"):
-        if kind == "note":
+        if kind == "note" and flips:
+            # moved to where its mirror image would be, still reading
+            # forwards: the middle of its text is what is mirrored
+            x0, y0, x1, y1 = annotation_bounds("note", obj, scene)
+            cx, cy = at((x0 + x1) / 2, (y0 + y1) / 2)
+            obj.x += cx - (x0 + x1) / 2
+            obj.y += cy - (y0 + y1) / 2
+        elif kind == "note":
             obj.x, obj.y = at(obj.x, obj.y)
         else:
             obj.points = pts(obj.points)
@@ -747,6 +769,10 @@ def transform_sheet_item(kind: str, obj, matrix, size: float = 1.0,
     elif kind == "dim":
         obj.x1, obj.y1 = at(obj.x1, obj.y1)
         obj.x2, obj.y2 = at(obj.x2, obj.y2)
+        if flips:
+            # its line is drawn to the left of first-to-second; mirrored,
+            # left is the other side, so the ends change places
+            obj.x1, obj.y1, obj.x2, obj.y2 = obj.x2, obj.y2, obj.x1, obj.y1
         obj.offset *= abs(float(size))
         if getattr(obj, "m1", None) is not None:
             obj.detail_id = ""          # its points no longer project from
@@ -764,6 +790,10 @@ def transform_sheet_item(kind: str, obj, matrix, size: float = 1.0,
         if getattr(obj, "holes", None):
             obj.holes = [pts(ring) for ring in obj.holes]
         obj.spacing *= abs(float(size))
+        if similar:
+            a = math.radians(obj.angle)
+            d = linear @ np.array([math.cos(a), math.sin(a)])
+            obj.angle = math.degrees(math.atan2(d[1], d[0])) % 180.0
     else:
         return False
     return True

@@ -498,8 +498,62 @@ def cmd_scale_nu(ctx):
         " by " + " × ".join(f"{f:g}" for f in factors))
 
 
-@command("mirror", aliases=("mi",))
+def _mirror_on_paper(ctx, lv):
+    """Mirror what is picked on a sheet across a line on the paper (#36).
+
+    Kept or not, as in the model. A kept original stays exactly where it
+    was and the mirror is a copy, so a locked frame can be mirrored that
+    way: the lock is about the frame not being disturbed, and it is not.
+    """
+    import math
+
+    import numpy as np
+    from ..core.layout import copy_sheet_item, transform_sheet_item
+    picks = list(lv.selected)
+    if not picks:
+        ctx.echo("Nothing picked on the sheet: click geometry, a detail "
+                 "frame or an annotation first.")
+        return
+    p1 = yield PointReq("Start of mirror line")
+    p2 = yield PointReq("End of mirror line", rubber_from=p1)
+    a = np.array([float(p1[0]), float(p1[1])])
+    d = np.array([float(p2[0]), float(p2[1])]) - a
+    if math.hypot(*d) < 1e-9:
+        ctx.echo("The mirror line has no length — cancelled.")
+        return
+    d /= np.linalg.norm(d)
+    reflect = 2.0 * np.outer(d, d) - np.eye(2)
+    matrix = np.eye(3)
+    matrix[:2, :2] = reflect
+    matrix[:2, 2] = a - reflect @ a
+    keep = yield OptionReq("Keep original?", options=["Yes", "No"],
+                           default="Yes")
+    lay = lv.layout
+    done = kept = 0
+    for kind, obj in picks:
+        if keep == "Yes":
+            dup = copy_sheet_item(lay, kind, obj)
+            if dup is None:
+                continue
+            transform_sheet_item(kind, dup, matrix, 1.0, ctx.scene, force=True)
+            done += 1
+        elif transform_sheet_item(kind, obj, matrix, 1.0, ctx.scene):
+            done += 1
+        else:
+            kept += 1
+    ctx.scene.notify("layouts")
+    msg = f"Mirrored {done} sheet item(s)."
+    if kept:
+        msg += f" {kept} locked detail(s) left as they were."
+    ctx.echo(msg)
+
+
+@command("mirror", aliases=("mi",), space="any")
 def cmd_mirror(ctx):
+    lv = ctx.sheet_view()
+    if lv is not None:
+        yield from _mirror_on_paper(ctx, lv)
+        return
     held, objs = yield from _what_to_transform(ctx, "Select objects to mirror")
     p1 = yield PointReq("Start of mirror line")
 

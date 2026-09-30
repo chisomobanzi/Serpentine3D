@@ -25,7 +25,7 @@
 
 ### Fixed
 
-- **Scale, Scale1D and Scale2D work on what is picked on a sheet (#36).**
+- **Scale, Scale1D, Scale2D and Mirror work on what is picked on a sheet (#36).**
   Pick a polyline, a detail or a dimension on a layout, type `scale`, and
   the command asked for model objects no click on paper can give, so it
   could only be cancelled. `move` and `rotate` had learned to ask the sheet
@@ -37,6 +37,12 @@
   points, with text height, dimension offset and hatch spacing following a
   uniform scale. `scale1d` moves text and dimensions without distorting
   them. A locked detail stays put and says so, as it does for `move`.
+  `mirror` had the same fault and works on a sheet too, keeping the
+  original or not as in the model. Text keeps reading forwards and moves to
+  where its mirror image would be, as AutoCAD and Rhino treat text by
+  default; a dimension stays on the mirrored side of what it measures; a
+  hatch's lines turn with it; and a detail frame moves to its mirrored place
+  at its own size, since a view of the model cannot itself be mirrored.
 
 - **Trim takes the part you click, in one click (#31).** After the cutters,
   trim asked for the object to trim and then which piece of it to take
