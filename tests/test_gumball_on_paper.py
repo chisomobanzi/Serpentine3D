@@ -8,9 +8,10 @@ meant dragging and squinting.
 
 So the sheet gets a gumball of its own: two arrows and the one plane pad that
 a sheet has, in paper millimetres, anchored on the middle of whatever is
-picked. A ring turns what is picked, and Shift on the pad scales notes and
-paper geometry. What cannot itself turn is placed rather than bent: a note
-orbits the pivot and stays level, a detail frame moves at its own size.
+picked. A ring turns what is picked and Shift on the pad scales it, both
+the way the rotate and scale commands do. What cannot itself turn is placed
+rather than bent: a note orbits the pivot and stays level, a detail frame
+moves at its own size, and a scaled frame keeps its drawing scale.
 """
 
 from __future__ import annotations
@@ -920,3 +921,133 @@ def test_alt_ring_turns_copies_and_leaves_the_originals(sheet):
 
     assert (note.x, note.y, dim.x1, dim.y1) == before
     assert len(lay.notes) == 2 and len(lay.dims) == 2
+
+
+# ------------------------------------ Shift-pad scales every kind (#36)
+
+def _shift_pad(lv, factor, modifiers=None):
+    """Shift-drag the pad out to `factor` times its distance from the anchor."""
+    gb = lv.gumball
+    shift = Qt.KeyboardModifier.ShiftModifier
+    held = shift if modifiers is None else shift | modifiers
+    sx, sy = _handle(lv, "pad", 2)
+    anchor = np.asarray(gb.anchor(), float)
+    start = np.asarray(lv.screen_to_paper(sx, sy), float)
+    assert gb.begin_drag(("pad", 2), sx, sy, held)
+    label = gb.drag_to(*lv.paper_to_screen(*(anchor + (start - anchor)
+                                               * factor)), held)
+    return gb, label
+
+
+def _grown(p, centre, factor):
+    return np.asarray(centre, float) + (np.asarray(p, float) - centre) * factor
+
+
+def test_shift_on_the_pad_scales_a_mixed_pick_live(sheet):
+    det, note, dim, hatch = _mixed_pick(sheet)
+    _w, lv, _det, _note = sheet
+    centre = np.asarray(lv.gumball.anchor(), float)
+    frame_middle = (det.x + det.w / 2, det.y + det.h / 2)
+    frame_size = (det.w, det.h)
+    drawing_scale = det.scale_denom
+    note_middle = _middle("note", note)
+    height = note.height
+    offset = dim.offset
+    spacing, angle = hatch.spacing, hatch.angle
+    corners = [list(p) for p in hatch.points]
+    lv._hlr_cache[det.id] = "stale picture"
+
+    gb, label = _shift_pad(lv, 2.0)
+
+    assert label == "2.000x"
+    np.testing.assert_allclose((det.x + det.w / 2, det.y + det.h / 2),
+                               _grown(frame_middle, centre, 2.0), atol=1e-6)
+    assert (det.w, det.h) == pytest.approx((frame_size[0] * 2,
+                                            frame_size[1] * 2))
+    assert det.scale_denom == drawing_scale
+    assert det.id not in lv._hlr_cache
+    np.testing.assert_allclose(_middle("note", note),
+                               _grown(note_middle, centre, 2.0), atol=1e-6)
+    assert note.height == pytest.approx(height * 2)
+    np.testing.assert_allclose((dim.x1, dim.y1),
+                               _grown((40.0, 120.0), centre, 2.0), atol=1e-6)
+    np.testing.assert_allclose((dim.x2, dim.y2),
+                               _grown((80.0, 120.0), centre, 2.0), atol=1e-6)
+    assert dim.offset == pytest.approx(offset * 2)
+    np.testing.assert_allclose(hatch.points,
+                               [_grown(p, centre, 2.0) for p in corners],
+                               atol=1e-6)
+    assert hatch.spacing == pytest.approx(spacing * 2)
+    assert hatch.angle == pytest.approx(angle)
+    gb.end_drag()
+
+
+def test_shift_on_the_pad_scales_from_where_the_drag_began(sheet):
+    """Out to 3 then back to 1.5 leaves things at 1.5, not 4.5."""
+    _det, _note, dim, _hatch = _mixed_pick(sheet)
+    _w, lv, _det, _note = sheet
+    centre = np.asarray(lv.gumball.anchor(), float)
+    gb = lv.gumball
+    sx, sy = _handle(lv, "pad", 2)
+    start = np.asarray(lv.screen_to_paper(sx, sy), float)
+    shift = Qt.KeyboardModifier.ShiftModifier
+    assert gb.begin_drag(("pad", 2), sx, sy, shift)
+    for factor in (3.0, 1.5):
+        gb.drag_to(*lv.paper_to_screen(*_grown(start, centre, factor)),
+                   shift)
+    np.testing.assert_allclose((dim.x1, dim.y1),
+                               _grown((40.0, 120.0), centre, 1.5), atol=1e-6)
+    assert dim.offset == pytest.approx(5.0 * 1.5)
+    gb.end_drag()
+
+
+def test_cancelling_a_shift_pad_scale_puts_everything_back(sheet):
+    det, note, dim, hatch = _mixed_pick(sheet)
+    _w, lv, _det, _note = sheet
+    before = (det.x, det.y, det.w, det.h, note.x, note.y, note.height,
+              dim.x1, dim.y1, dim.offset, hatch.spacing,
+              [list(p) for p in hatch.points])
+    gb, _label = _shift_pad(lv, 2.5)
+    gb.cancel_drag()
+    after = (det.x, det.y, det.w, det.h, note.x, note.y, note.height,
+             dim.x1, dim.y1, dim.offset, hatch.spacing,
+             [list(p) for p in hatch.points])
+    assert after == before
+
+
+def test_a_shift_pad_scale_is_one_undo_step(sheet):
+    det, note, dim, _hatch = _mixed_pick(sheet)
+    w, lv, _det, _note = sheet
+    before = (det.w, note.height, dim.x1, dim.offset)
+    gb, _label = _shift_pad(lv, 2.0)
+    gb.end_drag()
+    assert det.w != pytest.approx(before[0])
+    w.history.undo()
+    lay = w.scene.layouts[0]
+    assert (lay.details[0].w, lay.notes[0].height, lay.dims[0].x1,
+            lay.dims[0].offset) == pytest.approx(before)
+
+
+def test_alt_shift_on_the_pad_scales_copies_and_leaves_the_originals(sheet):
+    _det, note, dim, _hatch = _mixed_pick(sheet)
+    _w, lv, _det, _note = sheet
+    lay = lv.layout
+    before = (note.height, dim.x1, dim.offset)
+    gb, _label = _shift_pad(lv, 2.0, Qt.KeyboardModifier.AltModifier)
+    gb.end_drag()
+    assert (note.height, dim.x1, dim.offset) == before
+    assert len(lay.notes) == 2 and len(lay.dims) == 2
+    copy_dim = next(d for d in lay.dims if d is not dim)
+    assert copy_dim.offset == pytest.approx(dim.offset * 2)
+
+
+def test_shift_on_the_pad_leaves_a_locked_detail_where_it_is(sheet):
+    det, note, _dim, _hatch = _mixed_pick(sheet)
+    _w, lv, _det, _note = sheet
+    det.locked = True
+    frame = (det.x, det.y, det.w, det.h)
+    height = note.height
+    gb, _label = _shift_pad(lv, 2.0)
+    gb.end_drag()
+    assert (det.x, det.y, det.w, det.h) == frame
+    assert note.height == pytest.approx(height * 2)

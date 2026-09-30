@@ -50,6 +50,10 @@
   leaders and hatches turn properly. The sheet gumball's rotation ring,
   offered only when paper geometry alone was picked, now shows for any pick
   and turns it all the same way, live as you drag, with Alt to turn copies.
+  Shift on its pad, which scaled only notes and paper geometry and quietly
+  moved anything else instead, now scales everything picked the way `scale`
+  does: a detail's frame grows and keeps its drawing scale, and text height,
+  dimension offsets and hatch spacing grow with it.
 
 - **Trim takes the part you click, in one click (#31).** After the cutters,
   trim asked for the object to trim and then which piece of it to take
