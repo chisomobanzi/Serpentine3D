@@ -342,22 +342,92 @@ def cmd_split(ctx):
 
 @command("trim", aliases=("tr",))
 def cmd_trim(ctx):
+    """Cut objects with the cutters and take away the part clicked.
+
+    One click says both which object and which part of it goes, as in
+    Rhino (#31): the piece nearest where the click landed is removed at
+    once, and it asks again for the next until Enter. A pick with no
+    position (typed, scripted, or chosen from a list) cannot say which
+    part, so it asks which piece instead, as trim always did.
+    """
     cutters = yield SelectReq("Select cutting objects")
-    targets = yield SelectReq("Select object to trim",
-                              kinds=("curve", "surface", "solid", "picture"),
-                              max_count=1, allow_preselected=False)
-    target = targets[0]
-    pieces = g.split_shape(target.shape, [c.shape for c in cutters],
-                           direction=tuple(ctx.cplane.normal))
+    cutting = [(c.id, c.shape) for c in cutters]
+    trimmed = 0
+    while True:
+        picked = yield SelectReq(
+            "Click the part to trim away"
+            + (", Enter when done" if trimmed else ""),
+            kinds=("curve", "surface", "solid", "picture"),
+            min_count=0 if trimmed else 1, max_count=1,
+            allow_preselected=False, want_point=True)
+        if not picked:
+            break
+        target = picked[0]
+        at = ctx.pick_points.get(target.id)
+        pieces = _pieces_to_trim(ctx, target, cutting)
+        if pieces is None:
+            if at is None:
+                return          # scripted, as trim always was: said, and done
+            continue            # clicked: say so and let the next click try
+        if at is None:
+            yield from _trim_by_asking(ctx, target, pieces)
+            return
+        doomed = _piece_nearest(pieces, at)
+        for i, piece in enumerate(pieces):
+            if i != doomed:
+                kept = _add_split_piece(ctx, piece, target)
+                ctx.scene.update(kept.id, name=target.name)
+        ctx.scene.remove(target.id)
+        trimmed += 1
+    if trimmed:
+        ctx.echo(f"Trimmed {trimmed} part(s).")
+
+
+def _pieces_to_trim(ctx, target, cutting):
+    """`target` cut by every cutter but itself, or None, said why."""
+    others = [shape for cid, shape in cutting if cid != target.id]
+    if not others:
+        ctx.echo(f"{target.name} is the only cutter; nothing to trim it with.")
+        return None
+    try:
+        pieces = g.split_shape(target.shape, others,
+                               direction=tuple(ctx.cplane.normal))
+    except g.GeometryError:
+        pieces = []
     if len(pieces) < 2:
         ctx.echo(f"The cutters do not cross {target.name}; nothing to trim.")
-        return
+        return None
+    return pieces
+
+
+def _piece_nearest(pieces, at) -> int:
+    """Which piece the clicked point is on: the one nearest to it."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeVertex
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    from OCP.gp import gp_Pnt
+    here = BRepBuilderAPI_MakeVertex(gp_Pnt(*at)).Vertex()
+    best, best_d = 0, float("inf")
+    for i, piece in enumerate(pieces):
+        shape = piece.face() if hasattr(piece, "face") else piece
+        try:
+            d = BRepExtrema_DistShapeShape(here, shape).Value()
+        except Exception:                                   # noqa: BLE001
+            continue
+        if d < best_d:
+            best, best_d = i, d
+    return best
+
+
+def _trim_by_asking(ctx, target, pieces):
+    """The object split, then each piece clicked taken away until Enter.
+
+    Each click takes its piece away at once and the prompt comes back for
+    the next, the way Rhino does it; Enter or Escape ends with whatever
+    was trimmed staying trimmed (issue #23). Only the pieces are on offer,
+    so the cutters and the rest of the model cannot be clicked away.
+    """
     added = [_add_split_piece(ctx, p, target) for p in pieces]
     ctx.scene.remove(target.id)
-    # Each click takes its piece away at once and the prompt comes back for
-    # the next, the way Rhino does it; Enter or Escape ends with whatever
-    # was trimmed staying trimmed (issue #23). Only the pieces are on offer,
-    # so the cutters and the rest of the model cannot be clicked away.
     piece_ids = {a.id for a in added}
     trimmed = 0
     try:

@@ -622,7 +622,9 @@ class MainWindow(QMainWindow):
         vp.layoutSelectionChanged.connect(self._update_status)
         vp.layoutSelectionChanged.connect(self.properties.refresh)
         vp.history = self.history
-        vp.objectClicked.connect(self._on_object_clicked)
+        vp.objectClicked.connect(
+            lambda obj_id, mods, pane=vp: self._on_object_clicked(
+                obj_id, mods, pane))
         vp.emptyClicked.connect(self._on_empty_clicked)
         vp.boxSelected.connect(self._on_box_selected)
         vp.pointPicked.connect(self._on_point_picked)
@@ -1392,9 +1394,14 @@ class MainWindow(QMainWindow):
         elif self.processor.busy and self.processor.request is req:
             self.processor.cancel()
 
-    def _on_object_clicked(self, obj_id: str, modifiers):
-        if isinstance(self.processor.request, SelectReq):
-            self.processor.click_object(obj_id)
+    def _on_object_clicked(self, obj_id: str, modifiers, pane=None):
+        req = self.processor.request
+        if isinstance(req, SelectReq):
+            at = None
+            px = getattr(pane, "last_click_px", None)
+            if req.want_point and px is not None:
+                at = pane.point_on(obj_id, *px)
+            self.processor.click_object(obj_id, at=at)
             return
         additive = bool(modifiers & (Qt.KeyboardModifier.ShiftModifier
                                      | Qt.KeyboardModifier.ControlModifier))

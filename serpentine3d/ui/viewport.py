@@ -998,6 +998,7 @@ class Viewport(QOpenGLWidget):
         # what the running command's points mean: "model" coordinates or
         # "paper" millimetres. Only a sheet can tell the two apart.
         self.point_space = "model"
+        self.last_click_px = None           # pixel of the last object click
         self.frame_aspect = None            # cinema frame guide (e.g. 2.39)
         self.grid_snap = bool(config.get("grid_snap")) if config else False
         self.grid_snap_step = (float(config.get("grid_snap_step",
@@ -3788,6 +3789,47 @@ class Viewport(QOpenGLWidget):
         hits = self.pick_objects(px, py)
         return hits[0] if hits else None
 
+    def point_on(self, obj_id: str, px: float, py: float):
+        """The point on an object nearest the ray through a pixel, or None.
+
+        Where a click landed on what it picked, for a command that needs
+        to know which part was meant, trim above all (#31). Of the points
+        the ray passes through, the nearest to the eye is the one seen.
+        Asked only when a command wants it: an exact distance on a large
+        solid is not free, and a plain click should not pay for it.
+        """
+        obj = self.scene.get(obj_id)
+        if obj is None:
+            return None
+        shape = obj.shape
+        if hasattr(shape, "face") and callable(shape.face):
+            shape = shape.face()                  # a picture's own plane
+        try:
+            from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+            from OCP.gp import gp_Pnt
+            from ..core import geometry as g
+            origin, direction = self._eye().ray_through(
+                px, py, self.width(), self.height())
+            origin = np.asarray(origin, float)
+            direction = np.asarray(direction, float)
+            direction /= np.linalg.norm(direction) or 1.0
+            lo, hi = obj.bbox()
+            reach = (float(np.linalg.norm(np.subtract(hi, lo)))
+                     + float(np.linalg.norm(np.add(lo, hi) / 2 - origin)) + 1.0)
+            ray = g.make_line(tuple(origin), tuple(origin + direction * reach))
+            dist = BRepExtrema_DistShapeShape(shape, ray)
+            if not dist.IsDone() or dist.NbSolution() == 0:
+                return None
+            best, best_t = None, float("inf")
+            for i in range(1, dist.NbSolution() + 1):
+                p = dist.PointOnShape1(i)
+                t = p.Distance(gp_Pnt(*origin))
+                if t < best_t:
+                    best, best_t = (p.X(), p.Y(), p.Z()), t
+            return best
+        except Exception:                                   # noqa: BLE001
+            return None                 # a mesh, a cloud: no exact point
+
     def pick_objects(self, px: float, py: float) -> list[str]:
         """Every object under the pixel, nearest first.
 
@@ -4367,8 +4409,10 @@ class Viewport(QOpenGLWidget):
         menu = ObjectChooser(rows, self)
         self._chooser = menu
         menu.rowHovered.connect(self.set_choice_hover)
+        # a row chosen from the list is not a place on the object
         menu.objectChosen.connect(
-            lambda obj_id: self.objectClicked.emit(obj_id, mods))
+            lambda obj_id: (setattr(self, "last_click_px", None),
+                            self.objectClicked.emit(obj_id, mods)))
         menu.aboutToHide.connect(self._chooser_closed)
         # Down and to the right of the cursor, so that letting the button up
         # without moving lands in the gap rather than on the first row.
@@ -4615,6 +4659,7 @@ class Viewport(QOpenGLWidget):
                 return
             picked = self.pick_object(pos.x(), pos.y())
             if picked:
+                self.last_click_px = (pos.x(), pos.y())
                 self.objectClicked.emit(picked, ev.modifiers())
             else:
                 self.emptyClicked.emit(ev.modifiers())

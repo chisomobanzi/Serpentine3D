@@ -161,6 +161,10 @@ class SelectReq(Req):
     choices: dict | None = None
     preview_fn: object = None
     accept: object = None                 # callable(obj) -> bool, extra filter
+    # Ask for where on the object a click landed, as well as which object:
+    # trim takes the part that point is on (#31). A viewport click supplies
+    # it; a typed, scripted or listed pick cannot, and leaves it out.
+    want_point: bool = False
 
 
 def _kinds_phrase(kinds: tuple) -> str:
@@ -258,6 +262,9 @@ class CommandContext:
         self.last_point: Point | None = None
         self._echo_fns: list = []
         self.result_ids: list[str] = []
+        # object id -> the world point a click landed on it, for the current
+        # selection prompt only (see SelectReq.want_point)
+        self.pick_points: dict = {}
         self.result_subobjects: list = []
         # set by the replay engine: the plane and aim a headless replay
         # answers with, standing in for the viewport that recorded them
@@ -779,6 +786,7 @@ class CommandProcessor:
             return
         if isinstance(req, SelectReq):
             self._select_buffer = []
+            self.ctx.pick_points = {}
             if (req.allow_preselected and self.ctx.selection.ids):
                 held = self.ctx.selection.objects()
                 pre = [o.id for o in held
@@ -963,7 +971,9 @@ class CommandProcessor:
             return False
         return req.accept is None or bool(req.accept(obj))
 
-    def click_object(self, obj_id: str):
+    def click_object(self, obj_id: str, at=None):
+        """Pick an object for the current selection prompt. `at` is where
+        on it the click landed, when the pick came from a viewport."""
         req = self.request
         if not isinstance(req, SelectReq):
             return
@@ -971,6 +981,8 @@ class CommandProcessor:
         if obj is None or not self._matching(obj, req):
             self.ctx.echo("Object type not accepted here.")
             return
+        if at is not None:
+            self.ctx.pick_points[obj_id] = tuple(float(v) for v in at)
         if obj_id in self._select_buffer:
             self._select_buffer.remove(obj_id)
         else:

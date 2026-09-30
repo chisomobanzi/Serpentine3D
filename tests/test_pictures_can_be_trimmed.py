@@ -19,7 +19,7 @@ def _start_trim(window, target, cutter):
     proc.run("trim")
     proc.click_object(cutter.id)
     proc.finish_selection()
-    assert isinstance(proc.request, SelectReq) and "object to trim" in proc.request.prompt.lower()
+    assert isinstance(proc.request, SelectReq) and "part to trim away" in proc.request.prompt.lower()
     proc.click_object(target.id)
 
 

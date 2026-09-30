@@ -25,6 +25,16 @@
 
 ### Fixed
 
+- **Trim takes the part you click, in one click (#31).** After the cutters,
+  trim asked for the object to trim and then which piece of it to take
+  away: two clicks for one decision. As in Rhino, one click now says both,
+  since where you click is on the part that goes. It goes at once, and trim
+  asks again for the next part until Enter. That needed to know where a
+  click lands on an object, which the selection never recorded, only what
+  it hit; a viewport click now carries the point, and on a solid it is the
+  face you see. A pick with no position, typed, scripted over RPC or chosen
+  from the list a held click offers, still asks which piece, as before.
+
 - **A surface with creases in it measures its true area and volume.**
   Found on the openNURBS DinerMug while chasing #34: the mug's body read
   30,852 in area against 38,845 in the render mesh Rhino stores for it, and
