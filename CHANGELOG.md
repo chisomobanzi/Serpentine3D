@@ -25,6 +25,14 @@
 
 ### Fixed
 
+- **A PDF saved from the file chooser is no longer named `.pdf.pdf`
+  (#39).** Printing sheets to "sheets.pdf" wrote "sheets.pdf.pdf". The
+  chooser adds the chosen format's extension to a name typed without one,
+  but kept a typed extension only when it was a format Export writes, and
+  PDF belongs to `exportpdf` alone. SVG sheets, viewport captures and
+  turntable videos were doubled the same way. A name ending in an extension
+  the chosen format lists now keeps it.
+
 - **The Osnap bar shows when object snaps are off.** Switching snaps off
   with the bar's On button, the `osnap` command or a key bound to it
   greyed out On alone, while End, Mid and the other types you had set

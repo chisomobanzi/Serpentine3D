@@ -61,8 +61,10 @@ def test_export_does_not_lead_with_all_supported():
     assert fileio.export_filter().startswith("Serpentine3D (*.serp)")
 
 
-def _export_path_for(monkeypatch, typed: str, name_filter: str) -> str:
-    """Run the real Export chooser with a canned filename + format choice."""
+def _export_path_for(monkeypatch, typed: str, name_filter: str,
+                     filters: str = "") -> str:
+    """Run the real Export chooser with a canned filename + format choice;
+    `filters` stands in for a command's own chooser, as exportpdf's."""
     from serpentine3d import app as app_mod
 
     class Rec(app_mod.QFileDialog):
@@ -82,7 +84,7 @@ def _export_path_for(monkeypatch, typed: str, name_filter: str) -> str:
     monkeypatch.setattr(app_mod, "QFileDialog", Rec)
     win = app_mod.MainWindow()
     try:
-        return win._pick_file(save=True, title="Export")
+        return win._pick_file(save=True, title="Export", filters=filters)
     finally:
         win.close()
 
@@ -222,3 +224,33 @@ def test_rhino_version_reads_off_the_chosen_filter():
     assert fileio.rhino_version_from_filter("Rhino (*.3dm)") == 8
     assert fileio.rhino_version_from_filter("STEP (*.step *.stp)") == 8
     assert fileio.rhino_version_from_filter("") == 8
+
+
+# --- a command's own chooser (#39) ------------------------------------------
+# exportpdf wrote sheets.pdf.pdf: a typed extension was kept only when it was
+# one Export writes, and PDF is exportpdf's alone. So were SVG sheets, PNG
+# captures and MP4 turntables, each doubled the same way.
+
+@pytest.mark.parametrize("typed, name_filter", [
+    ("/tmp/sheets.pdf", "PDF (*.pdf)"),
+    ("/tmp/Sheets.PDF", "PDF (*.pdf)"),
+    ("/tmp/Sheet 1.svg", "SVG (*.svg)"),
+    ("/tmp/viewport.png", "Images (*.png *.jpg *.jpeg)"),
+    ("/tmp/viewport.jpg", "Images (*.png *.jpg *.jpeg)"),
+    ("/tmp/turntable.mp4", "MP4 video (*.mp4)"),
+])
+def test_a_name_with_the_filters_own_extension_keeps_it(typed, name_filter):
+    assert fileio.ensure_suffix(typed, name_filter) == typed
+
+
+def test_a_name_without_it_still_gains_the_filters_extension():
+    assert fileio.ensure_suffix("/tmp/sheets", "PDF (*.pdf)") == \
+        "/tmp/sheets.pdf"
+    assert fileio.ensure_suffix("/tmp/my.part", "PDF (*.pdf)") == \
+        "/tmp/my.part.pdf"
+
+
+def test_the_pdf_chooser_hands_back_the_name_as_typed(monkeypatch):
+    path = _export_path_for(monkeypatch, "/tmp/sheets.pdf", "PDF (*.pdf)",
+                            filters="PDF (*.pdf)")
+    assert path == "/tmp/sheets.pdf"

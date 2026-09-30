@@ -116,15 +116,27 @@ def rhino_version_from_filter(name_filter: str) -> int:
     return 8
 
 
+def _filter_exts(name_filter: str) -> set:
+    """Every extension a name filter lists, with its dot:
+    "Images (*.png *.jpg)" -> {".png", ".jpg"}."""
+    _, _, globs = name_filter.partition("(")
+    return {g[1:].lower() for g in globs.rstrip(")").split()
+            if g.startswith("*.")}
+
+
 def ensure_suffix(path: str, name_filter: str) -> str:
     """Give a saved path an extension when the user typed none, so a bare
     "part" saves as the format they picked instead of failing to dispatch. A
-    typed extension we can actually write wins over the dropdown; anything
-    else ("my.part") keeps its text and gains the chosen suffix."""
+    typed extension we can actually write wins over the dropdown, and so does
+    one the chosen filter itself names: a command's own chooser, PDF or SVG
+    or a video, writes formats Export does not, and "sheets.pdf" came back
+    as "sheets.pdf.pdf" (#39). Anything else ("my.part") keeps its text and
+    gains the chosen suffix."""
     suffix = suffix_for_filter(name_filter)
     if not suffix:
         return path
-    if os.path.splitext(path)[1].lower() in EXPORT_EXTS:
+    ext = os.path.splitext(path)[1].lower()
+    if ext in EXPORT_EXTS or ext in _filter_exts(name_filter):
         return path
     return f"{path}.{suffix}"
 
