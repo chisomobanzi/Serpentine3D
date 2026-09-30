@@ -130,9 +130,14 @@ class PaperGumball:
                 at[1] + (s if axis == Y else 0.0))
 
     def _can_rotate(self) -> bool:
-        """Whether every selected item has paper-plane geometry to turn."""
-        picks = self._picks()
-        return bool(picks) and all(kind == "object" for kind, _obj in picks)
+        """Whether there is anything picked the ring could turn.
+
+        Everything a sheet holds can be turned (#36): what cannot itself
+        take an angle is placed, a note orbiting and staying level, a frame
+        moving at its own size. Only a locked frame stays, and `_picks`
+        has already left it out.
+        """
+        return bool(self._picks())
 
     def hit_test(self, px: float, py: float):
         if not self.active():
@@ -217,7 +222,11 @@ class PaperGumball:
                     ))
                 else:
                     object_originals.append((obj, obj.shape))
-        rotation_originals = ([(obj, obj.shape) for _kind, obj in picks]
+        # every pick as it was at the press, so each step of the drag turns
+        # from there: a shape for paper geometry, the fields for the rest
+        rotation_originals = ([(kind, obj, obj.shape if kind == "object"
+                                else copy.deepcopy(vars(obj)))
+                               for kind, obj in picks]
                               if rotating else [])
         self.drag = {
             "handle": handle,
@@ -277,14 +286,29 @@ class PaperGumball:
         return angle
 
     def _rotate_items_to(self, angle: float):
-        """Rotate paper objects from their drag-start shapes."""
-        from ..core import geometry
+        """Turn everything picked from its drag-start state, the way the
+        rotate command turns it (see `transform_sheet_item`)."""
+        import math
+
+        from ..core.layout import transform_sheet_item
         d = self.drag
-        anchor = d["anchor"]
-        centre = (float(anchor[0]), float(anchor[1]), 0.0)
-        for obj, shape in d["rotation_originals"]:
-            obj.shape = geometry.rotate(shape, centre, (0.0, 0.0, 1.0),
-                                        angle)
+        anchor = np.asarray(d["anchor"], float)
+        a = math.radians(angle)
+        turn = np.array([[math.cos(a), -math.sin(a)],
+                         [math.sin(a), math.cos(a)]])
+        matrix = np.eye(3)
+        matrix[:2, :2] = turn
+        matrix[:2, 2] = anchor - turn @ anchor
+        for kind, obj, state in d["rotation_originals"]:
+            if kind == "object":
+                obj.shape = state
+            else:
+                obj.__dict__.clear()
+                obj.__dict__.update(copy.deepcopy(state))
+            if abs(angle) >= 1e-12:
+                transform_sheet_item(kind, obj, matrix, 1.0, self.vp.scene)
+            if kind == "detail":
+                self.lv._hlr_cache.pop(obj.id, None)
         d["angle"] = float(angle)
         self.vp.scene.notify("layouts")
 

@@ -47,7 +47,9 @@
   refused a pick with anything else in it; it now turns everything. Notes,
   which are always drawn level, orbit the pivot and stay level, and a
   detail frame moves to its turned place at its own size; dimensions,
-  leaders and hatches turn properly.
+  leaders and hatches turn properly. The sheet gumball's rotation ring,
+  offered only when paper geometry alone was picked, now shows for any pick
+  and turns it all the same way, live as you drag, with Alt to turn copies.
 
 - **Trim takes the part you click, in one click (#31).** After the cutters,
   trim asked for the object to trim and then which piece of it to take
