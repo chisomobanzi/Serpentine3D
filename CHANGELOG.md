@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Ctrl+V pastes text into the command line (#37).** An empty command
+  line hands Ctrl+V to the window so that it can paste copied objects, and
+  paste only knew about objects: a command name or a coordinate copied from
+  anywhere else could be pasted with a right-click, or with Ctrl+V once
+  something was typed, but not with Ctrl+V into an empty line, which is
+  where it is wanted. Paste now does what Rhino's does. Text on the
+  clipboard goes to the command line, or to the Assistant when that is
+  where you are typing, and objects paste when objects were copied last.
+  Copying objects now puts them on the system clipboard as well, so text
+  copied before them cannot win against them, and pasting that copy
+  somewhere else gives a line saying what was copied.
+
 ## 0.10.5 — 2026-09-30
 
 ### Added

@@ -7,7 +7,7 @@ import signal
 import sys
 
 import numpy as np
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QMimeData, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
@@ -55,6 +55,10 @@ def clamp_panel_width(width, window_width):
 
 
 APP_TITLE = "Serpentine3D"
+
+
+# the system clipboard format that says Serpentine3D objects were copied
+_CLIPBOARD_MARK = "application/x-serpentine3d-copy"
 
 
 class MainWindow(QMainWindow):
@@ -1565,6 +1569,7 @@ class MainWindow(QMainWindow):
                 return
             self._clipboard = ("sheet", [(k, _copy.deepcopy(o))
                                          for k, o in lv.selected])
+            self._claim_clipboard(len(lv.selected), "sheet item")
             self.ctx.echo(f"Copied {len(lv.selected)} sheet item(s).")
             return
         objs = self.selection.objects()
@@ -1572,7 +1577,29 @@ class MainWindow(QMainWindow):
             return
         self._clipboard = ("model", [(o.name, o.shape, o.layer_id)
                                      for o in objs])
+        self._claim_clipboard(len(objs), "object")
         self.ctx.echo(f"Copied {len(objs)} object(s).")
+
+    def _claim_clipboard(self, count: int, noun: str):
+        """Make a copy of objects what the system clipboard holds.
+
+        Paste pastes text when the clipboard holds text (#37), so a copy of
+        objects has to take the clipboard over, or text copied before it
+        would win. It says so in words too: a clipboard manager that keeps
+        only text, or puts old text back over a clipboard with none, still
+        leaves something `_copied_objects_are_on_the_clipboard` can know.
+        """
+        plural = "" if count == 1 else "s"
+        self._clipboard_words = f"{count} {noun}{plural} copied in Serpentine3D"
+        mime = QMimeData()
+        mime.setData(_CLIPBOARD_MARK, b"1")
+        mime.setText(self._clipboard_words)
+        QApplication.clipboard().setMimeData(mime)
+
+    def _copied_objects_are_on_the_clipboard(self, mime) -> bool:
+        return mime is not None and (
+            mime.hasFormat(_CLIPBOARD_MARK)
+            or mime.text() == getattr(self, "_clipboard_words", None))
 
     def _paste(self):
         """Paste asks the clipboard, because what it holds is not in doubt.
@@ -1582,6 +1609,19 @@ class MainWindow(QMainWindow):
         that is showing — which need not be the one they were copied from,
         and that is the point of it.
         """
+        mime = QApplication.clipboard().mimeData()
+        if (mime is not None and mime.hasText() and mime.text()
+                and not self._copied_objects_are_on_the_clipboard(mime)):
+            # Text was copied last, from anywhere: it goes where you type,
+            # as right-click Paste in the command line puts it, and as
+            # Rhino's Paste does with text (#37).
+            if self.command_workspace.mode == "ai":
+                field = self.command_workspace.assistant.input
+            else:
+                field = self.command_line.input
+            field.setFocus()
+            field.paste()
+            return
         clip = getattr(self, "_clipboard", None)
         if not clip:
             return
