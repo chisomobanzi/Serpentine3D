@@ -72,6 +72,9 @@ class OsnapBar(QWidget):
 
     def _show_master(self, on: bool):
         """Wake the snap types up, or put them to sleep, with the master."""
+        # it says what it is, not only what it would be: a greyed "On" read
+        # as one more snap type switched off, not all of them
+        self._master.setText("On" if on else "Off")
         for t, btn in self._buttons.items():
             btn.setProperty("dormant", not on)
             btn.setToolTip(_TIPS[t] if on else

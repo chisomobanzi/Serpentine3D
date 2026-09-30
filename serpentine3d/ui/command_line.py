@@ -196,6 +196,7 @@ class CommandLine(QWidget):
         self._chip_row.setSpacing(6)
         self._chips: list[QPushButton] = []
         self._keyword_chips: list[QPushButton] = []
+        self._keyword_default: str | None = None
 
         row = self.entry_layout = QHBoxLayout()
         row.setContentsMargins(8, 4, 8, 6)
@@ -273,15 +274,18 @@ class CommandLine(QWidget):
             self._chip_row.addWidget(chip)
             self._chips.append(chip)
 
-    def set_keywords(self, words: list):
+    def set_keywords(self, words: list, default: str | None = None):
         """Show one-shot keyword chips; clicking one answers the prompt.
 
         Where an option chip is Name=Value and cycles, a keyword is a word
-        the prompt takes whole — Close, Center, BothSides — the clickable
-        twin of typing it.
+        the prompt takes whole — Close, Center, BothSides, or a question's
+        Yes and No — the clickable twin of typing it. `default` is the one
+        Enter or a right-click would give, and is marked as such.
         """
-        if words == [c.text() for c in self._keyword_chips]:
+        if (words == [c.text() for c in self._keyword_chips]
+                and default == self._keyword_default):
             return
+        self._keyword_default = default
         for c in self._keyword_chips:
             self._chip_row.removeWidget(c)
             c.deleteLater()
@@ -296,7 +300,11 @@ class CommandLine(QWidget):
                 "QPushButton { color: #7fb3d8; background: #26272b;"
                 " border: 1px solid #3a3b40; border-radius: 9px;"
                 " padding: 1px 10px; }"
-                "QPushButton:hover { border-color: #7fb3d8; }")
+                "QPushButton:hover { border-color: #7fb3d8; }"
+                'QPushButton[default="true"] { border-color: #7fb3d8; }')
+            if word == default:
+                chip.setProperty("default", True)
+                chip.setToolTip(f"Click, Enter or right-click for {word}")
             chip.clicked.connect(
                 lambda _=False, w=word: self.keywordClicked.emit(w))
             self._chip_row.addWidget(chip)

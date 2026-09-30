@@ -1099,7 +1099,8 @@ class MainWindow(QMainWindow):
                 req.prompt = "Text position (baseline anchor)"
         self.command_line.set_prompt(self.processor.prompt_text())
         self.command_line.set_options(self.processor.option_chips())
-        self.command_line.set_keywords(self.processor.keyword_chips())
+        self.command_line.set_keywords(self.processor.keyword_chips(),
+                                       self.processor.keyword_default())
         # every pane, because a ghost is set on every pane: clearing one of
         # them leaves a preview on the others that no command owns any more
         ghost = self._standing_ghost()

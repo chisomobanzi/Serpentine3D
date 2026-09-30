@@ -72,3 +72,13 @@ def test_a_type_that_is_off_looks_the_same_either_way(bar):
     osnaps._master.setChecked(False)
 
     assert _looks(perp) == off
+
+
+def test_the_master_says_off_when_it_is_off(bar):
+    _w, osnaps = bar
+    osnaps._master.setChecked(True)
+    assert osnaps._master.text() == "On"
+
+    osnaps._master.setChecked(False)
+
+    assert osnaps._master.text() == "Off"

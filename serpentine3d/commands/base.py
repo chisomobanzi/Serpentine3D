@@ -144,6 +144,10 @@ def has_text_editor(ctx):
     return processor is not None and not processor.headless
 
 
+# the most answers a question shows as chips to click
+MAX_ANSWER_CHIPS = 10
+
+
 @dataclass
 class OptionReq(Req):
     prompt: str
@@ -1084,7 +1088,20 @@ class CommandProcessor:
         the same as typing it.
         """
         req = self.request
+        if isinstance(req, OptionReq):
+            # a question's answers, the way Rhino puts them on its command
+            # line to click; a long list (every block, every layout) is one
+            # to type from, not a row of buttons
+            return (list(req.options)
+                    if len(req.options) <= MAX_ANSWER_CHIPS else [])
         return list(getattr(req, "extra_options", ()) or ())
+
+    def keyword_default(self):
+        """The keyword chip Enter would give, to mark as the default."""
+        req = self.request
+        if isinstance(req, OptionReq) and req.default in self.keyword_chips():
+            return req.default
+        return None
 
     def option_chips(self) -> list:
         """[(name, current_value)] for the active request's options."""
