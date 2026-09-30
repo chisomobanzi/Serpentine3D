@@ -25,6 +25,14 @@
 
 ### Fixed
 
+- **The Osnap bar shows when object snaps are off.** Switching snaps off
+  with the bar's On button, the `osnap` command or a key bound to it
+  greyed out On alone, while End, Mid and the other types you had set
+  stayed lit, so the bar with snaps off looked just like the bar with them
+  on, and nothing snapping looked like snapping being broken. The types now
+  go quiet with it, a dashed outline instead of a lit button, and keep
+  their settings for when snaps come back on.
+
 - **Scale, Scale1D, Scale2D, Mirror and Rotate work on everything picked on a sheet (#36).**
   Pick a polyline, a detail or a dimension on a layout, type `scale`, and
   the command asked for model objects no click on paper can give, so it

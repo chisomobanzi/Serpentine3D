@@ -62,6 +62,22 @@ class OsnapBar(QWidget):
         self._ortho.toggled.connect(self._ortho_toggled)
         layout.addWidget(self._ortho)
         layout.addStretch(1)
+        # A type left set while snaps are off keeps its setting for when
+        # they come back on, but must not look on: lit up as usual, the bar
+        # with snaps off looked just like the bar with them on.
+        self.setStyleSheet(
+            'QToolButton[dormant="true"]:checked { background: transparent;'
+            ' color: #8a8272; border: 1px dashed #5d5646; }')
+        self._show_master(viewport.snaps.enabled)
+
+    def _show_master(self, on: bool):
+        """Wake the snap types up, or put them to sleep, with the master."""
+        for t, btn in self._buttons.items():
+            btn.setProperty("dormant", not on)
+            btn.setToolTip(_TIPS[t] if on else
+                           f"{_TIPS[t]} (object snaps are off: turn On)")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
 
     def _button(self, text: str, tip: str) -> QToolButton:
         btn = QToolButton()
@@ -74,6 +90,7 @@ class OsnapBar(QWidget):
 
     def _master_toggled(self, on: bool):
         self.viewport.snaps.enabled = on
+        self._show_master(on)
         if self.config:
             self.config.set("osnaps", "enabled", on)
 
@@ -95,6 +112,7 @@ class OsnapBar(QWidget):
     def refresh(self):
         """Sync button states from viewport (after commands toggle them)."""
         self._master.setChecked(self.viewport.snaps.enabled)
+        self._show_master(self.viewport.snaps.enabled)
         for t, btn in self._buttons.items():
             btn.setChecked(self.viewport.snaps.types.get(t, False))
         self._grid.setChecked(self.viewport.grid_snap)
