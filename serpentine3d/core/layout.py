@@ -694,6 +694,81 @@ def move_sheet_item(kind: str, obj, dx: float, dy: float):
         move_annotation(kind, obj, dx, dy)
 
 
+def transform_sheet_item(kind: str, obj, matrix, size: float = 1.0,
+                         scene=None) -> bool:
+    """Put anything a sheet holds through an affine map of the paper.
+
+    `matrix` is a 3x3 map of paper millimetres, (x, y, 1) in and out; it
+    moves every point an item is placed by. `size` is what the item's own
+    lengths become worth: text height, a dimension's offset, a hatch's
+    spacing. A uniform scale passes its factor, and a one-way stretch
+    passes 1, which moves text and dimensions without distorting them.
+
+    A detail's frame is mapped and its drawing scale kept, so a 1:50 detail
+    stays 1:50 and shows more or less of the model. A locked detail is left
+    alone, as it is by `move_sheet_item`; the return says whether the item
+    was changed.
+    """
+    import numpy as np
+    m = np.asarray(matrix, float)
+
+    def at(x, y):
+        p = m @ np.array([float(x), float(y), 1.0])
+        return float(p[0]), float(p[1])
+
+    def pts(seq):
+        return [list(at(p[0], p[1])) for p in seq]
+
+    grow = abs(float(size) - 1.0) > 1e-12
+    if kind == "detail":
+        if obj.locked:
+            return False
+        xs, ys = zip(*(at(x, y) for x, y in detail_corners(obj)))
+        obj.x, obj.y = min(xs), min(ys)
+        obj.w = max(max(xs) - obj.x, MIN_DETAIL_MM)
+        obj.h = max(max(ys) - obj.y, MIN_DETAIL_MM)
+    elif kind == "object":
+        from . import geometry
+        m4 = np.eye(4)
+        m4[:2, :2] = m[:2, :2]
+        m4[:2, 3] = m[:2, 2]
+        obj.shape = geometry.apply_matrix(obj.shape, m4)
+    elif kind in ("note", "leader"):
+        if kind == "note":
+            obj.x, obj.y = at(obj.x, obj.y)
+        else:
+            obj.points = pts(obj.points)
+        if grow:
+            # A named style owns the rendered height; scaling is an edit to
+            # this one, so it leaves the style at the size it was drawn.
+            height = note_text_height(obj, scene)
+            obj.style = ""
+            obj.height = height * abs(float(size))
+    elif kind == "dim":
+        obj.x1, obj.y1 = at(obj.x1, obj.y1)
+        obj.x2, obj.y2 = at(obj.x2, obj.y2)
+        obj.offset *= abs(float(size))
+        if getattr(obj, "m1", None) is not None:
+            obj.detail_id = ""          # its points no longer project from
+            obj.m1 = obj.m2 = None      # the model points it was anchored to
+    elif kind == "rdim":
+        obj.cx, obj.cy = at(obj.cx, obj.cy)
+        obj.px, obj.py = at(obj.px, obj.py)
+    elif kind == "adim":
+        obj.vx, obj.vy = at(obj.vx, obj.vy)
+        obj.x1, obj.y1 = at(obj.x1, obj.y1)
+        obj.x2, obj.y2 = at(obj.x2, obj.y2)
+        obj.radius *= abs(float(size))
+    elif kind == "hatch":
+        obj.points = pts(obj.points)
+        if getattr(obj, "holes", None):
+            obj.holes = [pts(ring) for ring in obj.holes]
+        obj.spacing *= abs(float(size))
+    else:
+        return False
+    return True
+
+
 MIN_DETAIL_MM = 5.0
 
 

@@ -25,6 +25,19 @@
 
 ### Fixed
 
+- **Scale, Scale1D and Scale2D work on what is picked on a sheet (#36).**
+  Pick a polyline, a detail or a dimension on a layout, type `scale`, and
+  the command asked for model objects no click on paper can give, so it
+  could only be cancelled. `move` and `rotate` had learned to ask the sheet
+  first; the scale family had not, and being declared model-only it would
+  have refused a paper point anyway. On a sheet they now scale what is
+  picked there, in paper millimetres: paper geometry and pictures as
+  shapes, a detail's frame (its drawing scale kept, so a 1:50 detail stays
+  1:50 and shows more or less of the model), and annotations by their
+  points, with text height, dimension offset and hatch spacing following a
+  uniform scale. `scale1d` moves text and dimensions without distorting
+  them. A locked detail stays put and says so, as it does for `move`.
+
 - **Trim takes the part you click, in one click (#31).** After the cutters,
   trim asked for the object to trim and then which piece of it to take
   away: two clicks for one decision. As in Rhino, one click now says both,

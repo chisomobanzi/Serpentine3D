@@ -336,11 +336,84 @@ def cmd_rotate(ctx):
             action=("rotate", center, axis, angle))
 
 
-@command("scale", aliases=("sc",))
+def _scale_on_paper(ctx, lv, one_way: bool):
+    """Scale what is picked on a sheet, in paper millimetres (#36).
+
+    `scale` and `scale2d` are the same thing on paper, the sheet being a
+    plane: a uniform scale, text and offsets growing with it. `scale1d`
+    stretches along one direction and leaves text and dimensions their
+    size. A locked detail is left alone and said so, as for move.
+    """
+    import math
+
+    import numpy as np
+    from ..core.layout import transform_sheet_item
+    picks = list(lv.selected)
+    if not picks:
+        ctx.echo("Nothing picked on the sheet: click geometry, a detail "
+                 "frame or an annotation first.")
+        return
+    base = yield PointReq("Base point")
+    ref = yield PointReq("Scale factor, or first reference point",
+                         rubber_from=base, allow_number=True)
+    bx, by = float(base[0]), float(base[1])
+    if isinstance(ref, float):
+        factor = ref
+        aim = ctx.aim_direction() if one_way else None
+        axis = (aim[1][0], aim[1][1]) if aim is not None else (1.0, 0.0)
+    else:
+        axis = (float(ref[0]) - bx, float(ref[1]) - by)
+        d0 = math.hypot(*axis)
+        if d0 < 1e-12:
+            ctx.echo("Reference point is on the base point — cancelled.")
+            return
+        p2 = yield PointReq("Second reference point (or type factor)",
+                            rubber_from=base, allow_number=True)
+        if isinstance(p2, float):
+            factor = p2
+        elif one_way:
+            # how far along the axis the pick lands, against the reference
+            factor = ((float(p2[0]) - bx) * axis[0]
+                      + (float(p2[1]) - by) * axis[1]) / (d0 * d0)
+        else:
+            factor = math.hypot(float(p2[0]) - bx, float(p2[1]) - by) / d0
+    if abs(factor) < 1e-9:
+        ctx.echo("Zero scale factor — cancelled.")
+        return
+    if one_way:
+        a = np.asarray(axis, float)
+        a /= np.linalg.norm(a) or 1.0
+        linear = np.eye(2) + (factor - 1.0) * np.outer(a, a)
+        size = 1.0
+    else:
+        linear = np.eye(2) * factor
+        size = factor
+    matrix = np.eye(3)
+    matrix[:2, :2] = linear
+    matrix[:2, 2] = np.array([bx, by]) - linear @ np.array([bx, by])
+    done = kept = 0
+    for kind, obj in picks:
+        if transform_sheet_item(kind, obj, matrix, size, ctx.scene):
+            done += 1
+        else:
+            kept += 1
+    ctx.scene.notify("layouts")
+    how = " along one direction" if one_way else ""
+    msg = f"Scaled {done} sheet item(s) by {factor:g}{how}."
+    if kept:
+        msg += f" {kept} locked detail(s) left as they were."
+    ctx.echo(msg)
+
+
+@command("scale", aliases=("sc",), space="any")
 def cmd_scale(ctx):
     """Scale about a base point: type a factor, or grab a reference
     point and drag it to its new position (live preview)."""
     import math
+    lv = ctx.sheet_view()
+    if lv is not None:
+        yield from _scale_on_paper(ctx, lv, one_way=False)
+        return
     held, objs = yield from _what_to_transform(ctx, "Select objects to scale")
     center = yield PointReq("Base point")
     ref = yield PointReq("Scale factor, or first reference point",
@@ -879,12 +952,16 @@ def cmd_projecttocplane(ctx):
     ctx.echo(f"Flattened {n} object(s) onto the CPlane.")
 
 
-@command("scale1d")
+@command("scale1d", space="any")
 def cmd_scale1d(ctx):
     """Stretch along one direction only: type a factor and it stretches
     the way the cursor is pointing, or set the axis with a reference point
     and drag that to where it should end up."""
     import math
+    lv = ctx.sheet_view()
+    if lv is not None:
+        yield from _scale_on_paper(ctx, lv, one_way=True)
+        return
     held, objs = yield from _what_to_transform(
         ctx, "Select objects to scale in one direction")
     base = yield PointReq("Base point")
@@ -937,11 +1014,15 @@ def cmd_scale1d(ctx):
     _stretch(axis, factor)
 
 
-@command("scale2d")
+@command("scale2d", space="any")
 def cmd_scale2d(ctx):
     """Scale in the CPlane only (thickness along the CPlane normal is
     kept)."""
     import math
+    lv = ctx.sheet_view()
+    if lv is not None:
+        yield from _scale_on_paper(ctx, lv, one_way=False)
+        return
     held, objs = yield from _what_to_transform(
         ctx, "Select objects to scale in the CPlane")
     base = yield PointReq("Base point")
