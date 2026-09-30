@@ -25,6 +25,14 @@
 
 ### Fixed
 
+- **A Ctrl+Shift band holds faces even when you let go of the keys first
+  (#43).** The band read Ctrl+Shift off the mouse release, so holding the
+  chord, sweeping, and letting go of the keys a moment before the button
+  turned a sweep for faces into an ordinary band that selected the whole
+  solid. The keys a band starts with now decide what it is for; keys
+  first pressed partway through a sweep still count, and a Shift band let
+  go of early still adds to the selection.
+
 - **A PDF saved from the file chooser is no longer named `.pdf.pdf`
   (#39).** Printing sheets to "sheets.pdf" wrote "sheets.pdf.pdf". The
   chooser adds the chosen format's extension to a name typed without one,

@@ -4636,12 +4636,18 @@ class Viewport(QOpenGLWidget):
             x0, y0 = self._press_pos.x(), self._press_pos.y()
             x1, y1 = self._box_end.x(), self._box_end.y()
             crossing = x1 < x0            # drag right-to-left = crossing
-            ids = self._band_pick(x0, y0, x1, y1, crossing, ev.modifiers())
+            # The keys a band was started with say what it is for: letting
+            # go of Ctrl+Shift a moment before the button is not changing
+            # your mind, and read off the release it turned a sweep for
+            # faces into one for the whole solid (#43). Keys first pressed
+            # partway through the sweep still count.
+            mods = self._hold_mods or ev.modifiers()
+            ids = self._band_pick(x0, y0, x1, y1, crossing, mods)
             self._box_active = False
             self._press_pos = None
             self._box_end = None
             if ids is not None:
-                self.boxSelected.emit(ids, ev.modifiers())
+                self.boxSelected.emit(ids, mods)
             self.update()
             return
         if self._press_pos is not None:

@@ -237,3 +237,58 @@ def test_a_ctrl_shift_drag_from_the_mouse_holds_the_parts_it_swept(vp):
 
     assert _held(vp, "edge") == [(zz.id, 1)]
     assert vp.selection.ids == []
+
+
+# --- the chord you started with (issue #43) ---------------------------------
+# The band read Ctrl+Shift off the release. Hold the chord, sweep, and let go
+# of the keys a moment before the button, and the sweep landed as a plain
+# object band: the whole solid selected, no face held, which reads exactly
+# as "Ctrl+Shift and a drag does not take faces".
+
+def _sweep(vp, x0, y0, x1, y1, pressed, released):
+    from PySide6.QtCore import QEvent
+    _mouse(vp, QEvent.Type.MouseButtonPress, x0, y0,
+           Qt.MouseButton.LeftButton, pressed)
+    _mouse(vp, QEvent.Type.MouseMove, x1, y1,
+           Qt.MouseButton.LeftButton, pressed)
+    _mouse(vp, QEvent.Type.MouseButtonRelease, x1, y1,
+           Qt.MouseButton.NoButton, released)
+
+
+def test_letting_go_of_the_keys_first_still_holds_faces(vp):
+    box = _box(vp)
+    corners = [(x, y, z) for x in (0, 10) for y in (0, 10) for z in (0, 10)]
+    x0, y0, x1, y1 = _band_round(vp, corners)
+
+    _sweep(vp, x0, y0, x1, y1, CTRL_SHIFT, Qt.KeyboardModifier.NoModifier)
+
+    assert len(_held(vp, "face")) == 6
+    assert vp.selection.ids == [], "the solid itself must not be taken"
+    assert all(oid == box.id for oid, _ in _held(vp, "face"))
+
+
+def test_the_chord_pressed_during_the_sweep_still_counts(vp):
+    zz = _zigzag(vp)
+    x0, y0, x1, y1 = _band_round(vp, [(10, 0, 0), (10, 10, 0)])
+
+    _sweep(vp, x0, y0, x1, y1, Qt.KeyboardModifier.NoModifier, CTRL_SHIFT)
+
+    assert _held(vp, "edge") == [(zz.id, 1)]
+    assert vp.selection.ids == []
+
+
+def test_a_shift_band_let_go_of_early_still_adds(vp):
+    one = vp.scene.add(g.make_line((0, 0, 0), (10, 0, 0)), name="One")
+    two = vp.scene.add(g.make_line((0, 20, 0), (10, 20, 0)), name="Two")
+    _look(vp)
+    vp.selection.set([one.id])
+    got = []
+    vp.boxSelected.connect(lambda ids, mods: got.append((ids, mods)))
+    x0, y0, x1, y1 = _band_round(vp, [(0, 20, 0), (10, 20, 0)])
+
+    _sweep(vp, x0, y0, x1, y1, Qt.KeyboardModifier.ShiftModifier,
+           Qt.KeyboardModifier.NoModifier)
+
+    assert got and got[-1][0] == [two.id]
+    assert got[-1][1] & Qt.KeyboardModifier.ShiftModifier, (
+        "the band was started with Shift, so it adds")
