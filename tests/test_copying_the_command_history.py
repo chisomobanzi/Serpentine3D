@@ -76,9 +76,7 @@ def test_copying_geometry_still_works_with_nothing_picked_in_the_history(win):
     kind, items = win._clipboard
     assert kind == "model" and len(items) == 1
     # the clipboard now says objects were copied (#37), not history text
-    mime = QApplication.clipboard().mimeData()
-    assert mime.hasFormat("application/x-serpentine3d-copy")
-    assert mime.text() == "1 object copied in Serpentine3D"
+    assert QApplication.clipboard().text() == "1 object copied in Serpentine3D"
 
 
 def test_a_selection_left_in_the_history_does_not_go_stale(win):

@@ -7,7 +7,7 @@ import signal
 import sys
 
 import numpy as np
-from PySide6.QtCore import QEvent, QMimeData, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
@@ -56,9 +56,6 @@ def clamp_panel_width(width, window_width):
 
 APP_TITLE = "Serpentine3D"
 
-
-# the system clipboard format that says Serpentine3D objects were copied
-_CLIPBOARD_MARK = "application/x-serpentine3d-copy"
 
 
 class MainWindow(QMainWindow):
@@ -1585,21 +1582,18 @@ class MainWindow(QMainWindow):
 
         Paste pastes text when the clipboard holds text (#37), so a copy of
         objects has to take the clipboard over, or text copied before it
-        would win. It says so in words too: a clipboard manager that keeps
-        only text, or puts old text back over a clipboard with none, still
-        leaves something `_copied_objects_are_on_the_clipboard` can know.
+        would win. It does so in words, which is also what survives a
+        clipboard manager that keeps only text. Words and nothing else: a
+        QMimeData made here and left on the clipboard segfaults PySide6 as
+        the interpreter shuts down, so quitting after a copy crashed.
         """
         plural = "" if count == 1 else "s"
         self._clipboard_words = f"{count} {noun}{plural} copied in Serpentine3D"
-        mime = QMimeData()
-        mime.setData(_CLIPBOARD_MARK, b"1")
-        mime.setText(self._clipboard_words)
-        QApplication.clipboard().setMimeData(mime)
+        QApplication.clipboard().setText(self._clipboard_words)
 
     def _copied_objects_are_on_the_clipboard(self, mime) -> bool:
-        return mime is not None and (
-            mime.hasFormat(_CLIPBOARD_MARK)
-            or mime.text() == getattr(self, "_clipboard_words", None))
+        return (mime is not None
+                and mime.text() == getattr(self, "_clipboard_words", None))
 
     def _paste(self):
         """Paste asks the clipboard, because what it holds is not in doubt.
