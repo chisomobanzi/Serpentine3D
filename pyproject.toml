@@ -18,6 +18,9 @@ dependencies = [
     "rhino3dm>=8.0",
     "ezdxf>=1.1",
     "svgelements>=1.9",
+    # SketchUp files (#42): read from the reverse-engineered format, no SDK.
+    # Held to 1.3 because the importer reads a table from its parse results.
+    "openskp>=1.3,<1.4",
 ]
 
 [project.optional-dependencies]

@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Added
+
+- **SketchUp files import (#42).** File > Import and drag and drop take a
+  `.skp`, on Linux, Windows and Mac, with no SketchUp needed: SketchUp's own
+  reader is a Windows and Mac SDK, so on Linux nothing could open one. The
+  file is read by [OpenSKP](https://github.com/iamahsanmehmood/openskp), which
+  reads the format without it. Each group or component placed at the top of
+  the model comes in as an object for every separate body it holds, its
+  faces joined into a solid where they close, so push/pull, booleans and
+  fillets work on it, facing outward however SketchUp had them wound. Stray
+  edges come in as curves beside it, and what one group made is grouped so
+  it selects together. Faces loose at the top come in one object per tag.
+  Tags become layers with their colours and visibility, taken from the
+  faces when a group itself is untagged, and material colours come across.
+  Sizes are converted from SketchUp's inches. Curved surfaces arrive as
+  SketchUp's facets with every edge showing, and textures, face-by-face
+  colours, scenes and dimensions are not imported. Some files saved by
+  SketchUp 2018 and 2019, and by very old versions, cannot be read yet, and
+  say so with the way round it: export from SketchUp as OBJ, FBX or DXF.
+
 ### Fixed
 
 - **Ctrl+V pastes text into the command line (#37).** An empty command

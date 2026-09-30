@@ -21,6 +21,7 @@ IMPORT_FORMATS = [
     ("SVG", (".svg",)),
     ("PLY point cloud", (".ply",)),
     ("E57 point cloud", (".e57",)),
+    ("SketchUp", (".skp",)),
 ]
 
 EXPORT_FORMATS = [
@@ -221,27 +222,42 @@ def _import_file(scene, path: str, ext: str, report, replace: bool = False) -> i
     if ext == ".3dm":
         from . import rhino
         items = rhino.import_3dm(path, progress=report.part(0.0, 0.95))
-        # Adding is the last stretch and it is not free. The bar used to stop
-        # wherever the converter left it and sit there while thousands of
-        # objects went into the scene, which read as a hang at 98%.
-        adding = report.part(0.95, 1.0)
-        count = len(items) or 1
-        layer_map = {}
-        for done, (name, shape, meta) in enumerate(items, 1):
-            layer_id = _layer_for(scene, meta, layer_map)
-            # Not `obj`: that name is the .obj importer, one branch above.
-            added = scene.add(shape, name=name, layer_id=layer_id)
-            # An override only: leaving it None keeps the object following its
-            # layer, the way it does in Rhino.
-            if meta.get("color"):
-                added.color = meta["color"]
-            if meta.get("material"):
-                added.material = dict(meta["material"])
-            if not meta.get("visible", True):
-                added.visible = False
-            adding.tick(done / count, f"Adding object {done} of {count}")
-        return len(items)
+        return _add_items(scene, items, report.part(0.95, 1.0))
+    if ext == ".skp":
+        from . import skp
+        items = skp.import_skp(path, units=scene.units,
+                               progress=report.part(0.0, 0.95))
+        return _add_items(scene, items, report.part(0.95, 1.0))
     raise ValueError(f"Unsupported import format: {ext}")
+
+
+def _add_items(scene, items: list, adding) -> int:
+    """Put an importer's (name, shape, meta) into the scene, each on its
+    layer, made where the file names one this scene lacks.
+
+    Adding is the last stretch and it is not free. The bar used to stop
+    wherever the converter left it and sit there while thousands of
+    objects went into the scene, which read as a hang at 98%.
+    """
+    count = len(items) or 1
+    layer_map = {}
+    for done, (name, shape, meta) in enumerate(items, 1):
+        layer_id = _layer_for(scene, meta, layer_map)
+        added = scene.add(shape, name=name, layer_id=layer_id)
+        # An override only: leaving it None keeps the object following its
+        # layer, the way it does in Rhino.
+        if meta.get("color"):
+            added.color = meta["color"]
+        if meta.get("material"):
+            added.material = dict(meta["material"])
+        if not meta.get("visible", True):
+            added.visible = False
+        if meta.get("group"):
+            # what the file held together stays together: clicking one
+            # selects them all, as the group command's own ids do
+            added.group_id = meta["group"]
+        adding.tick(done / count, f"Adding object {done} of {count}")
+    return len(items)
 
 
 def _layer_for(scene, meta: dict, made: dict) -> str | None:

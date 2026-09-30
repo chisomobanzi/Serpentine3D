@@ -2866,6 +2866,11 @@ def _selftest() -> int:
             lines.append(f"step: {os.path.getsize(step)} bytes")
         vol = g.volume(scene.all()[0].shape)
         lines.append(f"volume: {vol:.1f}")
+        # SketchUp's reader, which a bundle can leave behind without
+        # anything else noticing; its core loads the compiled triangulator
+        import openskp
+        import openskp._core
+        lines.append(f"skp: openskp {openskp.__version__}")
         ok = abs(vol - 975.6) < 1.0
         lines.append("SELFTEST OK" if ok else "SELFTEST FAILED: bad volume")
     except Exception as exc:                                  # noqa: BLE001

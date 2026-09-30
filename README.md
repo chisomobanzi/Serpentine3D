@@ -295,6 +295,7 @@ Settings live in `~/.config/serpentine3d/settings.json`.
 | `.glb` | | ✓ | Binary glTF with materials (Unreal/Blender/web) |
 | `.usda` | | ✓ | USD for virtual-production pipelines |
 | `.e57` | ✓ | | Point clouds: separate registered scans, RGB colours, Cartesian/spherical coordinates; metres converted to model units |
+| `.skp` | ✓ | | SketchUp 2013 onward, no SketchUp needed: each group or component as solids and polysurfaces, tags as layers, material colours |
 
 ## The assistant (AI modelling)
 
