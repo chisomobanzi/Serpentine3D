@@ -38,6 +38,9 @@ def export_dxf(scene, path: str, only_ids: list | None = None):
         if layer_name == "Default":
             layer_name = "0"
         attribs = {"layer": layer_name}
+        if obj.kind == "hatch":
+            _write_hatch(msp, obj.shape, attribs)
+            continue
         if obj.kind == "curve":
             for edge in geometry.edges_of(obj.shape):
                 pts = geometry.sample_curve(edge, 64)
@@ -59,6 +62,50 @@ def export_dxf(scene, path: str, only_ids: list | None = None):
                 data.faces = [tuple(int(i) for i in t)
                               for t in mesh.triangles]
     doc.saveas(path)
+
+
+def _write_hatch(msp, hatch, attribs):
+    """A model hatch as a DXF HATCH in its own plane: its loops as
+    polyline paths, its pattern as the lines it is drawn with."""
+    from ezdxf.math import OCS
+    from ..core.hatch import _rings
+    frame = hatch.frame
+    normal = frame[:3, 2]
+    ocs = OCS(tuple(normal))
+    out = msp.add_hatch(dxfattribs=dict(attribs, extrusion=tuple(normal)))
+    elevation = ocs.from_wcs(tuple(frame[:3, 3])).z
+    out.dxf.elevation = (0.0, 0.0, float(elevation))
+    rings = []
+    for ring in _rings(hatch.region, frame):
+        world = [frame @ np.array([u, v, 0.0, 1.0]) for u, v in ring]
+        rings.append([tuple(ocs.from_wcs(tuple(p[:3])))[:2] for p in world])
+
+    def area(r):
+        a = np.asarray(r)
+        return abs(float(np.dot(a[:, 0], np.roll(a[:, 1], -1))
+                         - np.dot(np.roll(a[:, 0], -1), a[:, 1]))) / 2
+
+    rings.sort(key=area, reverse=True)
+    for i, ring in enumerate(rings):
+        out.paths.add_polyline_path(ring, is_closed=True,
+                                    flags=1 if i == 0 else 0)
+    if hatch.pattern == "solid":
+        out.set_solid_fill()
+        return
+    a = math.radians(hatch.angle)
+    d = math.cos(a) * frame[:3, 0] + math.sin(a) * frame[:3, 1]
+    d_ocs = ocs.from_wcs(tuple(d))
+    base = math.degrees(math.atan2(d_ocs.y, d_ocs.x))
+
+    def line(deg):
+        r = math.radians(deg)
+        return [deg, (0.0, 0.0), (-math.sin(r) * hatch.spacing,
+                                  math.cos(r) * hatch.spacing), []]
+
+    definition = [line(base)] + ([line(base + 90.0)]
+                                 if hatch.pattern == "cross" else [])
+    out.set_pattern_fill(f"SERP_{hatch.pattern.upper()}", angle=0.0,
+                         scale=1.0, pattern_type=2, definition=definition)
 
 
 def _is_straight(pts, tol=1e-7) -> bool:
@@ -168,12 +215,111 @@ def import_dxf(scene, path: str) -> int:
                     normal=tuple(e.dxf.extrusion),
                     start=float(e.dxf.start_param),
                     end=float(e.dxf.end_param))
+            elif kind == "HATCH":
+                shape = _hatches_from(e)
         except geometry.GeometryError:
             continue
-        if shape is not None:
-            scene.add(shape, layer_id=layer_for(e))
+        for part in (shape if isinstance(shape, list)
+                     else [] if shape is None else [shape]):
+            scene.add(part, layer_id=layer_for(e))
             n += 1
     return n
+
+
+def _hatches_from(entity) -> list:
+    """A DXF HATCH as hatch objects, one for each island it fills (#33).
+
+    The boundary paths come back from ezdxf as lines and Bezier spans in
+    world coordinates, arcs and ellipses already as Beziers, and are built
+    as exact edges; nesting decides which loops are holes. The pattern is
+    written out line by line, each with its angle in the entity's own plane
+    and the offset to the next line: the spacing is that offset measured
+    square to the line, and two directions at right angles are a cross.
+    Dashes are not drawn, so a dashed pattern comes in as its lines.
+    """
+    from ezdxf import path as dxfpath
+    from ezdxf.math import OCS
+    from ..core.hatch import HatchShape
+    wires = []
+    for path in dxfpath.from_hatch(entity):
+        wire = _wire_from_path(path)
+        if wire is not None:
+            wires.append(wire)
+    if not wires:
+        return []
+    regions = geometry.planar_regions(wires)
+    pattern, angle, spacing = _dxf_pattern(entity)
+    ocs = OCS(entity.dxf.extrusion)
+    ux, uy = np.asarray(tuple(ocs.ux), float), np.asarray(tuple(ocs.uy), float)
+    out = []
+    for region in regions:
+        try:
+            hatch = HatchShape(region, pattern, angle=angle, spacing=spacing,
+                               xdir=tuple(ux))
+            # The angle turns from the plane's x towards its y. Where the
+            # region's own normal faces the other way its y does too, and
+            # the same pattern is the angle the other way round.
+            if float(np.dot(hatch.frame[:3, 1], uy)) < 0:
+                hatch = hatch.edited(angle=-angle)
+        except geometry.GeometryError:
+            continue
+        out.append(hatch)
+    return out
+
+
+def _wire_from_path(path):
+    """One ezdxf boundary path as a closed wire of exact edges."""
+    from ezdxf.path import Command
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeWire
+    from OCP.Geom import Geom_BezierCurve
+    from OCP.TColgp import TColgp_Array1OfPnt
+    from OCP.gp import gp_Pnt
+
+    def bezier(points):
+        poles = TColgp_Array1OfPnt(1, len(points))
+        for i, p in enumerate(points, 1):
+            poles.SetValue(i, gp_Pnt(float(p.x), float(p.y), float(p.z)))
+        return BRepBuilderAPI_MakeEdge(Geom_BezierCurve(poles)).Edge()
+
+    edges = []
+    start = path.start
+    for cmd in path:
+        end = cmd.end
+        if cmd.type == Command.LINE_TO:
+            if start.distance(end) > 1e-12:
+                edges.append(geometry.make_line(tuple(start), tuple(end)))
+        elif cmd.type == Command.CURVE3_TO:
+            edges.append(bezier([start, cmd.ctrl, end]))
+        elif cmd.type == Command.CURVE4_TO:
+            edges.append(bezier([start, cmd.ctrl1, cmd.ctrl2, end]))
+        start = end
+    if start.distance(path.start) > 1e-9:
+        edges.append(geometry.make_line(tuple(start), tuple(path.start)))
+    if not edges:
+        return None
+    mk = BRepBuilderAPI_MakeWire()
+    for edge in edges:
+        mk.Add(geometry.occ.to_edge(edge))
+    return mk.Wire() if mk.IsDone() else None
+
+
+def _dxf_pattern(entity) -> tuple:
+    """(pattern, angle in degrees, spacing) of a HATCH entity."""
+    if entity.dxf.solid_fill:
+        return "solid", 0.0, 1.0
+    lines = list(entity.pattern.lines) if entity.pattern else []
+    if not lines:
+        return "lines", 45.0, 3.175 * float(entity.dxf.pattern_scale or 1.0)
+    first = lines[0]
+    a = math.radians(float(first.angle))
+    ox, oy = float(first.offset[0]), float(first.offset[1])
+    spacing = abs(-ox * math.sin(a) + oy * math.cos(a))
+    if spacing < 1e-12:
+        spacing = math.hypot(ox, oy) or 1.0
+    directions = {round(float(ln.angle) % 180.0, 6) for ln in lines}
+    cross = any(abs(abs(d - e) - 90.0) < 1e-3 for d in directions
+                for e in directions)
+    return ("cross" if cross else "lines"), float(first.angle), spacing
 
 
 def export_layout_dxf(window, layout, path: str):

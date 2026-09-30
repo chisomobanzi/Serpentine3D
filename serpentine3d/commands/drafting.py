@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from ..core import geometry as g
 from ..core.layout import (
     PAPER_SIZES, DetailView, Layout, LinearDim, TextNote, parse_scale,
@@ -507,13 +509,18 @@ def _layer_pattern(ctx) -> str:
     return (ctx.scene.layers.current.hatch or "lines").capitalize()
 
 
+# "paper" still, though it hatches in the model too: the space only says what
+# a picked point means, and the model hatch picks curves, never a point. As
+# "any", a click on a sheet stepped into the detail under it instead of
+# placing the hatch's corner there.
 @command("hatch", space="paper")
 def cmd_hatch(ctx):
+    """Fill a region with a pattern: on a sheet, as it always was, and in
+    the model as an object of its own (#33)."""
     lay = _active_layout(ctx)
     if lay is None:
-        ctx.echo("Hatches go on layouts — switch to one first.")
+        yield from _hatch_in_the_model(ctx)
         return
-        yield  # pragma: no cover
     from ..core.layout import Hatch
     choices = _pattern_choices()
     offered = _layer_pattern(ctx)
@@ -561,6 +568,68 @@ def cmd_hatch(ctx):
                              angle=angle, spacing=spacing))
     ctx.scene.notify()
     ctx.echo(f"Hatch placed ({pattern.lower()}).")
+
+
+def _hatch_in_the_model(ctx):
+    """Hatch the closed planar curves picked, a curve inside another being a
+    hole in it, one hatch object for each region they make. The curves are
+    kept, as Rhino keeps them, and what was made is left selected."""
+    from ..core.hatch import HatchShape
+    objs = yield SelectReq("Select closed planar curves to hatch",
+                           kinds=("curve",))
+    boundaries, refused = [], []
+    for obj in objs:
+        try:
+            g.planar_face(obj.shape)          # closed and flat, or it says
+            boundaries.append(obj.shape)
+        except (g.GeometryError, Exception):  # noqa: BLE001
+            refused.append(obj.name)
+    if refused:
+        ctx.echo(f"Not hatched, a hatch needs closed flat curves: "
+                 f"{', '.join(refused)}.")
+    if not boundaries:
+        return
+    try:
+        regions = g.planar_regions(boundaries)
+    except g.GeometryError as exc:
+        ctx.echo(f"Could not make a region to hatch: {exc}")
+        return
+    pattern = yield OptionReq("Pattern", options=_pattern_choices(),
+                              default=_layer_pattern(ctx))
+    pattern = pattern.lower()
+    spacing, angle = 1.0, 45.0
+    if pattern != "solid":
+        size = max(float(np.ptp(np.array(g.bbox(r)), axis=0).max())
+                   for r in regions)
+        spacing = yield NumberReq("Line spacing", default=_round_spacing(size),
+                                  minimum=1e-6)
+        angle = yield NumberReq("Angle (degrees)", default=45.0)
+    xdir = tuple(ctx.cplane.xdir) if ctx.cplane is not None else None
+    made = []
+    for region in regions:
+        try:
+            shape = HatchShape(region, pattern, angle=float(angle),
+                               spacing=float(spacing), xdir=xdir)
+        except g.GeometryError as exc:
+            ctx.echo(f"Not hatched: {exc}")
+            continue
+        made.append(ctx.scene.add(shape, name="Hatch"))
+    if made:
+        ctx.select_result(made)
+        ctx.echo(f"{len(made)} hatch{'es' if len(made) != 1 else ''} "
+                 f"placed ({pattern}).")
+
+
+def _round_spacing(size: float) -> float:
+    """A round spacing that draws some twenty-five lines across `size`:
+    1, 2 or 5 times a power of ten, so the prompt offers 0.5, not 0.4137."""
+    import math
+    raw = max(size, 1e-9) / 25.0
+    step = 10 ** math.floor(math.log10(raw))
+    for m in (1, 2, 5, 10):
+        if raw <= m * step:
+            return float(m * step)
+    return float(10 * step)
 
 
 def _dim_scale_at(lay, x, y):

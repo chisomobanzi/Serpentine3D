@@ -1779,7 +1779,11 @@ def export_3dm(scene, path: str, only_ids: list | None = None,
             attrs.MaterialIndex = _write_material(model, materials,
                                                   obj.material)
             attrs.MaterialSource = r3.ObjectMaterialSource.MaterialFromObject
-        if obj.kind == "curve":
+        # rhino3dm cannot write a hatch, so a line hatch leaves as the
+        # curves it is drawn with rather than as a mesh with no faces,
+        # which is nothing; a solid one leaves as its filled mesh (#33)
+        if obj.kind == "curve" or (obj.kind == "hatch"
+                                   and obj.shape.pattern != "solid"):
             exported = False
             for edge in geometry.edges_of(obj.shape):
                 nc = _shape_to_r3_curve(edge)

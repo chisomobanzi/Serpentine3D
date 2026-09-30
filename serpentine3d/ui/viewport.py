@@ -208,8 +208,13 @@ uniform float uCurvRange;   // >0 enables curvature false-colour
 uniform int uRendered;      // 1 = environment-lit rendered mode
 uniform float uMetallic;
 uniform float uRoughness;
+uniform int uFlat;          // 1 = a flat mark (a solid hatch): no lighting
 out vec4 frag;
 void main() {
+    if (uFlat == 1) {
+        frag = vec4(uColor, uAlpha);
+        return;
+    }
     vec3 n = normalize(vNormal);
     if (!gl_FrontFacing) n = -n;
     vec3 l = normalize(-vPosView);
@@ -2207,6 +2212,10 @@ class Viewport(QOpenGLWidget):
 
             if obj.kind == "picture":
                 fill_alpha_obj = 0.0
+            elif obj.kind == "hatch":
+                # a hatch is a mark on the drawing, filled whatever the
+                # display mode, as Rhino draws a solid one in wireframe
+                fill_alpha_obj = 1.0
             elif obj.clip_plane is not None:
                 fill_alpha_obj = 0.18
             else:
@@ -2215,9 +2224,14 @@ class Viewport(QOpenGLWidget):
                 self._use(self._mesh_prog)
                 self._set_mvp(self._mesh_prog, omvp)
                 self._set_view(self._mesh_prog, oview)
+                # A solid hatch is a flat fill in its own colour, as a
+                # drawing shows one: lit, a flat disc read as a ball (#33).
+                flat_fill = obj.kind == "hatch"   # `flat` is the MVP here
+                GL.glUniform1i(self._uloc(self._mesh_prog, "uFlat"),
+                               1 if flat_fill else 0)
                 GL.glUniform3f(
                     self._uloc(self._mesh_prog, "uColor"),
-                    *fill_color)
+                    *(line_color if flat_fill else fill_color))
                 GL.glUniform1f(
                     self._uloc(self._mesh_prog, "uAlpha"),
                     fill_alpha_obj)
@@ -2251,7 +2265,7 @@ class Viewport(QOpenGLWidget):
             if gpu.line_count and (selected or show_edges or not gpu.tri_count):
                 if selected:
                     edge_color = (*theme.SELECTION_COLOR, 1.0)
-                elif obj.kind == "curve":
+                elif obj.kind in ("curve", "hatch"):
                     edge_color = (*line_color, 1.0)
                 else:
                     # face edges: darkened object colour
@@ -3804,7 +3818,8 @@ class Viewport(QOpenGLWidget):
                     found.append((pt_depth, obj.id))
                 continue
             shaded_faces = mesh.has_faces and (
-                obj.kind == "picture" or self._pick_mode() != "wireframe")
+                obj.kind in ("picture", "hatch")
+                or self._pick_mode() != "wireframe")
             if shaded_faces:
                 tris, _ = self._near_triangles(mesh, px - r, py - r,
                                                px + r, py + r, w, h)

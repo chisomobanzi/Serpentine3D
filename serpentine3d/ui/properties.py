@@ -216,6 +216,33 @@ class PropertiesPanel(QWidget):
         self.look_at_text.clicked.connect(self.lookAtTextRequested)
         form.addRow(self.look_at_text)
 
+        # A hatch in the model is edited here after it is placed (#33): its
+        # region stays, and pattern, spacing and angle redraw it in place.
+        self.hatch_pattern = QComboBox()
+        self.hatch_pattern.setObjectName("hatch_pattern")
+        from ..core.layout import HATCH_PATTERNS
+        for name in HATCH_PATTERNS:
+            self.hatch_pattern.addItem(name.capitalize(), name)
+        self.hatch_pattern.currentIndexChanged.connect(self._change_hatch)
+        form.addRow("Pattern", self.hatch_pattern)
+        self.hatch_spacing = QDoubleSpinBox()
+        self.hatch_spacing.setObjectName("hatch_spacing")
+        self.hatch_spacing.setDecimals(4)
+        self.hatch_spacing.setRange(1e-4, 1e9)
+        self.hatch_spacing.setToolTip("Distance between the pattern's lines")
+        self.hatch_spacing.valueChanged.connect(self._change_hatch)
+        form.addRow("Spacing", self.hatch_spacing)
+        self.hatch_angle = QDoubleSpinBox()
+        self.hatch_angle.setObjectName("hatch_angle")
+        self.hatch_angle.setDecimals(2)
+        self.hatch_angle.setRange(-360.0, 360.0)
+        self.hatch_angle.setSuffix("°")
+        self.hatch_angle.setToolTip(
+            "Angle of the lines, from the x axis of the plane it was drawn on")
+        self.hatch_angle.valueChanged.connect(self._change_hatch)
+        form.addRow("Angle", self.hatch_angle)
+        self._hatch_checkpoint_id = None
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.header)
@@ -299,6 +326,7 @@ class PropertiesPanel(QWidget):
         if detail is not None:
             self._show_scale(detail)
             self._show_detail_view(detail)
+        self._show_hatch()
         editable = self._editable_text()
         editable_id = editable.id if editable is not None else None
         selection_changed = editable_id != self._text_edit_selection_id
@@ -668,6 +696,58 @@ class PropertiesPanel(QWidget):
             self.scene.replace_shape(obj.id, obj.shape.edited(**values))
         self.textTypographyChanged.emit(obj.id, values)
 
+    def _editable_hatch(self):
+        obj, paper = self._current()
+        if obj is None or paper or getattr(obj, "kind", None) != "hatch":
+            return None
+        return obj
+
+    def _show_hatch(self):
+        """The hatch rows, for exactly one hatch in the model; spacing and
+        angle only where there are lines to space and turn."""
+        obj = self._editable_hatch()
+        if obj is None or obj.id != self._hatch_checkpoint_id:
+            self._hatch_checkpoint_id = None
+        lines = obj is not None and obj.shape.pattern != "solid"
+        self.form.setRowVisible(self.hatch_pattern, obj is not None)
+        self.form.setRowVisible(self.hatch_spacing, lines)
+        self.form.setRowVisible(self.hatch_angle, lines)
+        if obj is None:
+            return
+        hatch = obj.shape
+        for widget, value in ((self.hatch_spacing, hatch.spacing),
+                              (self.hatch_angle, hatch.angle)):
+            with QSignalBlocker(widget):
+                widget.setValue(value)
+        with QSignalBlocker(self.hatch_pattern):
+            self.hatch_pattern.setCurrentIndex(
+                self.hatch_pattern.findData(hatch.pattern))
+        self.hatch_spacing.setSuffix(f" {self.scene.units}")
+
+    def _change_hatch(self, *_):
+        if self._updating:
+            return
+        obj = self._editable_hatch()
+        if obj is None:
+            return
+        values = dict(pattern=self.hatch_pattern.currentData(),
+                      spacing=self.hatch_spacing.value(),
+                      angle=self.hatch_angle.value())
+        hatch = obj.shape
+        if (values["pattern"], values["spacing"], values["angle"]) == \
+                (hatch.pattern, hatch.spacing, hatch.angle):
+            return
+        try:
+            edited = hatch.edited(**values)
+        except g.GeometryError as exc:
+            self.measure_label.setText(str(exc))
+            return
+        # one undo step for a run of edits to the same hatch, as for text
+        if self._hatch_checkpoint_id != obj.id:
+            self.history.checkpoint("edit hatch")
+            self._hatch_checkpoint_id = obj.id
+        self.scene.replace_shape(obj.id, edited)
+
     def _editable_text(self):
         notes = self._sheet_picks("note")
         if notes:
@@ -773,6 +853,8 @@ class PropertiesPanel(QWidget):
                         f"Area: {g.surface_area(obj.shape):.3f} {u}²")
             if obj.kind == "pointcloud":
                 return cloud_measures(obj, fmt)
+            if obj.kind == "hatch":
+                return f"Area: {g.surface_area(obj.shape):.3f} {u}²"
         except Exception:
             pass
         return "—"

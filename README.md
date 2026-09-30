@@ -98,7 +98,7 @@ commits a value mid-command, or repeats the last command.
 | **Booleans** | `booleanunion` `booleandifference` `booleanintersection` |
 | **Transform** | `move` `copy` `rotate` `scale` `scalenu` `mirror` `array` |
 | **Edit** | `join` `explode` `trim` `split` `offset` `fillet` `rebuild` `pointson`/`pointsoff` (control points, curves *and* surfaces) `dir`/`flip` (curve direction and surface normals) `delete` `hide` `show` `rename` `undo` `redo` |
-| **Select** | `selall` `selnone` `selcrv` `selsrf` `selsolid` `sellayer` `selname` `sellast` `invert` `isolate` `unisolate` |
+| **Select** | `selall` `selnone` `selcrv` `selsrf` `selsolid` `selhatch` `sellayer` `selname` `sellast` `invert` `isolate` `unisolate` |
 | **Organise** | `group`/`ungroup` `lock`/`unlockall` `lockother` (lock all but the picked) `block` `insert` `blocklist` `count` `bringtofront`/`sendtoback` `bringforward`/`sendbackward` (draw order) |
 | **Camera** | `camera` (lens mm, cinema sensors, placement, 2.39/1.85 frame guides) `units` `cplane` |
 | **Array** | `array` (grid) `arraypolar` `arraypath` (along a curve) |
@@ -164,7 +164,9 @@ in 2D, print to PDF — without leaving the app:
   editable 2D curves on `Make2D visible` / `Make2D hidden` layers.
 - **Annotations**: multiline `text`, `leader`, `dim` / `dimradius` /
   `dimdiameter` / `dimangle`, `hatch` (pick corners or **Mode=Region**
-  to click inside detail linework), `scalebar`, `titleblock`,
+  to click inside detail linework; in the model it fills the closed
+  curves you pick, as an object that moves, scales and edits in
+  Properties), `scalebar`, `titleblock`,
   `sheetindex` and per-sheet `revision` tables. Everything on a sheet
   is selectable — drag to move, grips resize detail frames, Delete
   removes, `annotedit` edits — and dimensions picked inside a detail

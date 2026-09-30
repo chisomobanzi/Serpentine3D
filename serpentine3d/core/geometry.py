@@ -479,8 +479,9 @@ def apply_matrix(shape, matrix):
     from .mesh import MeshShape
     from .pointcloud import PointCloudShape
     from .text_object import TextShape
+    from .hatch import HatchShape
     m = np.asarray(matrix, float)
-    if isinstance(shape, (MeshShape, PointCloudShape, TextShape)):
+    if isinstance(shape, (MeshShape, PointCloudShape, TextShape, HatchShape)):
         return shape.transformed(m)
     a = m[:3, :3]
     # a similarity is a rotation times a single scale, so A@A.T is that
@@ -3107,7 +3108,8 @@ def boolean_intersection(a, b) -> TopoDS_Shape:
 
 def _apply_trsf(shape, trsf: gp_Trsf, copy: bool = True) -> TopoDS_Shape:
     from .text_object import TextShape
-    if isinstance(shape, TextShape):
+    from .hatch import HatchShape
+    if isinstance(shape, (TextShape, HatchShape)):
         return shape.transformed(_transform_matrix(trsf))
     return BRepBuilderAPI_Transform(shape, trsf, copy).Shape()
 
@@ -3157,7 +3159,8 @@ def _gtransform(shape, gtrsf) -> TopoDS_Shape:
     with NULL surfaces, and any later OCCT call on them segfaults.
     Strip the triangulation first, then reject a degenerate result."""
     from .text_object import TextShape
-    if isinstance(shape, TextShape):
+    from .hatch import HatchShape
+    if isinstance(shape, (TextShape, HatchShape)):
         return shape.transformed(_transform_matrix(gtrsf))
     from OCP.BRepTools import BRepTools
     BRepTools.Clean_s(shape)
@@ -3252,7 +3255,8 @@ def copy_shape(shape) -> TopoDS_Shape:
     from .mesh import MeshShape
     from .pointcloud import PointCloudShape
     from .text_object import TextShape
-    if isinstance(shape, (MeshShape, PointCloudShape, TextShape)):
+    from .hatch import HatchShape
+    if isinstance(shape, (MeshShape, PointCloudShape, TextShape, HatchShape)):
         return shape.copy()
     return BRepBuilderAPI_Copy(shape).Shape()
 
@@ -3268,8 +3272,11 @@ def shape_kind(shape) -> str:
     from .mesh import MeshShape
     from .pointcloud import PointCloudShape
     from .picture import PictureShape
+    from .hatch import HatchShape
     if isinstance(shape, PictureShape):
         return "picture"
+    if isinstance(shape, HatchShape):
+        return "hatch"
     if isinstance(shape, MeshShape):
         return "mesh"
     if isinstance(shape, PointCloudShape):
@@ -3338,6 +3345,9 @@ def surface_area(shape) -> float:
         return shape.area()
     if isinstance(shape, PointCloudShape):
         return 0.0                    # points have no surface
+    from .hatch import HatchShape
+    if isinstance(shape, HatchShape):
+        shape = shape.region          # the area it covers, not its lines
     return occ.surface_properties(shape).Mass()
 
 
@@ -3356,6 +3366,9 @@ def centroid(shape) -> Point:
     from .pointcloud import PointCloudShape
     if isinstance(shape, (MeshShape, PointCloudShape)):
         return shape.centroid()
+    from .hatch import HatchShape
+    if isinstance(shape, HatchShape):
+        shape = shape.region          # the middle of what it covers
     kind = shape_kind(shape)
     if kind == "solid":
         props = occ.volume_properties(shape)
@@ -3383,7 +3396,8 @@ _CLOUD_TAG = b"SPCL\x01"
 
 def shape_to_bytes(shape) -> bytes:
     from .text_object import TextShape
-    if isinstance(shape, TextShape):
+    from .hatch import HatchShape
+    if isinstance(shape, (TextShape, HatchShape)):
         return shape.to_bytes()
     from .picture import PictureShape
     if isinstance(shape, PictureShape):
@@ -3449,6 +3463,9 @@ def shape_from_bytes(data: bytes):
     from .text_object import TEXT_TAG, TextShape
     if data.startswith(TEXT_TAG):
         return TextShape.from_bytes(data)
+    from .hatch import HATCH_TAG, HatchShape
+    if data.startswith(HATCH_TAG):
+        return HatchShape.from_bytes(data)
     from .picture import PICTURE_TAG, PictureShape
     if data.startswith(PICTURE_TAG):
         return PictureShape.from_bytes(data)

@@ -15,6 +15,12 @@ def cmd_selcrv(ctx):
     yield from ()
 
 
+@command("selhatch", aliases=("selhatches",), mutates=False)
+def cmd_selhatch(ctx):
+    _select_kind(ctx, "hatch", "hatch(es)")
+    yield from ()
+
+
 @command("selsrf", aliases=("selsurfaces",), mutates=False)
 def cmd_selsrf(ctx):
     _select_kind(ctx, "surface", "surface(s)")

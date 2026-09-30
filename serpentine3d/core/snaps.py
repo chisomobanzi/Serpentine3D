@@ -56,7 +56,8 @@ def _static_snap_points(shape) -> list[tuple[tuple, str]]:
         return out
 
     from .text_object import TextShape
-    if isinstance(shape, TextShape):
+    from .hatch import HatchShape
+    if isinstance(shape, (TextShape, HatchShape)):
         return shape.snap_points()
     # Any other mesh (an OBJ, an STL) has triangles, not CAD edges: no end,
     # mid or centre of its own. The nearest point on its outline still snaps.

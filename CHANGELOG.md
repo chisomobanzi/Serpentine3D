@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Added
+
+- **A hatch in the model, and hatches in and out of DXF (#33).** Until now
+  a hatch could only be drawn on a layout, and `hatch` anywhere else said
+  so. In the model it now fills the closed flat curves you pick, a curve
+  inside another being a hole, and places one hatch object for each region
+  they make. The curves are kept, as Rhino keeps them. A hatch is its own
+  kind of object: it moves, turns, scales and copies as one, its lines turn
+  with it and their spacing scales with it, and Properties changes its
+  pattern, spacing or angle in place as one undo step. Its area is the area
+  it covers, and it snaps to its boundary rather than to every line. Lines,
+  cross and solid are the patterns, as on a sheet, and the pattern starts
+  from the layer's. A solid hatch is drawn flat, and filled in every display
+  mode. DXF `HATCH` entities now import as hatches, their boundaries built
+  exactly and their pattern read as its angle and spacing, a pair of
+  directions at right angles as a cross; dashes are not drawn, so a dashed
+  pattern comes in as its lines. Hatches export to DXF as `HATCH` entities
+  and to `.3dm` as their curves, since rhino3dm cannot write a hatch. A
+  file holding a hatch needs this release or newer to open. `selhatch`
+  selects them.
+
 ### Fixed
 
 - **A surface with creases in it measures its true area and volume.**
