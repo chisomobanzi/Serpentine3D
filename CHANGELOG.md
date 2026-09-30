@@ -25,7 +25,7 @@
 
 ### Fixed
 
-- **Scale, Scale1D, Scale2D and Mirror work on what is picked on a sheet (#36).**
+- **Scale, Scale1D, Scale2D, Mirror and Rotate work on everything picked on a sheet (#36).**
   Pick a polyline, a detail or a dimension on a layout, type `scale`, and
   the command asked for model objects no click on paper can give, so it
   could only be cancelled. `move` and `rotate` had learned to ask the sheet
@@ -43,6 +43,11 @@
   default; a dimension stays on the mirrored side of what it measures; a
   hatch's lines turn with it; and a detail frame moves to its mirrored place
   at its own size, since a view of the model cannot itself be mirrored.
+  `rotate` already turned paper geometry and pictures on a sheet but
+  refused a pick with anything else in it; it now turns everything. Notes,
+  which are always drawn level, orbit the pivot and stay level, and a
+  detail frame moves to its turned place at its own size; dimensions,
+  leaders and hatches turn properly.
 
 - **Trim takes the part you click, in one click (#31).** After the cutters,
   trim asked for the object to trim and then which piece of it to take

@@ -291,10 +291,14 @@ def cmd_rotate(ctx):
     import numpy as np
     lv = ctx.sheet_view()
     if lv is not None:
-        objs = [obj for kind, obj in lv.selected if kind == "object"]
-        if not objs or len(objs) != len(lv.selected):
-            ctx.echo("Select paper geometry or pictures to rotate first.")
+        # everything picked turns (#36); paper geometry and pictures are
+        # the ones a preview can show while the angle is being dragged
+        picks = list(lv.selected)
+        if not picks:
+            ctx.echo("Nothing picked on the sheet: click geometry, a detail "
+                     "frame or an annotation first.")
             return
+        objs = [obj for kind, obj in picks if kind == "object"]
         held = []
     else:
         held, objs = yield from _what_to_transform(ctx, "Select objects to rotate")
@@ -326,10 +330,25 @@ def cmd_rotate(ctx):
                             preview_fn=_preview)
         angle = p2 if isinstance(p2, float) else _angle(p2)
     if lv is not None:
-        for obj in objs:
-            obj.shape = g.rotate(obj.shape, center, axis, angle)
+        from ..core.layout import transform_sheet_item
+        a = math.radians(angle)
+        turn = np.array([[math.cos(a), -math.sin(a)],
+                         [math.sin(a), math.cos(a)]])
+        pivot = np.array([float(center[0]), float(center[1])])
+        matrix = np.eye(3)
+        matrix[:2, :2] = turn
+        matrix[:2, 2] = pivot - turn @ pivot
+        done = kept = 0
+        for kind, obj in picks:
+            if transform_sheet_item(kind, obj, matrix, 1.0, ctx.scene):
+                done += 1
+            else:
+                kept += 1
         ctx.scene.notify("layouts")
-        ctx.echo(f"Rotated {len(objs)} paper object(s) by {angle:g} degrees.")
+        msg = f"Rotated {done} sheet item(s) by {angle:g} degrees."
+        if kept:
+            msg += f" {kept} locked detail(s) left as they were."
+        ctx.echo(msg)
     else:
         _do(ctx, held, objs, lambda s: g.rotate(s, center, axis, angle),
             "Rotated", f" by {angle:g} degrees",
