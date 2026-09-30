@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.5 — 2026-09-30
 
 ### Added
 
@@ -22,6 +22,13 @@
   and to `.3dm` as their curves, since rhino3dm cannot write a hatch. A
   file holding a hatch needs this release or newer to open. `selhatch`
   selects them.
+
+- **A question's answers can be clicked.** A prompt such as mirror's
+  "Keep original? (Yes/No) <Yes>" could only be answered by typing or by
+  Enter. Its answers now show as chips on the command line, as Rhino puts
+  them on its own, the default outlined; clicking one is the same as
+  typing it, and a right-click still takes the default. A question with a
+  long list of answers, such as which block to insert, is still typed.
 
 ### Fixed
 
@@ -48,13 +55,6 @@
   on, and nothing snapping looked like snapping being broken. The master
   now reads Off, and the types go quiet with it, a dashed outline instead
   of a lit button, keeping their settings for when snaps come back on.
-
-- **A question's answers can be clicked.** A prompt such as mirror's
-  "Keep original? (Yes/No) <Yes>" could only be answered by typing or by
-  Enter. Its answers now show as chips on the command line, as Rhino puts
-  them on its own, the default outlined; clicking one is the same as
-  typing it, and a right-click still takes the default. A question with a
-  long list of answers, such as which block to insert, is still typed.
 
 - **Scale, Scale1D, Scale2D, Mirror and Rotate work on everything picked on a sheet (#36).**
   Pick a polyline, a detail or a dimension on a layout, type `scale`, and

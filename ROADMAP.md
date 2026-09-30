@@ -6,11 +6,26 @@ Lourenço Vaz Pinto's first-use report as a practising architect on Linux
 (Bluefin), plus [#5](https://github.com/chisomobanzi/Serpentine3D/issues/5)
 from Jonas Pedrotti.
 
-Last updated when 0.10.4 was cut (2026-09-29).
+Last updated when 0.10.5 was cut (2026-09-30).
 
 ---
 
 ## Where things stand
+
+Version `0.10.5` is in `pyproject.toml`, the lockfile and the three packaging
+files; `CHANGELOG.md`'s 0.10.5 section is dated 2026-09-30. Three reporters
+and a QA pass. Keith Sloan's #34: Rhino faces that run to a pole or round a
+seam are built from their trims and keep their area, a face closing on
+itself is a solid, and a surface with creases measures its true area and
+volume (the DinerMug came out negative before). Jonas Pedrotti's #33 and
+#31: a hatch as a model object, read from and written to DXF, and trim in
+one click. Lourenço Vaz Pinto's #36, #39 and #43: scale, scale1d, scale2d,
+mirror and rotate on everything picked on a sheet, the sheet gumball's ring
+and Shift-pad doing the same; a PDF no longer saved as `.pdf.pdf`; and a
+Ctrl+Shift band that keeps the chord it started with. From QA while testing
+those: mirror ghosts its result on a sheet and while it asks about the
+original, the Osnap bar says Off and dims its types when snaps are off, and
+a question's answers are chips to click.
 
 Version `0.10.4` is in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.10.4 section is dated 2026-09-29. Three batches.
