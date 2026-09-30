@@ -27,6 +27,14 @@ those: mirror ghosts its result on a sheet and while it asks about the
 original, the Osnap bar says Off and dims its types when snaps are off, and
 a question's answers are chips to click.
 
+Release validation on Linux: 3,740 tests passed under the offscreen runner
+on Mesa. Released on 2026-09-30: pushed, tagged `v0.10.5`, published with the
+Linux AppImage, Windows installer and Apple Silicon DMG all attached. The
+packaged AppImage was checked first: `--version` read 0.10.5, the self-test
+passed, and a running copy measured a solid, made a hatch in the model and
+exported a sheet to PDF over RPC. The DMG was built on the Mac mini from the
+tag, its self-test passed, and it was copied back with matching SHA-256.
+
 Version `0.10.4` is in `pyproject.toml`, the lockfile and the three packaging
 files; `CHANGELOG.md`'s 0.10.4 section is dated 2026-09-29. Three batches.
 Jonas Pedrotti's second, all five of his open issues: the transform commands
