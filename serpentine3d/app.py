@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
 from . import commands as cmd_pkg
 from . import fileio
 from .commands.base import (
-    CommandContext, CommandProcessor, FileReq, PointReq, SelectReq, TextReq,
+    CommandContext, CommandProcessor, FileReq, OptionReq, PointReq, SelectReq,
+    TextReq,
 )
 from .core.history import History
 from .core.scene import Scene
@@ -1055,13 +1056,26 @@ class MainWindow(QMainWindow):
             self.command_line.echo("Direction released")
         vp.update()
 
+    def _standing_ghost(self):
+        """The ghost a question shows before anything is typed, or None.
+
+        A point's ghost follows the mouse and a number's what is typed; a
+        question asked after the picking is done, like mirror's "Keep
+        original?", has neither, and with no ghost the result it is waiting
+        to make looks like nothing happened at all.
+        """
+        req = self.processor.request
+        if isinstance(req, OptionReq) and req.preview_fn is not None:
+            return self.processor.preview_for(req.default)
+        return None
+
     def _live_preview(self, text: str):
         req = self.processor.request
         if req is not None and getattr(req, "preview_fn", None) and \
                 text.strip():
             shape = self.processor.preview_shape(text)
         else:
-            shape = None
+            shape = self._standing_ghost()
         # every pane. A ghost is a shape in the world, not a picture belonging
         # to one view, and the pane you are drawing in is whichever one the
         # cursor is over — so put it on the primary alone and the shape a
@@ -1088,8 +1102,9 @@ class MainWindow(QMainWindow):
         self.command_line.set_keywords(self.processor.keyword_chips())
         # every pane, because a ghost is set on every pane: clearing one of
         # them leaves a preview on the others that no command owns any more
+        ghost = self._standing_ghost()
         for vp in self.all_viewports():
-            vp.set_ghost(None)
+            vp.set_ghost(ghost)
         self.command_line.point_pending = isinstance(req, PointReq)
         # Space submits like Enter everywhere but a free-text prompt
         self.command_line.text_pending = isinstance(req, TextReq)

@@ -939,6 +939,40 @@ def sheet_item_bounds(kind: str, obj, scene=None) -> tuple:
     return annotation_bounds(kind, obj, scene)
 
 
+def sheet_item_linework(kind: str, obj, scene=None) -> list:
+    """The lines a sheet item stands on, as [(points, closed)] in paper
+    millimetres: what a paper snap lands on and what a pending transform
+    ghosts. A frame's edges, the box a note's text fills, a dimension's
+    extension and dimension lines, a hatch's loops. Paper geometry is a
+    shape already and gives none.
+    """
+    import numpy as np
+    if kind == "detail":
+        return [(list(detail_corners(obj)), True)]
+    if kind == "note":
+        x0, y0, x1, y1 = annotation_bounds("note", obj, scene)
+        return [([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], True)]
+    if kind == "leader":
+        return [(list(obj.points), False)]
+    if kind == "hatch":
+        return [(list(loop), True) for loop in [obj.points, *obj.holes]]
+    if kind == "dim":
+        a, b = np.array([obj.x1, obj.y1]), np.array([obj.x2, obj.y2])
+        delta = b - a
+        length = np.linalg.norm(delta)
+        normal = (np.array([-delta[1], delta[0]]) / length if length > 1e-9
+                  else np.zeros(2))
+        return [([a, a + normal * obj.offset, b + normal * obj.offset, b],
+                 False)]
+    if kind == "rdim":
+        return [([(obj.cx, obj.cy), (obj.px, obj.py)], False)]
+    if kind == "adim":
+        # the actual vertex and ray anchors, not the annotation's bbox
+        return [([(obj.x1, obj.y1), (obj.vx, obj.vy), (obj.x2, obj.y2)],
+                 False)]
+    return []
+
+
 def enclosing_polygon(polylines: list, px: float, py: float):
     """Smallest closed polyline (paper coords) containing the point."""
     best = None

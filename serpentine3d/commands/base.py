@@ -149,6 +149,7 @@ class OptionReq(Req):
     prompt: str
     options: list[str] = field(default_factory=list)
     default: str | None = None
+    preview_fn: object = None             # option -> ghost, shown while asked
 
 
 @dataclass

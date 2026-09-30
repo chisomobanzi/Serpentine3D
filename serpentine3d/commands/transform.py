@@ -16,6 +16,34 @@ def _ghost(objs, fn):
                             for s in shapes])
 
 
+def _sheet_ghost(ctx, picks, matrix, size: float = 1.0):
+    """What `picks` on a sheet would look like put through `matrix`, as one
+    shape to ghost: paper geometry as its shape, everything else as the
+    lines it stands on (see `sheet_item_linework`). Worked out on copies,
+    so nothing on the sheet moves to show it."""
+    import copy
+    from types import SimpleNamespace
+
+    from ..core.layout import sheet_item_linework, transform_sheet_item
+    from ..core.picture import PictureShape
+    shapes = []
+    for kind, obj in picks:
+        if kind == "object":
+            stand_in = SimpleNamespace(shape=obj.shape)
+            transform_sheet_item(kind, stand_in, matrix, size, ctx.scene)
+            shape = stand_in.shape
+            shapes.append(shape.face() if isinstance(shape, PictureShape)
+                          else shape)
+            continue
+        dup = copy.deepcopy(obj)
+        transform_sheet_item(kind, dup, matrix, size, ctx.scene, force=True)
+        for points, closed in sheet_item_linework(kind, dup, ctx.scene):
+            pts = [(float(p[0]), float(p[1]), 0.0) for p in points]
+            if len(pts) > 1:
+                shapes.append(g.make_polyline(pts, closed=closed))
+    return g.make_compound(shapes) if shapes else None
+
+
 def _what_to_transform(ctx, prompt, **kw):
     """(held parts, objects) — whichever of the two is being used.
 
@@ -534,19 +562,33 @@ def _mirror_on_paper(ctx, lv):
                  "frame or an annotation first.")
         return
     p1 = yield PointReq("Start of mirror line")
-    p2 = yield PointReq("End of mirror line", rubber_from=p1)
     a = np.array([float(p1[0]), float(p1[1])])
-    d = np.array([float(p2[0]), float(p2[1])]) - a
-    if math.hypot(*d) < 1e-9:
+
+    def _reflection(p):
+        """The paper map mirroring across p1-p, or None for no line."""
+        d = np.array([float(p[0]), float(p[1])]) - a
+        if math.hypot(*d) < 1e-9:
+            return None
+        d /= np.linalg.norm(d)
+        reflect = 2.0 * np.outer(d, d) - np.eye(2)
+        matrix = np.eye(3)
+        matrix[:2, :2] = reflect
+        matrix[:2, 2] = a - reflect @ a
+        return matrix
+
+    def _preview(p):
+        matrix = _reflection(p)
+        return None if matrix is None else _sheet_ghost(ctx, picks, matrix)
+
+    p2 = yield PointReq("End of mirror line", rubber_from=p1,
+                        preview_fn=_preview)
+    matrix = _reflection(p2)
+    if matrix is None:
         ctx.echo("The mirror line has no length — cancelled.")
         return
-    d /= np.linalg.norm(d)
-    reflect = 2.0 * np.outer(d, d) - np.eye(2)
-    matrix = np.eye(3)
-    matrix[:2, :2] = reflect
-    matrix[:2, 2] = a - reflect @ a
     keep = yield OptionReq("Keep original?", options=["Yes", "No"],
-                           default="Yes")
+                           default="Yes",
+                           preview_fn=lambda _keep: _preview(p2))
     lay = lv.layout
     done = kept = 0
     for kind, obj in picks:
@@ -600,7 +642,8 @@ def cmd_mirror(ctx):
         _do(ctx, held, objs, lambda s: g.mirror(s, p1, normal), "Mirrored")
         return
     keep = yield OptionReq("Keep original?", options=["Yes", "No"],
-                           default="Yes")
+                           default="Yes",
+                           preview_fn=lambda _keep: _preview(p2))
     for o in objs:
         mirrored = g.mirror(o.shape, p1, normal)
         if keep == "Yes":

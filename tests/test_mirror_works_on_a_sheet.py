@@ -266,3 +266,69 @@ def test_mirror_in_the_model_is_unchanged(sheet):
 
     lo, hi = g.bbox(w.scene.get(line.id).shape)
     assert (lo[0], hi[0]) == pytest.approx((80.0, 90.0))
+
+
+# --- seeing it before it happens --------------------------------------------
+# The model's mirror ghosts where things go as the line is drawn. On a sheet
+# nothing showed, so a mirror waiting on "Keep original?" looked exactly like
+# one that had done nothing at all (QA, 2026-09-30).
+
+def _ghost_box(shape):
+    lo, hi = g.bbox(shape)
+    return tuple(round(v, 6) for v in (lo[0], lo[1], hi[0], hi[1]))
+
+
+def test_the_second_point_ghosts_the_mirrored_geometry(sheet):
+    w, lv, lay, _said = sheet
+    lv.selected = [("object", lay.objects[0])]
+    _run(w, "mirror", UP_X50[0])
+
+    ghost = w.processor.preview_for((50.0, 10.0, 0.0))
+
+    assert ghost is not None
+    assert _ghost_box(ghost) == (70.0, 10.0, 90.0, 20.0)
+    assert _box(lay.objects[0]) == (10.0, 10.0, 30.0, 20.0)
+
+
+def test_the_second_point_ghosts_a_mixed_pick_without_moving_it(sheet):
+    w, lv, lay, _said = sheet
+    det, dim, note = lay.details[0], lay.dims[0], lay.notes[0]
+    lv.selected = [("detail", det), ("object", lay.objects[0]),
+                   ("dim", dim), ("note", note)]
+    _run(w, "mirror", UP_X50[0])
+
+    ghost = w.processor.preview_for((50.0, 10.0, 0.0))
+
+    # the detail frame mirrors to x -20..80 and the rule to 70..90; the
+    # dimension's lines run from y 5 up to its offset line, the frame to 90
+    assert _ghost_box(ghost) == pytest.approx((-20.0, 5.0, 90.0, 90.0))
+    assert (det.x, dim.x1, note.x) == (20.0, 10.0, 40.0)
+
+
+def test_the_ghost_stays_up_while_it_asks_about_the_original(sheet):
+    w, lv, lay, _said = sheet
+    lv.selected = [("object", lay.objects[0])]
+    _run(w, "mirror", *UP_X50)
+
+    assert w.processor.busy, "it should be asking whether to keep the original"
+    assert w.viewport._ghost is not None
+
+    w.processor.provide_text("No")
+
+    assert not w.processor.busy
+    assert w.viewport._ghost is None
+
+
+def test_the_model_mirror_keeps_its_ghost_up_while_it_asks_too(sheet):
+    w, _lv, _lay, _said = sheet
+    w.switch_space("model")
+    line = w.scene.add(g.make_line((10, 0, 0), (20, 0, 0)), name="L")
+    w.selection.set([line.id])
+    _run(w, "mirror", *UP_X50)
+
+    assert w.processor.busy
+    assert w.viewport._ghost is not None
+
+    w.processor.provide_text("Yes")
+
+    assert w.viewport._ghost is None

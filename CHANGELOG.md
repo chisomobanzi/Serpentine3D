@@ -43,6 +43,10 @@
   default; a dimension stays on the mirrored side of what it measures; a
   hatch's lines turn with it; and a detail frame moves to its mirrored place
   at its own size, since a view of the model cannot itself be mirrored.
+  Drawing the mirror line on a sheet ghosts the result, as it does in the
+  model, and in both the ghost now stays up while `mirror` asks whether to
+  keep the original: without it, a mirror waiting on that answer looked
+  exactly like one that had done nothing.
   `rotate` already turned paper geometry and pictures on a sheet but
   refused a pick with anything else in it; it now turns everything. Notes,
   which are always drawn level, orbit the pivot and stay level, and a

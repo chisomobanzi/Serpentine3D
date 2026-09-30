@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..core import geometry as g
-from ..core.layout import annotation_bounds, detail_corners
+from ..core.layout import annotation_bounds, sheet_item_linework
 from ..core.scene import SceneObject
 from ..core.snaps import SnapIndex
 
@@ -71,32 +71,32 @@ class PaperSnaps(SnapIndex):
             for obj in lay.objects:
                 # Keep the real curves: tessellation vertices are not End snaps.
                 include(obj.id, id(obj.shape), lambda obj=obj: obj.shape)
+            scene = self.view.vp.scene
+
+            def lines(kind, item, extra=()):
+                (points, closed), = sheet_item_linework(kind, item, scene)
+                poly(item.id, points, closed, extra)
+
             for det in lay.details:
-                poly(det.id, detail_corners(det), closed=True,
-                     extra=[((det.x + det.w/2, det.y + det.h/2, 0.), "center")])
+                lines("detail", det,
+                      extra=[((det.x + det.w/2, det.y + det.h/2, 0.), "center")])
             for note in lay.notes:
-                x0, y0, x1, y1 = annotation_bounds("note", note, self.view.vp.scene)
-                poly(note.id, [(x0,y0),(x1,y0),(x1,y1),(x0,y1)], closed=True,
-                     extra=[((note.x,note.y,0.), "point"),
-                            (((x0+x1)/2,(y0+y1)/2,0.), "center")])
+                x0, y0, x1, y1 = annotation_bounds("note", note, scene)
+                lines("note", note,
+                      extra=[((note.x,note.y,0.), "point"),
+                             (((x0+x1)/2,(y0+y1)/2,0.), "center")])
             for leader in lay.leaders:
-                poly(leader.id, leader.points)
+                lines("leader", leader)
             for hatch in lay.hatches:
-                for i, loop in enumerate([hatch.points, *hatch.holes]):
-                    poly(f"{hatch.id}:{i}", loop, closed=True)
+                for i, (loop, closed) in enumerate(
+                        sheet_item_linework("hatch", hatch, scene)):
+                    poly(f"{hatch.id}:{i}", loop, closed)
             for dim in lay.dims:
-                a, b = np.array([dim.x1,dim.y1]), np.array([dim.x2,dim.y2])
-                delta = b-a
-                length = np.linalg.norm(delta)
-                normal = np.array([-delta[1],delta[0]]) / length if length > 1e-9 else np.zeros(2)
-                aa, bb = a + normal*dim.offset, b + normal*dim.offset
-                poly(dim.id, [a,aa,bb,b])
+                lines("dim", dim)
             for dim in lay.rdims:
-                poly(dim.id, [(dim.cx,dim.cy),(dim.px,dim.py)],
-                     extra=[((dim.cx,dim.cy,0.), "center")])
+                lines("rdim", dim, extra=[((dim.cx,dim.cy,0.), "center")])
             for dim in lay.adims:
-                # The actual vertex and ray anchors, not the annotation's bbox.
-                poly(dim.id, [(dim.x1,dim.y1),(dim.vx,dim.vy),(dim.x2,dim.y2)])
+                lines("adim", dim)
 
         if (previous.keys() != current.keys() or
                 any(previous.get(key) is not entry for key, entry in current.items())):
