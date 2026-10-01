@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Choose the gumball's alignment (#41).** Type `GumballAlignment`, or
+  click the small tag beside the gumball, to choose CPlane, Object, World
+  or View. View follows the viewport's view plane. Object follows the
+  direction of a line or the plane of a flat curve or surface, and the
+  axes of text, hatches and pictures. Solids and selections of several
+  objects keep the CPlane. The choice is saved and shared by every pane.
+
 - **SketchUp files import (#42).** File > Import and drag and drop take a
   `.skp`, on Linux, Windows and Mac, with no SketchUp needed: SketchUp's own
   reader is a Windows and Mac SDK, so on Linux nothing could open one. The
@@ -23,6 +30,11 @@
   say so with the way round it: export from SketchUp as OBJ, FBX or DXF.
 
 ### Fixed
+
+- **Switching the gumball preserves its alignment (#41).** Turning it off
+  and on used to forget the alignment, and choosing an alignment after
+  that could fail. Both settings now keep each other, and the on/off
+  switch applies to every pane.
 
 - **Ctrl+V pastes text into the command line (#37).** An empty command
   line hands Ctrl+V to the window so that it can paste copied objects, and

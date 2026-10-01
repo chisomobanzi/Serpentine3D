@@ -18,6 +18,7 @@ from OCP.TopAbs import TopAbs_ShapeEnum, TopAbs_Orientation
 from OCP.TopExp import TopExp_Explorer, TopExp
 from OCP.TopTools import TopTools_IndexedMapOfShape
 from OCP.BRep import BRep_Tool, BRep_Builder
+from OCP.BRepLib import BRepLib_FindSurface
 from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace,
     BRepBuilderAPI_MakeVertex, BRepBuilderAPI_MakePolygon,
@@ -41,7 +42,7 @@ from OCP.BRepOffsetAPI import (
     BRepOffsetAPI_MakePipeShell, BRepOffsetAPI_MakeOffset,
 )
 from OCP.ChFi2d import ChFi2d_FilletAPI
-from OCP.GeomAbs import GeomAbs_JoinType
+from OCP.GeomAbs import GeomAbs_JoinType, GeomAbs_CurveType
 from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRepTopAdaptor import BRepTopAdaptor_FClass2d

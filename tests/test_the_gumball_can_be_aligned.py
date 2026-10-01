@@ -1,9 +1,9 @@
-"""The gumball can be aligned to the world, the CPlane or the object.
+"""The gumball can be aligned to the world, CPlane, object or view.
 
-A small tag on a leader off the gumball opens a menu with the three.
-Whole objects follow the CPlane unless told otherwise, as they always
-have; a held face or edge follows itself. "Object" for a whole object
-means the CPlane, because a solid has no frame of its own to offer.
+A small tag on a leader off the gumball opens a menu with the four.
+Whole framed objects follow their geometry under "Object"; solids and
+other objects without a natural frame follow the CPlane. A held face
+or edge follows itself, and "Object" remains available for every object.
 
 Under world or CPlane axes a held face still does everything it did in
 its own frame: an arrow along a leaning axis lifts the face by the part
@@ -16,12 +16,15 @@ frame: red is X, green is Y and blue is Z.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt
 
 from serpentine3d.core import geometry as g
 from serpentine3d.core.cplane import CPlane
+from serpentine3d.core.layout import DetailView
 from serpentine3d.core.scene import Scene
 from serpentine3d.core.selection import SelectionManager
 from serpentine3d.ui.gumball import Gumball
@@ -46,6 +49,23 @@ def _whole(shape, cplane=None):
 def _axes(gb):
     _, axes = gb.anchor_and_axes()
     return [tuple(np.round(a, 6)) for a in axes]
+
+
+def _view_axes(vp):
+    right, up = vp._eye().right_up()
+    return np.asarray((right, up, np.cross(right, up)), float)
+
+
+def _view_gumball(held_face):
+    box = g.make_box((0, 0, 0), 20, 10, 10)
+    if held_face:
+        gb, vp, obj = _holding(
+            box, "face", _face_where(box, lambda n: n[2] > 0.9))
+        vp.cplane = TILTED
+    else:
+        gb, vp, obj = _whole(box, TILTED)
+    gb.set_align("view")
+    return gb, vp, obj
 
 
 # --- what the axes follow ---------------------------------------------------
@@ -99,9 +119,85 @@ def test_a_held_face_uses_xyz_colours_in_every_alignment():
     gb, _, _ = _holding(box, "face", _face_where(box, lambda n: n[2] > 0.9))
     from serpentine3d.ui.gumball import AXIS_COLORS
 
-    for alignment in ("object", "world", "cplane"):
+    for alignment in ("object", "world", "cplane", "view"):
         gb.set_align(alignment)
         assert gb._axis_colours() == AXIS_COLORS
+
+
+# --- following the camera view ----------------------------------------------
+
+@pytest.mark.parametrize("held_face", [False, True], ids=["whole", "face"])
+def test_view_axes_follow_camera_right_up_and_their_right_hand_normal(held_face):
+    gb, vp, _ = _view_gumball(held_face)
+
+    _, axes = gb.anchor_and_axes()
+
+    assert np.asarray(axes) == pytest.approx(_view_axes(vp), abs=1e-6)
+
+
+@pytest.mark.parametrize("held_face", [False, True], ids=["whole", "face"])
+def test_view_axes_follow_camera_changes_between_drags(held_face, monkeypatch):
+    gb, vp, _ = _view_gumball(held_face)
+    anchor, before = gb.anchor_and_axes()
+    right = np.array([0.6, 0.8, 0.0])
+    up = np.array([-0.48, 0.36, 0.8])
+    monkeypatch.setattr(vp.camera, "right_up", lambda: (right, up))
+
+    after_anchor, after = gb.anchor_and_axes()
+
+    assert after_anchor == pytest.approx(anchor, abs=1e-6)
+    assert not np.allclose(before, after)
+    assert np.asarray(after) == pytest.approx(_view_axes(vp), abs=1e-6)
+
+
+@pytest.mark.parametrize("held_face", [False, True], ids=["whole", "face"])
+def test_a_view_drag_keeps_the_axes_it_started_with(held_face, monkeypatch):
+    gb, vp, _ = _view_gumball(held_face)
+    at_start = _view_axes(vp)
+    assert gb.begin_drag(("move", 0), 15.0, 13.0, NONE)
+    right = np.array([0.6, 0.8, 0.0])
+    up = np.array([-0.48, 0.36, 0.8])
+    monkeypatch.setattr(vp.camera, "right_up", lambda: (right, up))
+
+    axes = gb.drag["axes"]
+
+    assert np.asarray(axes) == pytest.approx(at_start, abs=1e-6)
+    assert not np.allclose(axes, _view_axes(vp))
+
+
+@pytest.mark.parametrize("held_face", [False, True], ids=["whole", "face"])
+@pytest.mark.parametrize("handle", [("move", 0), ("move", 1), ("rot", 2)])
+def test_view_x_y_arrows_and_z_ring_can_be_dragged(held_face, handle):
+    gb, _, _ = _view_gumball(held_face)
+
+    assert handle in gb.handles()
+    assert gb.begin_drag(handle, 15.0, 13.0, NONE)
+
+
+@pytest.mark.parametrize("held_face", [False, True], ids=["whole", "face"])
+@pytest.mark.parametrize("handle", [("move", 2), ("scale", 2), ("ext", 2)])
+def test_view_end_on_z_line_handles_cannot_be_dragged(held_face, handle):
+    gb, _, _ = _view_gumball(held_face)
+
+    assert gb.begin_drag(handle, 15.0, 13.0, NONE) is False
+    assert gb.drag is None
+
+
+def test_view_alignment_preserves_the_detail_plane_like_world_alignment():
+    gb, vp, _ = _whole(g.make_box((0, 0, 0), 10, 10, 10), TILTED)
+    detail = DetailView(azimuth=0.4, elevation=0.3, target=[2.0, 3.0, 4.0])
+    vp._detail_eye = lambda: SimpleNamespace(detail=detail)
+    from serpentine3d.ui.layout_view import detail_plane
+    cp = detail_plane(detail)
+    expected = np.asarray((cp.xdir, cp.ydir, cp.normal), float)
+    gb.set_align("world")
+    _, world_axes = gb.anchor_and_axes()
+    assert np.asarray(world_axes) == pytest.approx(expected, abs=1e-6)
+
+    gb.set_align("view")
+    _, view_axes = gb.anchor_and_axes()
+
+    assert np.asarray(view_axes) == pytest.approx(expected, abs=1e-6)
 
 
 # --- a held face under foreign axes ------------------------------------------
@@ -190,16 +286,19 @@ def test_the_tag_is_a_handle_that_opens_the_menu():
     assert gb.drag is None
 
 
-def test_the_menu_offers_the_three_and_knows_which_is_on():
+def test_the_menu_offers_the_four_and_knows_which_is_on():
     gb, _, _ = _whole(g.make_box((0, 0, 0), 10, 10, 10))
 
     rows = gb.menu_rows()
 
-    assert [r[1] for r in rows] == ["object", "cplane", "world"]
-    assert [r[2] for r in rows] == [True, False, False]     # object is on
-    assert rows[0][3] is False, "nothing held: object is not on offer"
+    assert [r[1] for r in rows] == ["object", "cplane", "world", "view"]
+    assert [r[2] for r in rows] == [True, False, False, False]  # object is on
+    assert rows[0][3] is True, "Object alignment is also offered for solids"
     gb.set_align("world")
-    assert [r[2] for r in gb.menu_rows()] == [False, False, True]
+    assert [r[2] for r in gb.menu_rows()] == [False, False, True, False]
+    gb.set_align("view")
+    assert [r[2] for r in gb.menu_rows()] == [False, False, False, True]
+    assert gb.menu_rows()[3][3] is True
 
 
 def test_object_is_on_offer_when_a_face_is_held():

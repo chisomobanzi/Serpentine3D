@@ -751,12 +751,25 @@ def cmd_zebra(ctx):
 @command("gumball", mutates=False)
 def cmd_gumball(ctx):
     gb = _vp(ctx).gumball
-    gb.enabled = not gb.enabled
-    if ctx.viewport.config is not None:
-        ctx.viewport.config.set("gumball", gb.enabled)
-    _vp(ctx).update()
+    gb.set_enabled(not gb.enabled)
     ctx.echo(f"Gumball {'on' if gb.enabled else 'off'}.")
     yield from ()
+
+
+_GUMBALL_ALIGNMENTS = {"CPlane": "cplane", "Object": "object",
+                       "World": "world", "View": "view"}
+
+
+@command("gumballalignment", mutates=False)
+def cmd_gumballalignment(ctx):
+    """Choose what the gumball's axes follow: the CPlane, the object, the world or the view."""
+    gb = _vp(ctx).gumball
+    current = {v: k for k, v in _GUMBALL_ALIGNMENTS.items()}[gb.align]
+    choice = yield OptionReq("Gumball alignment",
+                             options=list(_GUMBALL_ALIGNMENTS),
+                             default=current)
+    gb.set_align(_GUMBALL_ALIGNMENTS[choice])
+    ctx.echo(f"Gumball aligned to the {choice if choice == 'CPlane' else choice.lower()}.")
 
 
 @command("pictureframe", aliases=("picture",), space="any")

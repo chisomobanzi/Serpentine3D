@@ -146,8 +146,9 @@ def test_a_line_grows_along_both_of_the_ways_it_does_not_run(pane):
             == ("ext", axis)
 
 
+@pytest.mark.parametrize("alignment, normal_axis", [("object", 2), ("cplane", 1)])
 def test_the_surface_you_just_made_stops_offering_the_boxes_it_cannot_use(
-        pane):
+        pane, alignment, normal_axis):
     """The bug as it was met: pull a surface off a line and you are left
     holding the surface, with the gumball still offering to grow it along
     the two axes it is already flat in."""
@@ -155,13 +156,21 @@ def test_the_surface_you_just_made_stops_offering_the_boxes_it_cannot_use(
     _grab(pane, Z_ARROW)
     pane.gumball.apply_scalar(4.0)
     pane.gumball.end_drag()
-    assert [o.kind for o in _others(pane, line)] == ["surface"]
-    assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, 0)) \
-        == ("move", 0)
-    assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, 2)) \
-        == ("move", 2)
-    assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, 1)) \
-        == ("ext", 1)
+    surfaces = _others(pane, line)
+    assert [o.kind for o in surfaces] == ["surface"]
+    assert pane.selection.ids == [surfaces[0].id]
+    pane.gumball.set_align(alignment)
+
+    # Sweeping the X-directed line along Z makes an XZ surface. Object Z
+    # follows its normal; the explicitly selected CPlane keeps Y normal.
+    surface_normal = np.cross((1.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+    _anchor, axes = pane.gumball.anchor_and_axes()
+    out_of_plane = [abs(np.dot(axis, surface_normal)) > 1e-6
+                    for axis in axes]
+    assert out_of_plane == [axis == normal_axis for axis in range(3)]
+    for axis, can_grow in enumerate(out_of_plane):
+        assert pane.gumball.hit_test(*_handle_at(pane, gb.EXT_POS, axis)) \
+            == ("ext" if can_grow else "move", axis)
 
 
 def test_ctrl_and_the_arrow_along_the_line_moves_it_rather_than_growing_it(
