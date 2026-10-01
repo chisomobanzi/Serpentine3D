@@ -13,7 +13,7 @@
 
 </div>
 
-https://github.com/user-attachments/assets/6230eff9-f4c9-43e1-8fae-efbfd37380d4
+https://github.com/user-attachments/assets/837002ba-7780-49d3-b966-71d6469ba884
 
 Serpentine3D (`serp3d`) is a freeform surface modeller in the spirit of Rhinoceros 3D —
 BREP/NURBS geometry on the OpenCASCADE kernel, not meshes. It is built for set
