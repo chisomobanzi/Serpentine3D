@@ -68,7 +68,7 @@ ARC_R = 0.82
 PAD0, PAD1 = 0.28, 0.5
 TAG_AT = 1.42                # the alignment tag, up and right of the pivot
 TAG_R = 0.07
-ALIGNMENTS = ("object", "cplane", "world")
+ALIGNMENTS = ("object", "cplane", "world", "view")
 TAG_COLOR = (0.62, 0.63, 0.68)
 
 # handle ids: ("move",axis) ("pad",axis) ("rot",axis) ("scale",axis)
@@ -79,9 +79,7 @@ _ONE_DOF = ("move", "rot", "scale", "ext")   # take a single typed value
 class Gumball:
     def __init__(self, viewport):
         self.vp = viewport
-        self.enabled = True
-        if viewport.config is not None:
-            self.enabled = bool(viewport.config.get("gumball", default=True))
+        self._enabled = True           # only when there is no config to ask
         self.hover = None
         self.drag = None          # dict with handle, originals, refs
         self._geom_cache = None
@@ -92,46 +90,90 @@ class Gumball:
         self._align = None             # only when there is no config to ask
         self._menu = None              # the alignment menu while it is open
 
-    # ------------------------------------------------------------ alignment
+    # ------------------------------------------------------------ settings
 
-    @property
-    def align(self) -> str:
-        """Which axes the handles follow: "object" (a held face or edge's
-        own frame; the CPlane for a whole object, which has no frame of its
-        own), "cplane" or "world"."""
+    def _config(self):
+        """The settings every pane shares, or None (a bare test viewport)."""
         cfg = self.vp.config
-        if cfg is not None and hasattr(cfg, "set"):
-            value = cfg.get("gumball", "align", default="object")
-        else:
-            value = self._align
-        return value if value in ALIGNMENTS else "object"
+        return cfg if cfg is not None and hasattr(cfg, "set") else None
 
-    def set_align(self, value: str):
-        if value not in ALIGNMENTS:
-            raise ValueError(f"align must be one of {ALIGNMENTS}")
-        cfg = self.vp.config
-        if cfg is not None and hasattr(cfg, "set"):
-            cfg.set("gumball", "align", value)
-        self._align = value
-        self._memo.clear()
+    def _settings(self, **change) -> dict:
+        """The gumball's settings as the one entry they are saved as, with
+        `change` applied.
+
+        The on/off switch used to be saved as the whole entry, a bare true
+        or false, which left nowhere to keep an alignment beside it: turning
+        the gumball off and on again forgot the alignment, and choosing one
+        after that raised. A bare switch read here becomes the entry's
+        "enabled" and keeps its value.
+        """
+        entry = self._config().get("gumball", default=None)
+        out = (dict(entry) if isinstance(entry, dict)
+               else {"enabled": True if entry is None else bool(entry)})
+        out.update(change)
+        return out
+
+    def _repaint_panes(self):
+        """Every pane draws the gumball the settings describe."""
         panes = getattr(getattr(self.vp, "window", lambda: None)(),
                         "all_viewports", None)
         for pane in (panes() if panes else [self.vp]):
             if hasattr(pane, "update"):
                 pane.update()
 
-    def _own_frame_held(self) -> bool:
-        """Is something held that brings a frame of its own?"""
-        subs = getattr(self.vp.selection, "subobjects", None)
-        return bool(subs) and any(k in ("face", "edge") for (_, k, _) in subs)
+    @property
+    def enabled(self) -> bool:
+        """Whether the gumball shows on what is picked. Read from the
+        settings each time, as the alignment is, so the panes cannot
+        disagree about it."""
+        cfg = self._config()
+        if cfg is None:
+            return self._enabled
+        entry = cfg.get("gumball", default=True)
+        if isinstance(entry, dict):
+            return bool(entry.get("enabled", True))
+        return bool(entry)
+
+    @enabled.setter
+    def enabled(self, value):
+        self.set_enabled(value)
+
+    def set_enabled(self, value: bool):
+        self._enabled = bool(value)
+        cfg = self._config()
+        if cfg is not None:
+            cfg.set("gumball", self._settings(enabled=self._enabled))
+        self._repaint_panes()
+
+    # ------------------------------------------------------------ alignment
+
+    @property
+    def align(self) -> str:
+        """Which axes the handles follow, as Rhino's GumballAlignment names
+        them: "object" (the object's own frame, see `_object_axes`; a held
+        face or edge's own frame), "cplane", "world" or "view"."""
+        cfg = self._config()
+        value = (cfg.get("gumball", "align", default="object")
+                 if cfg is not None else self._align)
+        return value if value in ALIGNMENTS else "object"
+
+    def set_align(self, value: str):
+        if value not in ALIGNMENTS:
+            raise ValueError(f"align must be one of {ALIGNMENTS}")
+        cfg = self._config()
+        if cfg is not None:
+            cfg.set("gumball", self._settings(align=value))
+        self._align = value
+        self._memo.clear()
+        self._repaint_panes()
 
     def menu_rows(self) -> list:
         """(label, value, on, offered) for the alignment menu."""
         current = self.align
-        own = self._own_frame_held()
-        return [("Align to object", "object", current == "object", own),
+        return [("Align to object", "object", current == "object", True),
                 ("Align to CPlane", "cplane", current == "cplane", True),
-                ("Align to world", "world", current == "world", True)]
+                ("Align to world", "world", current == "world", True),
+                ("Align to view", "view", current == "view", True)]
 
     def tag_position(self):
         """Where the alignment tag sits: up and right of the pivot on the
@@ -147,8 +189,7 @@ class Gumball:
         return anchor + d * TAG_AT * s
 
     def open_menu(self, px, py):
-        """The alignment menu, at the cursor. Rows the selection cannot
-        use are shown but greyed, so the menu reads the same every time."""
+        """Offer every alignment at the cursor, with the current one checked."""
         from PySide6.QtCore import QPoint
         from PySide6.QtGui import QAction, QActionGroup
         from PySide6.QtWidgets import QMenu
@@ -180,7 +221,7 @@ class Gumball:
         return menu
 
     def _foreign_axes(self):
-        """The world or CPlane axes when those are asked for, else None."""
+        """The world, CPlane or view axes when asked for, else None."""
         if self.align == "world":
             return (np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]),
                     np.array([0.0, 0.0, 1.0]))
@@ -188,7 +229,92 @@ class Gumball:
             cp = self._plane()
             return (np.asarray(cp.xdir, float), np.asarray(cp.ydir, float),
                     np.asarray(cp.normal, float))
+        if self.align == "view":
+            right, up = self.vp._eye().right_up()
+            return right, up, np.cross(right, up)
         return None
+
+    def _object_frame(self, shape):
+        """An object's geometric frame, without any CPlane-dependent axes."""
+        from ..core import occ
+        from ..core.hatch import HatchShape
+        from ..core.picture import PictureShape
+        from ..core.text_object import TextShape
+
+        if isinstance(shape, TextShape):
+            frame = shape.frame
+            x, y = frame[:3, 0], frame[:3, 1]
+            return "axes", (x / np.linalg.norm(x), y / np.linalg.norm(y),
+                            np.asarray(shape.plane_normal, float))
+        if isinstance(shape, HatchShape):
+            return "axes", tuple(shape.frame[:3, i] for i in range(3))
+        if isinstance(shape, PictureShape):
+            x = np.asarray(shape.plane["u"], float)
+            z = np.cross(x, np.asarray(shape.plane["v"], float))
+            if np.linalg.norm(x) < 1e-12 or np.linalg.norm(z) < 1e-12:
+                return None
+            x, z = x / np.linalg.norm(x), z / np.linalg.norm(z)
+            return "axes", (x, np.cross(z, x), z)
+        if not isinstance(shape, occ.TopoDS_Shape):
+            return None
+        kind = shape.ShapeType()
+        if kind in (occ.FACE, occ.SHELL):
+            faces = g.faces_of(shape)
+            if len(faces) == 1:
+                try:
+                    return "face", np.asarray(g.face_normal(faces[0]), float)
+                except g.GeometryError:      # a free-form surface has no frame
+                    pass
+            return None
+        if kind not in (occ.EDGE, occ.WIRE):
+            return None
+        curves = [occ.edge_adaptor(edge) for edge in g.edges_of(shape)]
+        if not curves:
+            return None
+        if all(curve.GetType() == occ.GeomAbs_CurveType.GeomAbs_Line
+               for curve in curves):
+            line = curves[0].Line()
+            x = np.asarray(g.pnt_tuple(line.Direction()), float)
+            origin = np.asarray(g.pnt_tuple(line.Location()), float)
+            # A collinear wire is also reported planar, but that arbitrary
+            # plane cannot tell us which way its gumball ought to point.
+            points = [np.asarray(g.pnt_tuple(curve.Value(t)), float)
+                      for curve in curves
+                      for t in (curve.FirstParameter(), curve.LastParameter())]
+            if all(np.linalg.norm(np.cross(p - origin, x)) < 1e-6
+                   for p in points):
+                return "line", x
+        surface = occ.BRepLib_FindSurface(shape, -1.0, True, False)
+        if surface.Found():
+            normal = surface.Surface().Pln().Axis().Direction()
+            return "curve", np.asarray(g.pnt_tuple(normal), float)
+        return None
+
+    def _object_axes(self, obj, cp):
+        """One whole object's axes, combined with the live CPlane."""
+        frame = self._remembered(("frame", obj.id),
+                                lambda: self._object_frame(obj.shape))
+        if frame is None:
+            return None
+        kind, basis = frame
+        if kind == "axes":
+            return basis
+        if kind == "line":
+            x = basis
+            z = np.asarray(cp.normal, float) - np.dot(cp.normal, x) * x
+            if np.linalg.norm(z) < 1e-6:
+                z = np.asarray(cp.ydir, float) - np.dot(cp.ydir, x) * x
+            z /= np.linalg.norm(z)
+        else:
+            z = basis
+            if kind == "curve" and np.dot(z, cp.normal) < 0:
+                z = -z
+            for want in (cp.xdir, cp.ydir, (1, 0, 0)):
+                x = np.asarray(want, float) - np.dot(want, z) * z
+                if np.linalg.norm(x) > 1e-6:
+                    break
+            x /= np.linalg.norm(x)
+        return x, np.cross(z, x), z
 
     # ----------------------------------------------------------- state
 
@@ -255,10 +381,10 @@ class Gumball:
                                 lambda: self._face_target(*faces[0]))
 
     def _remembered(self, key, compute):
-        """`compute()` once per scene state and selection, for the targets
-        paint, hover and hit-testing all ask for several times a frame.
-        Each one walks the solid's faces; the walk is the same every time
-        until something changes, and the memo forgets on its own then."""
+        """`compute()` once per scene revision and held sub-objects, for
+        targets paint, hover and hit-testing ask for several times a frame.
+        Whole-object targets include their object id in `key`, because
+        changing whole-object selection does not change either state value."""
         state = (getattr(self.vp.scene, "revision", 0),
                  tuple(getattr(self.vp.selection, "subobjects", ())))
         hit = self._memo.get(key)
@@ -812,7 +938,16 @@ class Gumball:
             return anchor, (np.array([1.0, 0.0, 0.0]),
                             np.array([0.0, 1.0, 0.0]),
                             np.array([0.0, 0.0, 1.0]))
+        if self.align == "view" and self.vp._detail_eye() is None:
+            right, up = self.vp._eye().right_up()
+            return anchor, (right, up, np.cross(right, up))
         cp = self._plane()
+        if (self.align == "object" and self.drag is None and seg is None
+                and self.vp._detail_eye() is None and len(objs) == 1
+                and not getattr(self.vp.selection, "subobjects", None)):
+            axes = self._object_axes(objs[0], cp)
+            if axes is not None:
+                return anchor, axes
         return anchor, (np.asarray(cp.xdir), np.asarray(cp.ydir),
                         np.asarray(cp.normal))
 

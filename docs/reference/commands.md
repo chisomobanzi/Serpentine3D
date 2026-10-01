@@ -80,6 +80,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `grid` | Grid |
 | `gridsnap` | Gridsnap |
 | `gumball` | Gumball |
+| `gumballalignment` | Choose what the gumball's axes follow: the CPlane, the object, the world or the view. |
 | `isocurves` (`showisocurves`) | Show or hide the wires across surfaces in this viewport. |
 | `isometric` (`iso`) | Isometric |
 | `left` | Left |

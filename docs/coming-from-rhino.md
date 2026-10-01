@@ -33,6 +33,10 @@ page maps your habits over and is honest about the gaps.
   on the second press. `max` does it from the command line.
 - **The gumball** for move / rotate / scale, with numeric entry and Alt-drag
   copy; ++ctrl+shift++-click faces and edges for push/pull and fillets.
+  `GumballAlignment`, or the small tag beside the gumball, chooses CPlane,
+  Object, World or View. Object follows a line, a planar curve or surface,
+  text, a hatch or a picture; solids and selections of several objects use
+  the CPlane. View follows the current viewport's view plane.
 - **Layers**, display modes (`wireframe` / `shaded` / `ghosted` / `rendered`
   / `technical`), and **linetypes** per layer or object.
 - **Surface isocurves and edges are yours to switch off**, as they are in

@@ -82,6 +82,11 @@ class TextShape(TopoDS_Compound):
         return tuple(row[3] for row in self._frame[:3])
 
     @property
+    def frame(self) -> np.ndarray:
+        """The placement axes and origin, independent of the lettering."""
+        return np.asarray(self._frame, float)
+
+    @property
     def plane_normal(self):
         """Unit normal of the transformed plane carrying the lettering."""
         frame = np.asarray(self._frame, dtype=float)
