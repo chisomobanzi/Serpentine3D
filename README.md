@@ -120,7 +120,7 @@ no conda and no system packages, on Linux, Windows and macOS alike.
 
 Serpentine3D is free and always will be: no subscription, no licence server, no
 "upgrade to Pro". One person builds it between other work. If it is useful to
-you, [a small contribution on Ko-fi](https://ko-fi.com/chisomobanzi) keeps it
+you, [a small contribution on Ko-fi](https://ko-fi.com/chisomobanzi/?hidefeed=true&widget=true&embed=true&preview=true) keeps it
 moving.
 
 Bug reports, sample files and documentation fixes are worth as much and cost
