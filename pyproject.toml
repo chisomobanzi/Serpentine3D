@@ -10,6 +10,7 @@ dependencies = [
     # OCP 8 removed compatibility names used throughout the modelling kernel.
     "cadquery-ocp==7.9.3.1.1",
     "PySide6>=6.6",
+    "shiboken6>=6.6",       # checks whether a destroyed GL share group is still valid
     "numpy>=1.26",
     "pye57>=0.4.19,<0.5",
     "PyOpenGL>=3.1",

@@ -160,7 +160,7 @@ def test_each_pane_answers_for_itself(win):
 def test_the_draw_loop_asks_before_drawing_isocurves():
     from serpentine3d.ui.viewport import Viewport
 
-    src = inspect.getsource(Viewport._draw_objects)
+    src = inspect.getsource(Viewport._draw_objects_with_clips)
     assert "shows_isocurves(" in src
     assert "shows_edges(" in src
 

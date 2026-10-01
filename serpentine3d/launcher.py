@@ -50,6 +50,11 @@ def main() -> int:
         mcp_main()
         return 0
 
+    # Arm this before Qt and OpenCASCADE are imported: native faults bypass
+    # Python's exception handlers, and a Windows GUI build has no terminal.
+    from .utils.crash_log import enable as enable_crash_log
+    enable_crash_log()
+
     if "--selftest" in sys.argv:
         # headless bundle check — no window, no splash
         from .app import _selftest

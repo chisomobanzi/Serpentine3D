@@ -10,9 +10,10 @@ import time
 import traceback
 
 import numpy as np
+import shiboken6
 from OpenGL import GL
 from PySide6.QtCore import QPoint, QTimer, Qt, Signal
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QOpenGLContext
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -582,8 +583,8 @@ def clip_equation(origin, normal):
 
     It keeps what comes out positive, and the half behind the normal is the
     half that comes out positive, so the normal is the direction things
-    disappear in. The arrow drawn on the plane is that same normal, which is
-    why the two cannot end up telling different stories.
+    disappear in. The direction indicator points the opposite way, toward
+    the visible half, matching Rhino's clipping plane convention.
     """
     n = np.asarray(normal, float)
     o = np.asarray(origin, float)
@@ -607,7 +608,7 @@ def clip_normal_arrows(frames, camera, width, height):
         if not here:
             continue
         at = np.array([f[0] for f in here], float)
-        dirs = np.array([f[1] for f in here], float)
+        dirs = -np.array([f[1] for f in here], float)
         length = cv_marker_size(at, camera, width, height, CLIP_ARROW_PX)
         passes.append((arrow_segments(at, dirs, fwd, right, length),
                        theme.CLIP_NORMAL if enabled
@@ -667,6 +668,27 @@ def cloud_level_budget(counts: list, budget: int) -> int:
     return 0
 
 
+_deferred_buffer_deletes = {}
+
+
+def _current_share_group():
+    context = QOpenGLContext.currentContext()
+    return context.shareGroup() if context is not None else None
+
+
+def _flush_buffer_deletes():
+    """Delete retired buffers only in the group that owns their names."""
+    if not _deferred_buffer_deletes:
+        return
+    for group in list(_deferred_buffer_deletes):
+        if not shiboken6.isValid(group):
+            # Destroying the group already freed its OpenGL resources.
+            del _deferred_buffer_deletes[group]
+    buffers = _deferred_buffer_deletes.pop(_current_share_group(), [])
+    if buffers:
+        GL.glDeleteBuffers(len(buffers), buffers)
+
+
 class _MeshBuffers:
     """One mesh's vertex data on the GPU, shared by every viewport.
 
@@ -677,6 +699,7 @@ class _MeshBuffers:
     """
 
     def __init__(self, mesh, dash=None):
+        self._share_group = _current_share_group()
         self.tri_vbo = self.tri_ebo = self.tri_count = 0
         self.line_vbo = self.line_count = 0
         self.thick_vbo = self.thick_ebo = self.thick_count = 0
@@ -733,7 +756,14 @@ class _MeshBuffers:
 
     def release(self):
         if self._buffers:
-            GL.glDeleteBuffers(len(self._buffers), self._buffers)
+            if self._share_group == _current_share_group():
+                GL.glDeleteBuffers(len(self._buffers), self._buffers)
+            elif shiboken6.isValid(self._share_group):
+                # A context-destruction callback may run while another
+                # group's context is current. The same numeric ids there
+                # name different buffers; wait for the owner to draw again.
+                _deferred_buffer_deletes.setdefault(
+                    self._share_group, []).extend(self._buffers)
         self._buffers = []
         self.nbytes = 0
 
@@ -747,7 +777,10 @@ class _GpuObject:
         # have been freed, and an address gets recycled. See DisplayMesh.uid.
         self.mesh_key = mesh.uid
         self.dash_key = dash_key                  # linetype identity for cache
-        self._share_key = (mesh.uid, dash_key)
+        # Sharing is a property of a context group, not of the whole process.
+        # An embedded host or a recreated window can have a separate group.
+        # Reusing another group's buffer ids can crash a native GL driver.
+        self._share_key = (_current_share_group(), mesh.uid, dash_key)
         self.buffers = gpu_share.acquire(
             self._share_key, lambda: _MeshBuffers(mesh, dash))
         buf = self.buffers
@@ -1223,6 +1256,8 @@ class Viewport(QOpenGLWidget):
             self._paint_frame()
         except Exception:                                       # noqa: BLE001
             self._paint_failed = True
+            from ..utils.crash_log import record_exception
+            record_exception()
             traceback.print_exc()
             print("serp3d: this viewport has stopped drawing after the "
                   "error above. Redocking it, or reopening the window, "
@@ -1930,6 +1965,7 @@ class Viewport(QOpenGLWidget):
         - a background tessellation finishing, which makes an object drawable
           with no change to the scene at all.
         """
+        _flush_buffer_deletes()
         key = self._gpu_sync_key()
         if self._gpu_synced == key:
             return
@@ -2107,6 +2143,18 @@ class Viewport(QOpenGLWidget):
 
     def _draw_objects(self, mvp, view, mode_override=None,
                       light_background=False):
+        clips = self._clip_vectors() if self.space == "model" else []
+        try:
+            self._draw_objects_with_clips(mvp, view, clips, mode_override,
+                                          light_background)
+        finally:
+            # Qt also draws in this context. Leaving clip distances enabled
+            # after a failed upload makes its shaders' unwritten distances
+            # undefined, so release them even when an object cannot draw.
+            self._end_clips(clips)
+
+    def _draw_objects_with_clips(self, mvp, view, clips, mode_override=None,
+                                light_background=False):
         # The matrices arrive float64 and stay that way until each
         # object's anchor is folded in: the fold is the whole fix for
         # far geometry swimming, and it only works before the cast.
@@ -2126,7 +2174,6 @@ class Viewport(QOpenGLWidget):
         # keep insertion order (unchanged default behaviour).
         objects = sorted(self.scene.visible_objects(),
                          key=lambda o: -getattr(o, "draw_order", 0))
-        clips = self._clip_vectors() if self.space == "model" else []
         clips_dirty = False           # True while anchored clips are bound
         for i in range(len(clips)):
             GL.glEnable(GL.GL_CLIP_DISTANCE0 + i)
@@ -2333,7 +2380,6 @@ class Viewport(QOpenGLWidget):
                                          (*line_color, 1.0), selected,
                                          anchor=gpu.anchor)
         self._line_width(1.0)
-        self._end_clips(clips)
 
     def _draw_point_markers(self, mvp, points, color, selected: bool,
                             anchor=None):
@@ -2797,7 +2843,7 @@ class Viewport(QOpenGLWidget):
         GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _draw_clip_normals(self, mvp):
-        """One arrow per clipping plane, pointing the way things vanish.
+        """One arrow per clipping plane, pointing toward the visible side.
 
         A clipping plane is a rectangle and a rectangle looks the same from
         both sides, so until this was drawn there was nothing on screen that
@@ -2805,7 +2851,7 @@ class Viewport(QOpenGLWidget):
         the top of everything, because a plane lying flat against a face is
         exactly when you need to be told.
         """
-        frames = clip_plane_frames(self.scene.visible_objects())
+        frames = self._clip_frames()
         if not frames:
             return
         passes = clip_normal_arrows(frames, self.camera,
@@ -2969,18 +3015,33 @@ class Viewport(QOpenGLWidget):
             self._ghost = None
         self.update()
 
+    def _clip_frames(self):
+        """Read native plane geometry once, shared by the cut and its arrow.
+
+        Layer visibility can change without a scene revision. Including it
+        keeps a hidden plane from continuing to cut, and avoids repeatedly
+        entering OpenCASCADE from every pane's repaint.
+        """
+        key = (self.scene.revision, self._visible_layers())
+        cache = getattr(self, "_clip_frames_cache", None)
+        if cache is None or cache[0] != key:
+            cache = (key, clip_plane_frames(self.scene.visible_objects()))
+            self._clip_frames_cache = cache
+        return cache[1]
+
     def _clip_vectors(self) -> list:
         """vec4 clip equations from enabled clipping-plane objects.
         Keeps the half-space behind each plane's normal."""
+        frames = self._clip_frames()
         cache = getattr(self, "_clip_cache", None)
-        if cache is not None and cache[0] == self.scene.revision:
+        if cache is not None and cache[0] is frames:
             return cache[1]
         # Same frames the arrows are drawn from, so what the arrow promises
         # is what the shader does. Four is all the hardware guarantees.
         vecs = [clip_equation(o, n)
-                for o, n, on in clip_plane_frames(self.scene.visible_objects())
+                for o, n, on in frames
                 if on][:4]
-        self._clip_cache = (self.scene.revision, vecs)
+        self._clip_cache = (frames, vecs)
         return vecs
 
     def _set_clip_uniforms(self, prog, clips):
