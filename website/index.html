@@ -117,7 +117,15 @@
 
   /* ---- hero ---- */
   .hero { padding-block: clamp(48px, 9vw, 104px) 0; }
-  .hero-in { display: flex; flex-direction: column; }
+  .hero-in { display: flex; flex-direction: column; position: relative; }
+  .hero-in > * { position: relative; z-index: 1; }
+  .hero-in > .hero-serpent {
+    position: absolute; z-index: 0; top: -14px; right: clamp(16px, 4vw, 40px);
+    width: min(32vw, 440px); height: auto; opacity: 0.86; pointer-events: none;
+  }
+  .hero .btn.ghost { background: var(--bg); }
+  .hero .btn.ghost:hover { background: var(--bg); }
+  @media (max-width: 960px) { .hero-in > .hero-serpent { display: none; } }
   h1 { font-size: clamp(2.7rem, 7.4vw, 5.8rem); line-height: 1.0; letter-spacing: -0.018em; margin-bottom: 26px; }
   h1 .gold { color: var(--gold-hi); }
   .lede { font-size: clamp(1.05rem, 1.7vw, 1.22rem); color: var(--dim); max-width: 58ch; margin: 0 0 32px; }
@@ -283,6 +291,7 @@
 <main>
   <section class="hero">
     <div class="wrap hero-in">
+      <img class="hero-serpent" src="img/serpent.webp" width="900" height="900" alt="" aria-hidden="true">
       <p class="kick">Free and open source<span class="plat"> · Linux, Windows, macOS</span></p>
       <h1>Every surface<br> starts with a <span class="gold">curve.</span></h1>
       <p class="lede">Serpentine3D is a NURBS modeller and drafting tool for things that get
