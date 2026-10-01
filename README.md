@@ -53,8 +53,8 @@ https://github.com/user-attachments/assets/837002ba-7780-49d3-b966-71d6469ba884
   vector PDF.
 - **An assistant that can see.** Describe a change and it runs the commands,
   looks at the viewport to check its work and fixes its own mistakes, all
-  undoable. Use Claude, a ChatGPT account, an OpenAI key, or a local model in
-  LM Studio.
+  undoable. Use Claude, a ChatGPT account, an OpenAI key, or a local,
+  open-weight model.
 - **Headless.** Script it in the built-in editor, batch it with
   `serp3d-batch`, or let any MCP client drive a live session.
 - **Checks before you build.** Zebra stripes, curvature, draft analysis and
