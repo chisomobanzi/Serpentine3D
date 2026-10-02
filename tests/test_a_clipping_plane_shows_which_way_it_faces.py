@@ -1,4 +1,4 @@
-"""A clipping plane draws an arrow along its normal.
+"""A clipping plane draws an arrow toward its visible side.
 
 Asked for by a user: the plane could have a line showing its orientation.
 A clipping plane is a rectangle, and a rectangle looks the same from both
@@ -6,8 +6,8 @@ sides, so nothing on screen says which half of the model it is about to
 take away. You find out by dragging something across it and watching the
 thing vanish, which is a strange way to be told.
 
-The arrow points at the half that goes. It and the cut are read from one
-function, so they cannot drift apart.
+Rhino's direction indicator points at the visible half. Existing plane
+geometry and the hidden half stay unchanged when the indicator is corrected.
 """
 
 from __future__ import annotations
@@ -50,15 +50,14 @@ def _hidden_by(origin, normal, point):
 
 # --- where the arrow points ------------------------------------------------
 
-def test_the_arrow_points_at_the_half_that_gets_hidden():
-    """The whole point of drawing it. Whichever way round the plane is,
-    following the arrow takes you into the part of the model that is gone."""
-    (origin, normal, _enabled), = clip_plane_frames(_scene_with_plane().all())
-    n = np.asarray(normal, float)
-    o = np.asarray(origin, float)
+@pytest.mark.parametrize("flipped", [False, True])
+def test_the_arrow_points_at_the_visible_half(flipped):
+    frames = clip_plane_frames(_scene_with_plane(flipped=flipped).all())
+    (origin, normal, _enabled), = frames
+    (segments, _), = clip_normal_arrows(frames, _camera(), 800, 600)
 
-    assert _hidden_by(o, n, o + n * 5)
-    assert not _hidden_by(o, n, o - n * 5)
+    assert not _hidden_by(origin, normal, segments[1])
+    assert _hidden_by(origin, normal, 2 * segments[0] - segments[1])
 
 
 def test_flipping_the_plane_turns_the_arrow_round():
@@ -107,9 +106,9 @@ def _camera():
     return cam
 
 
-def test_the_arrow_leaves_the_plane_along_its_normal():
+def test_the_arrow_leaves_the_plane_opposite_its_geometry_normal():
     """The shaft is the first segment: it starts on the plane and ends out
-    along the normal, and the barbs behind the tip make it an arrow rather
+    into the visible half, and the barbs behind the tip make it an arrow rather
     than a line you have to guess the sense of."""
     frames = clip_plane_frames(_scene_with_plane().all())
     (segs, _color), = clip_normal_arrows(frames, _camera(), 800, 600)
@@ -117,7 +116,7 @@ def test_the_arrow_leaves_the_plane_along_its_normal():
     tail, tip = segs[0], segs[1]
     normal = np.asarray(frames[0][1], float)
     assert np.allclose(tail, frames[0][0], atol=1e-9)
-    assert np.dot(tip - tail, normal) > 0
+    assert np.dot(tip - tail, normal) < 0
     assert len(segs) == 6                    # shaft, then two barbs
 
 
@@ -189,3 +188,63 @@ def test_a_paused_plane_cuts_nothing(pane):
 
     assert clip_plane_frames(pane.scene.visible_objects()) != []
     assert pane._clip_vectors() == []
+
+
+def test_hiding_and_showing_a_planes_layer_changes_the_cut(pane):
+    layer = pane.scene.layers.create("Clipping")
+    obj = pane.scene.add(_rect_on_xy(), layer_id=layer.id)
+    pane.scene.update(obj.id, clip_plane={"enabled": True})
+    revision = pane.scene.revision
+    assert len(pane._clip_vectors()) == 1
+
+    pane.scene.layers.set_visible(layer.id, False)
+    assert pane.scene.revision == revision
+    assert pane._clip_vectors() == []
+    pane.scene.layers.set_visible(layer.id, True)
+    assert len(pane._clip_vectors()) == 1
+
+
+def test_a_failed_draw_releases_clipping_before_qt_draws(pane, monkeypatch):
+    from serpentine3d.ui import viewport
+
+    obj = pane.scene.add(_rect_on_xy())
+    pane.scene.update(obj.id, clip_plane={"enabled": True})
+    enabled = set()
+    monkeypatch.setattr(viewport.GL, "glEnable", enabled.add)
+    monkeypatch.setattr(viewport.GL, "glDisable", enabled.discard)
+    for name in ("_mesh_prog", "_line_prog", "_thick_prog", "_point_prog"):
+        setattr(pane, name, 1)
+
+    def refused_uniform(prog, clips):
+        if clips:
+            raise RuntimeError("driver refused clip uniforms")
+
+    monkeypatch.setattr(pane, "_set_clip_uniforms", refused_uniform)
+    with pytest.raises(RuntimeError, match="driver refused"):
+        pane._draw_objects(np.eye(4), np.eye(4))
+    assert enabled == set()
+
+
+def test_repainting_the_arrow_does_not_repeat_native_geometry_reads(pane, monkeypatch):
+    from types import SimpleNamespace
+    from serpentine3d.ui import viewport
+
+    obj = pane.scene.add(_rect_on_xy())
+    pane.scene.update(obj.id, clip_plane={"enabled": True})
+    normal = g.face_normal
+    calls = []
+
+    def counted(face):
+        calls.append(1)
+        return normal(face)
+
+    monkeypatch.setattr(g, "face_normal", counted)
+    monkeypatch.setattr(viewport.GL, "glDisable", lambda *_: None)
+    monkeypatch.setattr(viewport.GL, "glEnable", lambda *_: None)
+    pane._preview = SimpleNamespace(update=lambda *_: None)
+    pane._frame_anchor = None
+    monkeypatch.setattr(pane, "_draw_lines", lambda *_: None)
+    pane._clip_vectors()
+    pane._draw_clip_normals(np.eye(4))
+    pane._draw_clip_normals(np.eye(4))
+    assert len(calls) == 1

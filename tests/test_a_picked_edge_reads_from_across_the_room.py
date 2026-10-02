@@ -117,7 +117,7 @@ def test_the_width_is_worth_calling_feedback():
 def test_details_on_sheets_share_the_same_highlight():
     """One draw loop serves the model and every detail, so the fix does
     not need repeating anywhere."""
-    src = inspect.getsource(vp_mod.Viewport._draw_objects)
+    src = inspect.getsource(vp_mod.Viewport._draw_objects_with_clips)
     assert "_draw_thick_segments(" in src
     assert "glLineWidth(3.0)" not in src
 

@@ -2515,6 +2515,7 @@ dependencies = [
     { name = "pyopengl" },
     { name = "pyside6" },
     { name = "rhino3dm" },
+    { name = "shiboken6" },
     { name = "svgelements" },
 ]
 
@@ -2542,6 +2543,7 @@ requires-dist = [
     { name = "pyside6", specifier = ">=6.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "rhino3dm", specifier = ">=8.0" },
+    { name = "shiboken6", specifier = ">=6.6" },
     { name = "svgelements", specifier = ">=1.9" },
 ]
 provides-extras = ["dev", "docs"]

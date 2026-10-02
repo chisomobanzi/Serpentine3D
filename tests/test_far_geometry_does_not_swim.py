@@ -168,7 +168,7 @@ def test_the_buffers_upload_relative_to_the_anchor():
 
 
 def test_the_draw_loop_folds_each_objects_anchor_into_its_matrices():
-    src = inspect.getsource(vp.Viewport._draw_objects)
+    src = inspect.getsource(vp.Viewport._draw_objects_with_clips)
     assert "anchored(" in src and "anchored_clips(" in src
 
 

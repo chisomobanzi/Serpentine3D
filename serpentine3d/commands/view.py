@@ -167,7 +167,8 @@ def cmd_viewcapturetoclipboard(ctx):
 def cmd_clippingplane(ctx):
     """Place a rectangular clipping plane on the CPlane: geometry on its
     normal side is hidden in shaded viewports. Move or rotate the plane
-    object to move the cut; Flip reverses the kept side."""
+    object to move the cut; Flip reverses the kept side. The purple arrow
+    points toward the visible side, following Rhino's convention."""
     c1 = yield PointReq("First corner of clipping plane")
 
     def _rect(p):
@@ -191,8 +192,8 @@ def cmd_clippingplane(ctx):
         face = g.mirror(face, tuple(c1), tuple(ctx.cplane.normal))
     obj = ctx.scene.add(face, name=_next_clip_name(ctx.scene))
     ctx.scene.update(obj.id, clip_plane={"enabled": True})
-    ctx.echo(f"Created {obj.name} — geometry on its normal side is "
-             "hidden. 'disableclippingplane' pauses it.")
+    ctx.echo(f"Created {obj.name}. The purple arrow points toward the visible "
+             "side. 'disableclippingplane' pauses it.")
 
 
 def _next_clip_name(scene) -> str:
