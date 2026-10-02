@@ -66,7 +66,7 @@ def drawn_pictures(monkeypatch):
 
     for name in ("glUniformMatrix4fv", "glUniform1i", "glActiveTexture",
                  "glBindTexture", "glBindVertexArray", "glBindBuffer",
-                 "glDepthMask"):
+                 "glDepthMask", "glEnable", "glDisable", "glPolygonOffset"):
         monkeypatch.setattr(module.GL, name, lambda *args: None)
     monkeypatch.setattr(module.GL, "glUniform1f", uniform)
     monkeypatch.setattr(module.GL, "glBufferData", upload)

@@ -10,6 +10,8 @@ is a DWG since that is the way out of it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
@@ -119,7 +121,7 @@ def test_what_can_be_opened_still_is_and_the_rest_is_reported(
 
     _drag(window, _urls(_a_dwg(tmp_path), good))
 
-    assert seen == [str(good)], "the good file still comes in"
+    assert [Path(path) for path in seen] == [good], "the good file still comes in"
     assert "Site plan.dwg" in _said(window)
 
 

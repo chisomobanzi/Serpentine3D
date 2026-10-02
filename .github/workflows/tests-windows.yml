@@ -29,4 +29,7 @@ jobs:
       - name: Unit tests
         env:
           QT_QPA_PLATFORM: offscreen
+          # Qt's offscreen platform uses its basic font database, which does
+          # not discover Windows system fonts like the desktop platform does.
+          QT_QPA_FONTDIR: C:/Windows/Fonts
         run: uv run pytest tests/ -q --ignore=tests/e2e_dod.py
