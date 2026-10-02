@@ -51,6 +51,11 @@ def open_window(tmp_path, monkeypatch):
     yield create
     for window in windows:
         window.processor.cancel()
+        # Qt's synthetic modified chords can leave queryKeyboardModifiers()
+        # reporting Shift after keySequence returns. Release both modifiers
+        # explicitly so later drawing tests start with no keys held.
+        QTest.keyRelease(window.viewport, Qt.Key.Key_Shift)
+        QTest.keyRelease(window.viewport, Qt.Key.Key_Control)
         window.mark_saved()
         window.close()
     QApplication.processEvents()
