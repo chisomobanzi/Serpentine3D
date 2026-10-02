@@ -59,15 +59,40 @@ def _what_to_transform(ctx, prompt, **kw):
     return held, objs
 
 
-def _preview_of(ctx, held, objs, fn):
-    """What the drawing would look like with `fn` applied to what is picked.
+def _preview_of(ctx, held, objs, fn, action=None):
+    """Rebuild the pending parents without changing the scene or selection.
 
-    Only control points preview; the rest rebuild geometry to answer, which
-    is too much to do on every mouse move.
+    Every candidate starts from the scene's unchanged shapes. Parts sharing
+    a parent are combined in the same order as completion, and a refused
+    parent is quietly left out of the ghost.
     """
     if not held:
         return _ghost(objs, fn)
-    return ctx.control_point_ghost(held.get("cv", {}), fn)
+    shapes = dict(ctx._moved_control_points(held.get("cv", {}), fn))
+    segments = held.get("segment") or {}
+    at = _point_map(fn)
+    for obj_id, idxs in segments.items():
+        obj = ctx.scene.get(obj_id)
+        if obj is None:
+            continue
+        try:
+            shapes[obj_id] = g.transform_segments(
+                shapes.get(obj_id, obj.shape), idxs, at)
+        except g.GeometryError:
+            continue
+    faces = held.get("face") or {}
+    edges = held.get("edge") or {}
+    for obj_id in dict.fromkeys(list(faces) + list(edges)):
+        obj = ctx.scene.get(obj_id)
+        if obj is None:
+            continue
+        try:
+            shapes[obj_id] = _solid_parts_shape(
+                shapes.get(obj_id, obj.shape), faces.get(obj_id, []),
+                edges.get(obj_id, []), fn, action)
+        except g.GeometryError:
+            continue
+    return g.make_compound(list(shapes.values())) if shapes else None
 
 
 def _point_map(fn):
@@ -143,14 +168,12 @@ def _do_to_parts(ctx, held, fn, verb, tail, action):
         hold = ([(obj_id, "face", i) for i in fidx]
                 + [(obj_id, "edge", i) for i in eidx])
         try:
+            shape = _solid_parts_shape(obj.shape, fidx, eidx, fn,
+                                       action, doing)
+            ctx.scene.replace_shape(obj_id, shape)
             if fidx and len(fidx) == len(g.faces_of(obj.shape)):
-                # every face held is the solid itself, whatever the
-                # transform: a band round the whole thing means the thing
-                ctx.scene.replace_shape(obj_id, fn(obj.shape))
                 done.append(f"{obj.name} (every face held)")
             elif kind == "move":
-                ctx.scene.replace_shape(obj_id, g.move_parts(
-                    obj.shape, fidx, eidx, tuple(action[1])))
                 what = []
                 if fidx:
                     what.append(f"{len(fidx)} face(s)")
@@ -158,15 +181,6 @@ def _do_to_parts(ctx, held, fn, verb, tail, action):
                     what.append(f"{len(eidx)} solid edge(s)")
                 done.append(" and ".join(what))
             else:
-                if eidx:
-                    raise g.GeometryError(
-                        f"an edge of a solid can be moved, but not {doing}d")
-                if len(fidx) > 1:
-                    # turning faces in turn double counts the same way;
-                    # until a set can be turned as one, say so
-                    raise g.GeometryError(f"{doing} one face at a time")
-                ctx.scene.replace_shape(
-                    obj_id, _face_by_action(obj.shape, fidx[0], action))
                 done.append("1 face")
         except g.GeometryError as exc:
             refused.append(f"{obj.name}: {exc}")
@@ -181,6 +195,22 @@ def _do_to_parts(ctx, held, fn, verb, tail, action):
         ctx.echo(why + ".")
     if not done and not refused:
         ctx.echo("Nothing held could be transformed.")
+
+
+def _solid_parts_shape(shape, fidx, eidx, fn, action, doing="transform"):
+    """The same pure parent rebuild for a preview and a completed edit."""
+    if fidx and len(fidx) == len(g.faces_of(shape)):
+        # A band holding every face means the whole parent, for any command.
+        return fn(shape)
+    if action and action[0] == "move":
+        return g.move_parts(shape, fidx, eidx, tuple(action[1]))
+    if eidx:
+        raise g.GeometryError(
+            f"an edge of a solid can be moved, but not {doing}d")
+    if len(fidx) > 1:
+        # Turning faces in turn would double count shared corners.
+        raise g.GeometryError(f"{doing} one face at a time")
+    return _face_by_action(shape, fidx[0], action)
 
 
 def _face_by_action(shape, index, action):
@@ -249,7 +279,8 @@ def cmd_move(ctx):
 
     def _preview(p):
         off = tuple(b - a for a, b in zip(p1, p))
-        return _preview_of(ctx, held, objs, lambda s: g.translate(s, off))
+        return _preview_of(ctx, held, objs, lambda s: g.translate(s, off),
+                           action=("move", off))
 
     p2 = yield PointReq("Point to move to", rubber_from=p1,
                         preview_fn=_preview)
@@ -351,7 +382,8 @@ def cmd_rotate(ctx):
         def _preview(p):
             a = p if isinstance(p, float) else _angle(p)
             return _preview_of(ctx, held, objs,
-                               lambda s: g.rotate(s, center, axis, a))
+                               lambda s: g.rotate(s, center, axis, a),
+                               action=("rotate", center, axis, a))
 
         p2 = yield PointReq("Angle, or second reference point",
                             rubber_from=center, allow_number=True,
@@ -481,7 +513,8 @@ def cmd_scale(ctx):
             if f < 1e-9:
                 return None
             return _preview_of(ctx, held, objs,
-                               lambda s: g.scale(s, center, f))
+                               lambda s: g.scale(s, center, f),
+                               action=("scale", f))
 
         p2 = yield PointReq("Second reference point (drag to scale)",
                             rubber_from=center, allow_number=True,
