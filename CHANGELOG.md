@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Default modelling shortcuts (#50).** Group and ungroup use Ctrl+G and
+  Ctrl+Shift+G; hide and show all use Ctrl+H and Ctrl+Shift+H; lock and
+  unlock all use Ctrl+L and Ctrl+Shift+L. Ctrl+T starts Trim and Ctrl+J
+  joins. F8 toggles Ortho, F9 toggles grid snap, Ctrl+W zooms into a window,
+  and Home/End undo and redo camera changes. Ctrl+Shift+E fits the model
+  alongside the existing Ctrl+E. Older settings receive these presets
+  while keeping custom bindings. Ortho and grid snap can change during an
+  unfinished drawing without cancelling it or changing the repeat command.
+
+- **Keyboard defaults are visible and editable.** Settings > Shortcuts
+  includes the existing file, clipboard and view bindings alongside the
+  modelling presets. Removing a key keeps it unbound after restart;
+  Restore keyboard defaults resets just the keyboard. Duplicate keys show
+  a conflict while retaining the last valid assignments. Menu shortcuts
+  follow edits immediately, with Show all and Unlock all labelled explicitly.
+
+### Fixed
+
+- **Tests default to headless rendering.** Without an explicit Qt platform,
+  tests use offscreen rendering with Mesa, keeping their windows off the
+  desktop. An explicitly selected Qt platform still wins.
+
 ## 0.10.6 (2026-10-01)
 
 ### Added

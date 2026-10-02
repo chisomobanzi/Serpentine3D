@@ -15,8 +15,16 @@ remappable in *Settings → Shortcuts* and *Settings → Mouse*.
 | **Alt + right-drag** | Turn to face the nearest axis (see below) |
 | **Scroll wheel** | Zoom (anchors on the cursor) |
 | ++f1++ / ++f2++ / ++f3++ / ++f4++ | Top / Front / Right / Perspective |
-| ++ctrl+e++ | Zoom to fit (extents) |
+| ++ctrl+e++ / ++ctrl+shift+e++ | Zoom to fit (extents) |
+| ++ctrl+w++ | Zoom into a window picked with two corners |
+| ++home++ / ++end++ | Undo / redo camera changes, without undoing model edits |
 | ++f7++ | Toggle grid |
+| ++f8++ | Toggle Ortho (constrain picked points to construction-plane axes) |
+| ++f9++ | Toggle grid snap |
+
+F8 and F9 can change drawing constraints while a command is waiting for a
+point; the unfinished drawing continues. Home and End navigate view history
+when the command prompt is empty. When editing text, they move the caret.
 
 These are Rhino's chords. Orbit can be moved to the **middle** mouse button
 in *Settings → Mouse*; whichever button orbits is the one that takes the
@@ -83,9 +91,26 @@ Nothing is bound out of the box.
 | ++ctrl+n++ / ++ctrl+o++ / ++ctrl+s++ | New / Open / Save |
 | ++ctrl+z++ / ++ctrl+y++ | Undo / Redo |
 | ++ctrl+a++ | Select all |
+| ++ctrl+g++ / ++ctrl+shift+g++ | Group / ungroup |
+| ++ctrl+h++ / ++ctrl+shift+h++ | Hide selection / show all hidden objects |
+| ++ctrl+l++ / ++ctrl+shift+l++ | Lock selection / unlock all objects |
+| ++ctrl+t++ | Trim |
+| ++ctrl+j++ | Join |
 | ++delete++ | Delete selection |
 | ++ctrl+p++ | Export the current sheet to PDF |
 | ++ctrl+comma++ | Settings |
+
+The modelling shortcuts are preset on a fresh install and are added when
+upgrading older settings. Existing custom bindings take priority. Show all
+and Unlock all use the Shift pairs requested for Serpentine3D; Rhino uses
+those pairs for choosing individual hidden or locked objects instead.
+
+*Settings → Shortcuts* lists both the modelling presets and the existing
+file, editing and view shortcuts. Add, edit or remove a row to change a
+binding immediately; removed keys stay unbound after restart. If two rows
+use the same key, the conflict is shown and the last valid bindings stay
+active until you resolve it. *Restore keyboard defaults* resets keyboard
+bindings without changing mouse settings, aliases or object snaps.
 
 ## Selection
 
@@ -131,4 +156,5 @@ Nothing is bound out of the box.
   typed or repeats the last command. `delete` is never repeated, so a right-click after deleting
   something repeats whatever you were doing before it instead.
 - Type command options inline (`cap=n`) or click the chips under the prompt.
-- ++f1++ opens the searchable [command reference](commands.md) inside the app.
+- *Help → Command Reference* opens the searchable
+  [command reference](commands.md) inside the app. ++f1++ selects Top view.
