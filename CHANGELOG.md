@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.7 (2026-10-02)
 
 ### Added
 
@@ -20,11 +20,40 @@
   a conflict while retaining the last valid assignments. Menu shortcuts
   follow edits immediately, with Show all and Unlock all labelled explicitly.
 
+- **Preview the rebuilt object when transforming subobjects (#48).** Move,
+  Rotate and Scale show the complete parent geometry while editing held
+  faces, solid edges or curve segments, including the neighbours that follow
+  the edit. The original stays in place until confirmation, cancellation
+  clears the preview, and unsupported edits are refused as before.
+
 ### Fixed
+
+- **Make2D curves can be selected and measured safely (#55).** Some projected
+  curves carried only a two-dimensional curve, and measuring their length
+  in Properties crashed the geometry kernel. Both Make2D output paths now
+  build the missing three-dimensional curves. Older saved drawings are
+  repaired before measurement too, keeping their projected geometry.
+
+- **The clipping-plane arrow points toward the visible half (#44).** The
+  purple indicator faced the hidden side. It now follows Rhino's convention,
+  and command feedback explains its direction. Existing saved clipping
+  planes keep cutting the same half of the model.
+
+- **GPU buffers stay with their owning OpenGL context.** Reusing buffers
+  between contexts that did not share resources caused a native NVIDIA
+  driver crash. The cache now follows the context group that owns each
+  buffer, and deletion waits for that group to be current. Clipping state
+  is cleared after a failed draw. Native fault traces and paint errors are
+  saved to `~/.serpentine3d/crash.log` to help investigate further reports.
+  The exact Windows incident in #53 remains unconfirmed.
 
 - **Tests default to headless rendering.** Without an explicit Qt platform,
   tests use offscreen rendering with Mesa, keeping their windows off the
   desktop. An explicitly selected Qt platform still wins.
+
+- **Windows validation uses the platform's paths and fonts.** Drop tests
+  compare file paths consistently, picture tests complete their graphics
+  stubs, and offscreen Qt uses the runner's installed fonts.
 
 ## 0.10.6 (2026-10-01)
 

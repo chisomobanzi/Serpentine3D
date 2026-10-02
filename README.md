@@ -77,7 +77,7 @@ https://github.com/user-attachments/assets/837002ba-7780-49d3-b966-71d6469ba884
 |---|---|---|---|
 | **Linux** | [Serpentine3D-x86_64.AppImage](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) | 509&nbsp;MB | Make it executable and run it. Nothing to install. |
 | **Windows** | [Serpentine3D-Setup-x86_64.exe](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) | 119&nbsp;MB | Unsigned for now: choose **More info**, then **Run anyway**. |
-| **macOS** | [Serpentine3D-0.10.6-arm64.dmg](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.10.6-arm64.dmg) | 268&nbsp;MB | Apple Silicon. Unsigned for now: right-click the app and choose **Open**. |
+| **macOS** | [Serpentine3D-0.10.7-arm64.dmg](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.10.7-arm64.dmg) | 268&nbsp;MB | Apple Silicon. Unsigned for now: right-click the app and choose **Open**. |
 
 Each build carries the OpenCASCADE kernel and its own Python, and needs a GPU
 with OpenGL 3.3. Headless use works anywhere. [Release notes](https://github.com/chisomobanzi/Serpentine3D/releases/latest)
