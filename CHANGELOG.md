@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Layer names stay readable while renaming (#52).** The inline name editor
+  uses the layer row's full height without the padding of a standalone text
+  field, so letters are no longer cut off while typing.
+
 ## 0.10.7 (2026-10-02)
 
 ### Added

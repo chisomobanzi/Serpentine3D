@@ -43,6 +43,26 @@ def _column_width(tree, column, *choices) -> int:
     return tree.sizeHintForColumn(column) + max(0, longest - shown)
 
 
+class _NameDelegate(QStyledItemDelegate):
+    """Give inline renaming the row's full height without input padding."""
+
+    def createEditor(self, parent, option, index):
+        editor = super().createEditor(parent, option, index)
+        # The global input padding is for standalone fields. In a layer
+        # row it leaves only a narrow strip in which to paint the letters.
+        editor.setStyleSheet("QLineEdit { padding: 0px 8px; }")
+        return editor
+
+    def updateEditorGeometry(self, editor, option, index):
+        super().updateEditorGeometry(editor, option, index)
+        # Keep Qt's horizontal placement (including sublayer indentation),
+        # but use the whole row rather than the text's padded rectangle.
+        rect = editor.geometry()
+        rect.setTop(option.rect.top())
+        rect.setHeight(option.rect.height())
+        editor.setGeometry(rect)
+
+
 class _ChoiceDelegate(QStyledItemDelegate):
     """Edits a cell with a drop-down of the known choices.
 
@@ -343,6 +363,7 @@ class LayersPanel(QWidget):
         self.tree.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.header().setStretchLastSection(False)
+        self.tree.setItemDelegateForColumn(_NAME_COL, _NameDelegate(self.tree))
         self.tree.setItemDelegateForColumn(_TYPE_COL, _ChoiceDelegate(
             _lt.LINETYPES, editable=False, parent=self.tree))
         self.tree.setItemDelegateForColumn(_PRINT_COL, _ChoiceDelegate(
