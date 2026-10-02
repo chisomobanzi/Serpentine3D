@@ -11,15 +11,15 @@ from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
-    QMenu, QMessageBox, QProgressDialog, QTabBar, QToolBar, QVBoxLayout,
-    QWidget,
+    QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QProgressDialog, QTabBar,
+    QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 from . import commands as cmd_pkg
 from . import fileio
 from .commands.base import (
     CommandContext, CommandProcessor, FileReq, OptionReq, PointReq, SelectReq,
-    TextReq,
+    TextReq, resolve,
 )
 from .core.history import History
 from .core.scene import Scene
@@ -842,6 +842,7 @@ class MainWindow(QMainWindow):
 
     def _build_menus(self):
         mb = self.menuBar()
+        self._shortcut_actions = {}
 
         m_file = mb.addMenu("&File")
         self._action(m_file, "New", "Ctrl+N", lambda: self._file_new())
@@ -865,13 +866,22 @@ class MainWindow(QMainWindow):
         self._action(m_edit, "Copy", "Ctrl+C", self._copy_selected)
         self._action(m_edit, "Paste", "Ctrl+V", self._paste)
         m_edit.addSeparator()
-        self._action(m_edit, "Delete", None, self._delete_selected)
+        self._action(m_edit, "Delete", None, self._delete_selected,
+                     binding="delete")
         self._action(m_edit, "Select All", "Ctrl+A",
                      lambda: self.run_command("selall"))
         self._action(m_edit, "Select None", None,
                      lambda: self.run_command("selnone"))
         self._action(m_edit, "Invert Selection", None,
                      lambda: self.run_command("invert"))
+        m_edit.addSeparator()
+        for label, command in (
+                ("Group", "group"), ("Ungroup", "ungroup"),
+                ("Hide", "hide"), ("Show all", "show"),
+                ("Lock", "lock"), ("Unlock all", "unlockall"),
+                ("Trim", "trim"), ("Join", "join")):
+            self._action(m_edit, label, None,
+                         lambda c=command: self.run_command(c), binding=command)
         m_edit.addSeparator()
         self._action(m_edit, "Control Points On", "F10",
                      lambda: self.run_command("pointson"))
@@ -889,6 +899,11 @@ class MainWindow(QMainWindow):
         m_view.addSeparator()
         self._action(m_view, "Zoom Extents", "Ctrl+E",
                      lambda: self.run_command("zoomextents"))
+        for label, command in (("Zoom Window", "zoomwindow"),
+                               ("Undo View", "undoview"),
+                               ("Redo View", "redoview")):
+            self._action(m_view, label, None,
+                         lambda c=command: self.run_command(c), binding=command)
         m_view.addSeparator()
         self._action(m_view, "Wireframe", None,
                      lambda: self.run_command("wireframe"))
@@ -939,6 +954,11 @@ class MainWindow(QMainWindow):
         m_draft.addSeparator()
         self._action(m_draft, "Export PDF...", "Ctrl+P",
                      lambda: self.run_command("exportpdf"))
+        m_draft.addSeparator()
+        self._action(m_draft, "Toggle Ortho", None,
+                     lambda: self.run_command("ortho"), binding="ortho")
+        self._action(m_draft, "Toggle Grid Snap", None,
+                     lambda: self.run_command("gridsnap"), binding="gridsnap")
 
         m_tools = mb.addMenu("&Tools")
         self._action(m_tools, "Command Palette...", "Ctrl+Shift+P",
@@ -954,9 +974,14 @@ class MainWindow(QMainWindow):
 
         m_help = mb.addMenu("&Help")
         self._action(m_help, "Commands", None, self._show_commands)
+        self._action(m_help, "Command Reference", None, self.show_help_browser)
         self._action(m_help, "Check for Updates…", None,
                      self._check_updates_manual)
         self._action(m_help, "About", None, self._about)
+        # Keep the Python menu wrappers alongside the action registry.
+        self._menus = (m_file, m_edit, m_view, m_ports, m_draft, m_tools,
+                       self._plugins_menu, m_help)
+        self._menu_actions = tuple(menu.menuAction() for menu in self._menus)
 
     def plugin_menu_action(self, label: str, fn):
         self._action(self._plugins_menu, label, None, fn)
@@ -969,10 +994,13 @@ class MainWindow(QMainWindow):
         os.makedirs(d, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(d))  # portable
 
-    def _action(self, menu, label, shortcut, fn):
+    def _action(self, menu, label, shortcut, fn, *, binding=None):
+        from .utils.config import DEFAULT_SHORTCUTS
         act = QAction(label, self)
-        if shortcut:
-            act.setShortcut(QKeySequence(shortcut))
+        if binding is None and shortcut:
+            binding = DEFAULT_SHORTCUTS[shortcut]
+        if binding is not None:
+            self._shortcut_actions[binding] = act
         act.triggered.connect(lambda checked=False: fn())
         menu.addAction(act)
         return act
@@ -980,6 +1008,19 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- commanding
 
     def run_command(self, name: str):
+        # These controls have no input requests and can change during a
+        # pick. Running them through the processor would cancel that pick
+        # and replace its repeat target with the toggle.
+        control = resolve(name)
+        if (self.processor.busy and control is not None
+                and control.name in ("ortho", "gridsnap")):
+            for _ in control.fn(self.ctx):
+                pass
+            self.osnap_bar.refresh()
+            self._refresh_rubber(None)
+            self._repaint_panes()
+            self.command_line.focus()
+            return
         self._pending_import_paths.clear()
         self.processor.run(name)
         self.command_line.focus()
@@ -2550,25 +2591,33 @@ class MainWindow(QMainWindow):
             sc.setParent(None)
             sc.deleteLater()
         self._user_shortcuts = []
-        self._user_shortcut_keys = set()
         wanted = {}
         for key, command in (self.cfg.get("shortcuts",
                                           default={}) or {}).items():
             seq = QKeySequence(key)
             if seq.isEmpty():
                 continue
-            wanted[seq.toString()] = command
-        # the user's keys win: strip clashing built-in menu shortcuts
-        for act in self.findChildren(QAction):
-            if not act.shortcut().isEmpty() \
-                    and act.shortcut().toString() in wanted:
-                act.setShortcut(QKeySequence())
+            wanted[seq.toString()] = command.strip().lower()
+        # The configuration owns every keyboard binding. Menu actions own
+        # their Qt shortcuts so showing a key never installs it twice.
+        for command, act in self._shortcut_actions.items():
+            act.setShortcuts([QKeySequence(key) for key, target in wanted.items()
+                              if target == command])
         for key_text, command in wanted.items():
+            if command in self._shortcut_actions:
+                continue
             sc = QShortcut(QKeySequence(key_text), self)
             sc.activated.connect(
-                lambda c=command: self.run_command(c))
+                lambda c=command: self._activate_shortcut(c))
             self._user_shortcuts.append(sc)
-            self._user_shortcut_keys.add(key_text)
+        self._keyboard_bindings = wanted
+
+    def _activate_shortcut(self, command):
+        action = self._shortcut_actions.get(command)
+        if action is not None:
+            action.trigger()
+        else:
+            self.run_command(command)
 
     # ------------------------------------------------------------------ misc
 
@@ -2682,39 +2731,30 @@ class MainWindow(QMainWindow):
             pressed = QKeySequence(ev.keyCombination())
         except Exception:
             return False
-        for key, cmd in (self.cfg.get("shortcuts", default={}) or {}).items():
+        for key, cmd in self._keyboard_bindings.items():
             seq = QKeySequence(key)
             if not seq.isEmpty() and seq.matches(pressed) == \
                     QKeySequence.SequenceMatch.ExactMatch:
-                self.run_command(cmd)
+                self._activate_shortcut(cmd)
                 return True
         return False
 
+    def _text_editor_has_focus(self):
+        field = QApplication.focusWidget()
+        return (isinstance(field, (QLineEdit, QPlainTextEdit, QTextEdit))
+                and not field.isReadOnly()
+                and field is not getattr(
+                    getattr(self, "command_line", None), "input", None))
+
     def keyPressEvent(self, ev):
+        # Native editor shortcuts have already had their chance. An editor's
+        # ignored key must not fall through to the model shortcut fallback.
+        # Read-only history still participates in normal window shortcuts.
+        if self._text_editor_has_focus():
+            ev.accept()
+            return
         if self._match_user_shortcut(ev):
-            return
-        # fallback for env without a WM where QAction shortcuts don't fire
-        if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            handlers = {
-                Qt.Key.Key_C: self._copy_selected,
-                Qt.Key.Key_V: self._paste,
-                Qt.Key.Key_A: lambda: self.run_command("selall"),
-                Qt.Key.Key_Z: lambda: self.run_command("undo"),
-                Qt.Key.Key_Y: lambda: self.run_command("redo"),
-            }
-            fn = handlers.get(ev.key())
-            if fn:
-                fn()
-                return
-        if ev.key() == Qt.Key.Key_F1 \
-                and "F1" not in getattr(self, "_user_shortcut_keys", ()):
-            self.show_help_browser()
-            return
-        if ev.key() == Qt.Key.Key_F10:
-            self.run_command("pointson")
-            return
-        if ev.key() == Qt.Key.Key_F11:
-            self.run_command("pointsoff")
+            ev.accept()
             return
         # any printable key focuses the command line (Rhino behaviour)
         text = ev.text()
@@ -2737,12 +2777,14 @@ class MainWindow(QMainWindow):
                     field.insertPlainText(text)
                 ev.accept()
                 return
-        if text and text.isprintable() and not self.command_line.input.hasFocus():
+        if (text and text.isprintable()
+                and not ev.modifiers() & (
+                    Qt.KeyboardModifier.ControlModifier
+                    | Qt.KeyboardModifier.AltModifier
+                    | Qt.KeyboardModifier.MetaModifier)
+                and not self.command_line.input.hasFocus()):
             self.command_line.focus()
             self.command_line.input.insert(text)
-            return
-        if ev.key() == Qt.Key.Key_Delete:
-            self._delete_selected()
             return
         if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             if not self.processor.busy and self.processor.last_command:
