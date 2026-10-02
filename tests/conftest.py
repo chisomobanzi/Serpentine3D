@@ -1,8 +1,21 @@
 import os
 
-import pytest
+# Headless unless asked otherwise. Many tests build and show real viewports and
+# windows; without this a local run opens every one of them on the desktop, as
+# CI never does because its workflows set the variable. Set QT_QPA_PLATFORM
+# (for example to "xcb") before running to watch them on a real display.
+if "QT_QPA_PLATFORM" not in os.environ:
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    # Offscreen still reaches the display's GL driver through GLX. With a
+    # desktop GPU driver that gives a context with no framebuffer behind it,
+    # and a pane painting into that can crash the whole run (NVIDIA, the text
+    # tests). Mesa's software renderer is what CI draws with; use it here too.
+    os.environ.setdefault("__GLX_VENDOR_LIBRARY_NAME", "mesa")
+    os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
 
-import serpentine3d.commands  # registers all commands  # noqa: F401
+import pytest  # noqa: E402
+
+import serpentine3d.commands  # registers all commands  # noqa: F401,E402
 
 
 @pytest.fixture(autouse=True)

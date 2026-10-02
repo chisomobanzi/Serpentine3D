@@ -48,6 +48,17 @@ class CommandInput(QLineEdit):
         self.focusLost.emit()
         super().focusOutEvent(ev)
 
+    def _model_editing_shortcut(self, ev):
+        """An empty CAD prompt gives otherwise native edit keys to the model."""
+        if self.text() or self.text_pending:
+            return False
+        modifiers = ev.modifiers()
+        return (modifiers == Qt.KeyboardModifier.NoModifier
+                and ev.key() in (Qt.Key.Key_Home, Qt.Key.Key_End)) or (
+            modifiers & Qt.KeyboardModifier.ControlModifier
+            and ev.key() in (Qt.Key.Key_C, Qt.Key.Key_V, Qt.Key.Key_A,
+                             Qt.Key.Key_Z, Qt.Key.Key_Y, Qt.Key.Key_H))
+
     def event(self, ev):
         # Backtab is Shift+Tab, which X delivers as its own key rather than
         # as Tab with a modifier. The prompt keeps the focus through most of
@@ -57,12 +68,17 @@ class CommandInput(QLineEdit):
                 and ev.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab)):
             self.tabPressed.emit()
             return True
-        # with an empty input, cede Ctrl+C/V/A to the app-level shortcuts
-        if (ev.type() == ev.Type.ShortcutOverride and not self.text()
-                and ev.modifiers() & Qt.KeyboardModifier.ControlModifier
-                and ev.key() in (Qt.Key.Key_C, Qt.Key.Key_V, Qt.Key.Key_A)):
+        # QLineEdit claims some keys even when there is no text to edit.
+        if (ev.type() == ev.Type.ShortcutOverride
+                and self._model_editing_shortcut(ev)):
             ev.ignore()
             return False
+        if (ev.type() == ev.Type.ShortcutOverride
+                and (self.text() or self.text_pending)
+                and ev.key() == Qt.Key.Key_H
+                and ev.modifiers() == Qt.KeyboardModifier.ControlModifier):
+            ev.accept()
+            return True
         return super().event(ev)
 
     def keyPressEvent(self, ev):
@@ -87,13 +103,19 @@ class CommandInput(QLineEdit):
             self.downPressed.emit()
         elif key == Qt.Key.Key_Escape:
             self.escPressed.emit()
-        elif (not self.text()
-                and ev.modifiers() & Qt.KeyboardModifier.ControlModifier
-                and key in (Qt.Key.Key_C, Qt.Key.Key_V, Qt.Key.Key_A,
-                            Qt.Key.Key_Z, Qt.Key.Key_Y)):
+        elif self._model_editing_shortcut(ev):
             ev.ignore()          # bubble to the main window
         else:
+            editing_control_h = ((self.text() or self.text_pending)
+                                 and key == Qt.Key.Key_H
+                                 and ev.modifiers() ==
+                                 Qt.KeyboardModifier.ControlModifier)
             super().keyPressEvent(ev)
+            # Native Ctrl+H varies with the platform. Preserve QLineEdit's
+            # answer, including an ignored event, without hiding the model
+            # behind the text being edited.
+            if editing_control_h:
+                ev.accept()
 
 
 class _EchoView(QPlainTextEdit):

@@ -18,7 +18,9 @@ from PySide6.QtWidgets import (
 from ..commands import base as cmd_base
 from ..ai.model_discovery import ModelDiscovery as _ModelDiscovery
 from ..core.snaps import SNAP_TYPES
-from ..utils.config import parse_chord, parse_rhino_aliases, parse_shortcuts
+from ..utils.config import (
+    DEFAULT_SHORTCUTS, parse_chord, parse_rhino_aliases, parse_shortcuts,
+)
 from .dialogs import untether
 
 
@@ -213,13 +215,23 @@ class SettingsDialog(QDialog):
                                   "simple text files ('F5 zoomextents' or "
                                   "'ctrl+b=box' per line) or JSON."))
         self.key_table = self._binding_table("Shortcut", self._shortcuts_changed)
-        for key, cmd in sorted(
-                (self.cfg.get("shortcuts", default={}) or {}).items()):
-            self._add_row(self.key_table, key, cmd)
+        with QSignalBlocker(self.key_table):
+            for key, cmd in sorted(
+                    (self.cfg.get("shortcuts", default={}) or {}).items()):
+                self._add_row(self.key_table, key, cmd)
         layout.addWidget(self.key_table, 2)   # more keys get bound than chords
-        layout.addLayout(self._table_buttons(
+        keyboard_buttons = self._table_buttons(
             self.key_table, self._import_shortcuts,
-            on_change=self._shortcuts_changed))
+            on_change=self._shortcuts_changed)
+        restore = QPushButton("Restore keyboard defaults")
+        restore.clicked.connect(self._restore_keyboard_defaults)
+        keyboard_buttons.addWidget(restore)
+        layout.addLayout(keyboard_buttons)
+        self.shortcut_feedback = QLabel()
+        self.shortcut_feedback.setWordWrap(True)
+        self.shortcut_feedback.setStyleSheet("color: #e5ae60;")
+        layout.addWidget(self.shortcut_feedback)
+        self._shortcuts_changed()
 
         layout.addSpacing(10)
         layout.addWidget(_section(
@@ -265,7 +277,7 @@ class SettingsDialog(QDialog):
 
     def _shortcuts_changed(self, *_):
         shortcuts = {}
-        bad = []
+        conflicts = set()
         for r in range(self.key_table.rowCount()):
             key_item = self.key_table.item(r, 0)
             cmd_item = self.key_table.item(r, 1)
@@ -275,12 +287,34 @@ class SettingsDialog(QDialog):
             cmd = cmd_item.text().strip().lower()
             if not key or not cmd:
                 continue
-            if QKeySequence(key).isEmpty():
-                bad.append(key)
+            sequence = QKeySequence(key)
+            if sequence.isEmpty():
                 continue
+            key = sequence.toString()
+            if key in shortcuts:
+                conflicts.add(key)
             shortcuts[key] = cmd
+        if conflicts:
+            self.shortcut_feedback.setText(
+                "Shortcut conflict: " + ", ".join(sorted(conflicts)) +
+                " is already bound. Choose another key or remove the duplicate. "
+                "Your last valid bindings remain active.")
+            return
+        self.shortcut_feedback.clear()
         self.cfg.set("shortcuts", shortcuts)
         self.window.apply_user_shortcuts()
+
+    def _restore_keyboard_defaults(self):
+        if QMessageBox.question(
+                self, "Restore keyboard defaults",
+                "Replace all keyboard bindings with their factory defaults?") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        with QSignalBlocker(self.key_table):
+            self.key_table.setRowCount(0)
+            for key, command in sorted(DEFAULT_SHORTCUTS.items()):
+                self._add_row(self.key_table, key, command)
+        self._shortcuts_changed()
 
     def _import_shortcuts(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -668,8 +702,13 @@ class SettingsDialog(QDialog):
 
     def _add_row(self, table: QTableWidget, a: str, b: str):
         # avoid duplicate keys: update in place
+        keyboard = table is getattr(self, "key_table", None)
+        if keyboard:
+            a = QKeySequence(a).toString()
         for r in range(table.rowCount()):
-            if table.item(r, 0) and table.item(r, 0).text() == a:
+            existing = table.item(r, 0)
+            if existing and (QKeySequence(existing.text()).toString()
+                             if keyboard else existing.text()) == a:
                 table.item(r, 1).setText(b)
                 return
         r = table.rowCount()

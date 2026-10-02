@@ -24,6 +24,51 @@ _migrate_legacy_dirs()
 CONFIG_DIR = os.path.expanduser("~/.config/serpentine3d")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "settings.json")
 
+DEFAULT_SHORTCUTS = {
+    "Ctrl+N": "new",
+    "Ctrl+O": "open",
+    "Ctrl+S": "save",
+    "Ctrl+Shift+S": "saveas",
+    "Ctrl+Q": "quit",
+    "Ctrl+Z": "undo",
+    "Ctrl+Y": "redo",
+    # These are application actions, distinct from the model Copy command.
+    "Ctrl+C": "clipboardcopy",
+    "Ctrl+V": "clipboardpaste",
+    "Delete": "delete",
+    "Ctrl+A": "selall",
+    "F10": "pointson",
+    "F11": "pointsoff",
+    "F1": "top",
+    "F2": "front",
+    "F3": "right",
+    "F4": "perspective",
+    "F5": "isometric",
+    "Ctrl+E": "zoomextents",
+    "Ctrl+Shift+A": "assistant",
+    "Ctrl+M": "maximizeviewport",
+    "F7": "grid",
+    "Ctrl+P": "exportpdf",
+    "Ctrl+Shift+P": "commandpalette",
+    "Ctrl+`": "scripteditor",
+    "Ctrl+,": "settings",
+    "Ctrl+G": "group",
+    "Ctrl+Shift+G": "ungroup",
+    "Ctrl+H": "hide",
+    "Ctrl+Shift+H": "show",
+    "Ctrl+L": "lock",
+    "Ctrl+Shift+L": "unlockall",
+    "Ctrl+T": "trim",
+    "Ctrl+J": "join",
+    "F8": "ortho",
+    "F9": "gridsnap",
+    "Ctrl+W": "zoomwindow",
+    "Home": "undoview",
+    "End": "redoview",
+    "Ctrl+Shift+E": "zoomextents",
+}
+SHORTCUT_DEFAULTS_VERSION = 1
+
 DEFAULTS = {
     "mouse": {
         "orbit_button": "right",       # middle | right; right as in Rhino
@@ -54,7 +99,8 @@ DEFAULTS = {
     "show_welcome": True,              # start screen on launch
     "check_updates": True,             # check GitHub for a newer release on launch
     "aliases": {},                     # alias -> command name
-    "shortcuts": {},                   # key sequence -> command name
+    "shortcuts": DEFAULT_SHORTCUTS,    # key sequence -> command name
+    "shortcut_defaults_version": SHORTCUT_DEFAULTS_VERSION,
     "display": {
         "grid_extent": 100,
         "grid_major": 10,
@@ -95,6 +141,21 @@ class Config:
         except (OSError, ValueError):
             return
         _merge(self.data, stored)
+        shortcuts = stored.get("shortcuts", {}) or {}
+        if stored.get("shortcut_defaults_version", 0) < SHORTCUT_DEFAULTS_VERSION:
+            # Upgrade once, preserving Qt-equivalent custom bindings. The
+            # version makes subsequent saves authoritative, so deleting a
+            # factory shortcut does not bring it back on the next launch.
+            from PySide6.QtGui import QKeySequence
+            custom_keys = {QKeySequence(key).toString() for key in shortcuts}
+            self.data["shortcuts"] = {
+                key: command for key, command in DEFAULT_SHORTCUTS.items()
+                if QKeySequence(key).toString() not in custom_keys
+            }
+            self.data["shortcuts"].update(shortcuts)
+            self.data["shortcut_defaults_version"] = SHORTCUT_DEFAULTS_VERSION
+        else:
+            self.data["shortcuts"] = copy.deepcopy(shortcuts)
 
     def save(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
