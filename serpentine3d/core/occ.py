@@ -18,7 +18,7 @@ from OCP.TopAbs import TopAbs_ShapeEnum, TopAbs_Orientation
 from OCP.TopExp import TopExp_Explorer, TopExp
 from OCP.TopTools import TopTools_IndexedMapOfShape
 from OCP.BRep import BRep_Tool, BRep_Builder
-from OCP.BRepLib import BRepLib_FindSurface
+from OCP.BRepLib import BRepLib, BRepLib_FindSurface
 from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace,
     BRepBuilderAPI_MakeVertex, BRepBuilderAPI_MakePolygon,
@@ -120,7 +120,29 @@ def bbox_add(shape, box: Bnd_Box):
     # extents do not land a fraction below their boundary through conversion.
     BRepBndLib.AddOptimal_s(shape, box, False, True)
 
+def ensure_curves3d(shape):
+    """Materialize pcurve-only edges before a native consumer reads them.
+
+    HLR can leave projected B-splines without a 3D curve. OCCT's linear
+    properties then dereference a null curve instead of raising an error.
+    Build from the existing pcurves, preserving their projected geometry.
+    Degenerate edges at sphere poles legitimately have no curve to build.
+    """
+    if BRepLib.BuildCurves3d_s(shape):
+        return
+    explorer = TopExp_Explorer(shape, EDGE)
+    while explorer.More():
+        edge = to_edge(explorer.Current())
+        if (not BRep_Tool.Degenerated_s(edge)
+                and BRep_Tool.Curve_s(edge, 0., 0.) is None):
+            raise ValueError("A curve has no 3D geometry and could not be reconstructed")
+        explorer.Next()
+
+
 def linear_properties(shape) -> GProp_GProps:
+    # Also protect projected curves saved by older versions, which bypass
+    # the repaired HLR output when their drawing is reopened.
+    ensure_curves3d(shape)
     props = GProp_GProps()
     BRepGProp.LinearProperties_s(shape, props)
     return props

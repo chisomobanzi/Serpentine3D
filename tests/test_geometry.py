@@ -644,12 +644,16 @@ def test_offset_faces_rejects_empty():
 
 
 def _make2d_edge():
-    """One edge as Make2D leaves it: projected, with no 3D curve of its own."""
+    """An old Make2D edge, before its missing 3D curve was constructed."""
     from serpentine3d.core import hlr
-    res = hlr.hlr_project_safe([g.make_box((0, 0, 0), 100, 100, 100)],
-                               origin=(0, 0, 0), view_dir=(0, 1, 0),
-                               x_dir=(1, 0, 0))
-    edges = res["visible"] + res["outline"]
+    from OCP.HLRBRep import HLRBRep_Algo, HLRBRep_HLRToShape
+    algo = HLRBRep_Algo()
+    algo.Add(g.make_box((0, 0, 0), 100, 100, 100))
+    algo.Projector(hlr._projector((0, 0, 0), (0, 1, 0), (1, 0, 0)))
+    algo.Update()
+    algo.Hide()
+    convert = HLRBRep_HLRToShape(algo)
+    edges = g.edges_of(convert.VCompound()) + g.edges_of(convert.OutLineVCompound())
     assert edges, "HLR produced nothing to test with"
     return edges[0]
 

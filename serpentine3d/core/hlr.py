@@ -21,6 +21,14 @@ def _projector(origin, view_dir, x_dir):
     return HLRAlgo_Projector(ax2)
 
 
+def _projected_edges(compound) -> list:
+    """HLR output that selection, measurement, and editing can safely read."""
+    if compound is None or compound.IsNull():
+        return []
+    occ.ensure_curves3d(compound)
+    return geometry.edges_of(compound)
+
+
 def hlr_project(shapes: list, origin, view_dir, x_dir,
                 include_hidden: bool = True) -> dict:
     """Run HLR. Returns {'visible': [edges], 'outline': [...], 'hidden': [...]}
@@ -38,20 +46,16 @@ def hlr_project(shapes: list, origin, view_dir, x_dir,
     algo.Hide()
     conv = HLRBRep_HLRToShape(algo)
 
-    def edges(compound) -> list:
-        if compound is None or compound.IsNull():
-            return []
-        return geometry.edges_of(compound)
-
     out = {
-        "visible": edges(conv.VCompound()) + edges(conv.Rg1LineVCompound()),
-        "outline": edges(conv.OutLineVCompound()),
+        "visible": (_projected_edges(conv.VCompound())
+                    + _projected_edges(conv.Rg1LineVCompound())),
+        "outline": _projected_edges(conv.OutLineVCompound()),
         "hidden": [],
     }
     if include_hidden:
-        out["hidden"] = (edges(conv.HCompound())
-                         + edges(conv.OutLineHCompound())
-                         + edges(conv.Rg1LineHCompound()))
+        out["hidden"] = (_projected_edges(conv.HCompound())
+                         + _projected_edges(conv.OutLineHCompound())
+                         + _projected_edges(conv.Rg1LineHCompound()))
     return out
 
 
@@ -104,7 +108,7 @@ def project_by_shape(shapes: list, origin, view_dir, x_dir,
             c = method(arg)
         except Exception:                                     # noqa: BLE001
             return []
-        return [] if (c is None or c.IsNull()) else geometry.edges_of(c)
+        return _projected_edges(c)
 
     algo = HLRBRep_Algo()
     for s in shapes:
