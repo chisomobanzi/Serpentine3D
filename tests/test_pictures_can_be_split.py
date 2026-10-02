@@ -83,7 +83,8 @@ def picture_draws(monkeypatch):
         draws.append((vertices.copy(), pending["image"], pending["uAlpha"]))
 
     for name in ("glUniformMatrix4fv", "glUniform1i", "glActiveTexture",
-                 "glBindTexture", "glBindVertexArray", "glBindBuffer", "glDepthMask"):
+                 "glBindTexture", "glBindVertexArray", "glBindBuffer", "glDepthMask",
+                 "glEnable", "glDisable", "glPolygonOffset"):
         monkeypatch.setattr(module.GL, name, lambda *args: None)
     monkeypatch.setattr(module.GL, "glUniform1f", lambda k, v: pending.update({k: v}))
     monkeypatch.setattr(module.GL, "glBufferData", upload)
