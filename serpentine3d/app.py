@@ -211,6 +211,7 @@ class MainWindow(QMainWindow):
                                   viewport=self.viewport, window=self)
         self.ctx.current_path = None
         self.processor = CommandProcessor(self.ctx)
+        self._cursor_preview = None
         self._file_picker_open = False
         self.ctx.add_echo_listener(self.command_line.echo)
         self.processor.add_listener(self._sync_command_state)
@@ -839,6 +840,7 @@ class MainWindow(QMainWindow):
         # sizes the tools to the height it has and keeps them all in sight.
         bar.addWidget(tool_strip(groups, self.run_command, bar))
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, bar)
+        self._tools_toolbar = bar
 
     def _build_menus(self):
         mb = self.menuBar()
@@ -918,6 +920,9 @@ class MainWindow(QMainWindow):
         m_view.addSeparator()
         self._action(m_view, "AI Assistant", "Ctrl+Shift+A",
                      self.show_ai_panel)
+        tools_toolbar_action = self._tools_toolbar.toggleViewAction()
+        tools_toolbar_action.setText("Tools Toolbar")
+        m_view.addAction(tools_toolbar_action)
         m_view.addSeparator()
         # Four Viewports was two levels down and went unfound (GitHub #5
         # asked for a layout that had shipped), so it sits in View itself.
@@ -1077,7 +1082,7 @@ class MainWindow(QMainWindow):
 
     def _on_option_chip(self, name: str):
         self.processor.set_option(name)
-        self._live_preview(self.command_line.input.text())
+        self._live_preview(self.command_line.input.text(), use_cursor=True)
         self.command_line.focus()
 
     def _on_keyword_chip(self, word: str):
@@ -1111,11 +1116,18 @@ class MainWindow(QMainWindow):
             return self.processor.preview_for(req.default)
         return None
 
-    def _live_preview(self, text: str):
+    def _live_preview(self, text: str, *, use_cursor=False):
         req = self.processor.request
+        # Typing supersedes the cursor, even when the text is invalid or
+        # cleared. An option chip alone can reuse the current mouse point.
+        if not use_cursor:
+            self._cursor_preview = None
         if req is not None and getattr(req, "preview_fn", None) and \
                 text.strip():
             shape = self.processor.preview_shape(text)
+        elif (use_cursor and self._cursor_preview is not None
+              and self._cursor_preview[0] is req):
+            shape = self.processor.preview_for(self._cursor_preview[1])
         else:
             shape = self._standing_ghost()
         # every pane. A ghost is a shape in the world, not a picture belonging
@@ -1128,6 +1140,9 @@ class MainWindow(QMainWindow):
     def _sync_command_state(self):
         busy = self.processor.busy
         req = self.processor.request
+        if (self._cursor_preview is not None
+                and self._cursor_preview[0] is not req):
+            self._cursor_preview = None
         active = self.processor.active
         self.properties.set_model_text_command_active(
             active is not None and active.name == "textobject")
@@ -1516,6 +1531,7 @@ class MainWindow(QMainWindow):
         self._refresh_rubber(point, source=self.sender())
         req = self.processor.request
         if isinstance(req, PointReq) and getattr(req, "preview_fn", None):
+            self._cursor_preview = (req, point)
             # ghost of the pending result under the cursor, ~30Hz cap
             from PySide6.QtCore import QElapsedTimer
             timer = getattr(self, "_ghost_timer", None)

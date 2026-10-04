@@ -56,11 +56,12 @@ def _subobject_edge_map(ctx):
 
 
 @command("filletedge", aliases=("fe",))
-def cmd_filletedge(ctx):
+def cmd_filletedge(ctx, objs=None):
     """Fillet edges. Ctrl+Shift-click edges first to fillet only those;
     otherwise fillets every edge of the selected solids."""
     picked = _subobject_edge_map(ctx)
     if picked:
+        held_picks = list(ctx.selection.subobjects)
         chain = yield OptionReq("Extend picks to smooth chains?",
                                 options=["No", "Yes"], default="No")
         from .base import TextReq
@@ -71,6 +72,7 @@ def cmd_filletedge(ctx):
             ctx.echo("Could not parse the radius.")
             return
         done = 0
+        succeeded = set()
         for obj_id, edges in picked.items():
             obj = ctx.scene.get(obj_id)
             if chain == "Yes":
@@ -84,16 +86,22 @@ def cmd_filletedge(ctx):
                 ctx.scene.replace_shape(
                     obj_id, g.fillet_edges(obj.shape, radius, edges=edges))
                 done += len(edges)
+                succeeded.add(obj_id)
             except g.GeometryError as exc:
                 ctx.echo(f"{obj.name}: {exc}")
         ctx.selection.clear()
+        remaining = [s for s in held_picks if s[0] not in succeeded]
+        ctx.result_subobjects = remaining
         ctx.echo(f"Filleted {done} edge(s).")
         return
-    objs = yield SelectReq("Select solids to fillet (Ctrl+Shift-click "
-                           "edges beforehand to fillet specific ones)",
-                           kinds=("solid", "surface"))
+    if objs is None:
+        objs = yield SelectReq("Select solids to fillet (Ctrl+Shift-click "
+                               "edges beforehand to fillet specific ones)",
+                               kinds=("solid", "surface"))
+    ctx.echo("Filleting all edges. Ctrl+Shift-click specific edges before "
+             "running Fillet to round only those.")
     read, req = _edge_size_req(
-        ctx, objs, "Fillet radius (click, or type a number)",
+        ctx, objs, "Fillet radius for all edges (click, or type a number)",
         lambda r: g.make_compound(
             [g.fillet_edges(o.shape, r) for o in objs]))
     radius = read((yield req))
@@ -107,6 +115,8 @@ def cmd_filletedge(ctx):
             done += 1
         except g.GeometryError as exc:
             ctx.echo(f"{o.name}: {exc}")
+            ctx.echo("Try a smaller radius, or Ctrl+Shift-click specific "
+                     "edges before running Fillet again.")
     if done:
         ctx.echo(f"Filleted all edges of {done} object(s) at r={radius:g}.")
 

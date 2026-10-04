@@ -1063,12 +1063,22 @@ def cmd_setpt(ctx):
     up on an axis."""
     objs = yield SelectReq("Select curves, surfaces or points",
                            kinds=("curve", "surface", "point"))
+
+    def _axes():
+        return (ctx.opt("X", "No") == "Yes", ctx.opt("Y", "No") == "Yes",
+                ctx.opt("Z", "Yes") == "Yes")
+
+    def _preview(p):
+        axes = _axes()
+        return _ghost(objs, lambda s: g.set_points(s, p, axes)) \
+            if any(axes) else None
+
     target = yield PointReq(
         "Target point",
+        preview_fn=_preview,
         choices={"X": ["No", "Yes"], "Y": ["No", "Yes"],
                  "Z": ["Yes", "No"]})
-    axes = (ctx.opt("X", "No") == "Yes", ctx.opt("Y", "No") == "Yes",
-            ctx.opt("Z", "Yes") == "Yes")
+    axes = _axes()
     if not any(axes):
         ctx.echo("All axes set to No — nothing to do.")
         return

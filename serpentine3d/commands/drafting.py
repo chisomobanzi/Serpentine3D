@@ -337,11 +337,13 @@ def cmd_make2d(ctx):
                           view_dir=tuple(-fwd), x_dir=tuple(right))
 
     layers = ctx.scene.layers
-    def layer_for(name, color):
+    def layer_for(name, color, linetype="Continuous"):
         existing = layers.find_by_name(name)
         if existing:
             return existing.id
-        return layers.create(name, color).id
+        layer = layers.create(name, color)
+        layers.set_linetype(layer.id, linetype)
+        return layer.id
 
     made = 0
     visible_edges = res["visible"] + res["outline"]
@@ -351,7 +353,7 @@ def cmd_make2d(ctx):
                       name="2D drawing (visible)", layer_id=vis_layer)
         made += len(visible_edges)
     if res["hidden"]:
-        hid_layer = layer_for("Make2D hidden", (0.5, 0.5, 0.55))
+        hid_layer = layer_for("Make2D hidden", (0.5, 0.5, 0.55), "Hidden")
         ctx.scene.add(g.make_compound(res["hidden"]),
                       name="2D drawing (hidden)", layer_id=hid_layer)
         made += len(res["hidden"])

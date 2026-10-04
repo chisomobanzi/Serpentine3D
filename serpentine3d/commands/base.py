@@ -568,6 +568,10 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
         for opt in req.extra_options:
             if text and opt.lower().startswith(text.lower()):
                 return True, opt
+        # Zero abbreviates absolute world coordinates at a position prompt.
+        # Prompts measuring a dimension or factor keep their numeric zero.
+        if text == "0" and req.number_from is None and not req.allow_number:
+            return True, (0.0, 0.0, 0.0)
         pt = parse_point(text, ctx.last_point, ctx.scene.units, ctx.cplane)
         # A command that runs along an axis of its own says so; failing
         # that, Tab lets you aim one by hand, and failing that the cursor is
