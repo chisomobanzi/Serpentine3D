@@ -3075,7 +3075,11 @@ class Viewport(QOpenGLWidget):
         if self._preview is None:
             return
         tris, segs = self._ghost_geometry()
-        if tris is None and segs is None:
+        points = self._ghost.points if self._ghost is not None else []
+        if (len(points) and self.space != "model"
+                and self._drawing_through() is not None):
+            points = self._on_paper(points)
+        if tris is None and segs is None and not len(points):
             return
         gold = theme.SELECTION_COLOR
         # on a sheet everything is flat at z=0, so the order it is drawn in is
@@ -3099,6 +3103,19 @@ class Viewport(QOpenGLWidget):
             self._line_width(1.6)
             GL.glBindVertexArray(self._preview.vao)
             GL.glDrawArrays(GL.GL_LINES, 0, len(segs))
+            self._line_width(1.0)
+        if len(points):
+            # Free vertices have no face or edge to draw. Use the same marks
+            # as placed point objects, after taking model points onto paper.
+            if flat:
+                from .layout_view import point_marks
+                marks = point_marks(points, self.layout_view._point_mark_size())
+                self._preview.update(rebased(marks.reshape(-1, 3),
+                                            self._frame_anchor))
+                self._draw_lines(self._preview, mvp, (*gold, 0.85), 1.8)
+            else:
+                self._draw_point_markers(mvp, points, (*gold, 0.85), False,
+                                         anchor=self._frame_anchor)
             self._line_width(1.0)
         if flat:
             GL.glEnable(GL.GL_DEPTH_TEST)

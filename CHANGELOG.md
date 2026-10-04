@@ -1,8 +1,33 @@
 # Changelog
 
-## Unreleased
+## 0.10.8 (2026-10-05)
+
+### Added
+
+- **SetPt previews its pending result (#47).** Curves, surfaces and standalone
+  points show a temporary preview in every viewport while choosing or typing
+  target coordinates. Changing X/Y/Z refreshes the preview, including turning
+  all axes off and back on. Confirmation or cancellation clears the preview.
+
+- **Type `0` for the world origin.** At position prompts, `0` means `0,0,0`,
+  including after another point or on a moved construction plane. Dimension
+  and factor prompts continue to treat it as a numeric zero.
+
+- **Bring back the side toolbar from View > Tools Toolbar.** The checked menu
+  item follows the toolbar's visibility and restores it after closing it or
+  reopening a saved layout with the toolbar hidden.
 
 ### Fixed
+
+- **Fillet imported STEP solids with the normal Fillet tool.** Fillet accepts
+  curves, solids and surfaces, and uses preselected solid edges when present.
+  Whole-object mode explains that it rounds all edges. Geometry failures give
+  smaller-radius or specific-edge guidance, and failed edge selections stay
+  available to retry, including when some objects succeeded.
+
+- **Make2D hidden lines default to the Hidden linetype (#51).** Newly created
+  `Make2D hidden` layers use short dashes, with output curves inheriting the
+  layer style. Later Make2D runs preserve existing output-layer styles.
 
 - **Layer names stay readable while renaming (#52).** The inline name editor
   uses the layer row's full height without the padding of a standalone text

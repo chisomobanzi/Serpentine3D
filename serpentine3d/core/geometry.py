@@ -832,18 +832,26 @@ def fillet_edges(shape, radius, edges: list | None = None,
     targets = edges if edges is not None else edges_of(shape)
     if not targets:
         raise GeometryError("No edges to fillet")
-    for e in targets:
-        if r_pair and not chamfer:
-            mk.Add(r_pair[0], r_pair[1], e)
-        elif r_pair:
-            mk.Add(r_pair[0], r_pair[1], e)
-        else:
-            mk.Add(float(radius), e)
-    mk.Build()
+    from OCP.Standard import Standard_Failure
+    verb = "Chamfer" if chamfer else "Fillet"
+    failure = (f"{verb} failed — the radius or distance may be too large "
+               "for the smallest edges; try a smaller value")
+    try:
+        for e in targets:
+            if r_pair:
+                mk.Add(r_pair[0], r_pair[1], e)
+            else:
+                mk.Add(float(radius), e)
+        if mk.NbContours() == 0:
+            raise GeometryError(
+                f"No sharp edges to {verb.lower()} — pick an edge where "
+                "faces meet at a corner. Existing rounded edges cannot "
+                "be resized with this tool.")
+        mk.Build()
+    except Standard_Failure as exc:
+        raise GeometryError(failure) from exc
     if not mk.IsDone() or mk.Shape().IsNull():
-        raise GeometryError(
-            "Fillet failed — the radius is probably too large for "
-            "the smallest edges; try a smaller value")
+        raise GeometryError(failure)
     return unwrap_compound(mk.Shape())
 
 

@@ -262,8 +262,24 @@ def cmd_offset(ctx):
 
 @command("fillet")
 def cmd_fillet(ctx):
-    a = yield SelectReq("Select first curve to fillet", kinds=("curve",),
+    """Round two curves, or edges of a selected solid/surface."""
+    from .solids_edit import cmd_filletedge
+
+    held = ctx.selection.objects()
+    edge_objects = [ctx.scene.get(oid)
+                    for oid, kind, _ in ctx.selection.subobjects
+                    if kind == "edge"]
+    if (any(o is not None and o.kind in ("solid", "surface")
+            for o in edge_objects)
+            or (held and all(o.kind in ("solid", "surface") for o in held))):
+        yield from cmd_filletedge(ctx)
+        return
+    a = yield SelectReq("Select first curve or solid to fillet",
+                        kinds=("curve", "solid", "surface"),
                         max_count=1)
+    if a[0].kind != "curve":
+        yield from cmd_filletedge(ctx, objs=a)
+        return
     b = yield SelectReq("Select second curve", kinds=("curve",),
                         max_count=1, allow_preselected=False)
     from . import dragging
