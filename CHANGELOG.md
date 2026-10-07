@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.10.9 (2026-10-07)
+
+### Added
+
+- **Vertical Move and Copy (#49).** Press `V` then Enter, or choose
+  `Vertical=Yes`, to constrain the displacement to the construction plane's
+  normal. Pick a destination or type a signed distance, including units;
+  previews follow the constraint and Copy keeps it for repeated copies.
+  Keyboard shortcuts and aliases accept `! _Move _Vertical` and
+  `! _Copy _Vertical` to start with Vertical enabled.
+
+- **SetPt on subobjects, with live previews (#62).** Held faces, edges and
+  curve segments now accept SetPt. The preview shows the rebuilt parent,
+  including adjoining faces and shared corners. Supported circular caps and
+  untrimmed NURBS faces retain their native geometry. Operations that would
+  collapse or break the geometry leave the original intact.
+
+### Fixed
+
+- **Grouping and ungrouping preserve selection (#63).** The resulting group
+  or ungrouped objects stay selected, ready for the next command.
+
+- **Clipping planes retain their drawn elevation (#64).** The rectangle is
+  parallel to the construction plane at the first corner's depth, rather
+  than being projected onto the construction plane at Z=0. Preview and
+  committed geometry use the same elevation, including on rotated planes.
+
 ## 0.10.8 (2026-10-05)
 
 ### Added

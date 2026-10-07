@@ -165,21 +165,22 @@ def cmd_viewcapturetoclipboard(ctx):
 
 @command("clippingplane", aliases=("clip",))
 def cmd_clippingplane(ctx):
-    """Place a rectangular clipping plane on the CPlane: geometry on its
-    normal side is hidden in shaded viewports. Move or rotate the plane
+    """Place a rectangular clipping plane parallel to the CPlane through
+    the first corner: geometry on its normal side is hidden in shaded
+    viewports. Move or rotate the plane
     object to move the cut; Flip reverses the kept side. The purple arrow
     points toward the visible side, following Rhino's convention."""
     c1 = yield PointReq("First corner of clipping plane")
 
     def _rect(p):
         cp = ctx.cplane
-        u1, v1, _ = cp.from_world(c1)
+        u1, v1, w1 = cp.from_world(c1)
         u2, v2, _ = cp.from_world(p)
         if abs(u2 - u1) < 1e-9 or abs(v2 - v1) < 1e-9:
             return None
         return g.planar_face(g.make_polyline(
-            [cp.to_world(u1, v1), cp.to_world(u2, v1),
-             cp.to_world(u2, v2), cp.to_world(u1, v2)], closed=True))
+            [cp.to_world(u1, v1, w1), cp.to_world(u2, v1, w1),
+             cp.to_world(u2, v2, w1), cp.to_world(u1, v2, w1)], closed=True))
 
     c2 = yield PointReq("Opposite corner", rubber_from=c1,
                         choices={"Flip": ["No", "Yes"]}, preview_fn=_rect,

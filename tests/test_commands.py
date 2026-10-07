@@ -474,6 +474,7 @@ def test_group_lock_block(env):
     assert set(expanded) == {a.id, b.id}
 
     # lock C: unselectable, filters skip it
+    sel.clear()  # start a fresh selection instead of using the new group
     proc.run("lock")
     proc.click_object(c.id)
     proc.finish_selection()
@@ -943,6 +944,47 @@ def test_closecrv(env):
     assert not proc.busy
 
 
+@pytest.mark.parametrize("origin, normal, first_depth, second_depth", [
+    ((0, 0, 0), (0, 0, 1), 0, 0),
+    ((0, 0, 0), (0, 0, 1), 5, 5),
+    ((0, 0, 0), (0, 0, 1), -7, -7),
+    ((0, 0, 0), (0, 0, 1), 5, 12),
+    ((3, -5, 11), (0, 0, 1), 4, 9),
+    ((3, -5, 11), (0, 1, 1), 4, 9),
+])
+@pytest.mark.parametrize("flip", [False, True])
+def test_clipping_plane_keeps_the_first_corners_depth(
+        env, origin, normal, first_depth, second_depth, flip):
+    from serpentine3d.core.cplane import CPlane
+    from tests.conftest import StubViewport
+
+    scene, sel, hist, ctx, proc = env
+    cp = CPlane(origin=origin, normal=normal)
+    ctx.viewport = StubViewport("model")
+    ctx.viewport.cplane = cp
+    first = cp.to_world(-2, -3, first_depth)
+    second = cp.to_world(10, 11, second_depth)
+    second_text = ",".join(map(str, second))
+    expected_center = cp.to_world(4, 4, first_depth)
+
+    proc.run("clippingplane")
+    proc.provide_text(",".join(map(str, first)))
+    preview = proc.preview_shape(second_text)
+    assert preview is not None
+    assert g.centroid(preview) == pytest.approx(expected_center)
+    assert proc.busy and not scene.all()
+
+    proc.provide_text(f"Flip={'Yes' if flip else 'No'}")
+    proc.provide_text(second_text)
+    assert not proc.busy
+    plane, = scene.all()
+    assert plane.clip_plane == {"enabled": True}
+    assert g.centroid(plane.shape) == pytest.approx(expected_center)
+    face = next(iter(g.faces_of(plane.shape)))
+    expected_normal = tuple((-1 if flip else 1) * n for n in cp.normal)
+    assert g.face_normal(face) == pytest.approx(expected_normal)
+
+
 def test_clipping_plane_lifecycle(env, tmp_path):
     scene, sel, hist, ctx, proc = env
     from serpentine3d import fileio
@@ -955,6 +997,7 @@ def test_clipping_plane_lifecycle(env, tmp_path):
     plane = scene.all()[-1]
     assert plane.clip_plane == {"enabled": True}
     assert plane.name.startswith("Clipping Plane")
+    assert g.centroid(plane.shape)[2] == pytest.approx(5)
 
     proc.run("disableclippingplane all")
     assert scene.get(plane.id).clip_plane == {"enabled": False}
@@ -970,6 +1013,7 @@ def test_clipping_plane_lifecycle(env, tmp_path):
     fileio.import_file(loaded, path)
     planes = [o for o in loaded.all() if o.clip_plane]
     assert len(planes) == 1 and planes[0].clip_plane["enabled"]
+    assert g.centroid(planes[0].shape)[2] == pytest.approx(5)
 
 
 def test_selection_filter(env):

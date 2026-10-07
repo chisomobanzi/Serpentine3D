@@ -114,6 +114,11 @@ bindings without changing mouse settings, aliases or object snaps.
 
 ## Selection
 
+For Move or Copy, press `V` then Enter to enable **Vertical**. Movement follows
+the construction plane's normal through the base point. You can pick a target
+or enter a signed distance such as `-25mm`. Add `! _Move _Vertical` or
+`! _Copy _Vertical` in *Keyboard Shortcuts* to start with Vertical enabled.
+
 - **Click** to select; **Shift-click** adds, **Ctrl-click** removes; click
   empty space to deselect.
 - **Box selection**: drag **left→right** for a *window* (fully enclosed, gold

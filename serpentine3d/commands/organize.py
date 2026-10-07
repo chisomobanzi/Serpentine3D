@@ -12,6 +12,7 @@ def cmd_group(ctx):
     objs = yield SelectReq("Select objects to group", min_count=2)
     gid = uuid.uuid4().hex[:8]
     ctx.scene.update_many([o.id for o in objs], group_id=gid)
+    ctx.select_result(objs)
     ctx.echo(f"Grouped {len(objs)} object(s) — clicking one now selects "
              "them all.")
 
@@ -21,6 +22,7 @@ def cmd_ungroup(ctx):
     objs = yield SelectReq("Select grouped objects to ungroup")
     n = ctx.scene.update_many([o.id for o in objs if o.group_id],
                               group_id=None)
+    ctx.select_result(objs)
     ctx.echo(f"Ungrouped {n} object(s).")
 
 

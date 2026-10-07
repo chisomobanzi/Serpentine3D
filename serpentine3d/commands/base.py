@@ -52,6 +52,7 @@ class PointReq(Req):
     number_from: object = None            # (base, dir) or point-fn: '10' ->
                                           # base+10*dir / number_from(10.0)
     allow_number: bool = False            # bare number returns the float
+    option_changed: object = None         # update constraints before notifying
 
 
 def frame_sides(corner, cplane):
@@ -705,13 +706,15 @@ class CommandProcessor:
             self.cancel()
         # macro form: 'osnap mid toggle' — first token is the command,
         # the rest answer its prompts; aliases may expand to macros too
-        tokens = name.split()
-        name = tokens[0] if tokens else name
+        # Rhino shortcut presets may prefix an invocation with ! and its
+        # command word with _. Keep those markers out of argument text.
+        tokens = name.strip().removeprefix("!").split()
+        name = tokens[0].removeprefix("_") if tokens else name
         args = tokens[1:]
         alias_target = _ALIASES.get(name.lower().strip())
-        if alias_target and " " in alias_target:
-            expanded = alias_target.split()
-            name = expanded[0]
+        if alias_target:
+            expanded = alias_target.removeprefix("!").split()
+            name = expanded[0].removeprefix("_") if expanded else alias_target
             args = expanded[1:] + args
         self.headless = any(arg.lower() == "--headless" for arg in args)
         args = [arg for arg in args if arg.lower() != "--headless"]
@@ -913,6 +916,9 @@ class CommandProcessor:
                         return False
                     value = matches[0]
                 self.command_options[opt_name] = value
+                changed = getattr(req, "option_changed", None)
+                if changed is not None:
+                    changed()
                 if self.journal is not None:
                     self.journal.option(opt_name, value)
                 self.ctx.echo(f"{opt_name}={value}")
@@ -924,13 +930,27 @@ class CommandProcessor:
         req = self.request
         if req is None or not getattr(req, "choices", None):
             return False
-        text = text.strip()
+        # Only option identifiers accept the Rhino _ marker. If this is
+        # not an option, provide_text still parses the original argument.
+        text = text.strip().removeprefix("_")
+        if not text:
+            return False
         if "=" in text:
             name, _, value = text.partition("=")
             return self.set_option(name.strip(), value.strip())
-        for opt_name in req.choices:
-            if opt_name.lower() == text.lower():
-                return self.set_option(opt_name)
+        matches = [name for name in req.choices
+                   if name.lower().startswith(text.lower())]
+        exact = next((name for name in matches
+                      if name.lower() == text.lower()), None)
+        if exact is not None:
+            return self.set_option(exact)
+        # Construction keywords already accept abbreviations. Let their
+        # existing parser answer the prompt when a chip shares that prefix.
+        if any(word.lower().startswith(text.lower())
+               for word in getattr(req, "extra_options", ())):
+            return False
+        if len(matches) == 1:
+            return self.set_option(matches[0])
         return False
 
     def option(self, name: str, default: str) -> str:
@@ -958,6 +978,11 @@ class CommandProcessor:
     def provide_text(self, text: str):
         """Feed typed text for the current request."""
         if not self.busy or self.request is None:
+            return
+        # A leading ! can launch a shortcut from a pending command prompt;
+        # names, paths and other literal text answers keep the character.
+        if text.lstrip().startswith("!") and not isinstance(self.request, TextReq):
+            self.run(text)
             return
         if text.strip() and self._try_option_text(text):
             return

@@ -67,7 +67,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `area` | Area |
 | `back` | Back |
 | `bottom` | Bottom |
-| `clippingplane` (`clip`) | Place a rectangular clipping plane on the CPlane: geometry on its |
+| `clippingplane` (`clip`) | Place a rectangular clipping plane parallel to the CPlane through the first corner. |
 | `cplane` | Reposition the construction plane (drawing plane + grid). |
 | `curvature` | Curvature |
 | `curvatureanalysis` (`curvmap`) | Curvatureanalysis |
@@ -211,7 +211,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `bringtofront` (`bf`) | Draw the selected objects on top of overlapping ones. |
 | `changelayer` (`tolayer`) | Move objects to a layer by name (created if missing). |
 | `count` | Count objects: totals by block, kind and layer (for takeoffs). |
-| `group` | Group |
+| `group` | Group objects and keep them selected. |
 | `insert` | Insert |
 | `linetype` (`lt`, `setlinetype`) | Set the dash style of selected objects (Continuous/Dashed/…/ByLayer). |
 | `lock` | Lock |
@@ -222,7 +222,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `purge` | Remove empty layers and unused block definitions. |
 | `sendbackward` (`sendbackwards`) | Nudge the selected objects one step towards the back. |
 | `sendtoback` (`sb`) | Draw the selected objects behind overlapping ones. |
-| `ungroup` | Ungroup |
+| `ungroup` | Ungroup objects and keep them selected. |
 | `unlockall` (`unlock`) | Unlockall |
 | `what` | Report details of the selected objects. |
 
@@ -307,9 +307,9 @@ Commands that need a file open a filtered chooser by default. Append
 | `array` | Array |
 | `arraypath` (`arraycrv`) | Arraypath |
 | `arraypolar` | Arraypolar |
-| `copy` (`co`, `cp`) | Copy |
+| `copy` (`co`, `cp`) | Copy objects; Vertical constrains copies along the CPlane normal. |
 | `mirror` (`mi`) | Mirror |
-| `move` (`m`) | Move |
+| `move` (`m`) | Move objects or held parts; Vertical constrains movement along the CPlane normal. |
 | `orient` (`o2`) | Remap objects from two reference points to two target points |
 | `orient3pt` (`o3`) | Remap objects from three reference points to three target points |
 | `projecttocplane` (`flatten`) | Flatten curves/surfaces/points onto the construction plane. |
@@ -319,5 +319,4 @@ Commands that need a file open a filtered chooser by default. Append
 | `scale1d` | Stretch along one direction only: type a factor and it stretches |
 | `scale2d` | Scale in the CPlane only (thickness along the CPlane normal is |
 | `scalenu` | Scale by a different amount along each axis: type the three |
-| `setpt` (`setpoints`) | Force chosen coordinates of every control point to one value — |
-
+| `setpt` (`setpoints`) | Set chosen X/Y/Z coordinates on objects or held faces, edges and curve segments, with live previews. |

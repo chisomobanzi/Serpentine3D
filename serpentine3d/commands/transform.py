@@ -87,8 +87,13 @@ def _preview_of(ctx, held, objs, fn, action=None):
         if obj is None:
             continue
         try:
+            shape = shapes.get(obj_id, obj.shape)
+            if action and action[0] == "move":
+                # OCC can adjust input tolerances while drafting. A
+                # preview must leave the scene's original BRep untouched.
+                shape = g.copy_shape(shape)
             shapes[obj_id] = _solid_parts_shape(
-                shapes.get(obj_id, obj.shape), faces.get(obj_id, []),
+                shape, faces.get(obj_id, []),
                 edges.get(obj_id, []), fn, action)
         except g.GeometryError:
             continue
@@ -171,9 +176,9 @@ def _do_to_parts(ctx, held, fn, verb, tail, action):
             shape = _solid_parts_shape(obj.shape, fidx, eidx, fn,
                                        action, doing)
             ctx.scene.replace_shape(obj_id, shape)
-            if fidx and len(fidx) == len(g.faces_of(obj.shape)):
+            if kind != "setpt" and fidx and len(fidx) == len(g.faces_of(obj.shape)):
                 done.append(f"{obj.name} (every face held)")
-            elif kind == "move":
+            elif kind in ("move", "setpt"):
                 what = []
                 if fidx:
                     what.append(f"{len(fidx)} face(s)")
@@ -199,6 +204,9 @@ def _do_to_parts(ctx, held, fn, verb, tail, action):
 
 def _solid_parts_shape(shape, fidx, eidx, fn, action, doing="transform"):
     """The same pure parent rebuild for a preview and a completed edit."""
+    if action and action[0] == "setpt":
+        return g.set_part_points(
+            shape, list(fidx), list(eidx), tuple(action[1]), tuple(action[2]))
     if fidx and len(fidx) == len(g.faces_of(shape)):
         # A band holding every face means the whole parent, for any command.
         return fn(shape)
@@ -274,17 +282,37 @@ def cmd_move(ctx):
     if lv is not None:
         yield from _move_on_paper(ctx, lv)
         return
-    held, objs = yield from _what_to_transform(ctx, "Select objects to move")
-    p1 = yield PointReq("Point to move from")
+    choices = {"Vertical": ["No", "Yes"]}
+    held, objs = yield from _what_to_transform(
+        ctx, "Select objects to move", choices=choices)
+    p1 = yield PointReq("Point to move from", choices=choices)
+    # Keep the plane of the base point even if the target is picked in a
+    # different pane, or Vertical is enabled after the base was chosen.
+    normal = tuple(float(c) for c in ctx.cplane.normal)
+
+    def _offset(p):
+        off = tuple(b - a for a, b in zip(p1, p))
+        if ctx.opt("Vertical", "No") == "Yes":
+            distance = sum(c * n for c, n in zip(off, normal))
+            return tuple(distance * n for n in normal)
+        return off
 
     def _preview(p):
-        off = tuple(b - a for a, b in zip(p1, p))
-        return _preview_of(ctx, held, objs, lambda s: g.translate(s, off),
-                           action=("move", off))
+        offset = _offset(p)
+        return _preview_of(ctx, held, objs, lambda s: g.translate(s, offset),
+                           action=("move", offset))
 
-    p2 = yield PointReq("Point to move to", rubber_from=p1,
-                        preview_fn=_preview)
-    offset = tuple(b - a for a, b in zip(p1, p2))
+    def _constraints():
+        axis = (p1, normal) if ctx.opt("Vertical", "No") == "Yes" else None
+        target.axis_lock = axis
+        target.number_from = axis
+
+    target = PointReq("Point to move to (click, or type a distance)",
+                      rubber_from=p1, choices=choices, preview_fn=_preview,
+                      option_changed=_constraints)
+    _constraints()
+    p2 = yield target
+    offset = _offset(p2)
     _do(ctx, held, objs, lambda s: g.translate(s, offset), "Moved",
         action=("move", offset))
 
@@ -320,21 +348,37 @@ def cmd_copy(ctx):
     if lv is not None:
         yield from _copy_on_paper(ctx, lv)
         return
-    objs = yield SelectReq("Select objects to copy")
-    p1 = yield PointReq("Point to copy from")
+    choices = {"Vertical": ["No", "Yes"]}
+    objs = yield SelectReq("Select objects to copy", choices=choices)
+    p1 = yield PointReq("Point to copy from", choices=choices)
+    normal = tuple(float(c) for c in ctx.cplane.normal)
+
+    def _offset(p):
+        off = tuple(b - a for a, b in zip(p1, p))
+        if ctx.opt("Vertical", "No") == "Yes":
+            distance = sum(c * n for c, n in zip(off, normal))
+            return tuple(distance * n for n in normal)
+        return off
 
     def _preview(p):
-        off = tuple(b - a for a, b in zip(p1, p))
-        return _ghost(objs, lambda s: g.translate(s, off))
+        return _ghost(objs, lambda s: g.translate(s, _offset(p)))
+
+    def _constraints():
+        axis = (p1, normal) if ctx.opt("Vertical", "No") == "Yes" else None
+        target.axis_lock = axis
+        target.number_from = axis
 
     count = 0
     while True:
-        p2 = yield PointReq("Point to copy to (Enter to finish)",
-                            rubber_from=p1, allow_empty=count > 0,
-                            preview_fn=_preview)
+        target = PointReq("Point to copy to (Enter to finish)",
+                          rubber_from=p1, choices=choices,
+                          allow_empty=count > 0, preview_fn=_preview,
+                          option_changed=_constraints)
+        _constraints()
+        p2 = yield target
         if p2 is None:
             break
-        offset = tuple(b - a for a, b in zip(p1, p2))
+        offset = _offset(p2)
         for o in objs:
             ctx.scene.add_from(g.translate(o.shape, offset), o)
         count += 1
@@ -1061,26 +1105,35 @@ def cmd_setpt(ctx):
     """Force chosen coordinates of every control point to one value —
     the classic way to flatten walls onto a level (Z) or line things
     up on an axis."""
-    objs = yield SelectReq("Select curves, surfaces or points",
-                           kinds=("curve", "surface", "point"))
+    held = {kind: parts for kind, parts in ctx.held_parts().items()
+            if kind in ("segment", "face", "edge")}
+    objs = [] if held else (yield SelectReq(
+        "Select curves, surfaces or points", kinds=("curve", "surface", "point")))
 
     def _axes():
         return (ctx.opt("X", "No") == "Yes", ctx.opt("Y", "No") == "Yes",
                 ctx.opt("Z", "Yes") == "Yes")
 
-    def _preview(p):
+    def _preview(point):
         axes = _axes()
-        return _ghost(objs, lambda s: g.set_points(s, p, axes)) \
-            if any(axes) else None
+        if not any(axes):
+            return None
+        return _preview_of(
+            ctx, held, objs, lambda shape: g.set_points(shape, point, axes),
+            action=("setpt", point, axes))
 
     target = yield PointReq(
         "Target point",
-        preview_fn=_preview,
         choices={"X": ["No", "Yes"], "Y": ["No", "Yes"],
-                 "Z": ["Yes", "No"]})
+                 "Z": ["Yes", "No"]}, preview_fn=_preview)
     axes = _axes()
     if not any(axes):
         ctx.echo("All axes set to No — nothing to do.")
+        return
+    tags = "".join(a for a, on in zip("XYZ", axes) if on)
+    if held:
+        _do(ctx, held, [], lambda shape: g.set_points(shape, target, axes),
+            f"Set {tags} on", action=("setpt", target, axes))
         return
     n = 0
     for o in objs:
@@ -1089,7 +1142,6 @@ def cmd_setpt(ctx):
             n += 1
         except g.GeometryError as exc:
             ctx.echo(f"{o.name}: {exc}")
-    tags = "".join(a for a, on in zip("XYZ", axes) if on)
     ctx.echo(f"Set {tags} on {n} object(s).")
 
 

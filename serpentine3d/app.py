@@ -1163,6 +1163,8 @@ class MainWindow(QMainWindow):
         ghost = self._standing_ghost()
         for vp in self.all_viewports():
             vp.set_ghost(ghost)
+        # Let a new request show its first pointer preview immediately.
+        self._ghost_timer = None
         self.command_line.point_pending = isinstance(req, PointReq)
         # Space submits like Enter everywhere but a free-text prompt
         self.command_line.text_pending = isinstance(req, TextReq)
