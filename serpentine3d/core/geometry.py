@@ -3884,6 +3884,198 @@ def _map_points(shape, fn, verb: str = "This operation"):
     raise GeometryError(f"{verb} does not support {kind}s")
 
 
+def _set_circular_cap_points(shape, flist, elist, held_f, held_e, target, axes):
+    """A full circular cap is translated along its axis, without changing
+    its analytic boundary or the curved walls that meet it. Return None
+    when the held parts need the corner-mapping path instead.
+    """
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_CurveType, GeomAbs_SurfaceType
+
+    if sum(axes) != 1:
+        return None
+    axis = axes.index(True)
+    caps, covered_edges = {}, set()
+    for index, face in enumerate(flist):
+        try:
+            normal = face_normal(face)
+        except GeometryError:
+            continue
+        if abs(normal[axis]) < 1 - 1e-9:
+            continue
+        boundary = edges_of(face)
+        if not boundary:
+            continue
+        for edge in boundary:
+            curve = occ.edge_adaptor(edge)
+            if (curve.GetType() != GeomAbs_CurveType.GeomAbs_Circle
+                    or abs(curve.LastParameter() - curve.FirstParameter()
+                           - 2 * math.pi) > 1e-9):
+                break
+        else:
+            ring = {i for i, edge in enumerate(elist)
+                    if any(edge.IsSame(e) for e in boundary)}
+            if index in held_f or ring <= held_e:
+                caps[index] = (normal, centroid(face))
+                covered_edges.update(ring)
+    if not caps or not held_f <= caps.keys() or not held_e <= covered_edges:
+        return None
+    offsets = {index: (float(target[axis]) - point[axis]) * normal[axis]
+               for index, (normal, point) in caps.items()
+               if abs(float(target[axis]) - point[axis]) >= tight()}
+    if not offsets:
+        return shape
+    rim_edges = [elist[i] for i in covered_edges]
+    for index, face in enumerate(flist):
+        if index in caps or not any(
+                edge.IsSame(rim) for edge in edges_of(face) for rim in rim_edges):
+            continue
+        surface = BRepAdaptor_Surface(face)
+        if surface.GetType() != GeomAbs_SurfaceType.GeomAbs_Cylinder:
+            return None
+        direction = pnt_tuple(surface.Cylinder().Axis().Direction())
+        if abs(direction[axis]) < 1 - 1e-9:
+            return None
+    out = offset_faces(shape, offsets)
+    # The offset kernel can return a closed shell for an annular cap.
+    # Sewing its exact faces back into a solid keeps both circular loops.
+    if shape_kind(out) != "solid":
+        out = join_surfaces(faces_of(out))
+    if (shape_kind(out) != "solid" or not is_valid(out)
+            or abs(volume(out)) < tight() or free_boundaries(out)):
+        raise GeometryError("SetPt would collapse or break the solid")
+    if volume(out) < 0:
+        out = out.Reversed()
+    return out
+
+
+def set_part_points(shape, faces, edges, target: Point,
+                    axes: tuple[bool, bool, bool] = (False, False, True)):
+    """Set the chosen coordinates of held faces and their boundaries.
+
+    Shared corners are mapped once, including on their unheld neighbours.
+    Planar boundaries are rebuilt from those corners; complete circular
+    caps and untrimmed single-face NURBS surfaces retain their native
+    geometry. A projection that collapses an edge, bends a planar face,
+    or opens a solid is refused before the original shape is replaced.
+    """
+    import numpy as np
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
+    from OCP.GeomAbs import GeomAbs_CurveType
+
+    kind = shape_kind(shape)
+    if kind not in ("solid", "surface"):
+        raise GeometryError("SetPt on held faces or edges needs a surface or solid")
+    if not any(axes):
+        raise GeometryError("Pick at least one axis to set")
+    flist, elist = faces_of(shape), edges_of(shape)
+    held_f, held_e = set(map(int, faces)), set(map(int, edges))
+    if any(not (0 <= i < len(flist)) for i in held_f):
+        raise GeometryError("Face index out of range")
+    if any(not (0 <= i < len(elist)) for i in held_e):
+        raise GeometryError("Edge index out of range")
+    if not held_f and not held_e:
+        raise GeometryError("Nothing held to set")
+
+    if kind == "surface" and len(flist) == 1 and held_f == {0}:
+        from OCP.Geom import Geom_BSplineSurface, Geom_BezierSurface
+        face = flist[0]
+        surface = BRep_Tool.Surface_s(face)
+        if isinstance(surface, (Geom_BSplineSurface, Geom_BezierSurface)):
+            wires = TopExp_Explorer(face, occ.WIRE)
+            wires.Next()
+            if not BRep_Tool.NaturalRestriction_s(face) or wires.More():
+                raise GeometryError("SetPt on a curved face needs an untrimmed surface")
+            out = set_points(shape, target, axes)
+            if not is_valid(out) or surface_area(out) < tight():
+                raise GeometryError("SetPt would collapse or break the surface")
+            return out
+    if kind == "solid":
+        out = _set_circular_cap_points(
+            shape, flist, elist, held_f, held_e, target, axes)
+        if out is not None:
+            return out
+
+    moving = set()
+    for sub in ([flist[i] for i in held_f] + [elist[i] for i in held_e]):
+        exp = TopExp_Explorer(sub, occ.VERTEX)
+        while exp.More():
+            moving.add(hash(exp.Current()))
+            exp.Next()
+
+    rebuilt = []
+    for face in flist:
+        exp = TopExp_Explorer(face, occ.VERTEX)
+        affected = False
+        while exp.More():
+            affected |= hash(exp.Current()) in moving
+            exp.Next()
+        if not affected:
+            rebuilt.append(face)
+            continue
+        try:
+            normal = face_normal(face)
+        except GeometryError as exc:
+            raise GeometryError("SetPt on these parts needs planar faces") from exc
+        outer = BRepTools.OuterWire_s(face)
+        wires = [outer]
+        exp = TopExp_Explorer(face, occ.WIRE)
+        while exp.More():
+            wire = occ.to_wire(exp.Current())
+            if not wire.IsSame(outer):
+                wires.append(wire)
+            exp.Next()
+        loops = []
+        for wire in wires:
+            pts = []
+            walk = BRepTools_WireExplorer(wire)
+            while walk.More():
+                if (occ.edge_adaptor(walk.Current()).GetType()
+                        != GeomAbs_CurveType.GeomAbs_Line):
+                    raise GeometryError(
+                        "SetPt on these parts needs straight face boundaries")
+                vertex = walk.CurrentVertex()
+                p = pnt_tuple(BRep_Tool.Pnt_s(vertex))
+                if hash(vertex) in moving:
+                    p = tuple(float(t) if on else c
+                              for c, t, on in zip(p, target, axes))
+                pts.append(p)
+                walk.Next()
+            if len(pts) < 3:
+                raise GeometryError("SetPt would collapse a face")
+            if any(math.dist(a, b) < tight()
+                   for a, b in zip(pts, pts[1:] + pts[:1])):
+                raise GeometryError("SetPt would collapse an edge")
+            loops.append(pts)
+        points = np.asarray([p for loop in loops for p in loop], float)
+        _, sv, _ = np.linalg.svd(points - points.mean(axis=0))
+        if sv[1] < tight():
+            raise GeometryError("SetPt would collapse a face")
+        if sv[-1] > tol() * 10:
+            raise GeometryError("SetPt would bend a face beside the held parts")
+        mk = BRepBuilderAPI_MakeFace(
+            occ.to_wire(make_polyline(loops[0], closed=True)), True)
+        for loop in loops[1:]:
+            mk.Add(occ.to_wire(make_polyline(loop, closed=True)))
+        if not mk.IsDone():
+            raise GeometryError("SetPt could not rebuild a face")
+        new_face = mk.Face()
+        if sum(a * b for a, b in zip(face_normal(new_face), normal)) < 0:
+            new_face = occ.to_face(new_face.Reversed())
+        rebuilt.append(new_face)
+    out = join_surfaces(rebuilt)
+    if shape_kind(out) != kind or not is_valid(out):
+        raise GeometryError(f"SetPt would collapse or break the {kind}")
+    if kind == "solid" and abs(volume(out)) < tight():
+        raise GeometryError("SetPt would collapse or break the solid")
+    if kind == "surface" and surface_area(out) < tight():
+        raise GeometryError("SetPt would collapse or break the surface")
+    if kind == "solid" and volume(out) < 0:
+        out = out.Reversed()
+    return out
+
+
 def set_points(shape, target: Point,
                axes: tuple[bool, bool, bool] = (False, False, True)):
     """Rhino SetPt: force chosen coordinates of every control point /
