@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Layers in Properties.** Pick a layer in the Layers list and Properties
+  shows it: name, colour, linetype, screen width in pixels, print width in
+  millimetres, section hatch, visible and locked, each on its own labelled
+  row instead of a narrow column. With several layers picked, a value they
+  share is shown and one they differ on is blank; setting it sets it on all
+  of them, as one undo step. "Move selected here" puts the selection onto
+  the layer, and "Select objects" selects what is on it.
+
+- **Every Properties page says what it is showing.** Each page opens the
+  same way: a mark and the kind of thing in gold ("Object", "Objects",
+  "Layer", "Detail", "Text note"), then its name, then one line of what and
+  where, such as "Solid on Default", "2 solids, 1 curve on 2 layers",
+  "3 objects on this layer" or "1:50 · frame 160 × 120 mm". The tab and
+  the header come from one description, so they always agree. That line
+  replaces the Type row.
+
+- **Panel icons.** Properties and Layers now carry an icon at the left of
+  their title bars, sliders and a stack of sheets, so the two stacked
+  panels tell apart at a glance.
+
+- **The selection stays while you look at a layer.** Picking a layer no
+  longer competes with what the viewport has selected. Once both are live,
+  the Properties title becomes two tabs, the selection with a gold pointer
+  and the layer with the Layers icon in its own colour, and a click switches
+  between them. While
+  the layer is shown, the selection is drawn in a dimmed gold, so full gold
+  still means "this is what Properties is editing". Escape lets go of the
+  layer first and the selection after; selecting something else lets go of
+  the layer too.
+
 ## 0.10.9 (2026-10-07)
 
 ### Added

@@ -350,3 +350,85 @@ def command_icon(name: str) -> QIcon | None:
     drawer(p)
     p.end()
     return QIcon(pix)
+
+
+# -- panel marks ------------------------------------------------------------
+# Smaller than the toolbar's: they sit in a dock's title and in its tabs, so
+# each drawer paints into a 16x16 logical box with a finer pen.
+
+_MARK = 16
+
+
+def _mark_pixmap(drawer) -> QPixmap:
+    pix = QPixmap(_MARK * _SCALE, _MARK * _SCALE)
+    pix.setDevicePixelRatio(_SCALE)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = _painter(pix)
+    pen = p.pen()
+    pen.setWidthF(1.25)
+    p.setPen(pen)
+    drawer(p)
+    p.end()
+    return pix
+
+
+def _sliders(p):
+    """Properties: values set along rails."""
+    for y, knob in ((4, 10.5), (8, 5), (12, 9)):
+        p.drawLine(QPointF(2, y), QPointF(14, y))
+        p.save()
+        p.setBrush(QBrush(QColor("#2e2f34")))
+        p.drawEllipse(QPointF(knob, y), 1.9, 1.9)
+        p.restore()
+
+
+def _sheets(p, fill: QColor, edge: QColor | None = None):
+    """Layers: a sheet with two more under it. `edge` outlines the top
+    sheet too; at tab size a fill alone is a handful of pixels inside a
+    grey outline, and the colour does not read."""
+    for y in (11, 8):
+        p.drawPolyline([QPointF(2, y), QPointF(8, y + 3), QPointF(14, y)])
+    top = QPainterPath(QPointF(8, 1.5))
+    for x, y in ((14, 4.8), (8, 8.1), (2, 4.8)):
+        top.lineTo(x, y)
+    top.closeSubpath()
+    p.save()
+    if edge is not None:
+        pen = p.pen()
+        pen.setColor(edge)
+        p.setPen(pen)
+    p.setBrush(QBrush(fill))
+    p.drawPath(top)
+    p.restore()
+
+
+def _pointer(p):
+    """The selection: what was clicked, in the selection's gold."""
+    arrow = QPainterPath(QPointF(4, 1.5))
+    for x, y in ((4, 13), (7, 10.2), (9.2, 14.6), (11, 13.8), (8.8, 9.4),
+                 (12.6, 9.4)):
+        arrow.lineTo(x, y)
+    arrow.closeSubpath()
+    p.save()
+    p.setPen(QPen(QColor(28, 24, 12), 1.0))
+    p.setBrush(QBrush(QColor.fromRgbF(1.0, 0.78, 0.25)))
+    p.drawPath(arrow)
+    p.restore()
+
+
+def panel_icon(name: str) -> QPixmap:
+    """The mark at the left of a panel's title: "properties" or "layers"."""
+    if name == "layers":
+        return _mark_pixmap(lambda p: _sheets(p, _FILL))
+    return _mark_pixmap(_sliders)
+
+
+def layer_mark(rgb) -> QIcon:
+    """A layer's tab mark: the Layers panel's own glyph, its top sheet in
+    the layer's colour, so the tab says both what it is and which."""
+    color = QColor.fromRgbF(*rgb)
+    return QIcon(_mark_pixmap(lambda p: _sheets(p, color, color)))
+
+
+def selection_mark() -> QIcon:
+    return QIcon(_mark_pixmap(_pointer))

@@ -322,6 +322,9 @@ class LayersPanel(QWidget):
     """
 
     changed = Signal()
+    # The user picked other rows, or let go of them all. Not sent for the
+    # redraw putting the same rows back, which is the panel's own doing.
+    pickedChanged = Signal()
 
     def __init__(self, scene, history, parent=None, selection=None):
         super().__init__(parent)
@@ -374,6 +377,7 @@ class LayersPanel(QWidget):
         self.tree.itemChanged.connect(self._item_changed)
         self.tree.itemClicked.connect(self._item_clicked)
         self.tree.itemDoubleClicked.connect(self._edit_item)
+        self.tree.itemSelectionChanged.connect(self._picks_changed)
 
         btn_style = ("QPushButton { padding: 2px; font-weight: bold; "
                      "min-width: 26px; max-width: 26px; }")
@@ -550,6 +554,18 @@ class LayersPanel(QWidget):
 
     def _selected_layer_ids(self) -> set[str]:
         return {self._layer_id(item) for item in self.tree.selectedItems()}
+
+    def picked_layer_ids(self) -> set[str]:
+        """The layers picked in the list, which is what Properties shows."""
+        return self._selected_layer_ids()
+
+    def clear_picked(self):
+        """Let go of every picked row, as a click on empty space would."""
+        self.tree.clearSelection()
+
+    def _picks_changed(self):
+        if not self._updating:
+            self.pickedChanged.emit()
 
     def _item_clicked(self, item, column):
         layer_id = self._layer_id(item)

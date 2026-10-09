@@ -29,7 +29,9 @@ from .ui.command_line import CommandLine
 from .ui.dialogs import untether
 from .ui.display_panel import DisplaySettingsDialog
 from .ui.layers_panel import LayersPanel
-from .ui.properties import PropertiesPanel
+from .ui.properties import PropertiesPanel, SubjectTitleBar
+from .ui.dock_title import DockTitleBar
+from .ui.icons import panel_icon
 from .ui.viewport import Viewport, set_default_gl_format
 
 _UNLIMITED = 16777215        # Qt's QWIDGETSIZE_MAX: "no maximum"
@@ -182,6 +184,13 @@ class MainWindow(QMainWindow):
         self._layer_dock.setWidget(self.layers_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
                            self._layer_dock)
+        self._layer_dock.setTitleBarWidget(DockTitleBar(
+            panel_icon("layers"), "Layers", self._layer_dock))
+        # Properties shows the layers picked there too, with a tab in its
+        # title for each of the two once both are live.
+        self.properties.follow_layers(self.layers_panel)
+        self._prop_dock.setTitleBarWidget(
+            SubjectTitleBar(self.properties, self._prop_dock))
 
         # Display controls belong to the viewport title menu. Create their
         # modeless window only when requested, leaving this column for
@@ -1051,6 +1060,12 @@ class MainWindow(QMainWindow):
             # selected: you asked to stop editing points, not to lose what
             # you were editing, so F10 brings back what was on screen.
             self.processor.run("pointsoff")
+        elif self.properties.subjects() == ["objects", "layers"] \
+                and self.properties.shown() == "layers":
+            # A look at a layer is the newer thing, the selection under it
+            # the older: let go of the layer and the objects come back
+            # into full gold. The next Escape clears them.
+            self.layers_panel.clear_picked()
         else:
             self.selection.clear()
         for vp in self.all_viewports():

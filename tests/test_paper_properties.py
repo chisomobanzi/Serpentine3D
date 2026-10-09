@@ -67,7 +67,7 @@ def test_picking_paper_geometry_names_it(sheet):
 def test_the_type_says_which_world_it_is_in(sheet):
     w, panel, _lay, obj = sheet
     _pick(w, obj)
-    assert panel.kind_label.text() == "Curve on paper"
+    assert panel.object_head.detail.text() == "Curve on paper"
 
 
 def test_it_is_measured_in_millimetres_of_paper(sheet):
@@ -245,7 +245,7 @@ def test_a_model_object_is_shown_the_way_it_was(sheet):
     box = w.scene.add(g.make_box((0, 0, 0), 10, 10, 10))
     w.selection.set([box.id])
     assert panel.header.text() == box.name
-    assert panel.kind_label.text() == "Solid"
+    assert panel.object_head.detail.text() == "Solid on Default"
     assert panel.color_reset.text() == "By layer"
     assert panel.layer_combo.isEnabled()
 
