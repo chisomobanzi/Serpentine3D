@@ -432,3 +432,63 @@ def layer_mark(rgb) -> QIcon:
 
 def selection_mark() -> QIcon:
     return QIcon(_mark_pixmap(_pointer))
+
+
+# -- layer switches -------------------------------------------------------
+# What the Layers list draws instead of check boxes. A switch that is in its
+# usual state (shown, unlocked) is drawn quietly and the unusual one stands
+# out, so a glance down the column finds the hidden and the locked layers.
+
+_SWITCH_INK = {"on": QColor("#b8b9bd"), "off": QColor(150, 151, 156, 110),
+               "locked": QColor("#e8e9ea"), "inherited": QColor("#7a7b80")}
+_switches: dict = {}
+
+
+def _eye(p, open_: bool):
+    almond = QPainterPath(QPointF(2, 8))
+    almond.quadTo(QPointF(8, 1.8), QPointF(14, 8))
+    almond.quadTo(QPointF(8, 14.2), QPointF(2, 8))
+    p.drawPath(almond)
+    p.save()
+    p.setBrush(QBrush(p.pen().color()))
+    p.drawEllipse(QPointF(8, 8), 2.0, 2.0)
+    p.restore()
+    if not open_:
+        p.drawLine(QPointF(3, 13.5), QPointF(13, 2.5))
+
+
+def _padlock(p, shut: bool):
+    p.drawRoundedRect(QRectF(4, 7.5, 8, 6.5), 1.3, 1.3)
+    shackle = QPainterPath(QPointF(5.6, 7.5))
+    if shut:
+        shackle.lineTo(5.6, 5.2)
+        shackle.arcTo(QRectF(5.6, 2.8, 4.8, 4.8), 180, -180)
+        shackle.lineTo(10.4, 7.5)
+    else:
+        # lifted clear of the body, its right leg hanging free
+        shackle.lineTo(5.6, 3.9)
+        shackle.arcTo(QRectF(5.6, 1.5, 4.8, 4.8), 180, -180)
+        shackle.lineTo(10.4, 5.4)
+    p.drawPath(shackle)
+
+
+def switch_glyph(kind: str, state: str) -> QPixmap:
+    """The glyph for a layer switch: `kind` "visible" or "locked", and
+    `state` "on" or "off", or "inherited" for a lock that is closed by a
+    parent rather than by the layer itself."""
+    key = (kind, state)
+    if key not in _switches:
+        if kind == "visible":
+            ink = _SWITCH_INK["on" if state == "on" else "off"]
+            drawer = lambda p: _eye(p, state == "on")  # noqa: E731
+        else:
+            ink = _SWITCH_INK["locked" if state == "on" else state]
+            drawer = lambda p: _padlock(p, state != "off")  # noqa: E731
+
+        def inked(p, drawer=drawer, ink=ink):
+            pen = p.pen()
+            pen.setColor(ink)
+            p.setPen(pen)
+            drawer(p)
+        _switches[key] = _mark_pixmap(inked)
+    return _switches[key]

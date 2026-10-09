@@ -4,43 +4,29 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from PySide6.QtCore import QItemSelectionModel, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import (QEvent, QItemSelectionModel, QPointF, QRect,
+                            QRectF, Qt, QTimer, Signal)
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QAbstractItemView, QColorDialog, QComboBox, QHBoxLayout,
-    QHeaderView, QMenu, QPushButton, QStyledItemDelegate, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QColorDialog, QHBoxLayout,
+    QHeaderView, QMenu, QPushButton, QStyle, QStyledItemDelegate,
+    QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..core import layout as _layout
-from ..core import linetype as _lt
-from . import theme
+from . import icons, theme
 
-# tree columns: name, visible check, colour swatch, linetype, print width
+# Tree columns: the name, then two switches and the colour. A layer's
+# linetype, widths and hatch are edited in Properties, on rows that say what
+# each number is, so the list keeps only what is used every few minutes.
 _NAME_COL = 0
 _VISIBLE_COL = 1
-_COLOR_COL = 2
-_TYPE_COL = 3
-_PRINT_COL = 4
+_LOCK_COL = 2
+_COLOR_COL = 3
+_SWITCH_COLS = (_VISIBLE_COL, _LOCK_COL)
 
-# the ISO pen widths a plotter is set up with, offered in the Print cell
-_STANDARD_PEN_WIDTHS = ("0.13", "0.18", "0.25", "0.35", "0.5", "0.7", "1.0")
-
-def _column_width(tree, column, *choices) -> int:
-    """How wide a column has to be for the longest choice it can hold.
-
-    Measured, not guessed: a hand-picked pixel width fits the font it was
-    picked against and clips the same word under a theme that asks for a
-    bigger one. Only the view knows what a cell costs beyond its text
-    (margins, the focus frame, the padding the stylesheet adds), and it can
-    only say so for the rows it has, so ask it about those and then add
-    however much wider the longest choice would be.
-    """
-    fm = tree.fontMetrics()
-    shown = max((fm.horizontalAdvance(tree.topLevelItem(i).text(column))
-                 for i in range(tree.topLevelItemCount())), default=0)
-    longest = max(fm.horizontalAdvance(c) for c in choices)
-    return tree.sizeHintForColumn(column) + max(0, longest - shown)
+# set on a lock cell whose layer is locked by a parent rather than by itself
+_INHERITED_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 class _NameDelegate(QStyledItemDelegate):
@@ -63,51 +49,90 @@ class _NameDelegate(QStyledItemDelegate):
         editor.setGeometry(rect)
 
 
-class _ChoiceDelegate(QStyledItemDelegate):
-    """Edits a cell with a drop-down of the known choices.
+class _SwitchDelegate(QStyledItemDelegate):
+    """A layer switch drawn as its glyph, an eye or a padlock, in place of
+    Qt's check box, and flipped by a click anywhere in its cell. The box sat
+    hard against the cell's left edge, so a click aimed at the middle of the
+    cell could miss it; the whole cell is the switch now.
 
-    The Type cell used to advance on every click, which hid the options and
-    made a mis-click cost a lap round the list; a drop-down shows them all
-    and commits one. An editable one also takes a typed value, for a pen
-    width that is not on the list.
+    The state is still the item's check state, so everything that reads or
+    sets a switch does it the way it did with a box.
     """
 
-    def __init__(self, choices, editable, parent=None):
+    def __init__(self, kind: str, parent=None):
         super().__init__(parent)
-        self._choices = list(choices)
-        self._editable = editable
+        self._kind = kind   # "visible" or "locked"
 
-    def createEditor(self, parent, option, index):
-        combo = QComboBox(parent)
-        combo.addItems(self._choices)
-        combo.setEditable(self._editable)
-        return combo
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        # the row's own background and selection, without the box or text
+        opt.features &= ~QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
+        opt.text = ""
+        style = opt.widget.style() if opt.widget is not None \
+            else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter,
+                          opt.widget)
+        on = _checked(index.data(Qt.ItemDataRole.CheckStateRole))
+        state = ("on" if on else "inherited" if index.data(_INHERITED_ROLE)
+                 else "off")
+        glyph = icons.switch_glyph(self._kind, state)
+        size = glyph.deviceIndependentSize()
+        rect = option.rect
+        painter.drawPixmap(QPointF(
+            rect.x() + (rect.width() - size.width()) / 2,
+            rect.y() + (rect.height() - size.height()) / 2), glyph)
 
-    def setEditorData(self, editor, index):
-        editor.setCurrentText(index.data() or "")
+    def editorEvent(self, event, model, option, index):
+        if not index.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+            return False
+        if event.type() == QEvent.Type.MouseButtonRelease:
+            if (event.button() != Qt.MouseButton.LeftButton
+                    or not option.rect.contains(event.position().toPoint())):
+                return False
+            on = _checked(index.data(Qt.ItemDataRole.CheckStateRole))
+            model.setData(index, Qt.CheckState.Unchecked if on
+                          else Qt.CheckState.Checked,
+                          Qt.ItemDataRole.CheckStateRole)
+            return True
+        # a double-click is two clicks to a switch, never an edit
+        return event.type() == QEvent.Type.MouseButtonDblClick
 
-    def setModelData(self, editor, model, index):
-        model.setData(index, editor.currentText(), Qt.ItemDataRole.EditRole)
 
-    def updateEditorGeometry(self, editor, option, index):
-        """Open the drop-down at the width its own list needs.
+class _SwatchDelegate(QStyledItemDelegate):
+    """The layer's colour as a small rounded swatch with room round it. A
+    cell filled edge to edge ran into the next row's, and down the side of
+    the panel the layers read as one striped bar rather than a swatch each.
+    The colour is still the cell's background, where it always was."""
 
-        A column is sized for the text it shows, which leaves nothing for
-        the frame and arrow a combo box adds, so an editor held to its cell
-        opens with its own choices cut off: "Continuous" as "Contin".
-        Let it overhang the cells to its right instead, and slide it back
-        inside the view rather than let it run off the edge.
-        """
-        rect = QRect(option.rect)
-        rect.setWidth(max(rect.width(), editor.sizeHint().width()))
-        view = editor.parentWidget()
-        if view is not None:
-            rect.setWidth(min(rect.width(), view.width()))
-            if rect.right() > view.rect().right():
-                rect.moveRight(view.rect().right())
-            if rect.left() < view.rect().left():
-                rect.moveLeft(view.rect().left())
-        editor.setGeometry(rect)
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.backgroundBrush = QBrush()   # the swatch, not the whole cell
+        opt.text = ""
+        style = opt.widget.style() if opt.widget is not None \
+            else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter,
+                          opt.widget)
+        brush = index.data(Qt.ItemDataRole.BackgroundRole)
+        if brush is None:
+            return
+        rect = option.rect
+        side = min(14, rect.height() - 6, rect.width() - 6)
+        swatch = QRectF(rect.x() + (rect.width() - side) / 2,
+                        rect.y() + (rect.height() - side) / 2, side, side)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(0, 0, 0, 90), 1))
+        painter.setBrush(brush)
+        painter.drawRoundedRect(swatch, 3, 3)
+        painter.restore()
+
+
+def _checked(state) -> bool:
+    """Whether a check state, as an enum or the int a model hands back, is
+    on."""
+    return state in (Qt.CheckState.Checked, Qt.CheckState.Checked.value)
 
 
 def _id_of(item) -> str:
@@ -154,23 +179,20 @@ class _LayerTree(QTreeWidget):
         """Give every column the width its own content asks for, except the
         name, which takes whatever the panel has left.
 
-        A fresh window gives this panel a fixed 280px column, and the four
-        narrow columns each have a width their content needs. The name is
-        the only one that does not, so the name is the one that gives: with
-        it stretched, every other column stays on screen at any panel
-        width, instead of Print sitting off the edge behind a scrollbar.
+        A fresh window gives this panel a fixed 280px column, and the three
+        narrow columns each have a width their glyph or swatch needs. The
+        name is the only one that does not, so the name is the one that
+        gives: with it stretched, every other column stays on screen at any
+        panel width, instead of sitting off the edge behind a scrollbar.
         """
         header = self.header()
         header.setMinimumSectionSize(24)
         header.setSectionResizeMode(_NAME_COL, QHeaderView.ResizeMode.Stretch)
-        header.resizeSection(_VISIBLE_COL, 28)
-        # 24, not 28: a filled swatch needs no more, and the four pixels go
-        # to the name column, which is the one an indented sublayer eats.
+        for column in _SWITCH_COLS:
+            header.resizeSection(column, 26)
+        # 24, not 26: a 14px swatch needs no more, and the pixels go to
+        # the name column, which is the one an indented sublayer eats.
         header.resizeSection(_COLOR_COL, 24)
-        header.resizeSection(
-            _TYPE_COL, _column_width(self, _TYPE_COL, *_lt.LINETYPES))
-        header.resizeSection(_PRINT_COL, _column_width(
-            self, _PRINT_COL, "Default", *_STANDARD_PEN_WIDTHS))
 
     def _next_sibling(self, item):
         """The row after this one at its own level, if it has one."""
@@ -272,7 +294,7 @@ class _LayerTree(QTreeWidget):
 
     def mouseReleaseEvent(self, event):
         index = self.indexAt(event.position().toPoint())
-        if index.isValid() and index.column() == _VISIBLE_COL:
+        if index.isValid() and index.column() in _SWITCH_COLS:
             mode = self.selectionMode()
             self.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
             try:
@@ -283,24 +305,8 @@ class _LayerTree(QTreeWidget):
         super().mouseReleaseEvent(event)
 
 
-def _parse_print_width(text: str):
-    """Millimetres from a print-width cell, or None if it makes no sense.
-
-    Empty or "Default" is the device default, 0. A negative reads as the
-    default too, since we have no no-plot pen. Anything unparseable returns
-    None so the caller can leave the width where it was.
-    """
-    t = (text or "").strip()
-    if t == "" or t.lower() == "default":
-        return 0.0
-    try:
-        return max(0.0, float(t))
-    except ValueError:
-        return None
-
-
 class LayersPanel(QWidget):
-    """The layers list: name, visibility, colour, linetype and print width.
+    """The layers list: name, the visible and locked switches, and colour.
 
     The panel redraws its whole tree from the scene on every notify, and a
     click or an edit in the tree ends in a notify, so the redraw runs in the
@@ -340,13 +346,16 @@ class LayersPanel(QWidget):
         self._collapsed = set()
 
         self.tree = _LayerTree()
-        self.tree.setColumnCount(5)
-        self.tree.setHeaderLabels(["Layer", "", "", "Type", "Print"])
+        self.tree.setColumnCount(4)
+        # Named for screen readers; never shown, since every cell says
+        # what it is by its glyph and its tooltip.
+        self.tree.setHeaderLabels(["Layer", "Visible", "Locked", "Colour"])
+        self.tree.setHeaderHidden(True)
         # a sublayer is drawn under its parent, so the branch needs its
         # expander back
         self.tree.setRootIsDecorated(True)
-        # Tighter than Qt's 20px a level. The dock is 280px wide and four
-        # of the five columns are sized from their own content, so the name
+        # Tighter than Qt's 20px a level. The dock is 280px wide and three
+        # of the four columns are sized from their own content, so the name
         # column is what an indent is taken out of: at the default indent a
         # root layer read "Def..." and a grandchild's name had no room left
         # at all. At 12 a fresh window's Default still reads in full. Deep
@@ -367,10 +376,12 @@ class LayersPanel(QWidget):
             QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.header().setStretchLastSection(False)
         self.tree.setItemDelegateForColumn(_NAME_COL, _NameDelegate(self.tree))
-        self.tree.setItemDelegateForColumn(_TYPE_COL, _ChoiceDelegate(
-            _lt.LINETYPES, editable=False, parent=self.tree))
-        self.tree.setItemDelegateForColumn(_PRINT_COL, _ChoiceDelegate(
-            ("Default", *_STANDARD_PEN_WIDTHS), editable=True, parent=self.tree))
+        self.tree.setItemDelegateForColumn(
+            _VISIBLE_COL, _SwitchDelegate("visible", self.tree))
+        self.tree.setItemDelegateForColumn(
+            _LOCK_COL, _SwitchDelegate("locked", self.tree))
+        self.tree.setItemDelegateForColumn(
+            _COLOR_COL, _SwatchDelegate(self.tree))
         self.tree.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._row_menu)
@@ -438,11 +449,12 @@ class LayersPanel(QWidget):
     def width_short_by(self) -> int:
         """How many pixels the panel is short of showing every column.
 
-        The four narrow columns take the width their own content needs
+        The three narrow columns take the width their own content needs
         and the name takes whatever is left, so the panel width the
-        window hands over decides whether the name fits. 280px is this
-        machine's font's number: measured against a wider sans-serif the
-        same five columns want more, there is nothing left for the name,
+        window hands over decides whether the name fits. 280px was this
+        machine's font's number when there were five columns: measured
+        against a wider sans-serif they wanted more, nothing was left for
+        the name,
         and the layer everything is drawn on reads "Defa...". The window
         asks after it has set that width, and gives back the difference.
         """
@@ -478,9 +490,7 @@ class LayersPanel(QWidget):
         label = f"{layer.name}" + (f"  ({n})" if n else "")
         if layer.id == self.scene.layers.current_id:
             label = "● " + label
-        print_text = ("Default" if layer.print_width == 0
-                      else f"{layer.print_width:g}")
-        item = QTreeWidgetItem([label, "", "", layer.linetype, print_text])
+        item = QTreeWidgetItem([label, "", "", ""])
         item.setData(_NAME_COL, Qt.ItemDataRole.UserRole, layer.id)
         item.setToolTip(_NAME_COL, self.scene.layers.full_path(layer.id))
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -489,18 +499,30 @@ class LayersPanel(QWidget):
         item.setCheckState(
             _VISIBLE_COL, Qt.CheckState.Checked if layer.visible
             else Qt.CheckState.Unchecked)
-        item.setToolTip(_VISIBLE_COL, "Visible")
+        item.setToolTip(_VISIBLE_COL, "Visible: click to hide" if layer.visible
+                        else "Hidden: click to show")
+        # Likewise the lock: the layer's own, with a parent's lock drawn as
+        # a dimmer padlock and said in the tooltip.
+        layers = self.scene.layers
+        item.setCheckState(
+            _LOCK_COL, Qt.CheckState.Checked if layer.locked
+            else Qt.CheckState.Unchecked)
+        locker = next((la for la in layers.ancestors(layer.id) if la.locked),
+                      None)
+        if layer.locked:
+            tip = "Locked: click to unlock. Its objects cannot be picked."
+        elif locker is not None:
+            tip = f"Locked by {locker.name}: click to lock this layer as well"
+            item.setData(_LOCK_COL, _INHERITED_ROLE, True)
+        else:
+            tip = "Unlocked: click to lock"
+        item.setToolTip(_LOCK_COL, tip)
         if not self.scene.layers.is_visible(layer.id):
             item.setForeground(_NAME_COL, QColor(theme.TEXT_MUTED))
         color = QColor.fromRgbF(*layer.color)
         item.setBackground(_COLOR_COL, color)
         item.setToolTip(_COLOR_COL, "Double-click name to rename; click "
                                     "swatch to change colour")
-        item.setToolTip(_TYPE_COL, "Double-click to choose the layer's "
-                                   "linetype")
-        item.setToolTip(_PRINT_COL, "Plotted pen width in mm; double-click "
-                                    "to pick or type one, Default for the "
-                                    "device pen")
         if parent_item is None:
             self.tree.addTopLevelItem(item)
         else:
@@ -593,16 +615,20 @@ class LayersPanel(QWidget):
     def _apply_edit(self, item, column):
         """Write what the user put in a cell back to its layer."""
         layer_id = self._layer_id(item)
-        if column == _VISIBLE_COL:
-            visible = item.checkState(_VISIBLE_COL) == Qt.CheckState.Checked
-            # a box in the selection switches the whole selection; a box
+        if column in _SWITCH_COLS:
+            on = item.checkState(column) == Qt.CheckState.Checked
+            # a switch in the selection switches the whole selection; one
             # outside it switches only its own layer
             selected = self._selected_layer_ids()
             targets = selected if layer_id in selected else {layer_id}
-            self.history.checkpoint("layer visibility")
+            layers = self.scene.layers
+            label, setter = ((
+                "layer visibility", layers.set_visible)
+                if column == _VISIBLE_COL else ("layer lock", layers.set_locked))
+            self.history.checkpoint(label)
             with self.scene.batched():
                 for target in targets:
-                    self.scene.layers.set_visible(target, visible)
+                    setter(target, on)
                 self.scene.notify()
         elif column == _NAME_COL:
             # rename via inline edit
@@ -611,38 +637,12 @@ class LayersPanel(QWidget):
                 self.history.checkpoint("rename layer")
                 self.scene.layers.rename(layer_id, text)
             self.scene.notify()
-        elif column == _TYPE_COL:
-            name = item.text(_TYPE_COL)
-            if name in _lt.LINETYPES:
-                self.history.checkpoint("layer linetype")
-                self.scene.layers.set_linetype(layer_id, name)
-            self.scene.notify()
-        elif column == _PRINT_COL:
-            width = _parse_print_width(item.text(_PRINT_COL))
-            if width is not None:
-                self.history.checkpoint("layer print width")
-                self.scene.layers.set_print_width(layer_id, width)
-            # notify redraws the cell from the layer, so a rejected value
-            # snaps back to what the layer still says
-            self.scene.notify()
 
     def _edit_item(self, item, column):
-        """A double-click: on the name it chooses the layer, else it edits."""
+        """A double-click on the name chooses the layer to draw on."""
         if column == _NAME_COL:
             self.scene.layers.current_id = self._layer_id(item)
             self.scene.notify()
-            return
-        if column not in (_TYPE_COL, _PRINT_COL):
-            return
-        # making a cell editable is one of the panel's own writes; Type and
-        # Print already show the layer's value, their delegates seed the
-        # drop-down from it
-        self._updating = True
-        try:
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
-        finally:
-            self._updating = False
-        self.tree.editItem(item, column)
 
     def _rename(self, layer_id):
         """Open a layer's name for typing, from the row menu.
@@ -824,9 +824,10 @@ class LayersPanel(QWidget):
         """The fill a hatch drawn on these layers starts out with.
 
         A layer is a material and a material has a fill, so this is where
-        Concrete is told it crosses. It lives in the menu rather than in a
-        column of its own because the tree's five columns already fill the
-        panel exactly, and a sixth would come out of the layer name.
+        Concrete is told it crosses. It lives here as well as on the layer
+        page in Properties because a right-click is where a Rhino hand goes
+        looking for it, and a column of its own would come out of the
+        layer name.
 
         The tick says what the picked layers are set to now, and says
         nothing at all when they disagree: two materials picked together

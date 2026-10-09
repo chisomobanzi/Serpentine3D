@@ -2,15 +2,15 @@
 
 A fresh window hands Properties and Layers a 280px column (`PANEL_WIDTH`),
 deliberately: extra window width belongs to the drawing, not to a panel of
-fixed-content fields. The layers tree was laid out before it had Type and
-Print columns, and with them added its five columns want more than 280 - so
-in the shipped app the Print column sits entirely off the right-hand edge
-behind a horizontal scrollbar, and Type is cut in half. A column you have
-to scroll sideways to find is one nobody finds.
+fixed-content fields. When the tree grew Type and Print columns its five
+columns wanted more than 280, so the Print column sat off the right-hand
+edge behind a horizontal scrollbar. A column you have to scroll sideways to
+find is one nobody finds. Type and Print have since moved to the layer page
+in Properties, but the rule stands for the columns that are left.
 
 The name is the only column whose content has no natural width, so the name
-is what gives: the four narrow columns keep the width their content needs
-and the name takes whatever is left over.
+is what gives: the narrow columns (the two switches and the colour) keep
+the width their content needs and the name takes whatever is left over.
 """
 
 from __future__ import annotations
@@ -26,8 +26,7 @@ from serpentine3d.ui import theme
 from serpentine3d.ui.layers_panel import LayersPanel
 
 NAME_COL = 0
-TYPE_COL = 3
-PRINT_COL = 4
+COLOR_COL = 3   # the last column, the one a short panel would push off
 
 
 def _panel(width=PANEL_WIDTH):
@@ -57,16 +56,16 @@ def test_the_columns_fit_the_width_a_fresh_window_gives_the_panel():
     tree = panel.tree
     total = sum(_columns(panel))
     assert total <= tree.viewport().width(), (
-        f"the five columns want {total}px of the {tree.viewport().width()}px "
+        f"the columns want {total}px of the {tree.viewport().width()}px "
         "the panel column has")
 
 
-def test_the_print_column_is_there_without_scrolling_sideways():
+def test_the_last_column_is_there_without_scrolling_sideways():
     _scene, panel = _panel()
     tree = panel.tree
-    index = tree.indexFromItem(_item_for(panel, DEFAULT_LAYER_ID), PRINT_COL)
+    index = tree.indexFromItem(_item_for(panel, DEFAULT_LAYER_ID), COLOR_COL)
     assert tree.visualRect(index).right() <= tree.viewport().rect().right(), \
-        "the Print cell starts past the right-hand edge of the panel"
+        "the colour cell runs past the right-hand edge of the panel"
     assert not tree.horizontalScrollBar().isVisible(), \
         "the layers tree needs a sideways scrollbar to show its own columns"
 
@@ -79,9 +78,9 @@ def test_the_room_left_over_goes_to_the_layer_name():
 
 
 def test_widening_the_panel_leaves_the_narrow_columns_alone():
-    """Type and Print are sized for their content, so more room is not
-    theirs to take - a 200px-wide Print column would be a waste of a panel
-    that only ever says "Default" or "0.25"."""
+    """The switches and the swatch are sized for their content, so more
+    room is not theirs to take: a 200px-wide eye would be a waste of the
+    panel."""
     _scene, narrow = _panel()
     _scene2, wide = _panel(PANEL_WIDTH + 120)
     assert _columns(narrow)[1:] == _columns(wide)[1:], \
@@ -118,11 +117,6 @@ def test_the_columns_fit_the_dock_of_a_real_window_under_the_real_theme():
                 f"{tree.viewport().width()}px the Layers dock has")
             assert not tree.horizontalScrollBar().isVisible(), \
                 "the Layers dock needs a sideways scrollbar in a fresh window"
-            for column, what in ((TYPE_COL, "Type"), (PRINT_COL, "Print")):
-                needed = tree.sizeHintForColumn(column)
-                assert tree.columnWidth(column) >= needed, (
-                    f"the {what} column is {tree.columnWidth(column)}px "
-                    f"where its rows need {needed}px, so it reads cut short")
             # The name column is the one that stretches, so it is the one
             # anything else takes its width out of. Sublayers gave every
             # row an indent for its expander, which is charged to this
@@ -165,8 +159,7 @@ def test_the_columns_fit_on_a_machine_whose_font_is_wider_than_ours():
         QApplication.processEvents()
         tree = panel.tree
         try:
-            for column, what in ((NAME_COL, "Layer"), (TYPE_COL, "Type"),
-                                 (PRINT_COL, "Print")):
+            for column, what in ((NAME_COL, "Layer"),):
                 needed = tree.sizeHintForColumn(column)
                 assert tree.columnWidth(column) >= needed, (
                     f"the {what} column is {tree.columnWidth(column)}px "

@@ -2174,6 +2174,11 @@ class Viewport(QOpenGLWidget):
         # keep insertion order (unchanged default behaviour).
         objects = sorted(self.scene.visible_objects(),
                          key=lambda o: -getattr(o, "draw_order", 0))
+        # A locked layer greys what is on it, as a locked object is greyed.
+        # Worked out once a frame over the layers, not once per object.
+        layers = self.scene.layers
+        locked_layers = {la.id for la in layers.all()
+                         if layers.is_locked(la.id)}
         clips_dirty = False           # True while anchored clips are bound
         for i in range(len(clips)):
             GL.glEnable(GL.GL_CLIP_DISTANCE0 + i)
@@ -2237,7 +2242,8 @@ class Viewport(QOpenGLWidget):
             selected = self._looks_selected(obj.id)
             gold = self._selection_color(obj.id) if selected else None
             color = gold if selected else self.scene.color_of(obj)
-            if obj.locked and not selected:
+            locked = obj.locked or obj.layer_id in locked_layers
+            if locked and not selected:
                 grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
                 color = (grey, grey, grey)
             if getattr(gpu, "cloud_count", 0):
@@ -2245,7 +2251,7 @@ class Viewport(QOpenGLWidget):
                 continue
             line_color = color
             surface = color
-            if mode == "rendered" and not selected and not obj.locked:
+            if mode == "rendered" and not selected and not locked:
                 # An imported object can display one colour and render
                 # another; edges stay on the one it displays, the way Rhino
                 # draws them.

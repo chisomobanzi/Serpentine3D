@@ -21,7 +21,7 @@ from serpentine3d.core.scene import Scene
 from serpentine3d.ui.layers_panel import LayersPanel
 
 VISIBLE_COL = 1
-TYPE_COL = 3   # a single click here selects the row and changes nothing else
+NAME_COL = 0   # a single click here selects the row and changes nothing else
 
 
 def _panel():
@@ -94,8 +94,8 @@ def test_the_user_can_ctrl_click_several_layers():
         QAbstractItemView.SelectionMode.ExtendedSelection,
         QAbstractItemView.SelectionMode.MultiSelection), \
         "the layers list only lets one layer be picked at a time"
-    _ctrl_click(panel, a, TYPE_COL)
-    _ctrl_click(panel, b, TYPE_COL)
+    _ctrl_click(panel, a, NAME_COL)
+    _ctrl_click(panel, b, NAME_COL)
     assert _selected_ids(panel) == {a, b}
 
 

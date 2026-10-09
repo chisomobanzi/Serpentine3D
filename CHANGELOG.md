@@ -24,6 +24,21 @@
   their title bars, sliders and a stack of sheets, so the two stacked
   panels tell apart at a glance.
 
+### Changed
+
+- **The Layers list is names and switches.** Each row is the layer's name,
+  an eye to show or hide it, a padlock to lock it, and its colour. The
+  Type and Print columns are gone from the list: linetype, screen width,
+  print width and section hatch are edited on the layer's page in
+  Properties, where each says what it is and in what unit. The switches
+  draw as an eye and a padlock instead of an unlabelled check box under a
+  blank header, a click anywhere in the cell flips them, and each tooltip
+  says what a click will do. Locking a layer had no button before; now it
+  is one click, and a locked layer's objects are greyed and cannot be
+  picked. A layer under a locked parent shows a dimmer padlock and names
+  the parent in its tooltip. Like the eye, the padlock on a picked row
+  switches every picked layer and keeps them picked.
+
 - **The selection stays while you look at a layer.** Picking a layer no
   longer competes with what the viewport has selected. Once both are live,
   the Properties title becomes two tabs, the selection with a gold pointer
