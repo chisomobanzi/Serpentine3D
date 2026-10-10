@@ -107,9 +107,9 @@ def test_section_hatch_and_linetype():
     assert scene.layers.get(walls.id).hatch == "cross"
     assert scene.layers.get(walls.id).linetype == "Dashed"
 
-    props.layer_hatch.setCurrentIndex(props.layer_hatch.findData(""))
+    props.layer_hatch.setCurrentIndex(props.layer_hatch.findData("none"))
 
-    assert scene.layers.get(walls.id).hatch == ""
+    assert scene.layers.get(walls.id).hatch == "none"
 
 
 def test_renaming_from_properties():

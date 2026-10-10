@@ -5,7 +5,7 @@ from __future__ import annotations
 import itertools
 from dataclasses import dataclass, replace
 
-from .layout import HATCH_PATTERNS
+from .layout import SECTION_FILLS
 
 DEFAULT_LAYER_ID = "default"
 
@@ -36,7 +36,7 @@ class Layer:
     lineweight: float = 1.4        # on-screen edge width in pixels
     linetype: str = "Continuous"   # dash-pattern name (core/linetype.py)
     print_width: float = 0.0       # plotted pen width in mm; 0 = device default
-    hatch: str = ""                # material fill (HATCH_PATTERNS); "" = none
+    hatch: str = "lines"           # fill where it is cut (SECTION_FILLS)
     parent: str | None = None      # the layer this one sits under, if any
 
 
@@ -185,16 +185,18 @@ class LayerManager:
                                          print_width=max(0.0, float(width)))
 
     def set_hatch(self, layer_id: str, pattern: str):
-        """Say what this layer's material is hatched with, or nothing.
+        """Say what this layer's material is filled with where it is cut.
 
-        Anything the app cannot draw is nothing: a file can name a
-        pattern this app has never heard of, and a prompt offering a word
-        that fills no region is worse than the prompt offering lines.
+        "none" is a fill of its own: the cut is outlined and left empty.
+        Anything else the app cannot draw is lines, which is what such a
+        layer was always drawn with: a file written before layers had a
+        hatch, or by a build that wrote "" for one nobody had set, or one
+        naming a pattern this app has never heard of.
         """
         name = (pattern or "").strip().lower()
         self._layers[layer_id] = replace(
             self._layers[layer_id],
-            hatch=name if name in HATCH_PATTERNS else "")
+            hatch=name if name in SECTION_FILLS else "lines")
 
     def move_up(self, layer_id: str) -> bool:
         """Move a layer above the sibling in front of it, branch and all.

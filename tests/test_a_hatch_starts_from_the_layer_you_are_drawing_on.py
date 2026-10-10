@@ -131,4 +131,4 @@ def test_the_layer_command_can_take_a_hatch_back_off_a_layer(env):
     proc.provide_text("Hatch")
     proc.provide_text("Concrete")
     proc.provide_text("None")
-    assert scene.layers.get(layer.id).hatch == ""
+    assert scene.layers.get(layer.id).hatch == "none"

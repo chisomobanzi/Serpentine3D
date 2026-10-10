@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from ..core import geometry as g
 from ..core.layers import PATH_SEPARATOR
-from ..core.layout import (HATCH_PATTERNS, DetailView, PaperObject, TextNote,
+from ..core.layout import (SECTION_FILLS, DetailView, PaperObject, TextNote,
                            parse_scale)
 from ..core.text import TextShape
 from ..core.linetype import LINETYPES
@@ -719,8 +719,7 @@ class PropertiesPanel(QWidget):
         self.layer_print.lineEdit().editingFinished.connect(
             self._set_layer_print)
         self.layer_hatch = QComboBox()
-        self.layer_hatch.addItem("None", "")
-        for name in HATCH_PATTERNS:
+        for name in SECTION_FILLS:
             self.layer_hatch.addItem(name.capitalize(), name)
         self.layer_hatch.setToolTip(
             "What a section cut through this layer's objects is filled with, "

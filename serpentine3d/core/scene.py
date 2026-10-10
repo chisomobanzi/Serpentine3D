@@ -509,7 +509,7 @@ class Scene:
         return self.layers.get(obj.layer_id).print_width
 
     def hatch_of(self, obj: SceneObject) -> str:
-        """The fill a cut through this object is drawn with, or nothing.
+        """The fill a cut through this object is drawn with ("none": none).
 
         Taken off the layer, the way the print width is: what a thing is
         made of belongs to the layer it is on, so a section through it

@@ -51,6 +51,14 @@
 
 ### Fixed
 
+- **A section hatch of None leaves the cut empty (#40).** A layer nobody
+  had set showed "None" for its section hatch, yet every cut through it
+  was hatched with lines, so choosing None changed nothing on the sheet.
+  An unset layer now says Lines, the fill its cuts have always had, so no
+  existing drawing changes. None is a choice of its own: the cut keeps its
+  outline and nothing else, on screen and on the plot. Hatching such a cut
+  by hand opens on the layer's pattern rather than on None.
+
 - **One edge between the viewports and the panels.** On builds with Qt 6.12,
   a window layout saved by a version from before 0.10.0 pulled the viewports
   out of their own area on launch. That left an empty strip between them
