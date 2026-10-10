@@ -62,6 +62,12 @@
 
 ### Fixed
 
+- **Panels start below their title bars.** Properties and Layers ran 5 px
+  under their title bars, so the picked layer's highlight overlapped the
+  Layers bar and the gold kind line sat hard against the Properties bar.
+  The header at the top of every Properties page now has room above it
+  and lines up with the rows below it.
+
 - **A section hatch of None leaves the cut empty (#40).** A layer nobody
   had set showed "None" for its section hatch, yet every cut through it
   was hatched with lines, so choosing None changed nothing on the sheet.

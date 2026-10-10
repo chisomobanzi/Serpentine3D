@@ -67,6 +67,11 @@ class Subject:
     tip: str       # the tab's tooltip
 
 
+# How far a page's contents stand in from its sides: the form rows'
+# margin, which the header and the buttons under it line up with.
+_INSET = 8
+
+
 class SubjectHeader(QWidget):
     """The top of every Properties page: a mark and the kind of thing in
     gold capitals, then its name, then one muted line of what and where.
@@ -85,7 +90,7 @@ class SubjectHeader(QWidget):
         self.kind.setStyleSheet(f"color: {theme.ACCENT};")
         self._kind_row = QWidget()
         row = QHBoxLayout(self._kind_row)
-        row.setContentsMargins(4, 6, 4, 0)
+        row.setContentsMargins(_INSET, 8, _INSET, 0)
         row.setSpacing(5)
         row.addWidget(self.mark)
         row.addWidget(self.kind)
@@ -95,8 +100,12 @@ class SubjectHeader(QWidget):
         self.title.setWordWrap(True)
         self.detail = QLabel()
         self.detail.setStyleSheet(
-            f"color: {theme.TEXT_MUTED}; padding: 0 4px 4px;")
+            f"color: {theme.TEXT_MUTED}; padding: 0 {_INSET}px 4px;")
         self.detail.setWordWrap(True)
+        # A styled label indents its text half an x past its padding
+        # unless told not to, which put the name out of line with the rows.
+        for label in (self.title, self.detail):
+            label.setIndent(0)
         column = QVBoxLayout(self)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
@@ -110,8 +119,8 @@ class SubjectHeader(QWidget):
         # With no kind line above it, the name keeps that line's gap. Set in
         # the style sheet: setContentsMargins on a styled label replaces its
         # padding, sides and all, and the name slid out of line.
-        self.title.setStyleSheet("font-weight: bold; padding: %dpx 4px 0;"
-                                 % (8 if subject is None else 2))
+        self.title.setStyleSheet("font-weight: bold; padding: %dpx %dpx 0;"
+                                 % (8 if subject is None else 2, _INSET))
         if subject is None:
             self._kind_row.hide()
             self.title.setText(self._empty[0])
@@ -686,7 +695,7 @@ class PropertiesPanel(QWidget):
             "Move the selected objects onto this layer")
         self.layer_move_here.clicked.connect(self._move_selection_here)
         acts = QHBoxLayout()
-        acts.setContentsMargins(4, 0, 4, 4)
+        acts.setContentsMargins(_INSET, 2, _INSET, 4)
         acts.addWidget(self.layer_select)
         acts.addWidget(self.layer_move_here)
         acts.addStretch(1)

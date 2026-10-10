@@ -70,6 +70,12 @@ class DockTitleBar(QWidget):
         self._show_buttons()
         self.setMinimumHeight(26)
 
+    def sizeHint(self):
+        """At least the height the bar asks for. The dock starts its
+        content where this hint ends, so a hint shorter than the bar ran
+        the panel 5 px under it."""
+        return super().sizeHint().expandedTo(self.minimumSize())
+
     def add_widget(self, widget, *args):
         """Put a widget after the name, before the stretch."""
         self.row.insertWidget(self._slot, widget, *args)
