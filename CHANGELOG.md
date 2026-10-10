@@ -49,6 +49,16 @@
   layer first and the selection after; selecting something else lets go of
   the layer too.
 
+### Fixed
+
+- **One edge between the viewports and the panels.** On builds with Qt 6.12,
+  a window layout saved by a version from before 0.10.0 pulled the viewports
+  out of their own area on launch. That left an empty strip between them
+  and the panels, with two edges to drag. Widening the panels and narrowing
+  them again, or maximising the window, opened a gap there that the
+  viewports never filled. The viewports now stay in their own area, so the
+  panel edge is the viewports' edge again and they follow it both ways.
+
 ## 0.10.9 (2026-10-07)
 
 ### Added
