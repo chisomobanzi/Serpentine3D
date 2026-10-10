@@ -113,6 +113,16 @@ def test_a_cut_from_a_layer_with_nothing_to_say_falls_back(env, monkeypatch):
     assert proc.request.default == "Cross"
 
 
+def test_a_cut_left_empty_offers_the_layer_s_pattern(env, monkeypatch):
+    """None is a material with no fill; hatching its cut by hand is asking
+    for one, so the prompt opens on a pattern it can draw."""
+    scene, _lay, proc = _paper(env, monkeypatch, cut=[[SQUARE, HOLE]],
+                               patterns=["none"])
+    scene.layers.set_hatch(DEFAULT_LAYER_ID, "cross")
+    _click(proc)
+    assert proc.request.default == "Cross"
+
+
 def test_the_material_is_offered_and_not_imposed(env, monkeypatch):
     """It is still a prompt: the one face in something else gets it."""
     _scene, lay, proc = _paper(env, monkeypatch, cut=[[SQUARE, HOLE]],

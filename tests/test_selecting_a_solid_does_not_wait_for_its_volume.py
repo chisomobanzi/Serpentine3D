@@ -88,7 +88,7 @@ def test_everything_cheap_about_the_object_is_there_at_once(panel, counted):
     sel.set([box.id])
 
     assert p.header.text() == "Box 0"
-    assert p.kind_label.text() == "Solid"
+    assert p.object_head.detail.text() == "Solid on Default"
     assert counted == []
 
 

@@ -47,7 +47,8 @@ def point_marks(points, size: float) -> np.ndarray:
     return np.asarray(segs, np.float32).reshape(-1, 2, 3)
 
 
-def hlr_visible_segments(by_obj, to_paper, is_picked) -> list:
+def hlr_visible_segments(by_obj, to_paper, is_picked,
+                         picked_ink=None) -> list:
     """A detail's visible line work as (ink, segments), in the order to draw.
 
     `by_obj` is what the hidden-line pass carried out: one (object id,
@@ -79,7 +80,7 @@ def hlr_visible_segments(by_obj, to_paper, is_picked) -> list:
                 into.append(np.stack([p[:-1], p[1:]], axis=1))
     out = []
     for segs, ink in ((plain, LINE_VISIBLE),
-                      (gold, (*theme.SELECTION_COLOR, 1.0))):
+                      (gold, picked_ink or (*theme.SELECTION_COLOR, 1.0))):
         if segs:
             out.append((ink, np.concatenate(segs).astype(np.float32)))
     return out
@@ -712,8 +713,10 @@ class LayoutView:
         # Visible edges, in the inks they take: a hidden-line detail has no
         # faces to tint, so ink is the only way it can show what is picked.
         picked = self.vp.selection.is_selected
+        held = (*theme.HELD_SELECTION_COLOR, 1.0) \
+            if self.vp.selection.held else None
         for ink, segs in hlr_visible_segments(data.get("visible_by_obj", []),
-                                              to_paper, picked):
+                                              to_paper, picked, held):
             self._draw_segs(paper_mvp, segs, ink, 1.6)
         # section-cut faces: heavy outline + 45-degree hatching
         regions = data.get("cut") or []

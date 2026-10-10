@@ -176,7 +176,14 @@ def test_a_layer_with_nothing_to_say_leaves_its_cut_on_lines(sectioned_sheet):
     w, lv, det, left, _right = sectioned_sheet
     w.scene.layers.set_hatch(w.scene.get(left.id).layer_id, "")
     lv._hlr_cache.clear()
-    assert _patterns_by_object(lv._detail_hlr(det))[left.id] == ""
+    assert _patterns_by_object(lv._detail_hlr(det))[left.id] == "lines"
+
+
+def test_a_layer_set_to_none_leaves_its_cut_empty(sectioned_sheet):
+    w, lv, det, left, _right = sectioned_sheet
+    w.scene.layers.set_hatch(w.scene.get(left.id).layer_id, "None")
+    lv._hlr_cache.clear()
+    assert _patterns_by_object(lv._detail_hlr(det))[left.id] == "none"
 
 
 def test_the_cut_the_pickers_read_is_the_cut_that_gets_filled(

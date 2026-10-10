@@ -112,6 +112,12 @@ class Leader:
 # list and cannot drift apart.
 HATCH_PATTERNS = ("lines", "cross", "solid")
 
+# What a layer's material can be filled with where a section cuts it: any
+# of the patterns, or none at all. None is a material's choice not to be
+# hatched, which a hatch drawn by hand cannot make, so layers offer it and
+# the hatch command does not.
+SECTION_FILLS = ("none", *HATCH_PATTERNS)
+
 
 @dataclass
 class Hatch:
@@ -337,9 +343,10 @@ def cut_hatching(regions: list, cx: float, cy: float, s: float,
 
     `patterns` is aligned with `regions` and says what each cut face is
     made of, off the layer it was cut from: "cross" goes over the face a
-    second time square to the first, "solid" fills it in instead, and
-    anything else (a layer with nothing to say, or a pattern out of a
-    file this build cannot draw) gets the plain lines it always got.
+    second time square to the first, "solid" fills it in instead, "none"
+    leaves it outlined and empty, and anything else (a caller with no
+    patterns, or a pattern out of a file this build cannot draw) gets
+    the plain lines it always got.
     Solid comes back on its own because it is not a set of segments: it
     is the rings themselves, holes and all, for a painter to flood.
 
@@ -355,7 +362,7 @@ def cut_hatching(regions: list, cx: float, cy: float, s: float,
         pattern = patterns[i] if patterns and i < len(patterns) else ""
         if pattern == "solid":
             solid.append(paper)
-        else:
+        elif pattern != "none":
             fill.extend(hatch_region(paper, angle, spacing))
             if pattern == "cross":
                 fill.extend(hatch_region(paper, angle + 90.0, spacing))

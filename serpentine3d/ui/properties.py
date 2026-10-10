@@ -1,23 +1,49 @@
-"""Properties panel: shows and edits the selected object."""
+"""Properties panel: shows and edits the selected object, or a picked layer.
+
+Two things can be live at once: what the viewport has selected, and the
+layers picked in the Layers list. Properties shows one of them, and the
+title bar (`SubjectTitleBar`) offers a tab for each when both are, so a
+look at a layer never costs the selection. While the layer is shown the
+selection is held, which every pane draws dimmed: full gold keeps meaning
+"this is what Properties is editing".
+"""
 
 from __future__ import annotations
 
+from collections import Counter
+from dataclasses import dataclass
 from itertools import product
 from math import atan, dist, isclose, pi, sin, tan
 
-from PySide6.QtCore import QSignalBlocker, QTimer, Signal, Qt
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtCore import QSignalBlocker, QSize, QTimer, Signal, Qt
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFontComboBox, QFormLayout, QLabel,
-    QLineEdit, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFontComboBox, QFormLayout,
+    QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
+    QStackedWidget, QTabBar, QVBoxLayout, QWidget,
 )
 
 from ..core import geometry as g
-from ..core.layout import DetailView, PaperObject, TextNote, parse_scale
+from ..core.layers import PATH_SEPARATOR
+from ..core.layout import (SECTION_FILLS, DetailView, PaperObject, TextNote,
+                           parse_scale)
 from ..core.text import TextShape
 from ..core.linetype import LINETYPES
+from . import icons, theme
+from .dock_title import DockTitleBar
 from .layout_view import LINE_VISIBLE
+from .object_chooser import kind_label
 from .camera import STANDARD_VIEWS
+
+# What the layer page offers for its two widths. Typed values work too; these
+# are the ones worth a click. Screen widths are pixels, print widths the
+# standard pen sizes in millimetres, the same list the Layers panel offers.
+SCREEN_WIDTHS = ("1", "1.4", "2", "3", "4")
+FROM_PRINT = "From print"       # a screen width worked out from print width
+PRINT_WIDTHS = ("0.13", "0.18", "0.25", "0.35", "0.5", "0.7", "1.0")
+
+# the tab mark for more than one layer, which have no one colour between them
+_MIXED_MARK = (0.6, 0.6, 0.62)
 
 # the scales an architect draws at, smallest denominator first; anything else
 # is typed in and read by the same rules as the `detailscale` command
@@ -27,6 +53,86 @@ SCALE_PRESETS = ["1:1", "1:2", "1:5", "1:10", "1:20", "1:50", "1:100", "1:200"]
 CONVERT_LABELS = {"curves": "Convert to curves",
                   "surface": "Convert to surfaces",
                   "solid": "Convert to solid"}
+
+
+@dataclass(frozen=True)
+class Subject:
+    """What one page of Properties shows, said once for the page's header
+    and for its tab."""
+    kind: str      # what sort of thing, in the header's gold capitals
+    title: str     # which one: its name, or how many
+    detail: str    # one muted line of what and where
+    mark: QIcon    # beside the kind, and on the tab
+    tab: str       # the tab's few words
+    tip: str       # the tab's tooltip
+
+
+# How far a page's contents stand in from its sides: the form rows'
+# margin, which the header and the buttons under it line up with.
+_INSET = 8
+
+
+class SubjectHeader(QWidget):
+    """The top of every Properties page: a mark and the kind of thing in
+    gold capitals, then its name, then one muted line of what and where.
+    Whatever a page shows, it opens by saying what that is."""
+
+    def __init__(self, empty_title: str = "", empty_detail: str = ""):
+        super().__init__()
+        self._empty = (empty_title, empty_detail)
+        self.mark = QLabel()
+        self.kind = QLabel()
+        font = self.kind.font()
+        font.setCapitalization(QFont.Capitalization.AllUppercase)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.2)
+        font.setPointSizeF(font.pointSizeF() * 0.85)
+        self.kind.setFont(font)
+        self.kind.setStyleSheet(f"color: {theme.ACCENT};")
+        self._kind_row = QWidget()
+        row = QHBoxLayout(self._kind_row)
+        row.setContentsMargins(_INSET, 8, _INSET, 0)
+        row.setSpacing(5)
+        row.addWidget(self.mark)
+        row.addWidget(self.kind)
+        row.addStretch(1)
+        self.title = QLabel()
+        # wraps rather than widening the dock for a long name
+        self.title.setWordWrap(True)
+        self.detail = QLabel()
+        self.detail.setStyleSheet(
+            f"color: {theme.TEXT_MUTED}; padding: 0 {_INSET}px 4px;")
+        self.detail.setWordWrap(True)
+        # A styled label indents its text half an x past its padding
+        # unless told not to, which put the name out of line with the rows.
+        for label in (self.title, self.detail):
+            label.setIndent(0)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        column.addWidget(self._kind_row)
+        column.addWidget(self.title)
+        column.addWidget(self.detail)
+        self.show_subject(None)
+
+    def show_subject(self, subject: Subject | None):
+        """Say what the page shows, or, with nothing, what to do about it."""
+        # With no kind line above it, the name keeps that line's gap. Set in
+        # the style sheet: setContentsMargins on a styled label replaces its
+        # padding, sides and all, and the name slid out of line.
+        self.title.setStyleSheet("font-weight: bold; padding: %dpx %dpx 0;"
+                                 % (8 if subject is None else 2, _INSET))
+        if subject is None:
+            self._kind_row.hide()
+            self.title.setText(self._empty[0])
+            self.detail.setText(self._empty[1])
+            self.detail.setVisible(bool(self._empty[1]))
+            return
+        self._kind_row.show()
+        self.mark.setPixmap(subject.mark.pixmap(14, 14))
+        self.kind.setText(subject.kind)
+        self.title.setText(subject.title)
+        self.detail.setText(subject.detail)
+        self.detail.setVisible(bool(subject.detail))
 
 
 class PropertiesPanel(QWidget):
@@ -40,6 +146,9 @@ class PropertiesPanel(QWidget):
     textTypographyChanged = Signal(str, object)
     textPlacementChanged = Signal(str)
     lookAtTextRequested = Signal()
+    # What is live, or which of it is shown, may have changed: the title bar
+    # redraws its tabs from subjects() and shown().
+    subjectsChanged = Signal()
 
     def __init__(self, scene, selection, history, parent=None,
                  viewport_source=None):
@@ -64,8 +173,12 @@ class PropertiesPanel(QWidget):
         self._text_edit_selection_id = None
         self._model_text_command_active = False
 
-        self.header = QLabel("No selection")
-        self.header.setStyleSheet("font-weight: bold; padding: 4px;")
+        # The page opens like every page here: kind, name, what and where.
+        # `header` is its name line, which older callers read by that name.
+        self.object_head = SubjectHeader(
+            empty_title="No selection",
+            empty_detail="Select objects, or pick a layer in Layers.")
+        self.header = self.object_head.title
 
         self.name_edit = QLineEdit()
         self.name_edit.editingFinished.connect(self._rename)
@@ -117,7 +230,6 @@ class PropertiesPanel(QWidget):
         self.detail_view_combo.setToolTip("View shown inside the selected detail")
         self.detail_view_combo.currentTextChanged.connect(self._change_detail_view)
 
-        self.kind_label = QLabel("—")
         self.measure_label = QLabel("—")
         self.measure_label.setWordWrap(True)
 
@@ -131,7 +243,6 @@ class PropertiesPanel(QWidget):
         form.addRow("Lineweight", self.lineweight_edit)
         form.addRow("View", self.detail_view_combo)
         form.addRow("Scale", self.scale_combo)
-        form.addRow("Type", self.kind_label)
         form.addRow("Info", self.measure_label)
         self.text_content = QPlainTextEdit()
         self.text_content.setObjectName("text_content")
@@ -243,11 +354,27 @@ class PropertiesPanel(QWidget):
         form.addRow("Angle", self.hatch_angle)
         self._hatch_checkpoint_id = None
 
+        self.object_page = QWidget()
+        page = QVBoxLayout(self.object_page)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.addWidget(self.object_head)
+        page.addLayout(form)
+        page.addStretch(1)
+        self._build_layer_page()
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self.object_page)
+        self.pages.addWidget(self.layer_page)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.header)
-        layout.addLayout(form)
-        layout.addStretch(1)
+        layout.addWidget(self.pages)
+
+        # Which subject the user last chose to see, "objects" or "layers";
+        # shown() falls back to whatever is live when it is not.
+        self._layers_panel = None
+        self._chosen = "objects"
+        self._picks_seen = self._objects_signature()
+        self._letting_go = False
 
         selection.add_listener(self.refresh)
         scene.add_listener(self.refresh, kinds=("objects", "layers",
@@ -304,6 +431,7 @@ class PropertiesPanel(QWidget):
     # --------------------------------------------------------------- showing
 
     def refresh(self):
+        self._let_go_if_moved_on()
         self._updating = True
         papers = self._paper_picks()
         detail = self._detail_pick()
@@ -311,9 +439,6 @@ class PropertiesPanel(QWidget):
         self._show_rows(paper=bool(papers), detail=detail is not None)
         if notes:
             self._blank_editors()
-            self.header.setText("Text note" if len(notes) == 1 else
-                                f"{len(notes)} notes selected")
-            self.kind_label.setText("Text on paper")
             self.form.setRowVisible(self.layer_combo, False)
             if len(notes) == 1:
                 self.measure_label.setText(notes[0].text)
@@ -343,8 +468,6 @@ class PropertiesPanel(QWidget):
             if self.text_content.toPlainText() != text:
                 self.text_content.setPlainText(text)
         self._show_text_typography(editable)
-        if model_text is not None:
-            self.kind_label.setText("Editable text")
         tools_visible = (self._model_text_command_active
                          or model_text is not None)
         if (selection_changed and model_text is not None
@@ -361,7 +484,467 @@ class PropertiesPanel(QWidget):
         self.text_placement_plane.setEnabled(tools_visible)
         self.form.setRowVisible(self.look_at_text, model_text is not None)
         self.look_at_text.setEnabled(model_text is not None)
+        self.object_head.show_subject(self.describe("objects"))
         self._updating = False
+        self._sync_subject()
+
+    # ------------------------------------------------------------- subjects
+
+    def follow_layers(self, panel):
+        """Show the layers picked in this Layers panel as well."""
+        self._layers_panel = panel
+        panel.pickedChanged.connect(self._layers_picked)
+        self._sync_subject()
+
+    def subjects(self) -> list[str]:
+        """What could be shown, in tab order: "objects" while anything is
+        selected (in the model or on a sheet), "layers" while any are
+        picked in the Layers list."""
+        out = []
+        if any(self._objects_signature()):
+            out.append("objects")
+        if self._picked_layers():
+            out.append("layers")
+        return out
+
+    def shown(self) -> str | None:
+        """The subject on show: the one last chosen while it is live, else
+        whichever is."""
+        live = self.subjects()
+        if self._chosen in live:
+            return self._chosen
+        return live[-1] if live else None
+
+    def show_subject(self, subject: str):
+        """Show the objects or the layers, which is what a tab does."""
+        self._chosen = subject
+        self._sync_subject()
+
+    def describe(self, subject: str) -> Subject | None:
+        """What a subject is, said once for both its page's header and its
+        tab, so the two cannot disagree: "objects" (whatever is selected,
+        in the model or on a sheet) or "layers". None when there is none.
+
+        A new kind of thing for Properties to show (a sheet, say) gets a
+        page and a description here; its header and its tab follow.
+        """
+        if subject == "layers":
+            return self._describe_layers()
+        return self._describe_selection()
+
+    def _describe_selection(self) -> Subject | None:
+        """In the order refresh() chooses its page: notes, then paper
+        geometry, then details, then the model. Nothing here measures or
+        converts anything, since it runs on every change of selection."""
+        mark = icons.selection_mark()
+
+        def said(kind, title, detail, tab=None):
+            tab = tab or title
+            return Subject(kind, title, detail, mark, tab,
+                           f"The selection: {tab}")
+
+        notes = self._sheet_picks("note")
+        if notes:
+            n = len(notes)
+            if n == 1:
+                first = next((line.strip() for line
+                              in notes[0].text.splitlines() if line.strip()),
+                             "")
+                return said("Text note", _clip(first) or "Empty note",
+                            "Text on paper")
+            return said("Text notes", f"{n} notes selected", "Text on paper",
+                        f"{n} notes")
+        papers = self._paper_picks()
+        if papers:
+            # said out loud, because a curve on the paper and a curve in the
+            # model look the same and are not the same thing at all
+            kinds = [kind_label(g.shape_kind(o.shape)) for o in papers]
+            n = len(papers)
+            if n == 1:
+                return said("Object", papers[0].name, f"{kinds[0]} on paper")
+            return said("Objects", f"{n} objects selected",
+                        f"{_kinds_text(kinds)} on paper", f"{n} objects")
+        details = self._sheet_picks("detail")
+        if details:
+            n = len(details)
+            if n == 1:
+                detail = details[0]
+                frame = f"frame {detail.w:g} × {detail.h:g} mm"
+                line = (frame if detail.perspective
+                        else f"{detail.scale_text()} · {frame}")
+                return said("Detail", f"{self._detail_view_name(detail)} view",
+                            _capital(line), "Detail")
+            return said("Details", f"{n} details selected", "On paper",
+                        f"{n} details")
+        objs = self.selection.objects()
+        if not objs:
+            return None
+        on = {o.layer_id for o in objs}
+        where = (f"on {self.scene.layers.get(next(iter(on))).name}"
+                 if len(on) == 1 else f"on {len(on)} layers")
+        n = len(objs)
+        if n == 1:
+            obj = objs[0]
+            kind = ("Editable text" if isinstance(obj.shape, TextShape)
+                    else kind_label(obj.kind))
+            return said("Object", obj.name, f"{kind} {where}")
+        kinds = [kind_label(o.kind) for o in objs]
+        return said("Objects", f"{n} objects selected",
+                    f"{_kinds_text(kinds)} {where}", f"{n} objects")
+
+    def _describe_layers(self) -> Subject | None:
+        """Counted as what is on the layer, in words the selection tab's
+        "3 objects" cannot be mistaken for."""
+        layers = self._picked_layers()
+        if not layers:
+            return None
+        count = self._count_on({la.id for la in layers})
+        if len(layers) == 1:
+            layer = layers[0]
+            path = self.scene.layers.full_path(layer.id).split(PATH_SEPARATOR)
+            where = " › ".join(path) + " · " if len(path) > 1 else ""
+            return Subject("Layer", layer.name,
+                           where + _on_count(count, "this layer"),
+                           icons.layer_mark(layer.color), layer.name,
+                           f"Layer: {layer.name}")
+        names = ", ".join(la.name for la in layers)
+        title = f"{len(layers)} layers"
+        return Subject("Layers", title,
+                       f"{names} · " + _on_count(count, "these layers"),
+                       icons.layer_mark(_MIXED_MARK), title,
+                       f"Layers: {names}")
+
+    def _count_on(self, layer_ids: set) -> int:
+        return sum(1 for o in self.scene.all() if o.layer_id in layer_ids)
+
+    def _picked_layers(self) -> list:
+        """The picked layers in list order, the ones that still exist."""
+        if self._layers_panel is None:
+            return []
+        ids = self._layers_panel.picked_layer_ids()
+        return [la for la in self.scene.layers.all() if la.id in ids]
+
+    def _objects_signature(self) -> tuple:
+        """What the object page would show, as something to compare."""
+        sheet = tuple(id(o) for kind in ("object", "detail", "note")
+                      for o in self._sheet_picks(kind))
+        return (tuple(self.selection.ids), sheet)
+
+    def _layers_picked(self):
+        """Rows picked are what you asked to see; none picked hands the
+        panel back to the objects."""
+        self._chosen = "layers" if self._picked_layers() else "objects"
+        self._sync_subject()
+
+    def _let_go_if_moved_on(self):
+        """Selecting other objects is moving on from the layer: let go of
+        it, so its tab does not hang about. Clearing the selection is not,
+        nor is a command handing back the selection it was given."""
+        seen, self._picks_seen = self._picks_seen, self._objects_signature()
+        if (self._picks_seen == seen or not any(self._picks_seen)
+                or self._letting_go or not self._picked_layers()):
+            return
+        self._letting_go = True
+        try:
+            self._chosen = "objects"
+            self._layers_panel.clear_picked()
+        finally:
+            self._letting_go = False
+
+    def _sync_subject(self):
+        """Show the page for the subject on show, then hold the selection
+        while it is not the one being edited. Holding tells the selection's
+        listeners, this panel among them, so it comes last."""
+        shown = self.shown()
+        if shown == "layers":
+            self._refresh_layer_page()
+            self.pages.setCurrentWidget(self.layer_page)
+        else:
+            self.pages.setCurrentWidget(self.object_page)
+        self.subjectsChanged.emit()
+        # Only while the panel can be seen: with Properties closed nothing
+        # on screen says why the selection went dim.
+        self.selection.set_held(
+            shown == "layers" and bool(self.selection.ids)
+            and self.isVisible())
+
+    def showEvent(self, ev):
+        super().showEvent(ev)
+        self._sync_subject()
+
+    def hideEvent(self, ev):
+        super().hideEvent(ev)
+        if not ev.spontaneous():        # not for a minimised window
+            self.selection.set_held(False)
+
+    # ------------------------------------------------------------ layer page
+
+    def _build_layer_page(self):
+        """A layer's look, a row per thing with its unit in the label: the
+        Layers list keeps only the switches, so nothing here has to be a
+        narrow cell whose meaning lives in a column header."""
+        self._layer_updating = False
+        self.layer_page = QWidget()
+        self.layer_head = SubjectHeader()
+
+        self.layer_select = QPushButton("Select objects")
+        self.layer_select.setToolTip("Select everything on the picked layers")
+        self.layer_select.clicked.connect(self._select_layer_objects)
+        self.layer_move_here = QPushButton()
+        self.layer_move_here.setToolTip(
+            "Move the selected objects onto this layer")
+        self.layer_move_here.clicked.connect(self._move_selection_here)
+        acts = QHBoxLayout()
+        acts.setContentsMargins(_INSET, 2, _INSET, 4)
+        acts.addWidget(self.layer_select)
+        acts.addWidget(self.layer_move_here)
+        acts.addStretch(1)
+
+        self.layer_name = QLineEdit()
+        self.layer_name.editingFinished.connect(self._rename_layer)
+        self.layer_color = QPushButton()
+        self.layer_color.setFixedSize(40, 22)
+        self.layer_color.setToolTip("Layer colour")
+        self.layer_color.clicked.connect(self._pick_layer_color)
+        self.layer_linetype = QComboBox()
+        self.layer_linetype.addItems(list(LINETYPES))
+        self.layer_linetype.currentIndexChanged.connect(self._set_layer_linetype)
+        self.layer_screen = QComboBox()
+        self.layer_screen.setEditable(True)
+        self.layer_screen.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.layer_screen.addItems([FROM_PRINT, *SCREEN_WIDTHS])
+        self.layer_screen.setToolTip(
+            "How thick the layer's lines are drawn on screen, in pixels. "
+            "From print works it out from the print width; a number of "
+            "your own stays put")
+        self.layer_screen.textActivated.connect(self._set_layer_screen)
+        self.layer_screen.lineEdit().editingFinished.connect(
+            self._set_layer_screen)
+        self.layer_print = QComboBox()
+        self.layer_print.setEditable(True)
+        self.layer_print.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.layer_print.addItems(["Default", *PRINT_WIDTHS])
+        self.layer_print.setToolTip(
+            "Pen width on a printed sheet, in millimetres; Default leaves it "
+            "to the printer")
+        self.layer_print.textActivated.connect(self._set_layer_print)
+        self.layer_print.lineEdit().editingFinished.connect(
+            self._set_layer_print)
+        self.layer_hatch = QComboBox()
+        for name in SECTION_FILLS:
+            self.layer_hatch.addItem(name.capitalize(), name)
+        self.layer_hatch.setToolTip(
+            "What a section cut through this layer's objects is filled with, "
+            "and what a hatch drawn on it starts out as")
+        self.layer_hatch.currentIndexChanged.connect(self._set_layer_hatch)
+        self.layer_visible = QCheckBox("Visible")
+        self.layer_visible.clicked.connect(lambda: self._layer_switch(
+            self.layer_visible, "layer visibility",
+            self.scene.layers.set_visible))
+        self.layer_locked = QCheckBox("Locked")
+        self.layer_locked.clicked.connect(lambda: self._layer_switch(
+            self.layer_locked, "layer lock", self.scene.layers.set_locked))
+        state = QHBoxLayout()
+        state.setContentsMargins(0, 0, 0, 0)
+        state.addWidget(self.layer_visible)
+        state.addWidget(self.layer_locked)
+        state.addStretch(1)
+        state_widget = QWidget()
+        state_widget.setLayout(state)
+
+        self.layer_form = form = QFormLayout()
+        form.setContentsMargins(8, 4, 8, 8)
+        form.setSpacing(6)
+        form.addRow("Name", self.layer_name)
+        form.addRow("Colour", self.layer_color)
+        form.addRow("Linetype", self.layer_linetype)
+        form.addRow("Screen width (px)", self.layer_screen)
+        form.addRow("Print width (mm)", self.layer_print)
+        form.addRow("Section hatch", self.layer_hatch)
+        form.addRow("", state_widget)
+
+        page = QVBoxLayout(self.layer_page)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.addWidget(self.layer_head)
+        page.addLayout(acts)
+        page.addLayout(form)
+        page.addStretch(1)
+
+    def _refresh_layer_page(self):
+        layers = self._picked_layers()
+        if not layers:
+            return
+        self._layer_updating = True
+        try:
+            one = layers[0] if len(layers) == 1 else None
+            self.layer_head.show_subject(self.describe("layers"))
+            self.layer_select.setVisible(
+                bool(self._count_on({la.id for la in layers})))
+            moving = self._movable_here()
+            self.layer_move_here.setVisible(bool(moving))
+            if moving:
+                n = len(moving)
+                self.layer_move_here.setText(
+                    f"Move {n} selected here" if n > 1 else "Move selected here")
+
+            self.layer_name.setEnabled(one is not None)
+            self.layer_name.setText(one.name if one is not None else "")
+            self.layer_name.setPlaceholderText(
+                "" if one is not None else f"{len(layers)} layers")
+            colors = {la.color for la in layers}
+            if len(colors) == 1:
+                (color,) = colors
+                self.layer_color.setStyleSheet(
+                    "QPushButton { background: rgb(%d,%d,%d); border: 1px "
+                    "solid #55565e; }" % tuple(int(c * 255) for c in color))
+            else:
+                self.layer_color.setStyleSheet("")
+            self._show_common(self.layer_linetype,
+                              {la.linetype for la in layers})
+            self._show_common_text(self.layer_screen,
+                                   {_screen_text(la) for la in layers})
+            self._show_common_text(self.layer_print,
+                                   {"Default" if la.print_width == 0
+                                    else _width_text(la.print_width)
+                                    for la in layers})
+            hatches = {la.hatch for la in layers}
+            self.layer_hatch.setCurrentIndex(
+                self.layer_hatch.findData(next(iter(hatches)))
+                if len(hatches) == 1 else -1)
+            self._show_check(self.layer_visible, {la.visible for la in layers})
+            self._show_check(self.layer_locked, {la.locked for la in layers})
+        finally:
+            self._layer_updating = False
+
+    @staticmethod
+    def _show_common(combo, values):
+        """The one value they share, or a blank for layers that differ."""
+        combo.setCurrentIndex(
+            combo.findText(next(iter(values))) if len(values) == 1 else -1)
+
+    @staticmethod
+    def _show_common_text(combo, values):
+        combo.setEditText(next(iter(values)) if len(values) == 1 else "")
+
+    @staticmethod
+    def _show_check(box, values):
+        box.setTristate(len(values) > 1)
+        box.setCheckState(
+            Qt.CheckState.PartiallyChecked if len(values) > 1
+            else Qt.CheckState.Checked if values == {True}
+            else Qt.CheckState.Unchecked)
+
+    def _layer_switch(self, box, label: str, setter):
+        """A click on Visible or Locked. On a mixed box it switches them
+        all on and the box stops being mixed; it never goes back to mixed,
+        which is not a state a layer can be put in."""
+        on = box.checkState() != Qt.CheckState.Unchecked
+        if box.isTristate():
+            box.setTristate(False)
+            on = True
+        with QSignalBlocker(box):
+            box.setChecked(on)
+        self._edit_layers(label, lambda i: setter(i, on))
+
+    def _edit_layers(self, label: str, apply):
+        """One undo step for a change to every picked layer."""
+        if self._layer_updating:
+            return
+        layers = self._picked_layers()
+        if not layers:
+            return
+        self.history.checkpoint(label)
+        with self.scene.batched():
+            for layer in layers:
+                apply(layer.id)
+            self.scene.notify()
+
+    def _rename_layer(self):
+        text = self.layer_name.text().strip()
+        layers = self._picked_layers()
+        if len(layers) != 1 or not text or text == layers[0].name:
+            return
+        self._edit_layers("rename layer",
+                          lambda i: self.scene.layers.rename(i, text))
+
+    def _pick_layer_color(self):
+        from PySide6.QtWidgets import QColorDialog
+        layers = self._picked_layers()
+        if not layers:
+            return
+        color = QColorDialog.getColor(
+            QColor.fromRgbF(*layers[0].color), self, "Layer colour")
+        if color.isValid():
+            rgb = (color.redF(), color.greenF(), color.blueF())
+            self._edit_layers("layer colour",
+                              lambda i: self.scene.layers.set_color(i, rgb))
+
+    def _set_layer_linetype(self, _index=None):
+        name = self.layer_linetype.currentText()
+        if name in LINETYPES:
+            self._edit_layers("layer linetype",
+                              lambda i: self.scene.layers.set_linetype(i, name))
+
+    def _set_layer_screen(self, *_args):
+        if self._layer_updating:
+            return
+        text = self.layer_screen.currentText().strip()
+        layers = self._picked_layers()
+        if text.lower().startswith(FROM_PRINT.lower()):
+            if any(la.screen_pinned for la in layers):
+                self._edit_layers("layer screen width",
+                                  self.scene.layers.follow_print)
+            return
+        width = _parse_width(text)
+        if width is None or width <= 0:
+            self._refresh_layer_page()      # put back what the layer says
+            return
+        if all(la.screen_pinned and la.lineweight == width for la in layers):
+            return
+        self._edit_layers("layer screen width",
+                          lambda i: self.scene.layers.set_lineweight(i, width))
+
+    def _set_layer_print(self, *_args):
+        if self._layer_updating:
+            return
+        text = self.layer_print.currentText().strip()
+        width = 0.0 if text.lower() in ("", "default") else _parse_width(text)
+        if width is None:
+            self._refresh_layer_page()
+            return
+        if {la.print_width for la in self._picked_layers()} == {width}:
+            return
+        self._edit_layers("layer print width",
+                          lambda i: self.scene.layers.set_print_width(i, width))
+
+    def _set_layer_hatch(self, index):
+        if index < 0:
+            return
+        pattern = self.layer_hatch.itemData(index)
+        self._edit_layers("layer hatch",
+                          lambda i: self.scene.layers.set_hatch(i, pattern))
+
+    def _movable_here(self) -> list[str]:
+        """Selected objects not yet on the one picked layer."""
+        layers = self._picked_layers()
+        if len(layers) != 1:
+            return []
+        return [o.id for o in self.selection.objects()
+                if o.layer_id != layers[0].id]
+
+    def _move_selection_here(self):
+        ids = self._movable_here()
+        if not ids:
+            return
+        self.history.checkpoint("move to layer")
+        self.scene.update_many(ids, layer_id=self._picked_layers()[0].id)
+        self.scene.notify("layers")
+
+    def _select_layer_objects(self):
+        """Selecting them is moving on to them, so the objects are shown."""
+        ids = {la.id for la in self._picked_layers()}
+        self.selection.set([o.id for o in self.scene.selectable_objects()
+                            if o.layer_id in ids])
 
     def _show_text_typography(self, editable):
         controls = (self.text_font_family, self.text_font_style,
@@ -490,7 +1073,6 @@ class PropertiesPanel(QWidget):
             else "Remove the override, use layer colour")
 
     def _refresh_model(self):
-        objs = self.selection.objects()
         obj = self._selected()
 
         self.layer_combo.clear()
@@ -498,22 +1080,15 @@ class PropertiesPanel(QWidget):
             self.layer_combo.addItem(layer.name, layer.id)
 
         if obj is None:
-            if len(objs) > 1:
-                self.header.setText(f"{len(objs)} objects selected")
-            else:
-                self.header.setText("No selection")
             self._blank_editors()
             self.layer_combo.setEnabled(False)
         else:
-            self.header.setText(obj.name)
             self.name_edit.setEnabled(True)
             self.name_edit.setText(obj.name)
             self.layer_combo.setEnabled(True)
             idx = self.layer_combo.findData(obj.layer_id)
             if idx >= 0:
                 self.layer_combo.setCurrentIndex(idx)
-            self.kind_label.setText("Point cloud" if obj.kind == "pointcloud"
-                                    else obj.kind.capitalize())
             self.measure_label.setText(self._measures(obj))
             self.color_widget.setEnabled(True)
             self._show_swatch(self._ink_of(obj))
@@ -522,7 +1097,6 @@ class PropertiesPanel(QWidget):
     def _refresh_paper(self, papers: list):
         obj = papers[0] if len(papers) == 1 else None
         if obj is None:
-            self.header.setText(f"{len(papers)} objects selected")
             self._blank_editors()
             self.linetype_combo.setEnabled(False)
             # blank, not the last one's pattern: a greyed-out "Dashed" reads as
@@ -531,13 +1105,8 @@ class PropertiesPanel(QWidget):
             self.lineweight_edit.setEnabled(False)
             self.lineweight_edit.setText("")
             return
-        self.header.setText(obj.name)
         self.name_edit.setEnabled(True)
         self.name_edit.setText(obj.name)
-        # said out loud, because a curve on the paper and a curve in the model
-        # look the same in a one-word row and are not the same thing at all
-        self.kind_label.setText(
-            f"{g.shape_kind(obj.shape).capitalize()} on paper")
         self.measure_label.setText(self._paper_measures(obj))
         self.color_widget.setEnabled(True)
         self._show_swatch(self._ink_of(obj))
@@ -551,9 +1120,7 @@ class PropertiesPanel(QWidget):
         """A detail has no name, layer or ink of its own; what it has is a
         frame on the sheet, in paper millimetres like `_paper_measures`, and
         the scale row below."""
-        self.header.setText("Detail")
         self._blank_editors()
-        self.kind_label.setText("Detail")
         self.measure_label.setText(f"Frame: {detail.w:g} × {detail.h:g} mm")
 
     def _show_scale(self, detail: DetailView):
@@ -564,7 +1131,10 @@ class PropertiesPanel(QWidget):
         self.scale_combo.setEditText(text)
 
     def _show_detail_view(self, detail: DetailView):
-        name = "Custom"
+        self.detail_view_combo.setCurrentText(self._detail_view_name(detail))
+
+    def _detail_view_name(self, detail: DetailView) -> str:
+        """The standard view a detail looks along, or Custom."""
         for index in range(1, self.detail_view_combo.count()):
             candidate = self.detail_view_combo.itemText(index)
             azimuth, elevation = STANDARD_VIEWS[candidate.lower()]
@@ -572,9 +1142,8 @@ class PropertiesPanel(QWidget):
             if (detail.perspective == (candidate == "Perspective")
                     and isclose(delta, 0, abs_tol=1e-7)
                     and isclose(detail.elevation, elevation, abs_tol=1e-7)):
-                name = candidate
-                break
-        self.detail_view_combo.setCurrentText(name)
+                return candidate
+        return "Custom"
 
     def _change_detail_view(self, name: str):
         if self._updating or name == "Custom":
@@ -608,7 +1177,6 @@ class PropertiesPanel(QWidget):
         self.name_edit.setEnabled(False)
         self.color_widget.setEnabled(False)
         self.color_btn.setStyleSheet("")
-        self.kind_label.setText("—")
         self.measure_label.setText("—")
 
     def _show_swatch(self, color):
@@ -952,6 +1520,126 @@ class PropertiesPanel(QWidget):
             self.refresh()
             return
         self._paper_edit("detail scale", detail, scale_denom=denom)
+
+
+def _plural(name: str) -> str:
+    return name + ("es" if name.endswith(("s", "sh", "ch", "x")) else "s")
+
+
+def _kinds_text(names: list[str]) -> str:
+    """What a set of things is, by kind: "Solids", or "2 solids, 1 curve",
+    the commonest first, and the rest summed after three kinds."""
+    counts = Counter(names).most_common()
+    if len(counts) == 1:
+        return _plural(counts[0][0])
+    parts = [f"{n} {(name if n == 1 else _plural(name)).lower()}"
+             for name, n in counts[:3]]
+    rest = sum(n for _name, n in counts[3:])
+    if rest:
+        parts.append(f"{rest} other" + ("" if rest == 1 else "s"))
+    return ", ".join(parts)
+
+
+def _on_count(n: int, these: str) -> str:
+    if not n:
+        return f"Nothing on {these} yet"
+    return f"{n} object{'' if n == 1 else 's'} on {these}"
+
+
+def _clip(text: str, limit: int = 48) -> str:
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def _capital(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
+def _width_text(width: float) -> str:
+    """A width as the drop-downs write it: 1.4, 2, 0.25."""
+    return f"{width:g}"
+
+
+def _screen_text(layer) -> str:
+    """A layer's screen width as its row shows it, saying where a width
+    that follows the print width came from."""
+    width = _width_text(layer.lineweight)
+    return width if layer.screen_pinned else f"{FROM_PRINT} ({width})"
+
+
+def _parse_width(text: str):
+    """A width typed into the layer page, with or without its unit, or None
+    for anything that is not one."""
+    t = (text or "").strip().lower()
+    for unit in ("mm", "px"):
+        t = t.removesuffix(unit).strip()
+    try:
+        width = float(t)
+    except ValueError:
+        return None
+    return width if width >= 0 else None
+
+
+
+
+class SubjectTitleBar(DockTitleBar):
+    """The Properties dock's title, which becomes tabs once two things are
+    live: the selection and the picked layers. Each tab carries a mark that
+    says what it is: the selection's pointer in gold, and for a layer the
+    Layers panel's own glyph in that layer's colour. A click shows that
+    one. With one thing live it is the plain title it always was.
+    """
+
+    def __init__(self, props: PropertiesPanel, dock=None):
+        super().__init__(icons.panel_icon("properties"), "Properties", dock)
+        self._props = props
+        self._live: list[str] = []
+        self.tabs = QTabBar()
+        self.tabs.setDrawBase(False)
+        self.tabs.setExpanding(False)
+        self.tabs.setElideMode(Qt.TextElideMode.ElideRight)
+        self.tabs.setIconSize(QSize(14, 14))
+        self.tabs.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tabs.currentChanged.connect(self._tab_chosen)
+        self.tabs.hide()
+        self.add_widget(self.tabs, 0, Qt.AlignmentFlag.AlignBottom)
+        props.subjectsChanged.connect(self.refresh)
+        self.refresh()
+
+    def tab_texts(self) -> list[str]:
+        return [self.tabs.tabText(i) for i in range(self.tabs.count())] \
+            if self._live else []
+
+    def refresh(self):
+        live = self._props.subjects()
+        self._live = live if len(live) > 1 else []
+        self.title.setVisible(not self._live)
+        self.tabs.setVisible(bool(self._live))
+        if not self._live:
+            return
+        blocker = QSignalBlocker(self.tabs)
+        while self.tabs.count() > len(self._live):
+            self.tabs.removeTab(self.tabs.count() - 1)
+        while self.tabs.count() < len(self._live):
+            self.tabs.addTab("")
+        for i, subject in enumerate(self._live):
+            text, mark, tip = self._label(subject)
+            self.tabs.setTabText(i, text)
+            self.tabs.setTabIcon(i, mark)
+            self.tabs.setTabToolTip(i, tip)
+        self.tabs.setCurrentIndex(self._live.index(self._props.shown()))
+        del blocker
+
+    def _label(self, subject: str):
+        """From the description the page's header is drawn from, so a tab
+        and its page say the same thing."""
+        said = self._props.describe(subject)
+        if said is None:
+            return "", QIcon(), ""
+        return said.tab, said.mark, said.tip
+
+    def _tab_chosen(self, index: int):
+        if 0 <= index < len(self._live):
+            self._props.show_subject(self._live[index])
 
 
 def cloud_measures(obj, fmt) -> str:

@@ -505,10 +505,13 @@ def _layer_pattern(ctx) -> str:
 
     A layer is a material and a material has a fill, so hatching a wall
     on the Concrete layer is a click and an Enter rather than the same
-    decision taken again on every region. A layer with nothing to say
-    leaves the command where it has always been, on lines.
+    decision taken again on every region. A layer whose material has no
+    fill leaves the command where it has always been, on lines: a hatch
+    drawn by hand is there to be seen.
     """
-    return (ctx.scene.layers.current.hatch or "lines").capitalize()
+    from ..core.layout import HATCH_PATTERNS
+    fill = ctx.scene.layers.current.hatch
+    return (fill if fill in HATCH_PATTERNS else "lines").capitalize()
 
 
 # "paper" still, though it hatches in the model too: the space only says what
@@ -538,9 +541,12 @@ def cmd_hatch(ctx):
         poly, holes, material = found
         # The face is already drawn in its material, so that is what the
         # prompt opens on: hatching a cut for real should not change what
-        # the cut is made of. Off a cut, the layer answers as it always did.
-        pattern = yield OptionReq("Pattern", options=choices,
-                                  default=material.capitalize() or offered)
+        # the cut is made of. Off a cut, or on one left empty, the layer
+        # answers as it always did.
+        material = material.capitalize()
+        pattern = yield OptionReq(
+            "Pattern", options=choices,
+            default=material if material in choices else offered)
         lay.hatches.append(Hatch(points=[list(p) for p in poly],
                                  holes=[[list(p) for p in ring]
                                         for ring in holes],

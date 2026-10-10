@@ -1,5 +1,89 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Layers in Properties.** Pick a layer in the Layers list and Properties
+  shows it: name, colour, linetype, screen width in pixels, print width in
+  millimetres, section hatch, visible and locked, each on its own labelled
+  row instead of a narrow column. With several layers picked, a value they
+  share is shown and one they differ on is blank; setting it sets it on all
+  of them, as one undo step. "Move selected here" puts the selection onto
+  the layer, and "Select objects" selects what is on it.
+
+- **Every Properties page says what it is showing.** Each page opens the
+  same way: a mark and the kind of thing in gold ("Object", "Objects",
+  "Layer", "Detail", "Text note"), then its name, then one line of what and
+  where, such as "Solid on Default", "2 solids, 1 curve on 2 layers",
+  "3 objects on this layer" or "1:50 · frame 160 × 120 mm". The tab and
+  the header come from one description, so they always agree. That line
+  replaces the Type row.
+
+- **Panel icons.** Properties and Layers now carry an icon at the left of
+  their title bars, sliders and a stack of sheets, so the two stacked
+  panels tell apart at a glance.
+
+### Changed
+
+- **The Layers list is names and switches.** Each row is the layer's name,
+  an eye to show or hide it, a padlock to lock it, and its colour. The
+  Type and Print columns are gone from the list: linetype, screen width,
+  print width and section hatch are edited on the layer's page in
+  Properties, where each says what it is and in what unit. The switches
+  draw as an eye and a padlock instead of an unlabelled check box under a
+  blank header, a click anywhere in the cell flips them, and each tooltip
+  says what a click will do. Locking a layer had no button before; now it
+  is one click, and a locked layer's objects are greyed and cannot be
+  picked. A layer under a locked parent shows a dimmer padlock and names
+  the parent in its tooltip. Like the eye, the padlock on a picked row
+  switches every picked layer and keeps them picked.
+
+- **A layer's screen width follows its print width (#40).** The two
+  widths used to know nothing of each other, so a wall given a 0.7 mm pen
+  still drew on screen as thin as everything else. Now the screen width
+  is worked out from the print width, at 4 px a millimetre and never under
+  a pixel, so a 0.35 mm pen draws at the 1.4 px layers have always had,
+  0.5 mm at 2 px and 0.7 mm at 2.8 px. The layer page shows it as
+  "From print (2.8)". Type a width of your own and it stays put whatever
+  the print width does; choose From print to let go again. Layers in
+  older files whose screen width somebody changed keep it; the rest
+  follow their print width.
+
+- **The selection stays while you look at a layer.** Picking a layer no
+  longer competes with what the viewport has selected. Once both are live,
+  the Properties title becomes two tabs, the selection with a gold pointer
+  and the layer with the Layers icon in its own colour, and a click switches
+  between them. While
+  the layer is shown, the selection is drawn in a dimmed gold, so full gold
+  still means "this is what Properties is editing". Escape lets go of the
+  layer first and the selection after; selecting something else lets go of
+  the layer too.
+
+### Fixed
+
+- **Panels start below their title bars.** Properties and Layers ran 5 px
+  under their title bars, so the picked layer's highlight overlapped the
+  Layers bar and the gold kind line sat hard against the Properties bar.
+  The header at the top of every Properties page now has room above it
+  and lines up with the rows below it.
+
+- **A section hatch of None leaves the cut empty (#40).** A layer nobody
+  had set showed "None" for its section hatch, yet every cut through it
+  was hatched with lines, so choosing None changed nothing on the sheet.
+  An unset layer now says Lines, the fill its cuts have always had, so no
+  existing drawing changes. None is a choice of its own: the cut keeps its
+  outline and nothing else, on screen and on the plot. Hatching such a cut
+  by hand opens on the layer's pattern rather than on None.
+
+- **One edge between the viewports and the panels.** On builds with Qt 6.12,
+  a window layout saved by a version from before 0.10.0 pulled the viewports
+  out of their own area on launch. That left an empty strip between them
+  and the panels, with two edges to drag. Widening the panels and narrowing
+  them again, or maximising the window, opened a gap there that the
+  viewports never filled. The viewports now stay in their own area, so the
+  panel edge is the viewports' edge again and they follow it both ways.
+
 ## 0.10.9 (2026-10-07)
 
 ### Added

@@ -29,7 +29,9 @@ from .ui.command_line import CommandLine
 from .ui.dialogs import untether
 from .ui.display_panel import DisplaySettingsDialog
 from .ui.layers_panel import LayersPanel
-from .ui.properties import PropertiesPanel
+from .ui.properties import PropertiesPanel, SubjectTitleBar
+from .ui.dock_title import DockTitleBar
+from .ui.icons import panel_icon
 from .ui.viewport import Viewport, set_default_gl_format
 
 _UNLIMITED = 16777215        # Qt's QWIDGETSIZE_MAX: "no maximum"
@@ -182,6 +184,13 @@ class MainWindow(QMainWindow):
         self._layer_dock.setWidget(self.layers_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
                            self._layer_dock)
+        self._layer_dock.setTitleBarWidget(DockTitleBar(
+            panel_icon("layers"), "Layers", self._layer_dock))
+        # Properties shows the layers picked there too, with a tab in its
+        # title for each of the two once both are live.
+        self.properties.follow_layers(self.layers_panel)
+        self._prop_dock.setTitleBarWidget(
+            SubjectTitleBar(self.properties, self._prop_dock))
 
         # Display controls belong to the viewport title menu. Create their
         # modeless window only when requested, leaving this column for
@@ -759,6 +768,27 @@ class MainWindow(QMainWindow):
                 docks.append(dock)
         return docks
 
+    def _restore_panels(self, state) -> bool:
+        """Put the window's own docks back, leaving the panes where they are.
+
+        A layout saved before the panes had an area of their own names them
+        as the window's docks, and Qt 6.12 looks for a saved dock among every
+        widget inside a window, not just its own. Restoring that layout moved
+        the panes into the window's left dock area, leaving their own area
+        empty in the middle to soak up whatever width was spare: a gap
+        between panes and panels that maximising made wide. Qt knows a dock
+        by its name, so the panes go without theirs for the moment it looks.
+        """
+        panes = self._viewport_docks()
+        names = [dock.objectName() for dock in panes]
+        for dock in panes:
+            dock.setObjectName("")
+        try:
+            return self.restoreState(state)
+        finally:
+            for dock, name in zip(panes, names):
+                dock.setObjectName(name)
+
     def toggle_maximized_viewport(self, vp=None) -> bool:
         """Give one pane the whole window, or hand the layout back.
 
@@ -1051,6 +1081,12 @@ class MainWindow(QMainWindow):
             # selected: you asked to stop editing points, not to lose what
             # you were editing, so F10 brings back what was on screen.
             self.processor.run("pointsoff")
+        elif self.properties.subjects() == ["objects", "layers"] \
+                and self.properties.shown() == "layers":
+            # A look at a layer is the newer thing, the selection under it
+            # the older: let go of the layer and the objects come back
+            # into full gold. The next Escape clears them.
+            self.layers_panel.clear_picked()
         else:
             self.selection.clear()
         for vp in self.all_viewports():
@@ -2163,7 +2199,7 @@ class MainWindow(QMainWindow):
             # Before restoreState, so the aux docks exist to restore onto.
             self.set_view_layout("quad")
         state = self.cfg.get("window", "state", default="")
-        if state and self.restoreState(QByteArray.fromBase64(state.encode())):
+        if state and self._restore_panels(QByteArray.fromBase64(state.encode())):
             self._docks_restored = True
         # Panels and panes are saved apart because they are put back apart:
         # the panels belong to the window and the panes to whichever space

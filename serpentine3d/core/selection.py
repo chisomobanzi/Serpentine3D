@@ -19,6 +19,11 @@ class SelectionManager:
         # draws the sub-object highlight, and mid-drag the picked indices
         # point into topology that replace_shape has already replaced.
         self.rebuilding: str | None = None
+        # True while Properties is showing something other than these
+        # objects, a picked layer say: they stay selected, and every pane
+        # draws them dimmed, so full gold still means "what Properties is
+        # editing". Shared here for the reason `rebuilding` is.
+        self.held = False
         self._listeners: list = []
         self.filter_kinds: set = set()   # e.g. {"curve"}; empty = any
         self.filter_active = False       # F6-style master toggle
@@ -62,6 +67,13 @@ class SelectionManager:
         self._assign(i for i in ids if i in self.scene.objects)
         self.subobjects = []
         self._notify()
+
+    def set_held(self, held: bool):
+        """Draw the selection dimmed, or at full strength again."""
+        held = bool(held)
+        if held != self.held:
+            self.held = held
+            self._notify()
 
     def toggle_subobject(self, obj_id: str, kind: str, index: int):
         entry = (obj_id, kind, index)

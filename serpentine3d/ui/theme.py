@@ -8,6 +8,10 @@ GRID_MAJOR = (1.0, 1.0, 1.0, 0.11)
 GRID_AXIS_X = (0.75, 0.33, 0.32, 0.85)
 GRID_AXIS_Y = (0.38, 0.65, 0.36, 0.85)
 SELECTION_COLOR = (1.0, 0.78, 0.25)          # warm gold
+# The selection while Properties shows something else, a picked layer say:
+# still selected, still gold, but about half way back towards the background,
+# so full gold keeps meaning "this is what Properties is editing".
+HELD_SELECTION_COLOR = (0.62, 0.50, 0.22)
 ACCENT = "#d9a441"
 
 # Control points, when they are on. Cool, because everything else in the

@@ -1377,7 +1377,7 @@ class Viewport(QOpenGLWidget):
                           tw + 2 * pad, th + 6)
             selected = self.selection.is_selected(obj.id)
             if selected:
-                border = QColor.fromRgbF(*theme.SELECTION_COLOR)
+                border = QColor.fromRgbF(*self._selection_color(obj.id))
                 fill = QColor(58, 48, 22, 235)
             else:
                 col = self.scene.color_of(obj)
@@ -2174,6 +2174,11 @@ class Viewport(QOpenGLWidget):
         # keep insertion order (unchanged default behaviour).
         objects = sorted(self.scene.visible_objects(),
                          key=lambda o: -getattr(o, "draw_order", 0))
+        # A locked layer greys what is on it, as a locked object is greyed.
+        # Worked out once a frame over the layers, not once per object.
+        layers = self.scene.layers
+        locked_layers = {la.id for la in layers.all()
+                         if layers.is_locked(la.id)}
         clips_dirty = False           # True while anchored clips are bound
         for i in range(len(clips)):
             GL.glEnable(GL.GL_CLIP_DISTANCE0 + i)
@@ -2235,8 +2240,10 @@ class Viewport(QOpenGLWidget):
                     self._set_clip_uniforms(prog, oclips)
                 clips_dirty = gpu.anchor is not None
             selected = self._looks_selected(obj.id)
-            color = theme.SELECTION_COLOR if selected else self.scene.color_of(obj)
-            if obj.locked and not selected:
+            gold = self._selection_color(obj.id) if selected else None
+            color = gold if selected else self.scene.color_of(obj)
+            locked = obj.locked or obj.layer_id in locked_layers
+            if locked and not selected:
                 grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
                 color = (grey, grey, grey)
             if getattr(gpu, "cloud_count", 0):
@@ -2244,7 +2251,7 @@ class Viewport(QOpenGLWidget):
                 continue
             line_color = color
             surface = color
-            if mode == "rendered" and not selected and not obj.locked:
+            if mode == "rendered" and not selected and not locked:
                 # An imported object can display one colour and render
                 # another; edges stay on the one it displays, the way Rhino
                 # draws them.
@@ -2312,7 +2319,7 @@ class Viewport(QOpenGLWidget):
             # and switching them off would empty the drawing.
             if gpu.line_count and (selected or show_edges or not gpu.tri_count):
                 if selected:
-                    edge_color = (*theme.SELECTION_COLOR, 1.0)
+                    edge_color = (*gold, 1.0)
                 elif obj.kind in ("curve", "hatch"):
                     edge_color = (*line_color, 1.0)
                 else:
@@ -2365,7 +2372,7 @@ class Viewport(QOpenGLWidget):
                     self._set_clip_uniforms(prog, oclips)
             if gpu.iso_count and show_isos:
                 if selected:
-                    iso_color = (*theme.SELECTION_COLOR, 0.55)
+                    iso_color = (*gold, 0.55)
                 elif mode == "wireframe":
                     iso_color = (*color, 0.55)
                 else:
@@ -2477,7 +2484,7 @@ class Viewport(QOpenGLWidget):
             mn, mx = obj.bbox()
             segs = rebased(_bbox_segments(mn, mx), gpu.anchor)
             self._preview.update(segs)
-            self._set_line_uniforms(mvp, (*theme.SELECTION_COLOR, 1.0))
+            self._set_line_uniforms(mvp, (*self._selection_color(obj.id), 1.0))
             self._line_width(1.0)
             GL.glBindVertexArray(self._preview.vao)
             GL.glDrawArrays(GL.GL_LINES, 0, len(segs))
@@ -3834,6 +3841,15 @@ class Viewport(QOpenGLWidget):
                                     x0, y0, x1, y1, w, h)
         return ((mesh.edge_segments if sub is None
                  else mesh.edge_segments[sub]), sub)
+
+    def _selection_color(self, obj_id: str) -> tuple:
+        """The gold to draw a selected object in: full, or dimmed while the
+        selection is held because Properties is showing something else. The
+        object chooser's row stays full gold, because it is what you are
+        pointing at."""
+        if self.selection.held and obj_id != self._choice_hover:
+            return theme.HELD_SELECTION_COLOR
+        return theme.SELECTION_COLOR
 
     def _looks_selected(self, obj_id: str) -> bool:
         """Drawn in the selection colour: either it is selected, or it is

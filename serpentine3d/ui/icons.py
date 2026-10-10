@@ -350,3 +350,145 @@ def command_icon(name: str) -> QIcon | None:
     drawer(p)
     p.end()
     return QIcon(pix)
+
+
+# -- panel marks ------------------------------------------------------------
+# Smaller than the toolbar's: they sit in a dock's title and in its tabs, so
+# each drawer paints into a 16x16 logical box with a finer pen.
+
+_MARK = 16
+
+
+def _mark_pixmap(drawer) -> QPixmap:
+    pix = QPixmap(_MARK * _SCALE, _MARK * _SCALE)
+    pix.setDevicePixelRatio(_SCALE)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = _painter(pix)
+    pen = p.pen()
+    pen.setWidthF(1.25)
+    p.setPen(pen)
+    drawer(p)
+    p.end()
+    return pix
+
+
+def _sliders(p):
+    """Properties: values set along rails."""
+    for y, knob in ((4, 10.5), (8, 5), (12, 9)):
+        p.drawLine(QPointF(2, y), QPointF(14, y))
+        p.save()
+        p.setBrush(QBrush(QColor("#2e2f34")))
+        p.drawEllipse(QPointF(knob, y), 1.9, 1.9)
+        p.restore()
+
+
+def _sheets(p, fill: QColor, edge: QColor | None = None):
+    """Layers: a sheet with two more under it. `edge` outlines the top
+    sheet too; at tab size a fill alone is a handful of pixels inside a
+    grey outline, and the colour does not read."""
+    for y in (11, 8):
+        p.drawPolyline([QPointF(2, y), QPointF(8, y + 3), QPointF(14, y)])
+    top = QPainterPath(QPointF(8, 1.5))
+    for x, y in ((14, 4.8), (8, 8.1), (2, 4.8)):
+        top.lineTo(x, y)
+    top.closeSubpath()
+    p.save()
+    if edge is not None:
+        pen = p.pen()
+        pen.setColor(edge)
+        p.setPen(pen)
+    p.setBrush(QBrush(fill))
+    p.drawPath(top)
+    p.restore()
+
+
+def _pointer(p):
+    """The selection: what was clicked, in the selection's gold."""
+    arrow = QPainterPath(QPointF(4, 1.5))
+    for x, y in ((4, 13), (7, 10.2), (9.2, 14.6), (11, 13.8), (8.8, 9.4),
+                 (12.6, 9.4)):
+        arrow.lineTo(x, y)
+    arrow.closeSubpath()
+    p.save()
+    p.setPen(QPen(QColor(28, 24, 12), 1.0))
+    p.setBrush(QBrush(QColor.fromRgbF(1.0, 0.78, 0.25)))
+    p.drawPath(arrow)
+    p.restore()
+
+
+def panel_icon(name: str) -> QPixmap:
+    """The mark at the left of a panel's title: "properties" or "layers"."""
+    if name == "layers":
+        return _mark_pixmap(lambda p: _sheets(p, _FILL))
+    return _mark_pixmap(_sliders)
+
+
+def layer_mark(rgb) -> QIcon:
+    """A layer's tab mark: the Layers panel's own glyph, its top sheet in
+    the layer's colour, so the tab says both what it is and which."""
+    color = QColor.fromRgbF(*rgb)
+    return QIcon(_mark_pixmap(lambda p: _sheets(p, color, color)))
+
+
+def selection_mark() -> QIcon:
+    return QIcon(_mark_pixmap(_pointer))
+
+
+# -- layer switches -------------------------------------------------------
+# What the Layers list draws instead of check boxes. A switch that is in its
+# usual state (shown, unlocked) is drawn quietly and the unusual one stands
+# out, so a glance down the column finds the hidden and the locked layers.
+
+_SWITCH_INK = {"on": QColor("#b8b9bd"), "off": QColor(150, 151, 156, 110),
+               "locked": QColor("#e8e9ea"), "inherited": QColor("#7a7b80")}
+_switches: dict = {}
+
+
+def _eye(p, open_: bool):
+    almond = QPainterPath(QPointF(2, 8))
+    almond.quadTo(QPointF(8, 1.8), QPointF(14, 8))
+    almond.quadTo(QPointF(8, 14.2), QPointF(2, 8))
+    p.drawPath(almond)
+    p.save()
+    p.setBrush(QBrush(p.pen().color()))
+    p.drawEllipse(QPointF(8, 8), 2.0, 2.0)
+    p.restore()
+    if not open_:
+        p.drawLine(QPointF(3, 13.5), QPointF(13, 2.5))
+
+
+def _padlock(p, shut: bool):
+    p.drawRoundedRect(QRectF(4, 7.5, 8, 6.5), 1.3, 1.3)
+    shackle = QPainterPath(QPointF(5.6, 7.5))
+    if shut:
+        shackle.lineTo(5.6, 5.2)
+        shackle.arcTo(QRectF(5.6, 2.8, 4.8, 4.8), 180, -180)
+        shackle.lineTo(10.4, 7.5)
+    else:
+        # lifted clear of the body, its right leg hanging free
+        shackle.lineTo(5.6, 3.9)
+        shackle.arcTo(QRectF(5.6, 1.5, 4.8, 4.8), 180, -180)
+        shackle.lineTo(10.4, 5.4)
+    p.drawPath(shackle)
+
+
+def switch_glyph(kind: str, state: str) -> QPixmap:
+    """The glyph for a layer switch: `kind` "visible" or "locked", and
+    `state` "on" or "off", or "inherited" for a lock that is closed by a
+    parent rather than by the layer itself."""
+    key = (kind, state)
+    if key not in _switches:
+        if kind == "visible":
+            ink = _SWITCH_INK["on" if state == "on" else "off"]
+            drawer = lambda p: _eye(p, state == "on")  # noqa: E731
+        else:
+            ink = _SWITCH_INK["locked" if state == "on" else state]
+            drawer = lambda p: _padlock(p, state != "off")  # noqa: E731
+
+        def inked(p, drawer=drawer, ink=ink):
+            pen = p.pen()
+            pen.setColor(ink)
+            p.setPen(pen)
+            drawer(p)
+        _switches[key] = _mark_pixmap(inked)
+    return _switches[key]

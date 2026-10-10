@@ -75,10 +75,11 @@ def test_the_pattern_the_layer_already_has_is_ticked():
     assert [a.text() for a in entries if a.isChecked()] == ["Solid"]
 
 
-def test_a_layer_with_no_hatch_has_none_ticked():
+def test_a_layer_nobody_has_set_has_lines_ticked():
+    """Lines is what its cuts are drawn with, so Lines is what it says."""
     _scene, panel = _panel()
     _menu, entries = _hatch_entries(panel, DEFAULT_LAYER_ID)
-    assert [a.text() for a in entries if a.isChecked()] == ["None"]
+    assert [a.text() for a in entries if a.isChecked()] == ["Lines"]
 
 
 def test_none_takes_the_hatch_back_off_the_layer():
@@ -86,7 +87,7 @@ def test_none_takes_the_hatch_back_off_the_layer():
     scene.layers.set_hatch(DEFAULT_LAYER_ID, "cross")
     panel.rebuild()
     _pick(panel, DEFAULT_LAYER_ID, "None")
-    assert scene.layers.get(DEFAULT_LAYER_ID).hatch == ""
+    assert scene.layers.get(DEFAULT_LAYER_ID).hatch == "none"
 
 
 def test_a_pattern_lands_on_every_picked_layer():
@@ -101,17 +102,17 @@ def test_a_pattern_lands_on_every_picked_layer():
     assert scene.layers.get(walls).hatch == "cross"
     assert scene.layers.get(slab).hatch == "cross", \
         "only the row under the pointer took the pattern"
-    assert scene.layers.get(DEFAULT_LAYER_ID).hatch == "", \
+    assert scene.layers.get(DEFAULT_LAYER_ID).hatch == "lines", \
         "a layer nobody picked was hatched too"
 
 
 def test_picking_a_pattern_can_be_undone():
     scene, panel = _panel()
-    scene.layers.set_hatch(DEFAULT_LAYER_ID, "lines")
+    scene.layers.set_hatch(DEFAULT_LAYER_ID, "cross")
     panel.rebuild()
     _pick(panel, DEFAULT_LAYER_ID, "Solid")
     panel.history.undo()
-    assert scene.layers.get(DEFAULT_LAYER_ID).hatch == "lines"
+    assert scene.layers.get(DEFAULT_LAYER_ID).hatch == "cross"
 
 
 def test_layers_that_disagree_have_nothing_ticked():

@@ -5,13 +5,28 @@ from __future__ import annotations
 import itertools
 from dataclasses import dataclass, replace
 
-from .layout import HATCH_PATTERNS
+from .layout import SECTION_FILLS
 
 DEFAULT_LAYER_ID = "default"
 
 # What a layer path is written with, the separator Rhino uses:
 # "Walls::Interior" is the layer Interior sitting under the layer Walls.
 PATH_SEPARATOR = "::"
+
+# A layer's width on screen comes from its width on paper unless somebody
+# sets it: 4 px a millimetre puts the 0.35 mm pen most drawings plot with
+# at the 1.4 px every layer has always drawn at, and a layer left on the
+# printer's default draws at that too.
+DEFAULT_SCREEN_WIDTH = 1.4
+SCREEN_PX_PER_MM = 4.0
+
+
+def screen_width_for(print_mm: float) -> float:
+    """The width, in pixels, a layer following its print width draws at.
+    Never under a pixel: a thin pen still has to show."""
+    if print_mm <= 0:
+        return DEFAULT_SCREEN_WIDTH
+    return max(1.0, round(print_mm * SCREEN_PX_PER_MM, 2))
 
 # muted but distinguishable object colors, dark-theme friendly
 _PALETTE = [
@@ -33,10 +48,11 @@ class Layer:
     color: tuple[float, float, float]
     visible: bool = True
     locked: bool = False
-    lineweight: float = 1.4        # on-screen edge width in pixels
+    lineweight: float = DEFAULT_SCREEN_WIDTH   # on-screen edge width, px
     linetype: str = "Continuous"   # dash-pattern name (core/linetype.py)
     print_width: float = 0.0       # plotted pen width in mm; 0 = device default
-    hatch: str = ""                # material fill (HATCH_PATTERNS); "" = none
+    screen_pinned: bool = False    # lineweight set by hand, not from print
+    hatch: str = "lines"           # fill where it is cut (SECTION_FILLS)
     parent: str | None = None      # the layer this one sits under, if any
 
 
@@ -173,28 +189,46 @@ class LayerManager:
         self._layers[layer_id] = replace(self._layers[layer_id], color=color)
 
     def set_lineweight(self, layer_id: str, weight: float):
+        """Set the screen width by hand, which pins it: the print width
+        no longer moves it until follow_print lets go."""
         self._layers[layer_id] = replace(self._layers[layer_id],
-                                         lineweight=max(0.2, float(weight)))
+                                         lineweight=max(0.2, float(weight)),
+                                         screen_pinned=True)
+
+    def follow_print(self, layer_id: str):
+        """Let the screen width come from the print width again."""
+        layer = self._layers[layer_id]
+        self._layers[layer_id] = replace(
+            layer, lineweight=screen_width_for(layer.print_width),
+            screen_pinned=False)
 
     def set_linetype(self, layer_id: str, name: str):
         self._layers[layer_id] = replace(self._layers[layer_id],
                                          linetype=name or "Continuous")
 
     def set_print_width(self, layer_id: str, width: float):
-        self._layers[layer_id] = replace(self._layers[layer_id],
-                                         print_width=max(0.0, float(width)))
+        """Set the plotted pen width, and with it the screen width unless
+        that was set by hand."""
+        layer = self._layers[layer_id]
+        width = max(0.0, float(width))
+        self._layers[layer_id] = replace(
+            layer, print_width=width,
+            lineweight=(layer.lineweight if layer.screen_pinned
+                        else screen_width_for(width)))
 
     def set_hatch(self, layer_id: str, pattern: str):
-        """Say what this layer's material is hatched with, or nothing.
+        """Say what this layer's material is filled with where it is cut.
 
-        Anything the app cannot draw is nothing: a file can name a
-        pattern this app has never heard of, and a prompt offering a word
-        that fills no region is worse than the prompt offering lines.
+        "none" is a fill of its own: the cut is outlined and left empty.
+        Anything else the app cannot draw is lines, which is what such a
+        layer was always drawn with: a file written before layers had a
+        hatch, or by a build that wrote "" for one nobody had set, or one
+        naming a pattern this app has never heard of.
         """
         name = (pattern or "").strip().lower()
         self._layers[layer_id] = replace(
             self._layers[layer_id],
-            hatch=name if name in HATCH_PATTERNS else "")
+            hatch=name if name in SECTION_FILLS else "lines")
 
     def move_up(self, layer_id: str) -> bool:
         """Move a layer above the sibling in front of it, branch and all.
