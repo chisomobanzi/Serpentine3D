@@ -39,6 +39,7 @@ from .camera import STANDARD_VIEWS
 # are the ones worth a click. Screen widths are pixels, print widths the
 # standard pen sizes in millimetres, the same list the Layers panel offers.
 SCREEN_WIDTHS = ("1", "1.4", "2", "3", "4")
+FROM_PRINT = "From print"       # a screen width worked out from print width
 PRINT_WIDTHS = ("0.13", "0.18", "0.25", "0.35", "0.5", "0.7", "1.0")
 
 # the tab mark for more than one layer, which have no one colour between them
@@ -702,9 +703,11 @@ class PropertiesPanel(QWidget):
         self.layer_screen = QComboBox()
         self.layer_screen.setEditable(True)
         self.layer_screen.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.layer_screen.addItems(SCREEN_WIDTHS)
+        self.layer_screen.addItems([FROM_PRINT, *SCREEN_WIDTHS])
         self.layer_screen.setToolTip(
-            "How thick the layer's lines are drawn on screen, in pixels")
+            "How thick the layer's lines are drawn on screen, in pixels. "
+            "From print works it out from the print width; a number of "
+            "your own stays put")
         self.layer_screen.textActivated.connect(self._set_layer_screen)
         self.layer_screen.lineEdit().editingFinished.connect(
             self._set_layer_screen)
@@ -790,8 +793,7 @@ class PropertiesPanel(QWidget):
             self._show_common(self.layer_linetype,
                               {la.linetype for la in layers})
             self._show_common_text(self.layer_screen,
-                                   {_width_text(la.lineweight)
-                                    for la in layers})
+                                   {_screen_text(la) for la in layers})
             self._show_common_text(self.layer_print,
                                    {"Default" if la.print_width == 0
                                     else _width_text(la.print_width)
@@ -877,11 +879,18 @@ class PropertiesPanel(QWidget):
     def _set_layer_screen(self, *_args):
         if self._layer_updating:
             return
-        width = _parse_width(self.layer_screen.currentText())
+        text = self.layer_screen.currentText().strip()
+        layers = self._picked_layers()
+        if text.lower().startswith(FROM_PRINT.lower()):
+            if any(la.screen_pinned for la in layers):
+                self._edit_layers("layer screen width",
+                                  self.scene.layers.follow_print)
+            return
+        width = _parse_width(text)
         if width is None or width <= 0:
             self._refresh_layer_page()      # put back what the layer says
             return
-        if {la.lineweight for la in self._picked_layers()} == {width}:
+        if all(la.screen_pinned and la.lineweight == width for la in layers):
             return
         self._edit_layers("layer screen width",
                           lambda i: self.scene.layers.set_lineweight(i, width))
@@ -1539,6 +1548,13 @@ def _capital(text: str) -> str:
 def _width_text(width: float) -> str:
     """A width as the drop-downs write it: 1.4, 2, 0.25."""
     return f"{width:g}"
+
+
+def _screen_text(layer) -> str:
+    """A layer's screen width as its row shows it, saying where a width
+    that follows the print width came from."""
+    width = _width_text(layer.lineweight)
+    return width if layer.screen_pinned else f"{FROM_PRINT} ({width})"
 
 
 def _parse_width(text: str):

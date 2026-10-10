@@ -15,7 +15,7 @@ import base64
 import json
 
 from ..core import geometry
-from ..core.layers import Layer
+from ..core.layers import DEFAULT_SCREEN_WIDTH, Layer
 
 # The newest version this reader understands. Anything newer is refused
 # with the version it asks for, never a traceback.
@@ -122,6 +122,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "lineweight": layer.lineweight,
                 "linetype": layer.linetype,
                 "print_width": layer.print_width,
+                "screen_pinned": layer.screen_pinned,
                 "hatch": layer.hatch,
                 "parent": layer.parent,
             }
@@ -299,9 +300,10 @@ def merge_scene(scene, path: str) -> int:
             found = scene.layers.create(source.name, source.color, parent=parent)
             scene.layers.set_visible(found.id, source.visible)
             scene.layers.set_locked(found.id, source.locked)
-            scene.layers.set_lineweight(found.id, source.lineweight)
             scene.layers.set_linetype(found.id, source.linetype)
             scene.layers.set_print_width(found.id, source.print_width)
+            if source.screen_pinned:
+                scene.layers.set_lineweight(found.id, source.lineweight)
             scene.layers.set_hatch(found.id, source.hatch)
         layer_for[layer_id] = found.id
         return found.id
@@ -356,6 +358,25 @@ def _check_version(doc: dict):
         raise ValueError(f"This file needs Serpentine3D {needs} or newer")
 
 
+def _restore_widths(layers, layer_id: str, ld: dict):
+    """A layer's two widths, put back the way the file left them.
+
+    The print width goes first, since a screen width that follows it is
+    worked out from it. A file written before screen widths followed
+    print widths has no word on which this is, so a screen width left at
+    the default follows and one somebody changed stays where they put it.
+    """
+    layers.set_print_width(layer_id, ld.get("print_width", 0.0))
+    lineweight = ld.get("lineweight", DEFAULT_SCREEN_WIDTH)
+    pinned = ld.get("screen_pinned")
+    if pinned is None:
+        pinned = abs(lineweight - DEFAULT_SCREEN_WIDTH) > 1e-6
+    if pinned:
+        layers.set_lineweight(layer_id, lineweight)
+    else:
+        layers.follow_print(layer_id)
+
+
 def _load_doc(scene, doc: dict, blobs=None):
     # "serpentine" is the pre-rebrand identifier; those files stay valid
     if doc.get("format") not in ("serpentine3d", "serpentine"):
@@ -369,18 +390,16 @@ def _load_doc(scene, doc: dict, blobs=None):
             layers.rename("default", ld["name"])
             layers.set_color("default", tuple(ld["color"]))
             layers.set_visible("default", ld.get("visible", True))
-            layers.set_lineweight("default", ld.get("lineweight", 1.4))
             layers.set_linetype("default", ld.get("linetype", "Continuous"))
-            layers.set_print_width("default", ld.get("print_width", 0.0))
+            _restore_widths(layers, "default", ld)
             layers.set_hatch("default", ld.get("hatch", ""))
             id_map[ld["id"]] = "default"
         else:
             layer = layers.create(ld["name"], tuple(ld["color"]))
             layers.set_visible(layer.id, ld.get("visible", True))
-            layers.set_lineweight(layer.id, ld.get("lineweight", 1.4))
             layers.set_linetype(layer.id, ld.get("linetype", "Continuous"))
             layers.set_locked(layer.id, ld.get("locked", False))
-            layers.set_print_width(layer.id, ld.get("print_width", 0.0))
+            _restore_widths(layers, layer.id, ld)
             layers.set_hatch(layer.id, ld.get("hatch", ""))
             id_map[ld["id"]] = layer.id
 

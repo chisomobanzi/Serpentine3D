@@ -39,6 +39,17 @@
   the parent in its tooltip. Like the eye, the padlock on a picked row
   switches every picked layer and keeps them picked.
 
+- **A layer's screen width follows its print width (#40).** The two
+  widths used to know nothing of each other, so a wall given a 0.7 mm pen
+  still drew on screen as thin as everything else. Now the screen width
+  is worked out from the print width, at 4 px a millimetre and never under
+  a pixel, so a 0.35 mm pen draws at the 1.4 px layers have always had,
+  0.5 mm at 2 px and 0.7 mm at 2.8 px. The layer page shows it as
+  "From print (2.8)". Type a width of your own and it stays put whatever
+  the print width does; choose From print to let go again. Layers in
+  older files whose screen width somebody changed keep it; the rest
+  follow their print width.
+
 - **The selection stays while you look at a layer.** Picking a layer no
   longer competes with what the viewport has selected. Once both are live,
   the Properties title becomes two tabs, the selection with a gold pointer
