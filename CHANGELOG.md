@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Variable-radius fillets swept over the whole smooth chain
+  (`filletedge`).** A radius used to be one number, or at best a
+  `start,end` pair applied edge by edge. Now `filletedge` takes
+  `u:r;u:r;…` — positions from 0 to 1 along the tangent chain the picked
+  edge belongs to, each with its own radius — and the kernel interpolates
+  the law across the entire chain, the way SolidWorks sweeps a
+  variable-radius fillet over one. `start,end` now varies along the whole
+  chain too, not each piece of it separately, and fewer than two points, a
+  position outside 0–1, or a non-positive radius is refused with a word
+  about which one. A chamfer keeps to a single distance and says so,
+  instead of dying in the bindings.
+
+### Changed
+
+- **`fillet` works in the plane the curves already live on.** Two curves
+  were filleted in world XY at the corner's height, so an L drawn on a
+  tilted construction plane came back as "radius too large or curves not
+  coplanar in XY". The plane now comes from the curves themselves — two
+  straight pieces span their own plane, and an arc donates its circle's
+  axis when the other edge lies in it — with the construction plane kept
+  as a hint for the pairs that leave it open.
+
+- **A fillet that does not fit names the largest one that does.** When the
+  kernel refuses a radius, `filletedge` bisects down from it and echoes
+  "the largest radius that fits is about 4.93" for that object, instead of
+  leaving "try a smaller value" as the whole conversation.
+
 ## 0.11.0 (2026-10-11)
 
 ### Added

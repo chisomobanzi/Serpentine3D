@@ -747,22 +747,89 @@ def offset_curve(shape, distance: float) -> TopoDS_Shape:
     return mk.Shape()
 
 
+def _curve_plane_normal(ea, eb) -> Point | None:
+    """Normal of the plane the two edges already live on, when the edges
+    say it themselves: two non-parallel lines span their own plane, and an
+    arc carries its circle's axis. None when the edges leave it open."""
+    import numpy as np
+    from OCP.GeomAbs import GeomAbs_CurveType
+
+    def line_dir(ad):
+        p, v = gp_Pnt(), gp_Vec()
+        ad.D1(ad.FirstParameter(), p, v)
+        arr = np.array([v.X(), v.Y(), v.Z()], float)
+        n = np.linalg.norm(arr)
+        return arr / n if n > 1e-12 else None
+
+    def plane_of_arc(edge):
+        ad = occ.edge_adaptor(edge)
+        if ad.GetType() != GeomAbs_CurveType.GeomAbs_Circle:
+            return None
+        circ = ad.Circle()
+        d = circ.Axis().Direction()
+        return np.array([d.X(), d.Y(), d.Z()], float)
+
+    ad_a, ad_b = occ.edge_adaptor(ea), occ.edge_adaptor(eb)
+    both_lines = (ad_a.GetType() == GeomAbs_CurveType.GeomAbs_Line
+                  and ad_b.GetType() == GeomAbs_CurveType.GeomAbs_Line)
+    if both_lines:
+        d1, d2 = line_dir(ad_a), line_dir(ad_b)
+        if d1 is not None and d2 is not None:
+            n = np.cross(d1, d2)
+            ln = np.linalg.norm(n)
+            if ln > 1e-9:
+                return tuple(n / ln)
+        return None
+    arc, other = ((ea, eb) if plane_of_arc(ea) is not None else (eb, ea))
+    n = plane_of_arc(arc)
+    if n is None:
+        return None
+    # the other edge must lie in the arc's plane: both endpoints and the
+    # line's direction perpendicular to the axis
+    ad_o = occ.edge_adaptor(other)
+    p, v = gp_Pnt(), gp_Vec()
+    ad_o.D1(ad_o.FirstParameter(), p, v)
+    d = np.array([v.X(), v.Y(), v.Z()], float)
+    nd = np.linalg.norm(d)
+    if nd < 1e-12 or abs(float(np.dot(d, n))) / nd > 1e-6:
+        return None
+    c0 = occ.edge_adaptor(arc).Circle().Location()
+    for t in (ad_o.FirstParameter(), ad_o.LastParameter()):
+        ad_o.D1(t, p, v)
+        off = np.array([p.X() - c0.X(), p.Y() - c0.Y(), p.Z() - c0.Z()])
+        if abs(float(np.dot(off, n))) > 1e-6:
+            return None
+    return tuple(n)
+
+
 def fillet_curves(edge_a, edge_b, radius: float,
-                  near: Point) -> tuple:
+                  near: Point, plane=None) -> tuple:
     """Fillet two coplanar line/arc edges; returns (trimmed_a, arc, trimmed_b).
 
     `near` chooses the corner when the curves cross more than once.
+
+    The fillet is built in the plane the curves live on, resolved in this
+    order: the plane the edges themselves define (two lines, or an arc
+    with the other edge lying in its plane), then `plane` — a normal
+    vector or anything with a `.normal`, such as a CPlane — and finally
+    world XY at the corner's height.
     """
     from .occ import ChFi2d_FilletAPI, gp_Pln
     if radius <= 0:
         raise GeometryError("Fillet radius must be positive")
     ea, eb = occ.to_edge(edge_a), occ.to_edge(edge_b)
-    # assume drafting plane = world XY at the corner's z
-    plane = gp_Pln(_pnt((0, 0, near[2])), _dir((0, 0, 1)))
-    api = ChFi2d_FilletAPI(ea, eb, plane)
+    normal = _curve_plane_normal(ea, eb)
+    if normal is None and plane is not None:
+        n = getattr(plane, "normal", plane)
+        normal = (float(n[0]), float(n[1]), float(n[2]))
+        if math.hypot(*normal) < 1e-12:
+            raise GeometryError("Fillet plane normal is degenerate")
+    if normal is None:
+        normal = (0.0, 0.0, 1.0)
+    api = ChFi2d_FilletAPI(ea, eb, gp_Pln(_pnt(near), _dir(normal)))
     if not api.Perform(float(radius)):
-        raise GeometryError("Fillet failed (radius too large or curves "
-                            "not coplanar in XY)")
+        raise GeometryError("Fillet failed (radius too large or the two "
+                            "curves do not share one plane)")
     ea_out = occ.TopoDS_Edge()
     eb_out = occ.TopoDS_Edge()
     arc = api.Result(_pnt(near), ea_out, eb_out)
@@ -814,15 +881,48 @@ def edge_chain(shape, edge_index: int, angle_tol_deg: float = 20.0) -> list:
 def fillet_edges(shape, radius, edges: list | None = None,
                  chamfer: bool = False) -> TopoDS_Shape:
     """Fillet (or chamfer) edges of a solid. edges=None means all edges.
-    `radius` may be a single value or (r_start, r_end) for a variable
-    fillet along each edge."""
+
+    `radius` shapes the profile:
+
+    - a single value: constant fillet, or one chamfer distance;
+    - (r_start, r_end): a radius varying linearly along each tangent
+      chain the picked edges form;
+    - a list of (u, r) pairs with u running 0 to 1 along that chain: a
+      variable fillet interpolating the radii through the given points,
+      as many of them as the shape deserves.
+
+    The kernel extends each picked edge along its tangent neighbours into
+    one contour, and a variable profile spans the whole contour — the way
+    SolidWorks sweeps a variable-radius fillet over a smooth chain.
+    Variable profiles are fillet-only: a chamfer takes one distance.
+    """
     r_pair = None
-    if isinstance(radius, (tuple, list)):
+    law = None
+    if isinstance(radius, (tuple, list)) and not (
+            len(radius) > 0 and isinstance(radius[0], (tuple, list))):
+        if len(radius) != 2:
+            raise GeometryError(
+                "A linear variable fillet takes (r_start, r_end); a "
+                "multi-point one takes (u, r) pairs")
         r_pair = (float(radius[0]), float(radius[1]))
         if min(r_pair) <= 0:
             raise GeometryError("Radii must be positive")
+    elif isinstance(radius, (tuple, list)):
+        law = [(float(u), float(r)) for u, r in radius]
+        if len(law) < 2:
+            raise GeometryError("A variable fillet needs at least two "
+                                "(u, radius) points")
+        if any(not 0.0 <= u <= 1.0 for u, _ in law):
+            raise GeometryError("Variable-fillet positions (u) run from "
+                                "0 to 1 along the chain")
+        if any(r <= 0 for _, r in law):
+            raise GeometryError("Radii must be positive")
+        law.sort(key=lambda point: point[0])
     elif radius <= 0:
         raise GeometryError("Radius must be positive")
+    if chamfer and (r_pair is not None or law is not None):
+        raise GeometryError("A chamfer takes a single distance — variable "
+                            "profiles are fillet-only")
     if chamfer:
         from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer
         mk = BRepFilletAPI_MakeChamfer(shape)
@@ -837,11 +937,25 @@ def fillet_edges(shape, radius, edges: list | None = None,
     failure = (f"{verb} failed — the radius or distance may be too large "
                "for the smallest edges; try a smaller value")
     try:
-        for e in targets:
-            if r_pair:
-                mk.Add(r_pair[0], r_pair[1], e)
-            else:
+        if r_pair is None and law is None:
+            for e in targets:
                 mk.Add(float(radius), e)
+        else:
+            # add bare, then give every contour the profile: the law spans
+            # the chain rather than each piece of it
+            for e in targets:
+                mk.Add(e)
+            from OCP.TColgp import TColgp_Array1OfPnt2d
+            from OCP.gp import gp_Pnt2d
+            if r_pair is not None:
+                for ic in range(1, mk.NbContours() + 1):
+                    mk.SetRadius(r_pair[0], r_pair[1], ic, 1)
+            else:
+                arr = TColgp_Array1OfPnt2d(1, len(law))
+                for i, (u, r) in enumerate(law, start=1):
+                    arr.SetValue(i, gp_Pnt2d(u, r))
+                for ic in range(1, mk.NbContours() + 1):
+                    mk.SetRadius(arr, ic, 1)
         if mk.NbContours() == 0:
             raise GeometryError(
                 f"No sharp edges to {verb.lower()} — pick an edge where "
@@ -849,10 +963,76 @@ def fillet_edges(shape, radius, edges: list | None = None,
                 "be resized with this tool.")
         mk.Build()
     except Standard_Failure as exc:
-        raise GeometryError(failure) from exc
+        raise GeometryError(_fillet_failure_text(verb, failure, mk)) from exc
     if not mk.IsDone() or mk.Shape().IsNull():
-        raise GeometryError(failure)
+        raise GeometryError(_fillet_failure_text(verb, failure, mk))
     return unwrap_compound(mk.Shape())
+
+
+def _blamed_chains(mk) -> tuple[int, bool]:
+    """(count, all_could_not_start): the contours the kernel blamed after
+    a failed fillet build. StartsolFailure is the kernel's own verdict
+    that a chain cannot even begin — the radius is too big for it."""
+    from OCP.ChFiDS import ChFiDS_ErrorStatus
+    try:
+        n = mk.NbFaultyContours()
+    except Exception:
+        return 0, False
+    if n <= 0:
+        return 0, False
+    all_start = True
+    for i in range(1, n + 1):
+        try:
+            if (mk.StripeStatus(mk.FaultyContour(i))
+                    != ChFiDS_ErrorStatus.ChFiDS_StartsolFailure):
+                all_start = False
+        except Exception:
+            all_start = False
+    return n, all_start
+
+
+def _fillet_failure_text(verb: str, failure: str, mk) -> str:
+    """The generic failure line, sharpened by what the kernel blamed."""
+    n, all_start = _blamed_chains(mk)
+    if n and all_start:
+        return (f"{verb} failed — the radius is too big for {n} of the "
+                "picked chains, none of them could even start; try a "
+                "smaller value")
+    if n:
+        return f"{verb} failed — {n} of the picked chains failed the blend"
+    return failure
+
+
+def largest_fillet_radius(shape, radius, edges: list | None = None,
+                          chamfer: bool = False, tries: int = 9):
+    """The largest radius not greater than the requested one that the
+    kernel actually builds, or None when even a hair-thin one fails.
+
+    Bisects fillet_edges, so it costs a build per step: call it where a
+    fillet already failed, never speculatively."""
+    hi = float(radius)
+
+    def builds(r):
+        try:
+            fillet_edges(shape, r, edges=edges, chamfer=chamfer)
+            return True
+        except GeometryError:
+            return False
+
+    if builds(hi):
+        return hi
+    lo = 0.0
+    for _ in range(tries):
+        mid = 0.5 * (lo + hi)
+        if mid <= 0:
+            break
+        if builds(mid):
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo <= max(1e-5, hi * 1e-3):
+            break
+    return lo if lo > 0 else None
 
 
 def face_normal(face) -> Point:

@@ -295,7 +295,8 @@ def cmd_fillet(ctx):
             return None
         try:
             return g.join_curves(list(
-                g.fillet_curves(a[0].shape, b[0].shape, r, corner)))
+                g.fillet_curves(a[0].shape, b[0].shape, r, corner,
+                                plane=ctx.cplane)))
         except g.GeometryError:
             return None
 
@@ -306,7 +307,8 @@ def cmd_fillet(ctx):
     if radius < 1e-9:
         ctx.echo("Zero radius — nothing filleted.")
         return
-    ea, arc, eb = g.fillet_curves(a[0].shape, b[0].shape, radius, corner)
+    ea, arc, eb = g.fillet_curves(a[0].shape, b[0].shape, radius, corner,
+                                  plane=ctx.cplane)
     joined = g.join_curves([ea, arc, eb])
     ctx.scene.remove(b[0].id)
     new = ctx.scene.replace_shape(a[0].id, joined)
