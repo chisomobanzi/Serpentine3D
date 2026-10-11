@@ -23,6 +23,11 @@
   A chamfer may take a distance per edge too. Where picked edges merge
   into one tangent chain, the last of their radii rules it.
 
+- **The blamed edges stay selected.** When the kernel refuses a fillet,
+  the error now carries the edges it choked on, and `filletedge` keeps
+  exactly those selected after it reports — the culprits are already
+  highlighted, and the next radius is one number away.
+
 ### Changed
 
 - **`fillet` works in the plane the curves already live on.** Two curves

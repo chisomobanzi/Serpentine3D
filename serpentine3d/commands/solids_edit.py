@@ -104,6 +104,7 @@ def cmd_filletedge(ctx, objs=None):
             return
         done = 0
         succeeded = set()
+        blamed_picks = {}
         for obj_id, edges in picked.items():
             obj = ctx.scene.get(obj_id)
             if chain == "Yes":
@@ -112,7 +113,11 @@ def cmd_filletedge(ctx, objs=None):
                 for (oid, kind, idx) in ctx.selection.subobjects:
                     if oid == obj_id and kind == "edge":
                         idx_set.update(g.edge_chain(obj.shape, idx))
-                edges = [all_edges[i] for i in sorted(idx_set)]
+                span = sorted(idx_set)
+                edges = [all_edges[i] for i in span]
+            else:
+                span = [idx for (oid, kind, idx) in ctx.selection.subobjects
+                        if oid == obj_id and kind == "edge"]
             try:
                 ctx.scene.replace_shape(
                     obj_id, g.fillet_edges(obj.shape, radius, edges=edges))
@@ -121,10 +126,28 @@ def cmd_filletedge(ctx, objs=None):
             except g.GeometryError as exc:
                 ctx.echo(f"{obj.name}: {exc}")
                 _echo_largest_fit(ctx, obj, radius, edges=edges)
+                blamed = getattr(exc, "blamed", None)
+                if blamed:
+                    # the kernel says which chains it choked on: keep
+                    # exactly those edges selected for the next try
+                    blamed_picks[obj_id] = [span[k] for k in blamed
+                                            if 0 <= k < len(span)]
         ctx.selection.clear()
-        remaining = [s for s in held_picks if s[0] not in succeeded]
+        remaining = []
+        seen = set()
+        for s in held_picks:
+            if s[0] in succeeded:
+                continue
+            keep = [(s[0], "edge", i)
+                    for i in blamed_picks.get(s[0], [])]
+            for t in (keep or [s]):
+                if t not in seen:
+                    seen.add(t)
+                    remaining.append(t)
         ctx.result_subobjects = remaining
         ctx.echo(f"Filleted {done} edge(s).")
+        if blamed_picks:
+            ctx.echo("The edges the kernel blamed stay selected.")
         return
     if objs is None:
         objs = yield SelectReq("Select solids to fillet (Ctrl+Shift-click "

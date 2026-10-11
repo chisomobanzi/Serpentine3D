@@ -987,44 +987,62 @@ def fillet_edges(shape, radius=None, edges: list | None = None,
                 "be resized with this tool.")
         mk.Build()
     except Standard_Failure as exc:
-        raise GeometryError(_fillet_failure_text(verb, failure, mk)) from exc
+        text, blamed = _fillet_failure(verb, failure, mk, targets)
+        err = GeometryError(text)
+        err.blamed = blamed
+        raise err from exc
     if not mk.IsDone() or mk.Shape().IsNull():
-        raise GeometryError(_fillet_failure_text(verb, failure, mk))
+        text, blamed = _fillet_failure(verb, failure, mk, targets)
+        err = GeometryError(text)
+        err.blamed = blamed
+        raise err
     return unwrap_compound(mk.Shape())
 
 
-def _blamed_chains(mk) -> tuple[int, bool]:
-    """(count, all_could_not_start): the contours the kernel blamed after
-    a failed fillet build. StartsolFailure is the kernel's own verdict
-    that a chain cannot even begin — the radius is too big for it."""
+def _blamed_targets(mk, targets) -> tuple[int, bool, list[int]]:
+    """(count, all_could_not_start, blamed indexes into targets): what the
+    kernel blamed after a failed fillet build. StartsolFailure is the
+    kernel's own verdict that a chain cannot even begin — the radius is
+    too big for it."""
     from OCP.ChFiDS import ChFiDS_ErrorStatus
     try:
         n = mk.NbFaultyContours()
     except Exception:
-        return 0, False
+        return 0, False, []
     if n <= 0:
-        return 0, False
+        return 0, False, []
     all_start = True
+    blamed = set()
     for i in range(1, n + 1):
         try:
-            if (mk.StripeStatus(mk.FaultyContour(i))
+            ic = mk.FaultyContour(i)
+            if (mk.StripeStatus(ic)
                     != ChFiDS_ErrorStatus.ChFiDS_StartsolFailure):
                 all_start = False
+            for j in range(1, mk.NbEdges(ic) + 1):
+                e = mk.Edge(ic, j)
+                for k, t in enumerate(targets):
+                    if t.IsSame(e):
+                        blamed.add(k)
         except Exception:
-            all_start = False
-    return n, all_start
+            continue
+    return n, all_start, sorted(blamed)
 
 
-def _fillet_failure_text(verb: str, failure: str, mk) -> str:
-    """The generic failure line, sharpened by what the kernel blamed."""
-    n, all_start = _blamed_chains(mk)
+def _fillet_failure(verb: str, failure: str, mk,
+                    targets) -> tuple[str, list[int]]:
+    """The generic failure line sharpened by what the kernel blamed, with
+    the blamed edges' indexes for the caller to highlight."""
+    n, all_start, blamed = _blamed_targets(mk, targets)
     if n and all_start:
-        return (f"{verb} failed — the radius is too big for {n} of the "
+        text = (f"{verb} failed — the radius is too big for {n} of the "
                 "picked chains, none of them could even start; try a "
                 "smaller value")
-    if n:
-        return f"{verb} failed — {n} of the picked chains failed the blend"
-    return failure
+    elif n:
+        text = f"{verb} failed — {n} of the picked chains failed the blend"
+    else:
+        text = failure
+    return text, blamed
 
 
 def largest_fillet_radius(shape, radius, edges: list | None = None,

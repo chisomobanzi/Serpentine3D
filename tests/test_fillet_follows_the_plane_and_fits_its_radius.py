@@ -159,8 +159,25 @@ def test_a_failed_fillet_blames_the_chains_that_cannot_start():
     box = g.make_box((0, 0, 0), 10, 10, 10)
     # all twelve edges of the cube get a chain, and none of them can even
     # begin at this radius: the kernel says so, and the error repeats it
-    with pytest.raises(g.GeometryError, match="too big for 12"):
+    with pytest.raises(g.GeometryError, match="too big for 12") as ei:
         g.fillet_edges(box, 1000.0)
+    # ... and names them, so a caller can highlight the culprits
+    assert getattr(ei.value, "blamed", None) == list(range(12))
+
+
+def test_a_picked_edge_that_failed_stays_selected_for_the_next_try(env):
+    scene, sel, hist, ctx, proc = env
+    echoes = []
+    ctx.add_echo_listener(echoes.append)
+    box = scene.add(g.make_box((0, 0, 0), 10, 10, 10))
+    sel.toggle_subobject(box.id, "edge", 0)
+    proc.run("filletedge")
+    proc.provide_text("No")
+    proc.provide_text("1000")
+    # the processor moves result_subobjects into the selection on finish
+    assert sel.subobjects == [(box.id, "edge", 0)]
+    assert any("too big" in m for m in echoes)
+    assert any("stay selected" in m for m in echoes)
 
 
 def test_a_failed_fillet_names_the_largest_radius_that_fits():
