@@ -878,9 +878,22 @@ def edge_chain(shape, edge_index: int, angle_tol_deg: float = 20.0) -> list:
     return sorted(chain)
 
 
+def _straight_law_points(law: list, steps: int = 8) -> list:
+    """A variable law's points redone as a dense polyline, so the
+    kernel's interpolation between them runs straight from radius to
+    radius instead of swinging through them."""
+    out = []
+    for (u1, r1), (u2, r2) in zip(law, law[1:]):
+        for k in range(steps):
+            t = k / steps
+            out.append((u1 + t * (u2 - u1), r1 + t * (r2 - r1)))
+    out.append(law[-1])
+    return out
+
+
 def fillet_edges(shape, radius=None, edges: list | None = None,
-                 chamfer: bool = False, radii: list | None = None
-                 ) -> TopoDS_Shape:
+                 chamfer: bool = False, radii: list | None = None,
+                 transition: str = "smooth") -> TopoDS_Shape:
     """Fillet (or chamfer) edges of a solid. edges=None means all edges.
 
     `radius` shapes the profile:
@@ -900,6 +913,9 @@ def fillet_edges(shape, radius=None, edges: list | None = None,
     The kernel extends each picked edge along its tangent neighbours into
     one contour, and a variable profile spans the whole contour — the way
     SolidWorks sweeps a variable-radius fillet over a smooth chain.
+    `transition` says how such a profile runs between its points:
+    "smooth" (the kernel's own interpolation, the default) or "straight"
+    (radius to radius on a line) — SolidWorks' two transition types.
     Variable profiles are fillet-only: a chamfer takes one distance, or
     one per edge.
     """
@@ -943,6 +959,10 @@ def fillet_edges(shape, radius=None, edges: list | None = None,
     if radii is not None and (r_pair is not None or law is not None):
         raise GeometryError(
             "Give either radii per edge, or a variable profile — not both")
+    transition = str(transition).lower()
+    if transition not in ("smooth", "straight"):
+        raise GeometryError(
+            "A variable fillet's transition is 'smooth' or 'straight'")
     if chamfer:
         from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer
         mk = BRepFilletAPI_MakeChamfer(shape)
@@ -975,8 +995,10 @@ def fillet_edges(shape, radius=None, edges: list | None = None,
                 for ic in range(1, mk.NbContours() + 1):
                     mk.SetRadius(r_pair[0], r_pair[1], ic, 1)
             else:
-                arr = TColgp_Array1OfPnt2d(1, len(law))
-                for i, (u, r) in enumerate(law, start=1):
+                points = (_straight_law_points(law) if transition == "straight"
+                          else law)
+                arr = TColgp_Array1OfPnt2d(1, len(points))
+                for i, (u, r) in enumerate(points, start=1):
                     arr.SetValue(i, gp_Pnt2d(u, r))
                 for ic in range(1, mk.NbContours() + 1):
                     mk.SetRadius(arr, ic, 1)

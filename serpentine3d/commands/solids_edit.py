@@ -102,6 +102,11 @@ def cmd_filletedge(ctx, objs=None):
         if radius is None:
             ctx.echo("Could not parse the radius.")
             return
+        transition = "smooth"
+        if isinstance(radius, list):
+            transition = yield OptionReq(
+                "Straight lines between the radius points?",
+                options=["Smooth", "Straight"], default="Smooth")
         done = 0
         succeeded = set()
         blamed_picks = {}
@@ -120,7 +125,8 @@ def cmd_filletedge(ctx, objs=None):
                         if oid == obj_id and kind == "edge"]
             try:
                 ctx.scene.replace_shape(
-                    obj_id, g.fillet_edges(obj.shape, radius, edges=edges))
+                    obj_id, g.fillet_edges(obj.shape, radius, edges=edges,
+                                           transition=transition))
                 done += len(edges)
                 succeeded.add(obj_id)
             except g.GeometryError as exc:

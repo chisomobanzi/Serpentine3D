@@ -258,7 +258,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `cap` | Cap |
 | `chamferedge` (`che`) | Chamferedge |
 | `contour` | Contour |
-| `filletedge` (`fe`) | Fillet edges. Ctrl+Shift-click edges first to fillet only those; the radius may be `start,end` or `u:r;u:r;…` for a variable law along the smooth chain. |
+| `filletedge` (`fe`) | Fillet edges. Ctrl+Shift-click edges first to fillet only those; the radius may be `start,end` or `u:r;u:r;…` for a variable law along the smooth chain, straight between points on request. |
 | `intersect` (`int`) | Intersect |
 | `mergeallcoplanarfaces` (`mergeallfaces`) | Fuse coplanar neighbouring faces of each selected polysurface. |
 | `pushpull` (`pp`, `moveface`) | SketchUp-style push/pull on a planar face. |

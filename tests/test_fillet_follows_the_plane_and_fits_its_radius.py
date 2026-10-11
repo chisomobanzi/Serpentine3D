@@ -101,6 +101,24 @@ def test_a_variable_law_sweeps_the_whole_tangent_chain():
     assert const_lo > law > linear > const_hi
 
 
+def test_a_variable_law_runs_straight_when_asked():
+    prism = _rounded_prism()
+    edge = _a_top_line_edge(prism)
+    const_lo = g.volume(g.fillet_edges(prism, 1.0, edges=[edge]))
+    const_hi = g.volume(g.fillet_edges(prism, 2.5, edges=[edge]))
+    smooth = g.volume(g.fillet_edges(
+        prism, [(0.0, 1.0), (0.5, 2.5), (1.0, 1.0)], edges=[edge]))
+    straight = g.volume(g.fillet_edges(
+        prism, [(0.0, 1.0), (0.5, 2.5), (1.0, 1.0)], edges=[edge],
+        transition="straight"))
+    assert const_lo > smooth > const_hi
+    assert const_lo > straight > const_hi
+    assert abs(smooth - straight) > 1e-3
+    with pytest.raises(g.GeometryError, match="'smooth' or 'straight'"):
+        g.fillet_edges(prism, [(0.0, 1.0), (1.0, 2.0)], edges=[edge],
+                       transition="wobbly")
+
+
 def test_law_and_positions_are_checked():
     box = g.make_box((0, 0, 0), 10, 10, 10)
     e = g.edges_of(box)[0]

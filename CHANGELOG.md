@@ -28,6 +28,12 @@
   exactly those selected after it reports — the culprits are already
   highlighted, and the next radius is one number away.
 
+- **Straight or smooth between the radius points.** A variable fillet's
+  points were always joined by the kernel's own smooth interpolation;
+  `filletedge` now asks, and `fillet_edges` takes `transition=`, so
+  the radii can also run straight from point to point — SolidWorks' two
+  transition types for a variable fillet.
+
 ### Changed
 
 - **`fillet` works in the plane the curves already live on.** Two curves
