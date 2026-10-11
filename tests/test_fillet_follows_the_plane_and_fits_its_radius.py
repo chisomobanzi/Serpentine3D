@@ -173,6 +173,49 @@ def test_radii_needs_one_radius_per_picked_edge():
                        radii=[1.0, 2.0])
 
 
+def test_fillet_corners_rounds_a_closed_rectangle_in_one_go():
+    rect = g.make_rectangle((0, 0, 0), (20, 10, 0))
+    out = g.fillet_corners(rect, 2.0)
+    assert g.shape_kind(out) == "curve"
+    assert g.is_closed_curve(out)
+    # perimeter 60, four rounds eat 2r each and give back four quarter arcs
+    assert g.curve_length(out) == pytest.approx(44 + 4 * math.pi, rel=1e-4)
+
+
+def test_fillet_corners_handles_left_and_right_turns():
+    # an open U: one left turn, one right turn
+    u = g.make_polyline([(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0)])
+    out = g.fillet_corners(u, 1.0)
+    assert not g.is_closed_curve(out)
+    assert g.curve_length(out) == pytest.approx(26 + math.pi, rel=1e-4)
+
+
+def test_fillet_corners_skips_corners_that_are_already_smooth():
+    rect = g.make_rectangle((0, 0, 0), (22, 12, 0))
+    rounded = g.offset_curve(rect, 1.0)     # every corner is an arc joint
+    out = g.fillet_corners(rounded, 2.0)
+    assert g.curve_length(out) == pytest.approx(
+        g.curve_length(rounded), rel=1e-6)
+
+
+def test_fillet_corners_refuses_a_radius_that_overlaps_a_piece():
+    rect = g.make_rectangle((0, 0, 0), (10, 10, 0))
+    with pytest.raises(g.GeometryError, match="overlap"):
+        g.fillet_corners(rect, 6.0)
+
+
+def test_filletedge_command_rounds_every_corner_via_filletcorners(env):
+    scene, sel, hist, ctx, proc = env
+    rect = scene.add(g.make_rectangle((0, 0, 0), (20, 10, 0)))
+    proc.run("filletcorners")
+    proc.click_object(rect.id)
+    proc.finish_selection()
+    proc.provide_text("2")
+    shape = scene.all()[0].shape
+    assert g.shape_kind(shape) == "curve"
+    assert g.curve_length(shape) == pytest.approx(44 + 4 * math.pi, rel=1e-4)
+
+
 def test_a_failed_fillet_blames_the_chains_that_cannot_start():
     box = g.make_box((0, 0, 0), 10, 10, 10)
     # all twelve edges of the cube get a chain, and none of them can even

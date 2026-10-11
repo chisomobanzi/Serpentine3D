@@ -34,6 +34,14 @@
   the radii can also run straight from point to point — SolidWorks' two
   transition types for a variable fillet.
 
+- **Every corner of a polyline rounded at once (`filletcorners`).** A
+  rectangle took four passes of `fillet` and joins in between; the new
+  command takes one radius and rounds all the corners of a
+  straight-sided polyline in one pass. Closed ones come back closed and
+  open ones keep their ends, joints that are already smooth are left
+  alone, and a radius that would make two rounds overlap is refused
+  with the piece's number.
+
 ### Changed
 
 - **`fillet` works in the plane the curves already live on.** Two curves

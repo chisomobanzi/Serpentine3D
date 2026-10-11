@@ -315,6 +315,24 @@ def cmd_fillet(ctx):
     ctx.echo(f"Filleted into {new.name} (r={radius:g}).")
 
 
+@command("filletcorners")
+def cmd_filletcorners(ctx):
+    """Round every corner of a straight-sided polyline at once."""
+    from .solids_edit import _edge_size_req
+    objs = yield SelectReq("Select polyline to fillet every corner of",
+                           kinds=("curve",), max_count=1)
+    read, req = _edge_size_req(
+        ctx, objs, "Fillet radius (click, or type a number)",
+        lambda r: g.fillet_corners(objs[0].shape, r))
+    radius = read((yield req))
+    if radius < 1e-9:
+        ctx.echo("Zero radius — nothing filleted.")
+        return
+    new = ctx.scene.replace_shape(
+        objs[0].id, g.fillet_corners(objs[0].shape, radius))
+    ctx.echo(f"Rounded every corner of {new.name} (r={radius:g}).")
+
+
 @command("explode", aliases=("x",))
 def cmd_explode(ctx):
     objs = yield SelectReq("Select objects to explode")

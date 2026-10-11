@@ -838,6 +838,91 @@ def fillet_curves(edge_a, edge_b, radius: float,
     return ea_out, arc, eb_out
 
 
+def fillet_corners(curve, radius: float) -> TopoDS_Shape:
+    """Round every corner of a straight-sided polyline in one go —
+    Rhino's FilletCorners. A closed curve comes back closed, an open one
+    keeps its ends, corners that are already smooth are left alone, and
+    a radius that would make two rounds overlap is refused with the
+    piece's number."""
+    import numpy as np
+
+    if radius <= 0:
+        raise GeometryError("Fillet radius must be positive")
+    from OCP.GeomAbs import GeomAbs_CurveType
+    edges = edges_of(curve)
+    is_line = [occ.edge_adaptor(e).GetType() == GeomAbs_CurveType.GeomAbs_Line
+               for e in edges]
+    if not any(is_line):
+        raise GeometryError(
+            "filletcorners rounds the straight pieces of a polyline")
+    closed = is_closed_curve(curve)
+    n = len(edges)
+    ends = [curve_endpoints(e) for e in edges]
+    arc_at = {}                # corner k -> (t1, arc, t2) between k, k+1
+
+    for k in range(n if closed else n - 1):
+        if not (is_line[k] and is_line[(k + 1) % n]):
+            continue                 # rounds go between two straight pieces
+        a_start, a_end = ends[k]
+        b_start, b_end = ends[(k + 1) % n]
+        # the corner is whichever pairing of the pieces' ends sits closest
+        best = None
+        for p, p_far in ((a_end, a_start), (a_start, a_end)):
+            for q, q_far in ((b_start, b_end), (b_end, b_start)):
+                d2 = sum((x - y) ** 2 for x, y in zip(p, q))
+                if best is None or d2 < best[0]:
+                    best = (d2, p, q, p_far, q_far)
+        d2, near, _q, a_far, b_far = best
+        if d2 > tol() ** 2:
+            continue                     # the pieces do not touch here
+        din = np.array(a_far, float) - np.array(near, float)
+        dout = np.array(b_far, float) - np.array(near, float)
+        li, lo = np.linalg.norm(din), np.linalg.norm(dout)
+        if li < tol() or lo < tol():
+            continue
+        din, dout = din / li, dout / lo
+        dot = float(np.dot(din, dout))
+        if dot < -1 + 1e-9:
+            continue                     # straight through: nothing to round
+        theta = math.acos(max(-1.0, min(1.0, dot)))
+        d = radius / math.tan(theta / 2)
+        if d < tol():
+            continue                     # corner too shallow to notice
+        bis = (din + dout) / np.linalg.norm(din + dout)
+        center = np.array(near) + bis * (radius / math.sin(theta / 2))
+        t1 = tuple(np.array(near) + din * d)
+        t2 = tuple(np.array(near) + dout * d)
+        mid = tuple(center - bis * radius)
+        arc_at[k] = (t1, make_arc_3pt(t1, mid, t2), t2)
+
+    # each piece runs from the previous corner's exit to this corner's
+    # entry; a radius that eats a whole piece is refused, with its number
+    out = []
+    for j in range(n):
+        exit_t = None
+        prev = (j - 1) % n
+        if (closed or j > 0) and prev in arc_at:
+            exit_t = arc_at[prev][2]
+        entry_t = arc_at[j][0] if j in arc_at else None
+        p_from = exit_t if exit_t is not None else ends[j][0]
+        p_to = entry_t if entry_t is not None else ends[j][1]
+        if exit_t is not None or entry_t is not None:
+            run_dir = np.array(p_to, float) - np.array(p_from, float)
+            old_dir = np.array(ends[j][1], float) - np.array(ends[j][0], float)
+            if float(np.dot(run_dir, old_dir)) <= 0:
+                raise GeometryError(
+                    f"Fillet radius {radius:g} is too large: the rounds "
+                    f"overlap on piece {j + 1} of the polyline")
+            p_from = tuple(p_from)
+            p_to = tuple(p_to)
+            out.append(make_line(p_from, p_to))
+        else:
+            out.append(edges[j])
+        if j in arc_at:
+            out.append(arc_at[j][1])
+    return join_curves(out)
+
+
 def edge_chain(shape, edge_index: int, angle_tol_deg: float = 20.0) -> list:
     """Indices of edges forming a tangent-continuous chain with the given
     edge (shared vertices with aligned tangents)."""
