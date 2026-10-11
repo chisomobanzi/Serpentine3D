@@ -16,6 +16,13 @@
   about which one. A chamfer keeps to a single distance and says so,
   instead of dying in the bindings.
 
+- **Different sizes on different edges (`fillet_edges`).** The core
+  call takes `radii=[...]` — one constant size per picked edge, matched
+  in order, the way SolidWorks' constant fillets let neighbouring edges
+  take different sizes, and the way FreeCAD's Part fillet edits them.
+  A chamfer may take a distance per edge too. Where picked edges merge
+  into one tangent chain, the last of their radii rules it.
+
 ### Changed
 
 - **`fillet` works in the plane the curves already live on.** Two curves

@@ -878,8 +878,9 @@ def edge_chain(shape, edge_index: int, angle_tol_deg: float = 20.0) -> list:
     return sorted(chain)
 
 
-def fillet_edges(shape, radius, edges: list | None = None,
-                 chamfer: bool = False) -> TopoDS_Shape:
+def fillet_edges(shape, radius=None, edges: list | None = None,
+                 chamfer: bool = False, radii: list | None = None
+                 ) -> TopoDS_Shape:
     """Fillet (or chamfer) edges of a solid. edges=None means all edges.
 
     `radius` shapes the profile:
@@ -891,10 +892,16 @@ def fillet_edges(shape, radius, edges: list | None = None,
       variable fillet interpolating the radii through the given points,
       as many of them as the shape deserves.
 
+    `radii` instead gives one constant size per picked edge, matched to
+    `edges` in order — SolidWorks' constant fillets let neighbouring
+    edges take different sizes, and so does this. Where picked edges
+    merge into one tangent chain, the last of their radii rules it.
+
     The kernel extends each picked edge along its tangent neighbours into
     one contour, and a variable profile spans the whole contour — the way
     SolidWorks sweeps a variable-radius fillet over a smooth chain.
-    Variable profiles are fillet-only: a chamfer takes one distance.
+    Variable profiles are fillet-only: a chamfer takes one distance, or
+    one per edge.
     """
     r_pair = None
     law = None
@@ -918,11 +925,24 @@ def fillet_edges(shape, radius, edges: list | None = None,
         if any(r <= 0 for _, r in law):
             raise GeometryError("Radii must be positive")
         law.sort(key=lambda point: point[0])
-    elif radius <= 0:
+    elif radius is not None and radius <= 0:
         raise GeometryError("Radius must be positive")
+    if radii is not None:
+        if edges is None or len(edges) != len(radii):
+            raise GeometryError(
+                "radii needs exactly one radius per picked edge")
+        if any(r is None or r <= 0 for r in radii):
+            raise GeometryError("Radii must be positive")
+        if radius is None:
+            radius = 0.0
+    elif radius is None:
+        raise GeometryError("A fillet needs a radius, or radii per edge")
     if chamfer and (r_pair is not None or law is not None):
         raise GeometryError("A chamfer takes a single distance — variable "
                             "profiles are fillet-only")
+    if radii is not None and (r_pair is not None or law is not None):
+        raise GeometryError(
+            "Give either radii per edge, or a variable profile — not both")
     if chamfer:
         from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer
         mk = BRepFilletAPI_MakeChamfer(shape)
@@ -938,8 +958,12 @@ def fillet_edges(shape, radius, edges: list | None = None,
                "for the smallest edges; try a smaller value")
     try:
         if r_pair is None and law is None:
-            for e in targets:
-                mk.Add(float(radius), e)
+            if radii is not None:
+                for e, r in zip(targets, radii):
+                    mk.Add(float(r), e)
+            else:
+                for e in targets:
+                    mk.Add(float(radius), e)
         else:
             # add bare, then give every contour the profile: the law spans
             # the chain rather than each piece of it

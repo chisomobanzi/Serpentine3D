@@ -126,6 +126,35 @@ def test_a_chamfer_takes_one_distance_only():
         g.fillet_edges(box, 1.0, edges=[e], chamfer=True)) == "solid"
 
 
+def test_neighbouring_edges_take_different_radii():
+    box = g.make_box((0, 0, 0), 10, 10, 10)
+    e = g.edges_of(box)
+    small = g.volume(g.fillet_edges(box, 1.0, edges=[e[0], e[2]]))
+    big = g.volume(g.fillet_edges(box, 3.0, edges=[e[0], e[2]]))
+    mixed = g.volume(g.fillet_edges(box, radii=[1.0, 3.0],
+                                    edges=[e[0], e[2]]))
+    # one edge rounds at 1, the other at 3: between the two uniform runs
+    assert small > mixed > big
+    # and a chamfer may take a distance per edge as well
+    cham = g.fillet_edges(box, radii=[1.0, 2.0], edges=[e[0], e[2]],
+                          chamfer=True)
+    assert g.shape_kind(cham) == "solid"
+
+
+def test_radii_needs_one_radius_per_picked_edge():
+    box = g.make_box((0, 0, 0), 10, 10, 10)
+    e = g.edges_of(box)
+    with pytest.raises(g.GeometryError, match="per picked edge"):
+        g.fillet_edges(box, radii=[1.0, 2.0])
+    with pytest.raises(g.GeometryError, match="per picked edge"):
+        g.fillet_edges(box, radii=[1.0, 2.0, 3.0], edges=[e[0], e[2]])
+    with pytest.raises(g.GeometryError, match="positive"):
+        g.fillet_edges(box, radii=[1.0, 0.0], edges=[e[0], e[2]])
+    with pytest.raises(g.GeometryError, match="not both"):
+        g.fillet_edges(box, (1.0, 2.0), edges=[e[0], e[2]],
+                       radii=[1.0, 2.0])
+
+
 def test_a_failed_fillet_blames_the_chains_that_cannot_start():
     box = g.make_box((0, 0, 0), 10, 10, 10)
     # all twelve edges of the cube get a chain, and none of them can even
