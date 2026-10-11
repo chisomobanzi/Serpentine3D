@@ -216,6 +216,22 @@ def test_filletedge_command_rounds_every_corner_via_filletcorners(env):
     assert g.curve_length(shape) == pytest.approx(44 + 4 * math.pi, rel=1e-4)
 
 
+def test_filletedge_variable_law_answers_its_prompts_in_order(env):
+    scene, sel, hist, ctx, proc = env
+    box = scene.add(g.make_box((0, 0, 0), 10, 10, 10))
+    sel.toggle_subobject(box.id, "edge", 0)
+    proc.run("filletedge")
+    proc.provide_text("No")            # no chain expansion
+    proc.provide_text("0:1;1:3")       # the law, straight from text
+    proc.provide_text("Smooth")
+    assert not proc.busy
+    v = g.volume(scene.all()[0].shape)
+    # the strip's cross-section is quadratic in the radius, the radius
+    # linear from 1 to 3: the mean area sits at 13/3 of the r=1 one
+    expected = 1000 - 10 * (1 - 3.14159 / 4) * (1 + 2 + 4.0 / 3)
+    assert v == pytest.approx(expected, rel=1e-2)
+
+
 def test_a_failed_fillet_blames_the_chains_that_cannot_start():
     box = g.make_box((0, 0, 0), 10, 10, 10)
     # all twelve edges of the cube get a chain, and none of them can even
