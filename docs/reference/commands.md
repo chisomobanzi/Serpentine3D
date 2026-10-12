@@ -161,7 +161,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `dir` | Show which way curves run and which way surfaces face. |
 | `explode` (`x`) | Explode |
 | `fillet` | Round two curves in the plane they already lie on, or edges of a selected solid/surface. |
-| `filletcorners` | Round every corner of a straight-sided polyline at once with one radius. |
+| `filletcorners` | Round every corner of a polyline at once with one radius — straight and arc pieces both round. |
 | `flip` | Turn curves round and surfaces inside out, as Rhino's Flip does. |
 | `hide` | Hide |
 | `insertknot` (`insertcontrolpoint`) | Add a control point to a curve without moving the curve. |

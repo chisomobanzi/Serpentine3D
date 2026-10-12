@@ -838,88 +838,143 @@ def fillet_curves(edge_a, edge_b, radius: float,
     return ea_out, arc, eb_out
 
 
-def fillet_corners(curve, radius: float) -> TopoDS_Shape:
-    """Round every corner of a straight-sided polyline in one go —
-    Rhino's FilletCorners. A closed curve comes back closed, an open one
-    keeps its ends, corners that are already smooth are left alone, and
-    a radius that would make two rounds overlap is refused with the
-    piece's number."""
+def _piece_end_tangent(edge, at_start: bool):
+    """Unit tangent at one end of an edge, pointing into the piece."""
     import numpy as np
+    ad = occ.edge_adaptor(edge)
+    p = gp_Pnt()
+    v = gp_Vec()
+    u = ad.FirstParameter() if at_start else ad.LastParameter()
+    ad.D1(u, p, v)
+    t = np.array([v.X(), v.Y(), v.Z()], float)
+    n = np.linalg.norm(t)
+    if n < 1e-12:
+        return t
+    t /= n
+    return t if at_start else -t
+
+
+def _arc_parameter_at(edge, point: Point) -> float:
+    """The parameter of `point` (a point on the arc) in the edge's own
+    parameterization — the projector answers modulo the circle's period,
+    so it is brought into the arc's span first."""
+    from OCP.GeomAPI import GeomAPI_ProjectPointOnCurve
+    ad = occ.edge_adaptor(edge)
+    first = ad.FirstParameter()
+    proj = GeomAPI_ProjectPointOnCurve(_pnt(point), ad.Curve().Curve())
+    u = proj.LowerDistanceParameter()
+    while u < first - 1e-12:
+        u += 2 * math.pi
+    while u > first + 2 * math.pi + 1e-12:
+        u -= 2 * math.pi
+    return min(max(u, first), ad.LastParameter())
+
+
+def _trimmed_arc_piece(edge, p_from: Point, p_to: Point,
+                       piece: int, radius: float):
+    """The part of an arc edge running from p_from to p_to in the edge's
+    own direction. A radius that eats the piece backwards is the rounds
+    overlapping, refused with the piece's number."""
+    u_from = _arc_parameter_at(edge, p_from)
+    u_to = _arc_parameter_at(edge, p_to)
+    if u_to <= u_from + 1e-9:
+        raise GeometryError(
+            f"Fillet radius {radius:g} is too large: the rounds overlap "
+            f"on piece {piece + 1} of the polyline")
+    from OCP.Geom import Geom_TrimmedCurve
+    base = occ.edge_adaptor(edge).Curve().Curve()
+    trimmed = Geom_TrimmedCurve(base, u_from, u_to)
+    return BRepBuilderAPI_MakeEdge(trimmed).Edge()
+
+
+def fillet_corners(curve, radius: float) -> TopoDS_Shape:
+    """Round every corner of a polyline in one go — Rhino's
+    FilletCorners. Straight and arc pieces both round; a closed curve
+    comes back closed, an open one keeps its ends, joints that are
+    already smooth are left alone, and a radius that would make two
+    rounds overlap is refused with the piece's number."""
+    import numpy as np
+    from OCP.GeomAbs import GeomAbs_CurveType
 
     if radius <= 0:
         raise GeometryError("Fillet radius must be positive")
-    from OCP.GeomAbs import GeomAbs_CurveType
     edges = edges_of(curve)
-    is_line = [occ.edge_adaptor(e).GetType() == GeomAbs_CurveType.GeomAbs_Line
-               for e in edges]
-    if not any(is_line):
-        raise GeometryError(
-            "filletcorners rounds the straight pieces of a polyline")
+    line_t = GeomAbs_CurveType.GeomAbs_Line
+    arc_t = GeomAbs_CurveType.GeomAbs_Circle
+    for k, e in enumerate(edges):
+        kind = occ.edge_adaptor(e).GetType()
+        if kind not in (line_t, arc_t):
+            raise GeometryError(
+                "filletcorners rounds straight and arc pieces — piece "
+                f"{k + 1} is neither")
     closed = is_closed_curve(curve)
     n = len(edges)
     ends = [curve_endpoints(e) for e in edges]
-    arc_at = {}                # corner k -> (t1, arc, t2) between k, k+1
+    corner_at = {}             # joint k (between k, k+1) -> (ta, arc, tb)
 
     for k in range(n if closed else n - 1):
-        if not (is_line[k] and is_line[(k + 1) % n]):
-            continue                 # rounds go between two straight pieces
+        j2 = (k + 1) % n
         a_start, a_end = ends[k]
-        b_start, b_end = ends[(k + 1) % n]
-        # the corner is whichever pairing of the pieces' ends sits closest
+        b_start, b_end = ends[j2]
+        # the corner is whichever pairing of the pieces' ends sits closest;
+        # which end each pairing uses is carried, not compared — the joined
+        # ends can differ by a hair that == would call different
         best = None
-        for p, p_far in ((a_end, a_start), (a_start, a_end)):
-            for q, q_far in ((b_start, b_end), (b_end, b_start)):
+        for a_at_start in (True, False):
+            p = a_start if a_at_start else a_end
+            for b_at_start in (True, False):
+                q = b_start if b_at_start else b_end
                 d2 = sum((x - y) ** 2 for x, y in zip(p, q))
                 if best is None or d2 < best[0]:
-                    best = (d2, p, q, p_far, q_far)
-        d2, near, _q, a_far, b_far = best
+                    best = (d2, p, a_at_start, b_at_start)
+        d2, near, a_at_start, b_at_start = best
         if d2 > tol() ** 2:
             continue                     # the pieces do not touch here
-        din = np.array(a_far, float) - np.array(near, float)
-        dout = np.array(b_far, float) - np.array(near, float)
-        li, lo = np.linalg.norm(din), np.linalg.norm(dout)
-        if li < tol() or lo < tol():
-            continue
-        din, dout = din / li, dout / lo
+        din = _piece_end_tangent(edges[k], at_start=a_at_start)
+        dout = _piece_end_tangent(edges[j2], at_start=b_at_start)
         dot = float(np.dot(din, dout))
-        if dot < -1 + 1e-9:
-            continue                     # straight through: nothing to round
+        if dot < -1 + 1e-9 or dot > 1 - 1e-9:
+            continue                     # already smooth: nothing to round
         theta = math.acos(max(-1.0, min(1.0, dot)))
-        d = radius / math.tan(theta / 2)
-        if d < tol():
+        if radius / math.tan(theta / 2) < tol():
             continue                     # corner too shallow to notice
-        bis = (din + dout) / np.linalg.norm(din + dout)
-        center = np.array(near) + bis * (radius / math.sin(theta / 2))
-        t1 = tuple(np.array(near) + din * d)
-        t2 = tuple(np.array(near) + dout * d)
-        mid = tuple(center - bis * radius)
-        arc_at[k] = (t1, make_arc_3pt(t1, mid, t2), t2)
+        try:
+            corner_at[k] = fillet_curves(edges[k], edges[j2], radius, near)
+        except GeometryError as exc:
+            raise GeometryError(
+                f"Fillet radius {radius:g} is too large at the joint "
+                f"after piece {k + 1}: {exc}")
 
     # each piece runs from the previous corner's exit to this corner's
     # entry; a radius that eats a whole piece is refused, with its number
     out = []
     for j in range(n):
-        exit_t = None
         prev = (j - 1) % n
-        if (closed or j > 0) and prev in arc_at:
-            exit_t = arc_at[prev][2]
-        entry_t = arc_at[j][0] if j in arc_at else None
-        p_from = exit_t if exit_t is not None else ends[j][0]
-        p_to = entry_t if entry_t is not None else ends[j][1]
-        if exit_t is not None or entry_t is not None:
-            run_dir = np.array(p_to, float) - np.array(p_from, float)
-            old_dir = np.array(ends[j][1], float) - np.array(ends[j][0], float)
-            if float(np.dot(run_dir, old_dir)) <= 0:
-                raise GeometryError(
-                    f"Fillet radius {radius:g} is too large: the rounds "
-                    f"overlap on piece {j + 1} of the polyline")
-            p_from = tuple(p_from)
-            p_to = tuple(p_to)
-            out.append(make_line(p_from, p_to))
+        entry = corner_at[j][0] if j in corner_at else None
+        exit_ = (corner_at[prev][2]
+                 if (closed or j > 0) and prev in corner_at else None)
+        if entry is None and exit_ is None:
+            out.append(edges[j])         # untouched piece, kept as built
+        elif entry is not None and exit_ is None:
+            out.append(entry)            # already trimmed at its end
+        elif exit_ is not None and entry is None:
+            out.append(exit_)            # already trimmed at its start
         else:
-            out.append(edges[j])
-        if j in arc_at:
-            out.append(arc_at[j][1])
+            p_from = curve_endpoints(exit_)[0]
+            p_to = curve_endpoints(entry)[1]
+            if occ.edge_adaptor(edges[j]).GetType() == line_t:
+                run = np.array(p_to, float) - np.array(p_from, float)
+                old = np.array(ends[j][1], float) - np.array(ends[j][0], float)
+                if float(np.dot(run, old)) <= 0:
+                    raise GeometryError(
+                        f"Fillet radius {radius:g} is too large: the rounds "
+                        f"overlap on piece {j + 1} of the polyline")
+                out.append(make_line(tuple(p_from), tuple(p_to)))
+            else:
+                out.append(_trimmed_arc_piece(edges[j], tuple(p_from),
+                                              tuple(p_to), j, radius))
+        if j in corner_at:
+            out.append(corner_at[j][1])
     return join_curves(out)
 
 
@@ -1001,8 +1056,16 @@ def fillet_edges(shape, radius=None, edges: list | None = None,
     `transition` says how such a profile runs between its points:
     "smooth" (the kernel's own interpolation, the default) or "straight"
     (radius to radius on a line) — SolidWorks' two transition types.
-    Variable profiles are fillet-only: a chamfer takes one distance, or
-    one per edge.
+    A law point may take a zero radius where it ends the law — that
+    reaches radii a constant fillet cannot fit, the way SolidWorks'
+    variable fillet tapers to nothing at a chain's end. Variable profiles
+    are fillet-only: a chamfer takes a single distance, or one per edge.
+
+    The blend refuses to hand back a solid that fails its own checks: if
+    the kernel builds but the result is broken, that is reported like any
+    other failure, never returned. An invalid input gets one repair pass
+    (ShapeFix) and the blend is retried on the repaired shape before the
+    failure is reported.
     """
     r_pair = None
     law = None
@@ -1023,9 +1086,15 @@ def fillet_edges(shape, radius=None, edges: list | None = None,
         if any(not 0.0 <= u <= 1.0 for u, _ in law):
             raise GeometryError("Variable-fillet positions (u) run from "
                                 "0 to 1 along the chain")
-        if any(r <= 0 for _, r in law):
-            raise GeometryError("Radii must be positive")
+        if any(r < 0 for _, r in law):
+            raise GeometryError("Radii cannot be negative")
         law.sort(key=lambda point: point[0])
+        if any(r <= 0 for _, r in law[1:-1]) or (law[0][1] <= 0
+                                                 and law[-1][1] <= 0):
+            raise GeometryError(
+                "A zero radius may end a variable law but not fill it — "
+                "interior points need a positive radius, and at least "
+                "one end must stay positive too")
     elif radius is not None and radius <= 0:
         raise GeometryError("Radius must be positive")
     if radii is not None:
@@ -1048,6 +1117,59 @@ def fillet_edges(shape, radius=None, edges: list | None = None,
     if transition not in ("smooth", "straight"):
         raise GeometryError(
             "A variable fillet's transition is 'smooth' or 'straight'")
+    verb = "Chamfer" if chamfer else "Fillet"
+    try:
+        return _fillet_edges_build(shape, radius, radii, r_pair, law, edges,
+                                   chamfer, transition, verb)
+    except _FilletBuildError as err:
+        # an invalid input can make the blend fail or come out broken;
+        # one repair pass and a rebuild before the failure stands
+        repaired = _repaired_input(shape)
+        if repaired is not None:
+            try:
+                return _fillet_edges_build(repaired, radius, radii, r_pair,
+                                           law, edges, chamfer, transition,
+                                           verb)
+            except _FilletBuildError:
+                pass  # the original failure is the honest one to report
+        raise err.as_geometry_error()
+
+
+def _repaired_input(shape):
+    """ShapeFix over `shape` when it fails its own checks, or None when
+    the input is fine (the common case — callers skip this cheaply) or
+    cannot be repaired."""
+    try:
+        if is_valid(shape):
+            return None
+        from OCP.ShapeFix import ShapeFix_Shape
+        sf = ShapeFix_Shape(shape)
+        sf.Perform()
+        fixed = sf.Shape()
+    except Exception:
+        return None
+    return fixed if is_valid(fixed) else None
+
+
+class _FilletBuildError(Exception):
+    """A failed or broken blend build, carrying the kernel's blame."""
+
+    def __init__(self, text, blamed):
+        super().__init__(text)
+        self.text = text
+        self.blamed = blamed
+
+    def as_geometry_error(self):
+        err = GeometryError(self.text)
+        err.blamed = self.blamed
+        return err
+
+
+def _fillet_edges_build(shape, radius, radii, r_pair, law, edges, chamfer,
+                        transition, verb):
+    """One blend attempt with the requested profile, validated before it
+    is returned. Raises _FilletBuildError when the kernel fails or the
+    built shape would not pass its own checks."""
     if chamfer:
         from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer
         mk = BRepFilletAPI_MakeChamfer(shape)
@@ -1058,7 +1180,6 @@ def fillet_edges(shape, radius=None, edges: list | None = None,
     if not targets:
         raise GeometryError("No edges to fillet")
     from OCP.Standard import Standard_Failure
-    verb = "Chamfer" if chamfer else "Fillet"
     failure = (f"{verb} failed — the radius or distance may be too large "
                "for the smallest edges; try a smaller value")
     try:
@@ -1095,37 +1216,38 @@ def fillet_edges(shape, radius=None, edges: list | None = None,
         mk.Build()
     except Standard_Failure as exc:
         text, blamed = _fillet_failure(verb, failure, mk, targets)
-        err = GeometryError(text)
-        err.blamed = blamed
-        raise err from exc
+        raise _FilletBuildError(text, blamed) from exc
     if not mk.IsDone() or mk.Shape().IsNull():
         text, blamed = _fillet_failure(verb, failure, mk, targets)
-        err = GeometryError(text)
-        err.blamed = blamed
-        raise err
-    return unwrap_compound(mk.Shape())
+        raise _FilletBuildError(text, blamed)
+    result = unwrap_compound(mk.Shape())
+    if not is_valid(result):
+        raise _FilletBuildError(
+            f"{verb} built a shape that fails its own solid checks — the "
+            "radius collapses the narrow faces it runs against; try a "
+            "smaller value", [])
+    return result
 
 
-def _blamed_targets(mk, targets) -> tuple[int, bool, list[int]]:
-    """(count, all_could_not_start, blamed indexes into targets): what the
-    kernel blamed after a failed fillet build. StartsolFailure is the
-    kernel's own verdict that a chain cannot even begin — the radius is
-    too big for it."""
+def _blamed_targets(mk, targets) -> tuple[int, str | None, list[int]]:
+    """(count, verdict, blamed indexes into targets): what the kernel
+    blamed after a failed fillet build. StartsolFailure is the kernel's
+    own verdict that a chain cannot even begin — the radius is too big
+    for it; TwistedSurface and WalkingFailure name the other two ways a
+    blend can die partway."""
     from OCP.ChFiDS import ChFiDS_ErrorStatus
     try:
         n = mk.NbFaultyContours()
     except Exception:
-        return 0, False, []
+        return 0, None, []
     if n <= 0:
-        return 0, False, []
-    all_start = True
+        return 0, None, []
+    statuses = []
     blamed = set()
     for i in range(1, n + 1):
         try:
             ic = mk.FaultyContour(i)
-            if (mk.StripeStatus(ic)
-                    != ChFiDS_ErrorStatus.ChFiDS_StartsolFailure):
-                all_start = False
+            statuses.append(mk.StripeStatus(ic))
             for j in range(1, mk.NbEdges(ic) + 1):
                 e = mk.Edge(ic, j)
                 for k, t in enumerate(targets):
@@ -1133,18 +1255,36 @@ def _blamed_targets(mk, targets) -> tuple[int, bool, list[int]]:
                         blamed.add(k)
         except Exception:
             continue
-    return n, all_start, sorted(blamed)
+    verdict = None
+    if statuses and all(s == ChFiDS_ErrorStatus.ChFiDS_StartsolFailure
+                        for s in statuses):
+        verdict = "start"
+    elif statuses and all(s == ChFiDS_ErrorStatus.ChFiDS_TwistedSurface
+                          for s in statuses):
+        verdict = "twisted"
+    elif statuses and all(s == ChFiDS_ErrorStatus.ChFiDS_WalkingFailure
+                          for s in statuses):
+        verdict = "walking"
+    return n, verdict, sorted(blamed)
 
 
 def _fillet_failure(verb: str, failure: str, mk,
                     targets) -> tuple[str, list[int]]:
     """The generic failure line sharpened by what the kernel blamed, with
     the blamed edges' indexes for the caller to highlight."""
-    n, all_start, blamed = _blamed_targets(mk, targets)
-    if n and all_start:
+    n, verdict, blamed = _blamed_targets(mk, targets)
+    if n and verdict == "start":
         text = (f"{verb} failed — the radius is too big for {n} of the "
                 "picked chains, none of them could even start; try a "
                 "smaller value")
+    elif n and verdict == "twisted":
+        text = (f"{verb} failed — the blend's surface twists along {n} of "
+                "the picked chains, usually where the faces meet at a "
+                "shallow angle; try a slightly different radius")
+    elif n and verdict == "walking":
+        text = (f"{verb} failed — the blend could not walk along {n} of "
+                "the picked chains; the radius is likely too large for "
+                "the faces it must cross")
     elif n:
         text = f"{verb} failed — {n} of the picked chains failed the blend"
     else:

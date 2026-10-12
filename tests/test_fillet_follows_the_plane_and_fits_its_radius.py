@@ -128,8 +128,13 @@ def test_law_and_positions_are_checked():
         g.fillet_edges(box, [(0.0, 1.0)], edges=[e])
     with pytest.raises(g.GeometryError, match="0 to 1"):
         g.fillet_edges(box, [(0.0, 1.0), (1.5, 2.0)], edges=[e])
-    with pytest.raises(g.GeometryError, match="positive"):
-        g.fillet_edges(box, [(0.0, 1.0), (1.0, 0.0)], edges=[e])
+    with pytest.raises(g.GeometryError, match="negative"):
+        g.fillet_edges(box, [(0.0, 1.0), (1.0, -1.0)], edges=[e])
+    # zero radii may taper a law's ends, never fill it
+    with pytest.raises(g.GeometryError, match="zero radius may end"):
+        g.fillet_edges(box, [(0.0, 1.0), (0.5, 0.0), (1.0, 1.0)], edges=[e])
+    with pytest.raises(g.GeometryError, match="zero radius may end"):
+        g.fillet_edges(box, [(0.0, 0.0), (1.0, 0.0)], edges=[e])
 
 
 def test_a_chamfer_takes_one_distance_only():
@@ -202,6 +207,90 @@ def test_fillet_corners_refuses_a_radius_that_overlaps_a_piece():
     rect = g.make_rectangle((0, 0, 0), (10, 10, 0))
     with pytest.raises(g.GeometryError, match="overlap"):
         g.fillet_corners(rect, 6.0)
+
+
+def test_fillet_corners_rounds_an_arc_corner_with_exact_length():
+    # line (0,0)->(10,0) meets an arc of radius 3 centred on (13,0) head
+    # on: its tangent at (10,0) points straight down. The round of r=1
+    # touches the line where the circle of centres around (13,0) at
+    # distance 3+1 meets distance 1 from the line: x = 13 - sqrt(15).
+    # From there the geometry is exact: the round sweeps acos(1/4) and
+    # the original arc keeps 3*(pi/2 - acos(sqrt(15)/4)).
+    line = g.make_line((0, 0, 0), (10, 0, 0))
+    arc = g.make_arc_3pt(
+        (10, 0, 0), (13 - 3 / math.sqrt(2), -3 / math.sqrt(2), 0), (13, -3, 0))
+    open_curve = g.join_curves([line, arc])
+    out = g.fillet_corners(open_curve, 1.0)
+    assert g.is_valid(out)
+    assert not g.is_closed_curve(out)
+    expected = ((13 - math.sqrt(15)) + math.acos(0.25)
+                + 3 * (math.pi / 2 - math.acos(math.sqrt(15) / 4)))
+    assert g.curve_length(out) == pytest.approx(expected, rel=1e-6)
+    assert g.curve_endpoints(out) == ((0, 0, 0), (13, -3, 0))
+
+
+def test_fillet_corners_rounds_an_arc_to_arc_corner():
+    # the first arc arrives at (4,0) heading down, the second leaves
+    # heading right: a 90-degree corner between two arcs
+    first = g.make_arc_3pt((0, 0, 0), (2, 2, 0), (4, 0, 0))
+    second = g.make_arc_3pt(
+        (4, 0, 0), (4 + 3 / math.sqrt(2), -3 + 3 / math.sqrt(2), 0), (7, -3, 0))
+    open_curve = g.join_curves([first, second])
+    out = g.fillet_corners(open_curve, 0.5)
+    assert g.is_valid(out)
+    assert g.curve_length(out) < g.curve_length(open_curve)
+    assert g.curve_endpoints(out) == ((0, 0, 0), (7, -3, 0))
+
+
+def test_fillet_corners_refuses_a_radius_that_overlaps_on_an_arc():
+    # a shallow arc piece (R=5, 0.785 long) between two corners: both
+    # rounds build at r=0.5, but at r=0.6 they want more of the piece
+    # than its 0.785 of arc — refused with the piece's number
+    phi = 0.785 / 5.0
+    center = (4.0, -5.0)
+    start = (4.0, 0.0)
+    mid_pt = (center[0] + 5 * math.sin(phi / 2),
+              center[1] + 5 * math.cos(phi / 2))
+    end = (center[0] + 5 * math.sin(phi), center[1] + 5 * math.cos(phi))
+    first = g.make_line((4, -10, 0), (4, 0, 0))
+    mid = g.make_arc_3pt((start[0], start[1], 0), (mid_pt[0], mid_pt[1], 0),
+                         (end[0], end[1], 0))
+    # the third piece leaves at 45 degrees off the arc's end tangent
+    tangent = (math.cos(phi), -math.sin(phi))
+    c, s = math.cos(-math.pi / 4), math.sin(-math.pi / 4)
+    heading = (tangent[0] * c - tangent[1] * s,
+               tangent[0] * s + tangent[1] * c)
+    third = g.make_line((end[0], end[1], 0),
+                        (end[0] + 1.5 * heading[0], end[1] + 1.5 * heading[1],
+                         0))
+    open_curve = g.join_curves([first, mid, third])
+    assert g.fillet_corners(open_curve, 0.5) is not None
+    with pytest.raises(g.GeometryError, match="overlap on piece 2"):
+        g.fillet_corners(open_curve, 0.6)
+
+
+def test_fillet_corners_rounds_a_closed_path_with_arc_corners():
+    # a closed trip of lines and arc corners: everything rounds at once
+    # and the path comes back closed
+    line_a = g.make_line((0, 0, 0), (10, 0, 0))
+    arc_a = g.make_arc_3pt((10, 0, 0), (13, -1.5, 0), (13, -3, 0))
+    line_b = g.make_line((13, -3, 0), (13, -13, 0))
+    arc_b = g.make_arc_3pt((13, -13, 0), (9, -16, 0), (5, -13, 0))
+    line_c = g.make_line((5, -13, 0), (0, -13, 0))
+    closing = g.make_line((0, -13, 0), (0, 0, 0))
+    closed_path = g.join_curves([line_a, arc_a, line_b, arc_b, line_c,
+                                 closing])
+    out = g.fillet_corners(closed_path, 0.8)
+    assert g.is_valid(out)
+    assert g.is_closed_curve(out)
+    assert g.curve_length(out) < g.curve_length(closed_path)
+
+
+def test_fillet_corners_refuses_pieces_that_are_neither_line_nor_arc():
+    spline = g.make_interp_curve([(0, 0, 0), (5, 3, 0), (10, 0, 0)])
+    line = g.make_line((10, 0, 0), (10, 10, 0))
+    with pytest.raises(g.GeometryError, match="straight and arc pieces"):
+        g.fillet_corners(g.join_curves([spline, line]), 1.0)
 
 
 def test_filletedge_command_rounds_every_corner_via_filletcorners(env):

@@ -317,7 +317,7 @@ def cmd_fillet(ctx):
 
 @command("filletcorners")
 def cmd_filletcorners(ctx):
-    """Round every corner of a straight-sided polyline at once."""
+    """Round every corner of a polyline at once, straight and arc pieces alike."""
     from .solids_edit import _edge_size_req
     objs = yield SelectReq("Select polyline to fillet every corner of",
                            kinds=("curve",), max_count=1)

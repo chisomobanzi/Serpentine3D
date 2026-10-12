@@ -54,7 +54,27 @@ def _qapp():
     """A full QApplication before anything creates a QGuiApplication
     (core/text.py would otherwise block widget construction later)."""
     from PySide6.QtWidgets import QApplication
-    yield QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
+    _deploy_fonts()
+    yield app
+
+
+def _deploy_fonts():
+    """The offscreen platform loads no system fonts on Windows: the font
+    database comes up empty and every family query misses — the monospace
+    kind line resolves to a proportional face and the scripted-text tests
+    get no glyph outlines at all. Qt asks shipped apps to deploy fonts;
+    the test's app deploys this machine's own fixed-pitch ones."""
+    from PySide6.QtGui import QFontDatabase
+    if QFontDatabase.families():
+        return
+    import os
+    fonts_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"),
+                             "Fonts")
+    for name in ("consola.ttf", "consolab.ttf", "cour.ttf"):
+        path = os.path.join(fonts_dir, name)
+        if os.path.exists(path):
+            QFontDatabase.addApplicationFont(path)
 from serpentine3d.commands.base import CommandContext, CommandProcessor
 from serpentine3d.core.history import History
 from serpentine3d.core.scene import Scene

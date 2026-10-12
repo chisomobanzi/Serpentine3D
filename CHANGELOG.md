@@ -42,7 +42,38 @@
   alone, and a radius that would make two rounds overlap is refused
   with the piece's number.
 
+- **A variable law may taper to zero at its ends.** A law point could
+  never take a zero radius; now the law's end points may — the blend
+  thins out to a knife edge the way SolidWorks' variable fillet tapers
+  at a chain's end. Interior points still need a positive radius, and
+  at least one end has to stay positive, with a word about which rule
+  was hit.
+
+- **`filletcorners` rounds arc corners too.** A polyline corner where a
+  straight piece meets an arc — or two arcs meet — used to be skipped
+  and only line-to-line corners rounded; now every corner of the
+  polyline rounds in the same pass, the piece between two rounds is
+  trimmed along its own arc when it has to be, and a radius that would
+  eat it backwards is refused with the piece's number, as before.
+
 ### Changed
+
+- **A fillet never hands back a broken solid.** The kernel sometimes
+  reports success and still returns a shape that fails its own solid
+  checks — a radius wider than the plate it runs along left a body the
+  mesher and the printer both choke on. The blend now checks its result
+  before returning it, and a broken one is reported like any other
+  failure, with the advice to go smaller.
+
+- **A dirty input gets one repair pass.** An imported shape that fails
+  its solid checks used to make the blend die with whatever the kernel
+  said about it; now the shape is repaired (ShapeFix) and the blend is
+  retried on the repaired solid before the failure stands.
+
+- **The failure line names the way the blend died.** A chain whose
+  surface comes out twisted and one the blend could not walk along used
+  to share the generic "failed the blend" line; each now says which, so
+  a shallow-angle twist and a too-large radius read differently.
 
 - **`fillet` works in the plane the curves already live on.** Two curves
   were filleted in world XY at the corner's height, so an L drawn on a
