@@ -36,9 +36,9 @@
 
 - **Every corner of a polyline rounded at once (`filletcorners`).** A
   rectangle took four passes of `fillet` and joins in between; the new
-  command takes one radius and rounds all the corners of a
-  straight-sided polyline in one pass. Closed ones come back closed and
-  open ones keep their ends, joints that are already smooth are left
+  command takes one radius and rounds all the corners of a polyline in
+  one pass, straight and arc pieces alike. Closed ones come back closed
+  and open ones keep their ends, joints that are already smooth are left
   alone, and a radius that would make two rounds overlap is refused
   with the piece's number.
 
@@ -68,7 +68,9 @@
 - **A dirty input gets one repair pass.** An imported shape that fails
   its solid checks used to make the blend die with whatever the kernel
   said about it; now the shape is repaired (ShapeFix) and the blend is
-  retried on the repaired solid before the failure stands.
+  retried on the repaired solid — picked edges re-resolved onto it, and
+  the retry skipped when the repair rebuilt the wire layout — before the
+  failure stands.
 
 - **The failure line names the way the blend died.** A chain whose
   surface comes out twisted and one the blend could not walk along used

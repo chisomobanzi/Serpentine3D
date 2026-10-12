@@ -171,3 +171,64 @@ def test_extreme_model_scales_keep_their_blends_valid():
         g.make_box((0, 0, 0), 10000, 10000, 10000), 1000.0)
     assert g.is_valid(huge)
     assert g.volume(huge) < 10000 ** 3
+
+
+def test_a_repair_retry_re_resolves_the_picked_edges(monkeypatch):
+    box = g.make_box((0, 0, 0), 10, 10, 10)
+    e = g.edges_of(box)[0]
+    repaired = g.copy_shape(box)
+    monkeypatch.setattr(g, "_repaired_input", lambda shape: repaired)
+    calls = []
+
+    def fake_build(shape, radius, radii, r_pair, law, edges, chamfer,
+                   transition, verb):
+        calls.append((shape, edges))
+        if len(calls) == 1:
+            raise g._FilletBuildError("boom", [0])
+        # the second attempt feeds the REPAIRED shape its own edges, not
+        # the original shape's handles
+        assert shape is repaired
+        assert len(edges) == 1 and not edges[0].IsSame(e)
+        assert g.curve_endpoints(edges[0]) == g.curve_endpoints(e)
+        return g.make_box((0, 0, 0), 10, 10, 10)
+
+    monkeypatch.setattr(g, "_fillet_edges_build", fake_build)
+    out = g.fillet_edges(box, 1.0, edges=[e])
+    assert g.shape_kind(out) == "solid"
+    assert len(calls) == 2
+
+
+def test_a_repair_that_rebuilds_the_wire_layout_skips_the_retry(monkeypatch):
+    box = g.make_box((0, 0, 0), 10, 10, 10)
+    e = g.edges_of(box)[0]
+    # a repair that moved the wire layout: no edge of this stand-in
+    # matches the picked edge, so the retry must not happen at all
+    unrelated = g.make_box((100, 100, 100), 10, 10, 10)
+    monkeypatch.setattr(g, "_repaired_input", lambda shape: unrelated)
+    calls = []
+
+    def failing_build(shape, radius, radii, r_pair, law, edges, chamfer,
+                      transition, verb):
+        calls.append(edges)
+        raise g._FilletBuildError("boom", [0])
+
+    monkeypatch.setattr(g, "_fillet_edges_build", failing_build)
+    with pytest.raises(g.GeometryError, match="boom"):
+        g.fillet_edges(box, 1.0, edges=[e])
+    assert len(calls) == 1          # the original failure stands, honest
+
+
+def test_filletcorners_says_which_piece_is_not_roundable(env):
+    scene, sel, hist, ctx, proc = env
+    echoes = []
+    ctx.add_echo_listener(echoes.append)
+    spline = scene.add(g.make_control_curve(
+        [(0, 0, 0), (5, 5, 0), (10, 0, 0)], degree=2))
+    proc.run("filletcorners")
+    proc.click_object(spline.id)
+    proc.finish_selection()
+    proc.provide_text("2")
+    assert not proc.busy
+    # the command names the piece, instead of a generic framework error
+    assert any("piece 1 is neither" in m for m in echoes)
+    assert not any(m.startswith("Error:") for m in echoes)

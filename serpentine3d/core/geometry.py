@@ -1123,15 +1123,22 @@ def fillet_edges(shape, radius=None, edges: list | None = None,
                                    chamfer, transition, verb)
     except _FilletBuildError as err:
         # an invalid input can make the blend fail or come out broken;
-        # one repair pass and a rebuild before the failure stands
+        # one repair pass and a rebuild before the failure stands. The
+        # picked edges are handles into the ORIGINAL shape; a repair that
+        # rebuilt the topology renames them, so they are re-resolved onto
+        # the repaired solid — and when no honest stand-in exists, the
+        # retry is skipped rather than fed edges it does not own.
         repaired = _repaired_input(shape)
         if repaired is not None:
-            try:
-                return _fillet_edges_build(repaired, radius, radii, r_pair,
-                                           law, edges, chamfer, transition,
-                                           verb)
-            except _FilletBuildError:
-                pass  # the original failure is the honest one to report
+            fixed_edges = (None if edges is None
+                           else _edges_on_repaired(repaired, edges))
+            if edges is None or fixed_edges is not None:
+                try:
+                    return _fillet_edges_build(repaired, radius, radii,
+                                               r_pair, law, fixed_edges,
+                                               chamfer, transition, verb)
+                except _FilletBuildError:
+                    pass  # the original failure is the honest one to report
         raise err.as_geometry_error()
 
 
@@ -1149,6 +1156,39 @@ def _repaired_input(shape):
     except Exception:
         return None
     return fixed if is_valid(fixed) else None
+
+
+def _edges_on_repaired(repaired, edges):
+    """The repaired shape's edges standing in for picked edges of the
+    original — matched by endpoints (either way round) within tol(), the
+    closest length breaking a tie — or None when the repair rebuilt the
+    wire layout and some edge has no honest stand-in."""
+    candidates = edges_of(repaired)
+    out = []
+    used = set()
+    for e in edges:
+        p, q = curve_endpoints(e)
+        want = curve_length(e)
+        best = None
+        for k, c in enumerate(candidates):
+            if k in used:
+                continue
+            c0, c1 = curve_endpoints(c)
+            same = ((sum((a - b) ** 2 for a, b in zip(c0, p)) <= tol() ** 2
+                     and sum((a - b) ** 2 for a, b in zip(c1, q)) <= tol() ** 2)
+                    or (sum((a - b) ** 2 for a, b in zip(c0, q)) <= tol() ** 2
+                        and sum((a - b) ** 2 for a, b in zip(c1, p)) <= tol() ** 2))
+            if not same:
+                continue
+            gap = abs(curve_length(c) - want)
+            if best is None or gap < best[0]:
+                best = (gap, k)
+        if best is None:
+            return None
+        k = best[1]
+        used.add(k)
+        out.append(candidates[k])
+    return out
 
 
 class _FilletBuildError(Exception):

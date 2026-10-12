@@ -328,8 +328,12 @@ def cmd_filletcorners(ctx):
     if radius < 1e-9:
         ctx.echo("Zero radius — nothing filleted.")
         return
-    new = ctx.scene.replace_shape(
-        objs[0].id, g.fillet_corners(objs[0].shape, radius))
+    try:
+        new = ctx.scene.replace_shape(
+            objs[0].id, g.fillet_corners(objs[0].shape, radius))
+    except g.GeometryError as exc:
+        ctx.echo(f"{objs[0].name}: {exc}")
+        return
     ctx.echo(f"Rounded every corner of {new.name} (r={radius:g}).")
 
 

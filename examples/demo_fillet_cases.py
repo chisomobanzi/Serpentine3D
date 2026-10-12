@@ -157,5 +157,7 @@ report("HugeScale")
 report("PlateRefused", 400.0)
 report("MeetRefused", 1000.0)
 
+import os
+os.makedirs(os.path.dirname(SCENE) or ".", exist_ok=True)
 doc.save(SCENE)
 print(f"saved {SCENE} with {len(doc.objects())} objects")
