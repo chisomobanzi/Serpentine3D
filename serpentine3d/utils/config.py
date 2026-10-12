@@ -111,6 +111,13 @@ DEFAULTS = {
         # draws before a scan's finer levels are left out
         "point_size": 2.0,
         "point_budget": 2000000,
+        # Whole-interface scale as a factor (1.0 = as shipped). Applied by
+        # the launcher through QT_SCALE_FACTOR, which Qt reads only as the
+        # QApplication is built — so it takes effect on the next launch.
+        # interface_font names the family for the app-wide font; "" leaves
+        # the platform default in charge.
+        "ui_scale": 1.0,
+        "interface_font": "",
     },
     # Window geometry, dock state and view layout from the last session,
     # written on close — see MainWindow._remember_window.

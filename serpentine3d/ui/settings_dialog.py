@@ -9,8 +9,8 @@ from __future__ import annotations
 from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView,
-    QLabel,
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFontComboBox,
+    QHBoxLayout, QHeaderView, QLabel,
     QListWidget, QMessageBox, QPushButton, QRadioButton, QSlider, QSpinBox,
     QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -21,6 +21,7 @@ from ..core.snaps import SNAP_TYPES
 from ..utils.config import (
     DEFAULT_SHORTCUTS, parse_chord, parse_rhino_aliases, parse_shortcuts,
 )
+from . import theme
 from .dialogs import untether
 
 
@@ -686,8 +687,57 @@ class SettingsDialog(QDialog):
         row4.addWidget(self.sp_transition)
         row4.addStretch(1)
         layout.addLayout(row4)
+
+        row5 = QHBoxLayout()
+        row5.addWidget(QLabel("Interface scale"))
+        self.sl_scale = QSlider(Qt.Orientation.Horizontal)
+        self.sl_scale.setRange(100, 150)
+        self.sl_scale.setSingleStep(5)
+        self.sl_scale.setPageStep(10)
+        self.sl_scale.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.sl_scale.setTickInterval(10)
+        self.sl_scale.setValue(round(float(self.cfg.get(
+            "display", "ui_scale", default=1.0)) * 100))
+        self.sl_scale.valueChanged.connect(self._interface_changed)
+        self.lbl_scale = QLabel(f"{self.sl_scale.value()}%")
+        row5.addWidget(self.sl_scale)
+        row5.addWidget(self.lbl_scale)
+        row5.addStretch(1)
+        layout.addLayout(row5)
+
+        row6 = QHBoxLayout()
+        row6.addWidget(QLabel("Interface font"))
+        self.cb_font = QFontComboBox()
+        self.cb_font.insertItem(0, "System default")
+        family = self.cfg.get("display", "interface_font", default="") or ""
+        self.cb_font.setCurrentIndex(
+            self.cb_font.findText(family) if family else 0)
+        self.cb_font.currentIndexChanged.connect(self._font_changed)
+        row6.addWidget(self.cb_font)
+        row6.addStretch(1)
+        layout.addLayout(row6)
+
+        hint = QLabel("The scale applies on the next launch; "
+                      "the font applies now.")
+        hint.setStyleSheet("color: palette(mid);")
+        layout.addWidget(hint)
         layout.addStretch(1)
         return w
+
+    def _interface_changed(self, *_):
+        # the scale is read once at launch, before Qt exists, by
+        # launcher._apply_ui_scale — so persist, and let the hint say so
+        self.cfg.set("display", "ui_scale", self.sl_scale.value() / 100.0)
+        self.lbl_scale.setText(f"{self.sl_scale.value()}%")
+
+    def _font_changed(self, *_):
+        family = (self.cb_font.currentText()
+                  if self.cb_font.currentIndex() > 0 else "")
+        self.cfg.set("display", "interface_font", family)
+        # the font is live: widgets repolish on the font-change event
+        app = QApplication.instance()
+        if app is not None:
+            theme.apply_interface_font(app, family)
 
     def _display_changed(self, *_):
         self.cfg.set("display", "grid_extent", self.sp_extent.value())

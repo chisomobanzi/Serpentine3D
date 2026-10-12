@@ -299,3 +299,25 @@ QCheckBox::indicator:checked {
     border-color: #d9a441;
 }
 """
+
+
+def apply_interface_font(app, family: str) -> None:
+    """The interface font onto the whole app ("" = system default).
+
+    Live-safe: widgets repolish on the font-change event. The kind line
+    sets its own fixed-pitch font and keeps it — tests say so.
+    """
+    from PySide6.QtGui import QFont
+    app.setFont(QFont(family))
+
+
+def apply_saved_interface_font(app) -> None:
+    """The saved interface font (Settings → Display) onto the app.
+
+    Called at startup, before any window is built, so everything inherits
+    it from the beginning.
+    """
+    from ..utils.config import Config
+    family = Config().get("display", "interface_font", default="") or ""
+    if family:
+        apply_interface_font(app, family)

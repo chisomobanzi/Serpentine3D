@@ -3105,6 +3105,9 @@ def run_app(app, splash=None):
     app.setDesktopFileName("serpentine3d")
     app.setStyleSheet(theme.QSS)
 
+    # The saved interface font, on before any window is built.
+    theme.apply_saved_interface_font(app)
+
     if splash:
         splash.message("Preparing workspace…", 0.7)
     window = MainWindow()
