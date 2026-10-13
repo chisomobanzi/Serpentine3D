@@ -7,7 +7,7 @@ import signal
 import sys
 
 import numpy as np
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QProcess, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
@@ -2258,7 +2258,10 @@ class MainWindow(QMainWindow):
         self.cfg.save()
 
     def closeEvent(self, ev):
-        if self.dirty and self.scene.all():
+        if (self.dirty and self.scene.all()
+                and not getattr(self, "_restarting", False)):
+            # a scale restart saved or handed the work over already —
+            # restart_app sets the flag so the prompt cannot double-ask
             ret = QMessageBox.question(
                 self, "Unsaved changes",
                 "Save changes before closing?",
@@ -3142,16 +3145,36 @@ def run_app(app, splash=None):
                       lambda: warn_if_opengl_failed(window, splash))
     window.offer_recovery()
 
-    for arg in app.arguments()[1:]:
+    args = app.arguments()[1:]
+    restart_origin = _restart_origin(args)
+
+    for arg in args:
         if not arg.startswith("-") and os.path.exists(arg):
             try:
+                from .utils.autosave import HANDOFF_PATH
+                # a restart handoff consumed on arrival: reopened under
+                # its original name, and removed now that it has served
+                handoff = (restart_origin is not None
+                           and os.path.abspath(arg) == HANDOFF_PATH)
                 fileio.import_file(window.scene, arg, replace=True)
-                if arg.endswith(".serp"):
+                if restart_origin is not None:
+                    window.ctx.current_path = restart_origin or None
+                elif arg.endswith(".serp"):
                     window.ctx.current_path = os.path.abspath(arg)
-                window.command_line.echo(
-                    f"Opened {arg}: {len(window.scene.all())} object(s).")
+                if handoff:
+                    os.unlink(arg)
+                    window.command_line.echo(
+                        "Restarted with the new interface scale — "
+                        "unsaved changes were kept.")
+                else:
+                    window.command_line.echo(
+                        f"Opened {arg}: {len(window.scene.all())} object(s).")
                 window.viewport.zoom_extents()
-                window.add_recent(arg)
+                if handoff:
+                    if restart_origin:
+                        window.add_recent(restart_origin)
+                else:
+                    window.add_recent(arg)
             except Exception as exc:                          # noqa: BLE001
                 window.command_line.echo(f"Could not open {arg}: {exc}")
             break
@@ -3164,6 +3187,119 @@ def run_app(app, splash=None):
         _offer_default_app(window)
     window.start_update_check()
     return app.exec()
+
+
+def _restart_origin(args: list[str]) -> str | None:
+    """The document path a restart handoff reopens under, when the argv
+    carries `--restart-origin <path>`; None when it carries no such flag,
+    "" when the flag names no document (it had never been saved)."""
+    for i, arg in enumerate(args):
+        if arg == "--restart-origin" and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def _restart_command() -> list[str]:
+    """The argv that starts this app again, wherever it runs from.
+
+    An AppImage names itself in $APPIMAGE, and re-running it reproduces
+    the whole environment. A frozen bundle without the variable is its
+    own executable. In development the interpreter runs the package
+    module directly.
+    """
+    bundle = os.environ.get("APPIMAGE")
+    if bundle:
+        return [bundle]
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, "-m", "serpentine3d"]
+
+
+def restart_app(window):
+    """Offer a restart so a new interface scale takes effect.
+
+    Qt reads the scale factor only as the QApplication is built, so the
+    setting lands on the next process (launcher._apply_ui_scale). The
+    session survives: a saved document reopens from disk, and unsaved
+    work is copied to the handoff file — safe from clean_exit, invisible
+    to crash recovery — and reopened dirty on the other side. Nothing
+    restarts without the user picking a button.
+    """
+    from .utils.autosave import HANDOFF_PATH
+
+    dirty = window.dirty and window.scene.all()
+    box = QMessageBox(window)
+    box.setWindowTitle("Restart Serpentine3D")
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText("Restart to apply the new interface scale?")
+    if dirty and window.ctx.current_path:
+        box.setInformativeText(
+            "This document has unsaved changes. Save them first, or "
+            "restart without saving — the unsaved work is kept and "
+            "reopened automatically.")
+        save = box.addButton("Save and Restart",
+                             QMessageBox.ButtonRole.AcceptRole)
+        restart = box.addButton("Restart without Saving",
+                                QMessageBox.ButtonRole.DestructiveRole)
+    elif dirty:
+        box.setInformativeText(
+            "This document has never been saved. Save it first, or "
+            "restart without saving — the work is kept and reopened "
+            "automatically.")
+        save = box.addButton("Save As… and Restart",
+                             QMessageBox.ButtonRole.AcceptRole)
+        restart = box.addButton("Restart without Saving",
+                                QMessageBox.ButtonRole.DestructiveRole)
+    else:
+        box.setInformativeText(
+            "The open document reopens exactly as it is now.")
+        save = None
+        restart = box.addButton("Restart", QMessageBox.ButtonRole.AcceptRole)
+    cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(save or restart)
+    box.exec()
+
+    clicked = box.clickedButton()
+    if clicked is cancel:
+        return
+    if clicked is restart:
+        handoff = None
+        if dirty:
+            from .fileio import native
+            try:
+                native.save_scene(window.scene, HANDOFF_PATH)
+                handoff = HANDOFF_PATH
+            except Exception:                                # noqa: BLE001
+                window.command_line.echo(
+                    "Could not hand the unsaved work over — not restarting.")
+                return
+        _relaunch(window, handoff=handoff, origin=window.ctx.current_path)
+        return
+    # save first: _file_save with no current path opens the Save dialog,
+    # and a cancelled pick leaves the window dirty — treat that as "no"
+    window._file_save()
+    if window.dirty:
+        return
+    _relaunch(window, handoff=None, origin=window.ctx.current_path)
+
+
+def _relaunch(window, handoff: str | None, origin: str | None):
+    """Spawn the next session and close this one.
+
+    No unsaved-changes prompt: the work is already on disk (saved, or
+    handed over). The child starts detached, before the close, so an
+    AppImage mount vanishing under this process cannot take it down.
+    """
+    cmd = _restart_command()
+    if handoff:
+        cmd += [handoff, "--restart-origin", origin or ""]
+    elif origin:
+        cmd += [origin]
+    if not QProcess.startDetached(cmd[0], cmd[1:]):
+        window.command_line.echo("Could not start the new instance.")
+        return
+    window._restarting = True
+    window.close()
 
 
 def main():

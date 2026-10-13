@@ -18,6 +18,12 @@ AUTOSAVE_DIR = os.path.join(
 
 DEFAULT_INTERVAL_SEC = 300
 
+# The restart handoff: restart_app copies unsaved work here, where
+# clean_exit (which removes only the pid-named slots) will not touch it,
+# and run_app consumes it on the other side. No session lock is written
+# for it, so crash recovery never mistakes it for a dead session.
+HANDOFF_PATH = os.path.join(AUTOSAVE_DIR, "restart-handoff.serp")
+
 
 if os.name == "nt":
     def _pid_alive(pid: int) -> bool:

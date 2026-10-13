@@ -5,9 +5,13 @@
 ### Added
 
 - **Interface scale and font (Settings → Display).** A scale slider,
-  100% to 150%, grows the whole interface — text, icons, panels — on the
-  next launch, and an interface-font picker (with the system default as
-  a choice) applies immediately. Both stick between sessions. GitHub #74.
+  100% to 150%, grows the whole interface — text, icons, panels — and an
+  interface-font picker (with the system default as a choice) applies
+  immediately. Both stick between sessions, and **Restart to apply**
+  relaunches the app at the new scale with the document still open:
+  saved files reopen from disk, unsaved work is kept and reopened
+  automatically, and nothing restarts without a clear save-first
+  prompt. GitHub #74.
 
 - **Variable-radius fillets swept over the whole smooth chain
   (`filletedge`).** A radius used to be one number, or at best a

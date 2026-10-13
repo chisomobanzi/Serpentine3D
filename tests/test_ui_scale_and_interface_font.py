@@ -8,17 +8,21 @@ the saved settings at startup.
 """
 
 import os
+import sys
 
 import pytest
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QApplication, QWidget
 
+from serpentine3d import app as app_mod
 from serpentine3d import launcher
+from serpentine3d.core import geometry as g
 from serpentine3d.core.scene import Scene
 from serpentine3d.core.selection import SelectionManager
 from serpentine3d.ui import theme
 from serpentine3d.ui import viewport as vp_mod
 from serpentine3d.ui.settings_dialog import SettingsDialog
+from serpentine3d.utils import autosave as autosave_mod
 from serpentine3d.utils.config import Config
 
 FAMILY = "DejaVu Sans"          # on every Linux CI box this runs on
@@ -145,3 +149,196 @@ def test_no_saved_font_leaves_the_platform_default(monkeypatch, tmp_path):
         assert app.font() == before
     finally:
         app.setFont(before)
+
+
+# -------------------------------------------------------------- the restart
+
+
+class _FakeWindow(QWidget):
+    """Just enough window for restart_app to plan a restart against."""
+
+    def __init__(self, scene, dirty, path):
+        super().__init__()
+        self.scene = scene
+        self._dirty = dirty
+        self.ctx = type("_Ctx", (), {"current_path": path})()
+        self.echoes = []
+        self.saved = False
+        self.closed = False
+        self._restarting = False
+        self._pick_cancel = False
+        self.command_line = self
+
+    @property
+    def dirty(self):
+        return self._dirty
+
+    def _file_save(self):
+        if self._pick_cancel:      # the Save dialog was cancelled
+            return
+        self.saved = True
+        self._dirty = False
+
+    def echo(self, message):
+        self.echoes.append(message)
+
+    def close(self):
+        self.closed = True
+
+
+class _Box:
+    """A QMessageBox stand-in that answers with the named button."""
+
+    chosen = None                  # set per test
+    instance = None
+
+    class Icon:
+        Question = object()
+
+    class ButtonRole:
+        AcceptRole = object()
+        RejectRole = object()
+        DestructiveRole = object()
+
+    def __init__(self, parent=None):
+        _Box.instance = self
+        self.buttons = []          # (label, role, button-object)
+
+    def setWindowTitle(self, _): pass
+    def setIcon(self, _): pass
+    def setText(self, _): pass
+    def setInformativeText(self, _): pass
+    def setDefaultButton(self, _): pass
+    def exec(self): pass
+
+    def addButton(self, label, role):
+        button = object()
+        self.buttons.append((label, role, button))
+        return button
+
+    def clickedButton(self):
+        for label, role, button in self.buttons:
+            if label == _Box.chosen:
+                return button
+        return None
+
+
+class _Proc:
+    started = []
+
+    @staticmethod
+    def startDetached(program, arguments):
+        _Proc.started.append((program, arguments))
+        return True
+
+
+@pytest.fixture
+def restart(tmp_path, monkeypatch):
+    _Box.chosen = None
+    _Proc.started = []
+    monkeypatch.setattr(app_mod, "QMessageBox", _Box)
+    monkeypatch.setattr(app_mod, "QProcess", _Proc)
+    handoff = str(tmp_path / "handoff.serp")
+    monkeypatch.setattr(autosave_mod, "HANDOFF_PATH", handoff)
+    return handoff
+
+
+def _scene_with_content():
+    scene = Scene()
+    scene.add(g.make_box((0, 0, 0), 1, 1, 1))
+    return scene
+
+
+def _box_labels():
+    return [label for label, role, button in _Box.instance.buttons]
+
+
+def test_restart_offers_save_first_for_a_dirty_saved_doc(restart):
+    win = _FakeWindow(_scene_with_content(), dirty=True, path="/tmp/doc.serp")
+    _Box.chosen = "Cancel"
+    app_mod.restart_app(win)
+    assert _box_labels() == ["Save and Restart", "Restart without Saving",
+                             "Cancel"]
+    assert not win.closed and _Proc.started == []
+    assert not os.path.exists(restart)
+
+
+def test_restart_without_saving_hands_the_work_over(restart):
+    win = _FakeWindow(_scene_with_content(), dirty=True, path="/tmp/doc.serp")
+    _Box.chosen = "Restart without Saving"
+    app_mod.restart_app(win)
+    assert win.closed and win._restarting
+    assert os.path.exists(restart)          # the handoff copy landed
+    (program, args), = _Proc.started
+    assert program == sys.executable
+    assert args[:2] == ["-m", "serpentine3d"]
+    assert args[2] == restart
+    assert args[3:5] == ["--restart-origin", "/tmp/doc.serp"]
+
+
+def test_save_and_restart_saves_then_relaunches_clean(restart):
+    win = _FakeWindow(_scene_with_content(), dirty=True, path="/tmp/doc.serp")
+    _Box.chosen = "Save and Restart"
+    app_mod.restart_app(win)
+    assert win.saved and win.closed and win._restarting
+    assert not os.path.exists(restart)      # no handoff needed
+    (program, args), = _Proc.started
+    assert args == ["-m", "serpentine3d", "/tmp/doc.serp"]
+
+
+def test_a_cancelled_save_dialog_stops_the_restart(restart):
+    win = _FakeWindow(_scene_with_content(), dirty=True, path=None)
+    win._pick_cancel = True
+    _Box.chosen = "Save As… and Restart"
+    app_mod.restart_app(win)
+    assert _box_labels() == ["Save As… and Restart", "Restart without Saving",
+                             "Cancel"]
+    assert not win.closed and _Proc.started == []
+    assert not os.path.exists(restart)
+
+
+def test_a_clean_doc_restarts_straight_from_disk(restart):
+    win = _FakeWindow(_scene_with_content(), dirty=False, path="/tmp/doc.serp")
+    _Box.chosen = "Restart"
+    app_mod.restart_app(win)
+    assert _box_labels() == ["Restart", "Cancel"]   # no save to offer
+    assert win.closed and win._restarting
+    (program, args), = _Proc.started
+    assert args == ["-m", "serpentine3d", "/tmp/doc.serp"]
+
+
+def test_an_untitled_dirty_doc_hands_over_with_no_origin(restart):
+    win = _FakeWindow(_scene_with_content(), dirty=True, path=None)
+    _Box.chosen = "Restart without Saving"
+    app_mod.restart_app(win)
+    (program, args), = _Proc.started
+    assert args == ["-m", "serpentine3d", restart, "--restart-origin", ""]
+
+
+def test_restart_command_knows_where_it_runs_from(monkeypatch):
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert app_mod._restart_command() == [sys.executable,
+                                          "-m", "serpentine3d"]
+    monkeypatch.setenv("APPIMAGE", "/tmp/Serpentine3D.AppImage")
+    assert app_mod._restart_command() == ["/tmp/Serpentine3D.AppImage"]
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert app_mod._restart_command() == [sys.executable]
+
+
+def test_the_restart_origin_flag_parses():
+    assert app_mod._restart_origin(
+        ["--restart-origin", "a.serp"]) == "a.serp"
+    assert app_mod._restart_origin(["--restart-origin", ""]) == ""
+    assert app_mod._restart_origin([]) is None
+    assert app_mod._restart_origin(["--restart-origin"]) is None
+
+
+def test_the_restart_button_enables_only_after_a_scale_change(dlg):
+    d, cfg = dlg
+    assert not d.btn_restart.isEnabled()      # nothing to apply yet
+    d.sl_scale.setValue(125)
+    assert d.btn_restart.isEnabled()
+    d.sl_scale.setValue(100)                  # back to the launch scale
+    assert not d.btn_restart.isEnabled()

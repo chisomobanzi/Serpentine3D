@@ -34,6 +34,10 @@ def _apply_ui_scale() -> None:
         return                      # hand-edited settings are not a crash
     if 1.0 < scale <= 1.5:          # the slider's range
         os.environ["QT_SCALE_FACTOR"] = f"{scale:g}"
+    else:
+        # also clears a factor inherited from the process we were
+        # restarted by, so scaling back to 100% sticks
+        os.environ.pop("QT_SCALE_FACTOR", None)
 
 
 def main() -> int:

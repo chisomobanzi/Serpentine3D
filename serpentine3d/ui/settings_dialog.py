@@ -698,6 +698,9 @@ class SettingsDialog(QDialog):
         self.sl_scale.setTickInterval(10)
         self.sl_scale.setValue(round(float(self.cfg.get(
             "display", "ui_scale", default=1.0)) * 100))
+        # what this launch already runs at — a restart only matters once
+        # the slider leaves it
+        self._launch_scale = self.cfg.get("display", "ui_scale", default=1.0)
         self.sl_scale.valueChanged.connect(self._interface_changed)
         self.lbl_scale = QLabel(f"{self.sl_scale.value()}%")
         row5.addWidget(self.sl_scale)
@@ -717,18 +720,29 @@ class SettingsDialog(QDialog):
         row6.addStretch(1)
         layout.addLayout(row6)
 
-        hint = QLabel("The scale applies on the next launch; "
-                      "the font applies now.")
-        hint.setStyleSheet("color: palette(mid);")
-        layout.addWidget(hint)
+        self.btn_restart = QPushButton("Restart to apply")
+        self.btn_restart.setEnabled(False)
+        self.btn_restart.clicked.connect(self._restart_for_scale)
+        row7 = QHBoxLayout()
+        row7.addWidget(self.btn_restart)
+        row7.addWidget(QLabel("the scale lands on restart; this "
+                              "document comes back with it"))
+        row7.addStretch(1)
+        layout.addLayout(row7)
         layout.addStretch(1)
         return w
 
+    def _restart_for_scale(self):
+        from ..app import restart_app
+        restart_app(self.window)
+
     def _interface_changed(self, *_):
         # the scale is read once at launch, before Qt exists, by
-        # launcher._apply_ui_scale — so persist, and let the hint say so
+        # launcher._apply_ui_scale — so persist, and offer the restart
         self.cfg.set("display", "ui_scale", self.sl_scale.value() / 100.0)
         self.lbl_scale.setText(f"{self.sl_scale.value()}%")
+        self.btn_restart.setEnabled(
+            self.sl_scale.value() / 100.0 != self._launch_scale)
 
     def _font_changed(self, *_):
         family = (self.cb_font.currentText()
