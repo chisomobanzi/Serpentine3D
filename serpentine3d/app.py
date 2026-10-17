@@ -3145,7 +3145,21 @@ def run_app(app, splash=None):
                       lambda: warn_if_opengl_failed(window, splash))
     window.offer_recovery()
 
-    args = app.arguments()[1:]
+    _open_launch_args(window, app.arguments()[1:])
+
+    from .ui.welcome import WelcomeScreen, should_show as _welcome
+    if _welcome(window):
+        WelcomeScreen(window).exec()
+    from .utils import file_assoc
+    if file_assoc.should_offer(window.cfg):
+        _offer_default_app(window)
+    window.start_update_check()
+    return app.exec()
+
+
+def _open_launch_args(window, args: list[str]):
+    """Open the first existing file the command line names: a double-
+    clicked document, `serp3d file.serp`, or a scale restart's handoff."""
     restart_origin = _restart_origin(args)
 
     for arg in args:
@@ -3174,19 +3188,13 @@ def run_app(app, splash=None):
                     if restart_origin:
                         window.add_recent(restart_origin)
                 else:
+                    # as from File → Open: what is on disk is what is
+                    # open; only a handoff's work is still unsaved
+                    window.mark_saved()
                     window.add_recent(arg)
             except Exception as exc:                          # noqa: BLE001
                 window.command_line.echo(f"Could not open {arg}: {exc}")
             break
-
-    from .ui.welcome import WelcomeScreen, should_show as _welcome
-    if _welcome(window):
-        WelcomeScreen(window).exec()
-    from .utils import file_assoc
-    if file_assoc.should_offer(window.cfg):
-        _offer_default_app(window)
-    window.start_update_check()
-    return app.exec()
 
 
 def _restart_origin(args: list[str]) -> str | None:

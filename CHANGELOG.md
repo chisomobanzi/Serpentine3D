@@ -97,6 +97,14 @@
   "the largest radius that fits is about 4.93" for that object, instead of
   leaving "try a smaller value" as the whole conversation.
 
+### Fixed
+
+- **A file opened by double-clicking it no longer asks to be saved.** A
+  document handed over on the command line (a double-click, `serp3d
+  file.serp`, or Open With) came up marked as changed, so closing it
+  untouched asked whether to save. It now starts saved, as it does from
+  File → Open.
+
 ## 0.11.0 (2026-10-11)
 
 ### Added
