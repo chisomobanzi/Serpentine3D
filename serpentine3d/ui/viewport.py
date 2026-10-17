@@ -25,7 +25,9 @@ from ..utils import units as _units
 # module (and the kernel behind it); re-exported here for old callers.
 from ..utils.glsetup import set_default_gl_format  # noqa: F401
 from . import section_caps as _caps
-from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
+from ..utils.math3d import (ANCHOR_NEAR, display_coords, normalize,
+                            ray_line_parameter, ray_plane, ray_plane_any,
+                            ray_triangle_hits)
 from . import gpu_share, theme
 from .camera import (
     STANDARD_VIEWS,
@@ -452,7 +454,7 @@ def _dashed_edge_segments(mesh, pattern, scale):
         out.extend(dash_polyline(poly, pattern, scale))
     if not out:
         return np.zeros((0, 2, 3), np.float32)
-    return np.asarray(out, np.float32)
+    return display_coords(out)
 
 
 # Vertex attribute layouts, as (location, floats, stride, byte offset).
@@ -520,7 +522,11 @@ def _thick_arrays(segments):
 # None and every object shares the frame's one float32 matrix, which is
 # what keeps _set_mvp's one-upload-per-frame behaviour on the scenes
 # that never had the problem.
-ANCHOR_NEAR = 4096.0            # float32 grid out here: half a micron
+#
+# The anchor's threshold, ANCHOR_NEAR, lives with display_coords in
+# utils/math3d: the same number decides which coordinates come out of the
+# kernel in double precision, since an anchor can only recover digits the
+# data still has.
 
 
 def mesh_anchor(mesh):

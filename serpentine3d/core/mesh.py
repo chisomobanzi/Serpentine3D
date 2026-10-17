@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..utils.math3d import display_coords
+
 # The fold a mesh is read as meaning: sharper than this is an edge someone
 # drew, gentler is one surface curving. The outline and the shading ask the
 # same question, so they ask it the same way.
@@ -171,8 +173,8 @@ class MeshShape:
             return np.zeros((0, 2, 3), np.float32)
         keep.sort()                              # the order the loop produced
         kept = key_sorted[keep]                  # unpacked only for the few
-        return points[np.column_stack(divmod(kept, len(points)))] \
-            .astype(np.float32)
+        pairs = np.column_stack(divmod(kept, len(points)))
+        return display_coords(points[pairs])
 
 
 def merge(meshes) -> MeshShape:
@@ -356,7 +358,7 @@ def mesh_to_display(mesh: MeshShape):
         else:
             normals = np.zeros((len(verts), 3), np.float32)
 
-        dm.vertices = verts.astype(np.float32)
+        dm.vertices = display_coords(verts)
         dm.triangles = tris.astype(np.uint32)
         dm.normals = normals
         dm.face_of_triangle = np.zeros(len(tris), np.int32)

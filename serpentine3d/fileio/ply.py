@@ -142,10 +142,16 @@ def export_ply(items, path: str):
     clouds = [c for _, c in items if isinstance(c, PointCloudShape)]
     if not clouds:
         raise ValueError("Nothing to export: PLY carries point clouds only")
-    xyz = np.concatenate([c.xyz for c in clouds]).astype("<f4")
+    # A scan at survey coordinates is written as doubles: float32 steps a
+    # quarter of a metre out there, which is a scan turned into a set of
+    # lines. Near home it stays float, as every reader expects of a PLY.
+    far = any(c.far for c in clouds)
+    coord = "<f8" if far else "<f4"
+    kind = "double" if far else "float"
+    xyz = np.concatenate([c.xyz for c in clouds]).astype(coord)
     n = len(xyz)
-    fields = [("x", "<f4"), ("y", "<f4"), ("z", "<f4")]
-    props = ["property float x", "property float y", "property float z"]
+    fields = [("x", coord), ("y", coord), ("z", coord)]
+    props = [f"property {kind} {axis}" for axis in "xyz"]
     rgb = conf = level = None
     if all(c.rgb is not None for c in clouds):
         rgb = np.concatenate([c.rgb for c in clouds]).astype(np.uint8)

@@ -352,6 +352,40 @@ def export_file(scene, path: str, only_ids: list | None = None,
                           stl_quality, rhino_version)
 
 
+# Formats whose own coordinates are single precision: a Rhino mesh's
+# vertices and a binary STL's floats are float32 however many digits we
+# hand them, so a model far from the world's origin lands on that grid
+# whatever this program does with it. Everything else carries doubles, or
+# (glTF) places a far mesh by its node instead. Saying so is the only
+# thing left to do for these two.
+_SINGLE_PRECISION = {".3dm": "Rhino mesh vertices",
+                     ".stl": "STL coordinates"}
+
+
+def _precision_note(objs, ext) -> str | None:
+    """What a single-precision format will do to a far model, or None."""
+    import numpy as np
+
+    from ..utils.math3d import ANCHOR_NEAR
+    what = _SINGLE_PRECISION.get(ext)
+    if what is None:
+        return None
+    reach = 0.0
+    for o in objs:
+        try:
+            mn, mx = o.bbox()
+        except Exception:                                  # noqa: BLE001
+            continue
+        reach = max(reach, max(abs(float(c)) for c in (*mn, *mx)))
+    if reach <= ANCHOR_NEAR:
+        return None
+    step = float(np.spacing(np.float32(reach)))
+    return (f"{what} are single precision: this model reaches "
+            f"{reach:,.0f} units from the origin, where they step "
+            f"{step:.3g} units. Move it near the origin, or export STEP, "
+            "to keep detail finer than that.")
+
+
 def _export_shapes(scene, path, ext, objs, only_ids, thumbnail, stl_quality,
                    rhino_version):
     if ext in (".step", ".stp"):
@@ -371,7 +405,7 @@ def _export_shapes(scene, path, ext, objs, only_ids, thumbnail, stl_quality,
         from . import stl
         stl.export_stl([(o.name, o.shape) for o in objs], path,
                        quality=stl_quality)
-        return
+        return _precision_note(objs, ext)
     if ext == ".3mf":
         from . import threemf
         threemf.export_3mf(
@@ -382,7 +416,7 @@ def _export_shapes(scene, path, ext, objs, only_ids, thumbnail, stl_quality,
         from . import rhino
         rhino.export_3dm(scene, path, only_ids=only_ids,
                          version=rhino_version)
-        return
+        return _precision_note(objs, ext)
     if ext == ".dxf":
         from . import dxf as dxf_mod
         dxf_mod.export_dxf(scene, path, only_ids=only_ids)

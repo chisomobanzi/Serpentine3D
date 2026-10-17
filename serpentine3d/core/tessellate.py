@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ..utils.math3d import display_coords
 from . import occ, geometry
 from .occ import (
     BRepMesh_IncrementalMesh, TopExp_Explorer, TopLoc_Location,
@@ -152,7 +153,7 @@ def _face_mesh(face) -> tuple | None:
         curv = _vertex_curvature(face, tri, n, reversed_face)
     else:
         curv = np.zeros(n, np.float32)
-    return verts.astype(np.float32), normals, idx, curv
+    return display_coords(verts), normals, idx, curv
 
 
 _CURVATURE = False      # latched on by the first curvature-mode viewport
@@ -208,11 +209,11 @@ def _edge_polyline(edge, deflection: float) -> np.ndarray | None:
         n = disc.NbPoints()
         if n < 2:
             return None
-        pts = np.empty((n, 3), np.float32)
+        pts = np.empty((n, 3), np.float64)
         for i in range(1, n + 1):
             p = disc.Value(i)
             pts[i - 1] = (p.X(), p.Y(), p.Z())
-        return pts
+        return display_coords(pts)
     except Exception:
         return None
 
@@ -335,10 +336,10 @@ def _face_isocurves(face) -> list[np.ndarray]:
                     run.append((p.X(), p.Y(), p.Z()))
                 else:
                     if len(run) >= 2:
-                        polylines.append(np.asarray(run, np.float32))
+                        polylines.append(display_coords(run))
                     run = []
             if len(run) >= 2:
-                polylines.append(np.asarray(run, np.float32))
+                polylines.append(display_coords(run))
     return polylines
 
 
@@ -397,13 +398,13 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         mesh.has_curvature = _CURVATURE
         mesh.face_of_triangle = np.concatenate(tri_face_ids)
     if segments:
-        mesh.edge_segments = np.concatenate(segments).astype(np.float32)
+        mesh.edge_segments = np.concatenate(segments)
         mesh.edge_of_segment = np.concatenate(seg_edge_ids)
     if isos:
-        mesh.iso_segments = np.concatenate(isos).astype(np.float32)
+        mesh.iso_segments = np.concatenate(isos)
 
     # free-standing points: vertex shapes and vertices dangling in compounds
     free_pts = geometry.free_points(shape)
     if free_pts:
-        mesh.points = np.asarray(free_pts, np.float32)
+        mesh.points = display_coords(free_pts)
     return mesh

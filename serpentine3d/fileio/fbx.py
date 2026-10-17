@@ -41,6 +41,12 @@ def _fmt_floats(arr) -> str:
     return ",".join(f"{x:.6g}" for x in np.asarray(arr, float).reshape(-1))
 
 
+def _fmt_coords(arr) -> str:
+    """Positions, which need more digits than a direction does: six of
+    them put a model at survey coordinates on a decimetre grid."""
+    return ",".join(f"{x:.15g}" for x in np.asarray(arr, float).reshape(-1))
+
+
 def _ascii_doc(geoms) -> str:
     """geoms: [(name, verts(Nx3), poly_indices(flat, XOR-term),
     pv_normals(Mx3) or None, color or None)]."""
@@ -74,7 +80,7 @@ def _ascii_doc(geoms) -> str:
         L.append(f'\tGeometry: {g}, "Geometry::{name}", "Mesh" {{')
         v = np.asarray(verts, float).reshape(-1)
         L.append(f"\t\tVertices: *{v.size} {{")
-        L.append(f"\t\t\ta: {_fmt_floats(v)}")
+        L.append(f"\t\t\ta: {_fmt_coords(v)}")
         L.append("\t\t}")
         L.append(f"\t\tPolygonVertexIndex: *{len(poly)} {{")
         L.append("\t\t\ta: " + ",".join(str(int(x)) for x in poly))

@@ -21,7 +21,7 @@ def _rubber(pts):
     """Preview segments through a point list."""
     if len(pts) < 2:
         return None
-    a = np.asarray(pts, np.float32)
+    a = np.asarray(pts, float)
     return np.stack([a[:-1], a[1:]], axis=1)
 
 

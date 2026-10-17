@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import re
 
+import numpy as np
+
 from ..core.tessellate import tessellate
+from ..utils.math3d import origin_for
 
 
 def _safe(name: str) -> str:
@@ -46,8 +49,21 @@ def export_usda(scene, path: str, only_ids: list | None = None):
         # What a renderer should show, which is the material's colour when it
         # has one — same reasoning as the glTF exporter.
         color = scene.render_color_of(obj)
-        pts = ", ".join(f"({v[0]:.6g}, {v[1]:.6g}, {v[2]:.6g})"
-                        for v in mesh.vertices)
+        # USD's point3f is float32, as glTF's positions are, so a mesh far
+        # from the world's origin is written about its own origin and
+        # placed by a translate op, which is a double3 and can hold where
+        # it stands. Near home there is no op and nothing changes.
+        verts = np.asarray(mesh.vertices, float)
+        origin = origin_for(verts)
+        if origin is not None:
+            verts = verts - origin
+        pts = ", ".join(f"({v[0]:.15g}, {v[1]:.15g}, {v[2]:.15g})"
+                        for v in verts)
+        placement = [] if origin is None else [
+            "        double3 xformOp:translate = "
+            f"({origin[0]:.15g}, {origin[1]:.15g}, {origin[2]:.15g})",
+            '        uniform token[] xformOpOrder = ["xformOp:translate"]',
+        ]
         counts = ", ".join("3" for _ in mesh.triangles)
         indices = ", ".join(str(int(i)) for t in mesh.triangles for i in t)
         m = obj.material or {}
@@ -56,6 +72,7 @@ def export_usda(scene, path: str, only_ids: list | None = None):
             f'        prepend apiSchemas = ["MaterialBindingAPI"]',
             "    )",
             "    {",
+            *placement,
             f"        point3f[] points = [{pts}]",
             f"        int[] faceVertexCounts = [{counts}]",
             f"        int[] faceVertexIndices = [{indices}]",

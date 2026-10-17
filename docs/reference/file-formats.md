@@ -27,6 +27,11 @@ format is chosen by extension.
   model units. Invalid samples are omitted; 16-bit colours are converted to
   8-bit RGB for display. Save as `.serp` to retain the imported clouds. Embedded
   photographs, intensity and scanner-specific metadata are not imported.
+- **Georeferenced scans.** A station standing at survey or UTM coordinates
+  keeps its points relative to its own position, so they stay accurate to a
+  micron however far from the world's origin the scan sits, both on screen
+  and in the saved file. A PLY export of such a scan is written with double
+  coordinates; readers that only take single-precision PLY will round it.
 - **SketchUp files.** Choose File > Import or drag a `.skp` into the window;
   SketchUp itself is not needed, on any platform. Each group or component at
   the top of the model becomes an object for every separate body in it,

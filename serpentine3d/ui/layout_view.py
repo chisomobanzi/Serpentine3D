@@ -54,7 +54,7 @@ def point_marks(points, size: float) -> np.ndarray:
         x, y, z = float(p[0]), float(p[1]), float(p[2])
         segs.append([[x - size, y, z], [x + size, y, z]])
         segs.append([[x, y - size, z], [x, y + size, z]])
-    return np.asarray(segs, np.float32).reshape(-1, 2, 3)
+    return np.asarray(segs, float).reshape(-1, 2, 3)
 
 
 def hlr_visible_segments(by_obj, to_paper, is_picked,
@@ -203,7 +203,7 @@ class DetailEye:
         the paper before the sheet's own transform can put it on screen.
         """
         from ..core.layout import detail_project
-        arr = np.asarray(points, np.float32).reshape(-1, 3)
+        arr = np.asarray(points, float).reshape(-1, 3)
         out = np.zeros_like(arr)
         for i, p in enumerate(arr):
             out[i, :2] = detail_project(self.detail, p)

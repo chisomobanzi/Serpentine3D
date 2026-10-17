@@ -1,5 +1,65 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A scan at survey coordinates is a scan again, not a set of lines.**
+  A point cloud was held in absolute float32, whose grid steps 3cm at half
+  a million units and a quarter of a metre at a UTM northing, so a
+  georeferenced station had its samples snapped onto the grid's planes:
+  2000 points spread over half a metre came back as 98 distinct values
+  along one axis, which is what you saw on screen: lines, not a surface.
+  A cloud now keeps its points as float32 offsets from a float64 origin
+  near it, picked when the cloud is built and carried with it through
+  moves, turns, subsets and copies. Offsets are good to a micron wherever
+  the scan stands. An E57 station takes the origin from its own pose, so
+  the precision is kept from the moment the file is read. The .serp
+  container writes the origin beside the (still float32) blob, the
+  session record carries it through undo and paste, and a PLY export of a
+  far scan is written as doubles rather than rounded on the way out. Old
+  files have no origin and open exactly as they did; a file of clouds
+  near the world's origin is byte for byte what it was before.
+
+- **A far model goes out of the program with the detail it has.** The
+  sweep that followed the two fixes above found the same rounding on
+  every other way out of a drawing. A mesh object in a `.serp` was stored
+  as absolute float32 and came back from its own file on a 6cm grid; so
+  did any shape that went through undo, Copy or Paste. Both now carry an
+  origin beside the points, as a scan does. OBJ wrote eight significant
+  digits, 3MF six and ASCII STL seven, which put a survey model on a
+  decimetre grid in the file; they write enough digits for a micron now.
+  A far mesh in a `.glb` or a `.usda` is written about its own origin and
+  placed by its node's translation, the way both formats mean a scene to
+  be assembled, since glTF positions and USD's `point3f` are float32
+  whatever is handed to them. A PLY of a far scan is
+  written as doubles. Exporting to the two formats whose own coordinates
+  are single precision whatever we hand them (Rhino `.3dm`, whose mesh
+  vertices are float32, and STL) now says so, naming the grid the model
+  will land on and suggesting STEP instead, rather than quietly
+  flattening the detail. On screen, the rubber band, a command's preview
+  and a detail view on a sheet were each casting model points to float32
+  before the anchor could subtract anything; they no longer do.
+
+- **A millimetre detail at survey coordinates is the size you modelled
+  it.** 0.8.1 stopped far geometry swimming while the camera moved, but
+  the data arriving at the renderer had already been rounded: the kernel
+  cast every display vertex, edge and isocurve to float32 on its way out,
+  and that grid is 8mm wide at 100,000 units and 6cm at a million. The
+  anchoring subtracts in double precision and so can only give back
+  digits the data still has, which left a surveyed building's 4mm reveal
+  holding still and wrong, two faces on one grid node fighting over
+  every pixel, and a 4mm box out there with no width at all. Display
+  coordinates now stay in double precision as far as the upload, where
+  the anchor has already made them small, so a georeferenced model draws
+  its detail rather than the grid it landed on. The gumball's handles and
+  a dashed linetype's segments took the same route and were rounded the
+  same way; both now ride the anchor properly. Picking, snapping and a
+  clipping plane's cut lines read the same arrays, so they are exact out
+  there too. Near the origin nothing changes: float32 is good to a
+  fraction of a micron there and costs half the memory, which on a
+  scanned survey is most of the file.
+
 ## 0.12.0 (2026-10-17)
 
 ### Added

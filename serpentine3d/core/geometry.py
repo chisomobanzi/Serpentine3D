@@ -4116,6 +4116,12 @@ def is_valid(shape) -> bool:
 # than let every caller learn that, the bytes carry their own kind: a
 # mesh is tagged, anything else is the BREP it always was.
 _MESH_TAG = b"SMSH\x01"
+# Version 2 of it: a float64 origin, then the vertices as float32 offsets
+# from it. float32 steps 6cm at a million units, so a survey mesh written
+# absolute was rounded onto that grid every time it went through undo or
+# the clipboard. Offsets are good to a micron wherever the mesh stands and
+# cost the same bytes. A mesh near the origin is still written as \x01.
+_MESH_ORIGIN_TAG = b"SMSH\x02"
 # A point cloud the same way, for the clipboard, the journal and undo: the
 # .serp file itself keeps clouds as raw blobs (fileio/native.py), not this.
 _CLOUD_TAG = b"SPCL\x01"
@@ -4135,9 +4141,16 @@ def shape_to_bytes(shape) -> bytes:
         return _CLOUD_TAG + _cloud_pack(shape)
     if isinstance(shape, MeshShape):
         import numpy as np
-        v = np.ascontiguousarray(shape.vertices, "<f4")
+        from ..utils.math3d import offsets_from, origin_for
         t = np.ascontiguousarray(shape.triangles, "<u4")
-        return (_MESH_TAG + struct.pack("<II", len(v), len(t))
+        origin = origin_for(shape.vertices)
+        if origin is None:
+            v = np.ascontiguousarray(shape.vertices, "<f4")
+            return (_MESH_TAG + struct.pack("<II", len(v), len(t))
+                    + v.tobytes() + t.tobytes())
+        v = np.ascontiguousarray(offsets_from(shape.vertices, origin), "<f4")
+        return (_MESH_ORIGIN_TAG + struct.pack("<II", len(v), len(t))
+                + np.ascontiguousarray(origin, "<f8").tobytes()
                 + v.tobytes() + t.tobytes())
     fd, path = tempfile.mkstemp(suffix=".brep")
     os.close(fd)
@@ -4154,15 +4167,22 @@ def _cloud_pack(cloud) -> bytes:
     parts = [struct.pack("<I", cloud.count)]
     flags = ((1 if cloud.rgb is not None else 0)
              | (2 if cloud.conf is not None else 0)
-             | (4 if cloud.level is not None else 0))
+             | (4 if cloud.level is not None else 0)
+             # Bit 8: the float32 points are offsets from a float64 origin
+             # written after them, as the .serp container stores a scan far
+             # from the world's origin. Records written before this have
+             # the bit clear and their points are absolute.
+             | (8 if cloud.far else 0))
     parts.append(struct.pack("<I", flags))
-    parts.append(np.ascontiguousarray(cloud.xyz, "<f4").tobytes())
+    parts.append(np.ascontiguousarray(cloud.local, "<f4").tobytes())
     if cloud.rgb is not None:
         parts.append(np.ascontiguousarray(cloud.rgb, np.uint8).tobytes())
     if cloud.conf is not None:
         parts.append(np.ascontiguousarray(cloud.conf, "<f4").tobytes())
     if cloud.level is not None:
         parts.append(np.ascontiguousarray(cloud.level, np.uint8).tobytes())
+    if cloud.far:
+        parts.append(np.ascontiguousarray(cloud.origin, "<f8").tobytes())
     return b"".join(parts)
 
 
@@ -4183,7 +4203,11 @@ def _cloud_unpack(data: bytes, offset: int):
         at += n * 4
     if flags & 4:
         level = np.frombuffer(data, np.uint8, count=n, offset=at)
-    return PointCloudShape(xyz, rgb, conf, level)
+        at += n
+    origin = None
+    if flags & 8:
+        origin = np.frombuffer(data, "<f8", count=3, offset=at)
+    return PointCloudShape(xyz, rgb, conf, level, origin=origin)
 
 
 def shape_from_bytes(data: bytes):
@@ -4198,15 +4222,20 @@ def shape_from_bytes(data: bytes):
         return PictureShape.from_bytes(data)
     if data[:len(_CLOUD_TAG)] == _CLOUD_TAG:
         return _cloud_unpack(data, len(_CLOUD_TAG))
-    if data[:len(_MESH_TAG)] == _MESH_TAG:
+    if data[:len(_MESH_TAG)] in (_MESH_TAG, _MESH_ORIGIN_TAG):
         import numpy as np
         from .mesh import MeshShape
+        rebased = data[:len(_MESH_TAG)] == _MESH_ORIGIN_TAG
         head = len(_MESH_TAG) + 8
         nv, nt = struct.unpack("<II", data[len(_MESH_TAG):head])
+        origin = np.zeros(3)
+        if rebased:
+            origin = np.frombuffer(data, "<f8", count=3, offset=head)
+            head += 24
         cut = head + nv * 12
         return MeshShape(
             np.frombuffer(data, "<f4", count=nv * 3,
-                          offset=head).reshape(-1, 3).astype(float),
+                          offset=head).reshape(-1, 3).astype(float) + origin,
             np.frombuffer(data, "<u4", count=nt * 3,
                           offset=cut).reshape(-1, 3))
     fd, path = tempfile.mkstemp(suffix=".brep")

@@ -1625,7 +1625,7 @@ class MainWindow(QMainWindow):
             # of the shape it was meant to help place. The number it carried is
             # still wanted, so it is asked for as sides instead of a length.
             if len(chain) >= 2 and sides is None and req.rubber_band:
-                arr = np.asarray(chain, np.float32)
+                arr = np.asarray(chain, float)
                 segs = np.stack([arr[:-1], arr[1:]], axis=1)
         # in every pane, for the same reason the picked points already are:
         # world points with a line between them, and each pane knows how to

@@ -1058,7 +1058,7 @@ class Gumball:
             c1 = anchor + u * PAD1 * s + v * PAD0 * s
             c2 = anchor + (u + v) * PAD1 * s
             c3 = anchor + u * PAD0 * s + v * PAD1 * s
-            tris = np.asarray([c0, c1, c2, c0, c2, c3], np.float32)
+            tris = np.asarray([c0, c1, c2, c0, c2, c3], float)
             self._tris(mvp, tris, (*self._colour(("pad", i), colours[i]),
                                    PAD_ALPHA))
 
@@ -1071,7 +1071,7 @@ class Gumball:
                 else:
                     a0 = anchor + axis * SHAFT0 * s
                     a1 = anchor + axis * SHAFT1 * s
-                    self._lines(mvp, np.asarray([a0, a1], np.float32),
+                    self._lines(mvp, np.asarray([a0, a1], float),
                                 (*color, 1.0), 2.4)
                     self._cone(mvp, anchor, axis, axes[(i + 1) % 3],
                                axes[(i + 2) % 3], s, (*color, 1.0))
@@ -1091,7 +1091,7 @@ class Gumball:
                 col = self._colour(("menu", 0), TAG_COLOR)
                 self._lines(mvp, np.asarray(
                     [anchor + d * 0.92 * s, tag - d * TAG_R * 1.6 * s],
-                    np.float32), (*col, 0.75), 1.2)
+                    float), (*col, 0.75), 1.2)
                 self._ring_at(mvp, tag, TAG_R * s, (*col, 1.0))
         if self._face_mode():                 # a faint square in the plane
             n = self._face_normal()
@@ -1100,7 +1100,7 @@ class Gumball:
             c0, c1 = anchor + (u + v) * r, anchor + (u - v) * r
             c2, c3 = anchor - (u + v) * r, anchor - (u - v) * r
             self._lines(mvp, np.asarray([c0, c1, c1, c2, c2, c3, c3, c0],
-                                        np.float32),
+                                        float),
                         (*self._colour(("move", 2), PP_COLOR), 0.5), 1.4)
         GL.glEnable(GL.GL_DEPTH_TEST)
         self.vp._line_width(1.0)
@@ -1123,7 +1123,7 @@ class Gumball:
         pts = [anchor + ARC_R * s * (u * math.cos(k / 48 * 2 * math.pi)
                                      + v * math.sin(k / 48 * 2 * math.pi))
                for k in range(49)]
-        arr = np.asarray(pts, np.float32)
+        arr = np.asarray(pts, float)
         segs = np.stack([arr[:-1], arr[1:]], axis=1).reshape(-1, 3)
         self._lines(mvp, segs, color, 1.6)
 
@@ -1133,7 +1133,7 @@ class Gumball:
         pts = [centre + radius * (right * math.cos(k / 20 * 2 * math.pi)
                                   + up * math.sin(k / 20 * 2 * math.pi))
                for k in range(21)]
-        arr = np.asarray(pts, np.float32)
+        arr = np.asarray(pts, float)
         segs = np.stack([arr[:-1], arr[1:]], axis=1).reshape(-1, 3)
         self._lines(mvp, segs, color, 1.4)
 
@@ -1143,7 +1143,7 @@ class Gumball:
         u, v = _frame(axis)
         self._lines(mvp, np.asarray(
             [anchor - axis * SHAFT1 * s, anchor + axis * SHAFT1 * s],
-            np.float32), (*color, 1.0), 2.4)
+            float), (*color, 1.0), 2.4)
         self._cone(mvp, anchor, axis, u, v, s, (*color, 1.0))
         self._cone(mvp, anchor, -axis, u, v, s, (*color, 1.0))
 
@@ -1162,7 +1162,7 @@ class Gumball:
                    and self.drag["handle"] == ("move", 2)))
         col = HOVER_COLOR if hot else FILLET_COLOR
         self._lines(mvp, np.asarray(
-            [anchor + n * SHAFT0 * s, anchor + n * SHAFT1 * s], np.float32),
+            [anchor + n * SHAFT0 * s, anchor + n * SHAFT1 * s], float),
             (*col, 1.0), 2.6)
         self._cone(mvp, anchor, n, u, v, s, (*col, 1.0))
         # quarter-round arc (fillet motif) in the n-u plane at the anchor
@@ -1171,7 +1171,7 @@ class Gumball:
         for k in range(13):
             a = k / 12 * (math.pi / 2)
             pts.append(anchor + r * (n * math.cos(a) + u * math.sin(a)))
-        arr = np.asarray(pts, np.float32)
+        arr = np.asarray(pts, float)
         segs = np.stack([arr[:-1], arr[1:]], axis=1).reshape(-1, 3)
         self._lines(mvp, segs, (*col, 0.7), 1.6)
         # The edge gets the same filled box as everything else, so it is not
@@ -1202,7 +1202,7 @@ class Gumball:
             p0 = base + r * (u * math.cos(a0) + v * math.sin(a0))
             p1 = base + r * (u * math.cos(a1) + v * math.sin(a1))
             tris.extend([tip, p0, p1])
-        self._tris(mvp, np.asarray(tris, np.float32), color)
+        self._tris(mvp, np.asarray(tris, float), color)
 
     def _knob(self, mvp, center, s, color, fill: bool = True):
         """A box facing you: filled to grow the thing, hollow to scale it."""
@@ -1214,11 +1214,11 @@ class Gumball:
         c2 = center + right * r + up * r
         c3 = center - right * r + up * r
         if fill:
-            self._tris(mvp, np.asarray([c0, c1, c2, c0, c2, c3], np.float32),
+            self._tris(mvp, np.asarray([c0, c1, c2, c0, c2, c3], float),
                        color)
             return
         self._lines(mvp, np.asarray([c0, c1, c1, c2, c2, c3, c3, c0],
-                                    np.float32), color, 1.8)
+                                    float), color, 1.8)
 
     def _leader(self, mvp, anchor, axis, s, color):
         """The dashed run back from the pivot to the scale box.
@@ -1234,7 +1234,7 @@ class Gumball:
             t0 = DASH0 + run * (k / n)
             t1 = t0 + run * 0.55 / n
             pts.extend([anchor - axis * t0 * s, anchor - axis * t1 * s])
-        self._lines(mvp, np.asarray(pts, np.float32), color, 1.4)
+        self._lines(mvp, np.asarray(pts, float), color, 1.4)
 
     def _paper(self, pts):
         """The points to upload: as they are, or where they appear on a sheet.
@@ -1252,7 +1252,9 @@ class Gumball:
         vp = self.vp
         # On paper the anchor is None and rebased is a plain cast; in the
         # model it is the frame anchor already folded into `mvp`, so far
-        # handles hold as still as the geometry they stand on.
+        # handles hold as still as the geometry they stand on. The handles
+        # are built in float64 for the same reason the kernel keeps its
+        # coordinates there: the subtraction here needs digits to work on.
         pts = self._paper(pts)
         vp._preview.update(rebased(pts.reshape(-1, 3), vp._frame_anchor))
         vp._set_line_uniforms(mvp, color)
