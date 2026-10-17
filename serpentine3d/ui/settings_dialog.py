@@ -757,8 +757,7 @@ class SettingsDialog(QDialog):
         self.sl_scale.setRange(SCALE_MIN, SCALE_MAX)
         self.sl_scale.setSingleStep(5)
         self.sl_scale.setPageStep(10)
-        self.sl_scale.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.sl_scale.setTickInterval(10)
+        self.sl_scale.setMinimumWidth(200)    # room to land on each 5%
         self.sl_scale.setValue(round(self._saved_scale() * 100))
         # what this process runs at, which Qt took before any window
         # existed: a saved scale that differs waits on a restart

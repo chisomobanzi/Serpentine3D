@@ -230,6 +230,29 @@ QPushButton:hover { background: #3f4047; border-color: #55565e; }
 QPushButton:pressed { background: #2b2c30; }
 QPushButton:default { border-color: #d9a441; }
 
+/* Styled here so a slider looks the same everywhere: left to the platform,
+   macOS drew no track on this dark theme and Linux filled it with the
+   desktop's highlight colour instead of ours. */
+QSlider::groove:horizontal {
+    height: 4px;
+    background: #1e1f22;
+    border: 1px solid #3a3b41;
+    border-radius: 3px;
+}
+QSlider::sub-page:horizontal {
+    background: #8a6a2f;
+    border: 1px solid #8a6a2f;
+    border-radius: 3px;
+}
+QSlider::handle:horizontal {
+    background: #cfd0d2;
+    border: 1px solid #45464d;
+    width: 14px;
+    margin: -5px 0;
+    border-radius: 8px;
+}
+QSlider::handle:horizontal:hover { background: #e6e7e9; border-color: #d9a441; }
+
 QMenuBar { background: #2b2c30; }
 QMenuBar::item { padding: 5px 10px; background: transparent; }
 QMenuBar::item:selected { background: #3a3b41; }
