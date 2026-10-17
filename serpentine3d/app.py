@@ -2326,6 +2326,41 @@ class MainWindow(QMainWindow):
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Recovery failed", str(exc))
 
+    def offer_handoff(self):
+        """Offer back unsaved work a scale restart handed over that no
+        session took up (the new one never got going). Called once the
+        command line's file is open, which is where a restart that worked
+        has already spent it."""
+        if os.environ.get("SERP3D_NO_RECOVER") == "1":
+            return
+        entry = self.autosave.waiting_handoff()
+        if entry is None:
+            return
+        import datetime
+        when = datetime.datetime.fromtimestamp(
+            entry["mtime"]).strftime("%H:%M")
+        doc = entry["doc_path"] or "an unsaved document"
+        ret = QMessageBox.question(
+            self, "Recover unsaved work?",
+            f"A restart at {when} kept unsaved changes to {doc}, but they "
+            "were never reopened.\n\nRestore them?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if ret != QMessageBox.StandardButton.Yes:
+            self.autosave.discard_handoff()
+            return
+        try:
+            fileio.import_file(self.scene, entry["path"], replace=True)
+            self.ctx.current_path = entry["doc_path"]
+            self.autosave.set_doc_path(entry["doc_path"])
+            self.autosave.discard_handoff()
+            self.command_line.echo(
+                f"Recovered {len(self.scene.all())} object(s) a restart "
+                "had kept.")
+            self.viewport.zoom_extents()
+            self._update_status()
+        except Exception as exc:                              # noqa: BLE001
+            QMessageBox.warning(self, "Recovery failed", str(exc))
+
     # ---------------------------------------------------------- space tabs
 
     def _build_space_tab_row(self):
@@ -3146,6 +3181,7 @@ def run_app(app, splash=None):
     window.offer_recovery()
 
     _open_launch_args(window, app.arguments()[1:])
+    window.offer_handoff()
 
     from .ui.welcome import WelcomeScreen, should_show as _welcome
     if _welcome(window):
@@ -3160,33 +3196,31 @@ def run_app(app, splash=None):
 def _open_launch_args(window, args: list[str]):
     """Open the first existing file the command line names: a double-
     clicked document, `serp3d file.serp`, or a scale restart's handoff."""
-    restart_origin = _restart_origin(args)
-
     for arg in args:
         if not arg.startswith("-") and os.path.exists(arg):
             try:
-                from .utils.autosave import HANDOFF_PATH
-                # a restart handoff consumed on arrival: reopened under
-                # its original name, and removed now that it has served
-                handoff = (restart_origin is not None
-                           and os.path.abspath(arg) == HANDOFF_PATH)
+                # a restart handoff is taken up on arrival: reopened under
+                # the name it was handed over with, and spent
+                handoff = None
+                if os.path.abspath(arg) == os.path.abspath(
+                        window.autosave.handoff_path):
+                    handoff = window.autosave.waiting_handoff()
                 fileio.import_file(window.scene, arg, replace=True)
-                if restart_origin is not None:
-                    window.ctx.current_path = restart_origin or None
-                elif arg.endswith(".serp"):
-                    window.ctx.current_path = os.path.abspath(arg)
-                if handoff:
-                    os.unlink(arg)
+                if handoff is not None:
+                    window.ctx.current_path = handoff["doc_path"]
+                    window.autosave.discard_handoff()
                     window.command_line.echo(
-                        "Restarted with the new interface scale — "
-                        "unsaved changes were kept.")
+                        "Restarted at the new interface scale. Unsaved "
+                        "changes were kept.")
                 else:
+                    if arg.endswith(".serp"):
+                        window.ctx.current_path = os.path.abspath(arg)
                     window.command_line.echo(
                         f"Opened {arg}: {len(window.scene.all())} object(s).")
                 window.viewport.zoom_extents()
-                if handoff:
-                    if restart_origin:
-                        window.add_recent(restart_origin)
+                if handoff is not None:
+                    if handoff["doc_path"]:
+                        window.add_recent(handoff["doc_path"])
                 else:
                     # as from File → Open: what is on disk is what is
                     # open; only a handoff's work is still unsaved
@@ -3195,16 +3229,6 @@ def _open_launch_args(window, args: list[str]):
             except Exception as exc:                          # noqa: BLE001
                 window.command_line.echo(f"Could not open {arg}: {exc}")
             break
-
-
-def _restart_origin(args: list[str]) -> str | None:
-    """The document path a restart handoff reopens under, when the argv
-    carries `--restart-origin <path>`; None when it carries no such flag,
-    "" when the flag names no document (it had never been saved)."""
-    for i, arg in enumerate(args):
-        if arg == "--restart-origin" and i + 1 < len(args):
-            return args[i + 1]
-    return None
 
 
 def _restart_command() -> list[str]:
@@ -3224,71 +3248,26 @@ def _restart_command() -> list[str]:
 
 
 def restart_app(window):
-    """Offer a restart so a new interface scale takes effect.
+    """Restart so a new interface scale takes effect, asking nothing.
 
     Qt reads the scale factor only as the QApplication is built, so the
     setting lands on the next process (launcher._apply_ui_scale). The
-    session survives: a saved document reopens from disk, and unsaved
-    work is copied to the handoff file — safe from clean_exit, invisible
-    to crash recovery — and reopened dirty on the other side. Nothing
-    restarts without the user picking a button.
+    document survives as it is: a clean one reopens from disk, and one
+    with unsaved changes (even an emptied one, which reopening from disk
+    would undo) is handed over through the autosave folder and reopened
+    unsaved under its own name. The question, if any, was the Settings
+    page's to ask.
     """
-    from .utils.autosave import HANDOFF_PATH
-
-    dirty = window.dirty and window.scene.all()
-    box = QMessageBox(window)
-    box.setWindowTitle("Restart Serpentine3D")
-    box.setIcon(QMessageBox.Icon.Question)
-    box.setText("Restart to apply the new interface scale?")
-    if dirty and window.ctx.current_path:
-        box.setInformativeText(
-            "This document has unsaved changes. Save them first, or "
-            "restart without saving — the unsaved work is kept and "
-            "reopened automatically.")
-        save = box.addButton("Save and Restart",
-                             QMessageBox.ButtonRole.AcceptRole)
-        restart = box.addButton("Restart without Saving",
-                                QMessageBox.ButtonRole.DestructiveRole)
-    elif dirty:
-        box.setInformativeText(
-            "This document has never been saved. Save it first, or "
-            "restart without saving — the work is kept and reopened "
-            "automatically.")
-        save = box.addButton("Save As… and Restart",
-                             QMessageBox.ButtonRole.AcceptRole)
-        restart = box.addButton("Restart without Saving",
-                                QMessageBox.ButtonRole.DestructiveRole)
-    else:
-        box.setInformativeText(
-            "The open document reopens exactly as it is now.")
-        save = None
-        restart = box.addButton("Restart", QMessageBox.ButtonRole.AcceptRole)
-    cancel = box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-    box.setDefaultButton(save or restart)
-    box.exec()
-
-    clicked = box.clickedButton()
-    if clicked is cancel:
-        return
-    if clicked is restart:
-        handoff = None
-        if dirty:
-            from .fileio import native
-            try:
-                native.save_scene(window.scene, HANDOFF_PATH)
-                handoff = HANDOFF_PATH
-            except Exception:                                # noqa: BLE001
-                window.command_line.echo(
-                    "Could not hand the unsaved work over — not restarting.")
-                return
-        _relaunch(window, handoff=handoff, origin=window.ctx.current_path)
-        return
-    # save first: _file_save with no current path opens the Save dialog,
-    # and a cancelled pick leaves the window dirty — treat that as "no"
-    window._file_save()
+    handoff = None
     if window.dirty:
-        return
-    _relaunch(window, handoff=None, origin=window.ctx.current_path)
+        try:
+            handoff = window.autosave.hand_over(window.ctx.current_path)
+        except Exception:                                     # noqa: BLE001
+            window.command_line.echo(
+                "Could not keep the unsaved work for a restart, so "
+                "Serpentine3D was not restarted.")
+            return
+    _relaunch(window, handoff=handoff, origin=window.ctx.current_path)
 
 
 def _relaunch(window, handoff: str | None, origin: str | None):
@@ -3300,11 +3279,14 @@ def _relaunch(window, handoff: str | None, origin: str | None):
     """
     cmd = _restart_command()
     if handoff:
-        cmd += [handoff, "--restart-origin", origin or ""]
+        cmd += [handoff]
     elif origin:
         cmd += [origin]
     if not QProcess.startDetached(cmd[0], cmd[1:]):
-        window.command_line.echo("Could not start the new instance.")
+        if handoff:
+            window.autosave.discard_handoff()   # this session keeps it
+        window.command_line.echo(
+            "Could not start Serpentine3D again, so it was not restarted.")
         return
     window._restarting = True
     window.close()

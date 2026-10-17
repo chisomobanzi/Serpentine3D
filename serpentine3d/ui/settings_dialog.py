@@ -1,16 +1,19 @@
 """Settings dialog: sidebar categories, changes apply immediately.
 
+All but one: the interface scale, which Qt reads only at startup. That
+one previews live, says it waits on a restart, and asks once on close.
+
 Deliberately not Rhino's option-tree maze: a handful of flat pages, plain
 language, live apply, and one-click import for Rhino alias files.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSignalBlocker, Qt
+from PySide6.QtCore import QRect, QSignalBlocker, QSize, Qt, QTimer
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFontComboBox,
-    QHBoxLayout, QHeaderView, QLabel,
+    QFrame, QHBoxLayout, QHeaderView, QLabel,
     QListWidget, QMessageBox, QPushButton, QRadioButton, QSlider, QSpinBox,
     QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -21,8 +24,62 @@ from ..core.snaps import SNAP_TYPES
 from ..utils.config import (
     DEFAULT_SHORTCUTS, parse_chord, parse_rhino_aliases, parse_shortcuts,
 )
+from .. import launcher
 from . import theme
 from .dialogs import untether
+
+# the slider's range, which launcher._apply_ui_scale also holds to
+SCALE_MIN, SCALE_MAX = 100, 150
+
+
+class _ScalePreview(QLabel):
+    """A piece of the real interface, enlarged to a scale it does not run at.
+
+    Qt takes the scale before any window exists, so the page cannot show
+    a new one live. It can show its size: the top-left of the Properties
+    panel (all text, and no 3D view to re-render), magnified by the step
+    from the running scale. Pixel-enlarged, so a little soft; the
+    restarted interface is sharp.
+    """
+
+    BOX = QSize(360, 132)
+
+    def __init__(self, window):
+        super().__init__()
+        self._window = window
+        self._shot = None
+        self.setFixedSize(self.BOX)
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+
+    def regrab(self):
+        """Take the interface again, as after a font change."""
+        self._shot = None
+
+    def _grab(self):
+        if self._shot is None:
+            dock = getattr(self._window, "_prop_dock", None)
+            source = (dock if dock is not None and dock.isVisible()
+                      else self._window)
+            # only the corner a smaller scale could show: grabbing the
+            # whole window would re-render the 3D view for nothing
+            self._shot = source.grab(QRect(0, 0, self.BOX.width() * 2,
+                                           self.BOX.height() * 2))
+        return self._shot
+
+    def show_step(self, step: float):
+        """Show the interface `step` times its running size."""
+        shot = self._grab()
+        dpr = shot.devicePixelRatio()
+        # the crop that fills the box at this size, within what was grabbed
+        w = min(self.BOX.width() / step, shot.width() / dpr)
+        h = min(self.BOX.height() / step, shot.height() / dpr)
+        crop = shot.copy(QRect(0, 0, round(w * dpr), round(h * dpr)))
+        big = crop.scaled(round(w * step * dpr), round(h * step * dpr),
+                          Qt.AspectRatioMode.IgnoreAspectRatio,
+                          Qt.TransformationMode.SmoothTransformation)
+        big.setDevicePixelRatio(dpr)
+        self.setPixmap(big)
 
 
 def _page(title: str, subtitle: str) -> tuple[QWidget, QVBoxLayout]:
@@ -87,13 +144,17 @@ class SettingsDialog(QDialog):
         btn_close = QPushButton("Close")
         btn_close.setDefault(True)
         btn_close.clicked.connect(self.accept)
+        # while a new interface scale waits, the footer says so beside
+        # Close, which is where people look before pressing it
+        self.btn_restart_now = QPushButton("Restart now")
+        self.btn_restart_now.clicked.connect(self._restart_now)
         footer = QHBoxLayout()
         footer.addWidget(btn_defaults)
         footer.addStretch(1)
-        note = QLabel("Changes apply immediately")
-        note.setStyleSheet("color: #85868a; font-size: 11px;")
-        footer.addWidget(note)
+        self.footer_note = QLabel()
+        footer.addWidget(self.footer_note)
         footer.addSpacing(12)
+        footer.addWidget(self.btn_restart_now)
         footer.addWidget(btn_close)
 
         body = QHBoxLayout()
@@ -102,6 +163,7 @@ class SettingsDialog(QDialog):
         root = QVBoxLayout(self)
         root.addLayout(body, 1)
         root.addLayout(footer)
+        self._show_scale_state()
 
     # ------------------------------------------------------------- mouse
 
@@ -689,24 +751,35 @@ class SettingsDialog(QDialog):
         layout.addLayout(row4)
 
         row5 = QHBoxLayout()
-        row5.addWidget(QLabel("Interface scale"))
+        lbl_scale_title = QLabel("Interface scale")
+        row5.addWidget(lbl_scale_title)
         self.sl_scale = QSlider(Qt.Orientation.Horizontal)
-        self.sl_scale.setRange(100, 150)
+        self.sl_scale.setRange(SCALE_MIN, SCALE_MAX)
         self.sl_scale.setSingleStep(5)
         self.sl_scale.setPageStep(10)
         self.sl_scale.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.sl_scale.setTickInterval(10)
-        self.sl_scale.setValue(round(float(self.cfg.get(
-            "display", "ui_scale", default=1.0)) * 100))
-        # what this launch already runs at — a restart only matters once
-        # the slider leaves it
-        self._launch_scale = self.cfg.get("display", "ui_scale", default=1.0)
+        self.sl_scale.setValue(round(self._saved_scale() * 100))
+        # what this process runs at, which Qt took before any window
+        # existed: a saved scale that differs waits on a restart
+        self._running_scale = launcher.running_scale()
         self.sl_scale.valueChanged.connect(self._interface_changed)
         self.lbl_scale = QLabel(f"{self.sl_scale.value()}%")
+        self.lbl_scale_pending = QLabel("after restart")
+        self.lbl_scale_pending.setStyleSheet(f"color: {theme.ACCENT};")
         row5.addWidget(self.sl_scale)
         row5.addWidget(self.lbl_scale)
+        row5.addWidget(self.lbl_scale_pending)
         row5.addStretch(1)
         layout.addLayout(row5)
+
+        row_preview = QHBoxLayout()
+        row_preview.addSpacing(lbl_scale_title.sizeHint().width()
+                               + row5.spacing())
+        self.scale_preview = _ScalePreview(self.window)
+        row_preview.addWidget(self.scale_preview)
+        row_preview.addStretch(1)
+        layout.addLayout(row_preview)
 
         row6 = QHBoxLayout()
         row6.addWidget(QLabel("Interface font"))
@@ -720,29 +793,77 @@ class SettingsDialog(QDialog):
         row6.addStretch(1)
         layout.addLayout(row6)
 
-        self.btn_restart = QPushButton("Restart to apply")
-        self.btn_restart.setEnabled(False)
-        self.btn_restart.clicked.connect(self._restart_for_scale)
-        row7 = QHBoxLayout()
-        row7.addWidget(self.btn_restart)
-        row7.addWidget(QLabel("the scale lands on restart; this "
-                              "document comes back with it"))
-        row7.addStretch(1)
-        layout.addLayout(row7)
         layout.addStretch(1)
         return w
 
-    def _restart_for_scale(self):
-        from ..app import restart_app
-        restart_app(self.window)
+    def _saved_scale(self) -> float:
+        try:
+            scale = float(self.cfg.get("display", "ui_scale", default=1.0))
+        except (TypeError, ValueError):
+            return 1.0                   # hand-edited: as the launcher does
+        return min(max(scale, SCALE_MIN / 100), SCALE_MAX / 100)
+
+    def _scale_waiting(self) -> float | None:
+        """The saved scale, when it is not the one running."""
+        saved = self._saved_scale()
+        return None if abs(saved - self._running_scale) < 1e-6 else saved
+
+    def _show_scale_state(self):
+        waiting = self._scale_waiting() is not None
+        self.lbl_scale.setText(f"{self.sl_scale.value()}%")
+        self.lbl_scale_pending.setHidden(not waiting)
+        self.btn_restart_now.setHidden(not waiting)
+        if waiting:
+            self.footer_note.setText(
+                "Interface scale changes when Serpentine3D restarts")
+            self.footer_note.setStyleSheet(
+                f"color: {theme.ACCENT}; font-size: 11px;")
+        else:
+            self.footer_note.setText("Changes apply immediately")
+            self.footer_note.setStyleSheet(
+                "color: #85868a; font-size: 11px;")
+        self.scale_preview.show_step(
+            self.sl_scale.value() / 100 / self._running_scale)
 
     def _interface_changed(self, *_):
         # the scale is read once at launch, before Qt exists, by
-        # launcher._apply_ui_scale — so persist, and offer the restart
+        # launcher._apply_ui_scale: persist it, and say it waits
         self.cfg.set("display", "ui_scale", self.sl_scale.value() / 100.0)
-        self.lbl_scale.setText(f"{self.sl_scale.value()}%")
-        self.btn_restart.setEnabled(
-            self.sl_scale.value() / 100.0 != self._launch_scale)
+        self._show_scale_state()
+
+    def _ask_restart(self, scale: float) -> bool:
+        box = QMessageBox(self)
+        box.setWindowTitle("Interface scale")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(f"Restart now to switch to {round(scale * 100)}%?")
+        box.setInformativeText(
+            "The open document comes back as it is, unsaved changes "
+            "included.")
+        restart = box.addButton("Restart now",
+                                QMessageBox.ButtonRole.AcceptRole)
+        later = box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(restart)
+        box.setEscapeButton(later)
+        box.exec()
+        return box.clickedButton() is restart
+
+    def done(self, result):
+        # Close, Esc and the title bar's X all end here. A new scale that
+        # would otherwise wait unseen gets one question.
+        waiting = self._scale_waiting()
+        if waiting is not None and self._ask_restart(waiting):
+            self._restart_now()
+            return
+        if waiting is not None:
+            self.window.command_line.echo(
+                f"Interface scale {round(waiting * 100)}% applies the next "
+                "time Serpentine3D starts.")
+        super().done(result)
+
+    def _restart_now(self):
+        from .. import app
+        super().done(QDialog.DialogCode.Accepted)
+        app.restart_app(self.window)
 
     def _font_changed(self, *_):
         family = (self.cb_font.currentText()
@@ -752,6 +873,10 @@ class SettingsDialog(QDialog):
         app = QApplication.instance()
         if app is not None:
             theme.apply_interface_font(app, family)
+        # the preview shows the interface as it now looks, once the new
+        # font has reached it
+        self.scale_preview.regrab()
+        QTimer.singleShot(0, self._show_scale_state)
 
     def _display_changed(self, *_):
         self.cfg.set("display", "grid_extent", self.sp_extent.value())

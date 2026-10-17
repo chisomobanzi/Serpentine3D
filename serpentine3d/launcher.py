@@ -40,6 +40,17 @@ def _apply_ui_scale() -> None:
         os.environ.pop("QT_SCALE_FACTOR", None)
 
 
+def running_scale() -> float:
+    """The interface scale this process runs at: whatever was in
+    QT_SCALE_FACTOR when Qt read it. Not the saved setting, which may be
+    waiting on a restart."""
+    try:
+        scale = float(os.environ.get("QT_SCALE_FACTOR", 1.0))
+    except ValueError:
+        return 1.0
+    return scale if scale > 0 else 1.0
+
+
 def main() -> int:
     # First, and before anything can print or open a window: the .3dm importer
     # spawns a helper process, and in a PyInstaller bundle a spawned child
