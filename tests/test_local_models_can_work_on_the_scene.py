@@ -270,9 +270,12 @@ def test_discovery_is_asynchronous_filters_embeddings_and_settings_survive_reope
     heartbeat.start()
 
     def slow_discovery():
-        # A blocking discovery on Qt's thread cannot receive this heartbeat.
+        # A blocking discovery on Qt's thread cannot receive this heartbeat,
+        # however long it waits. The bound only has to outlast an ordinary
+        # pause: late in a one-process suite a full garbage collection
+        # runs past 250 ms, which failed this on CI every time.
         before = len(observed_heartbeat)
-        deadline = time.monotonic() + .25
+        deadline = time.monotonic() + 2
         while len(observed_heartbeat) == before and time.monotonic() < deadline:
             time.sleep(.005)
         assert len(observed_heartbeat) > before, "Model discovery blocked Qt"
