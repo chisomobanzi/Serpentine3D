@@ -92,6 +92,7 @@ Nothing is bound out of the box.
 | ++ctrl+n++ / ++ctrl+o++ / ++ctrl+s++ | New / Open / Save |
 | ++ctrl+z++ / ++ctrl+y++ | Undo / Redo |
 | ++ctrl+a++ | Select all |
+| ++alt+a++ | Keep every region, while CurveBoolean asks which to keep |
 | ++ctrl+g++ / ++ctrl+shift+g++ | Group / ungroup |
 | ++ctrl+h++ / ++ctrl+shift+h++ | Hide selection / show all hidden objects |
 | ++ctrl+l++ / ++ctrl+shift+l++ | Lock selection / unlock all objects |
