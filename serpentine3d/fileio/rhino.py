@@ -2,7 +2,8 @@
 
 Import: NURBS curves are converted exactly (poles/weights/knots); breps,
 extrusions and NURBS surfaces come in as untrimmed NURBS faces; meshes are
-sewn into shells. Layers (names/colors) are preserved both ways.
+sewn into shells. Layers (names/colors) and each object's Attribute User
+Text are preserved both ways.
 
 Export: curves as exact NURBS; surfaces and solids as meshes (render
 meshes — Rhino re-imports them fine; exact BREP export goes via STEP).
@@ -18,7 +19,7 @@ import numpy as np
 import rhino3dm as r3
 from OCP.GeomAPI import GeomAPI_ProjectPointOnSurf
 
-from ..core import geometry, occ
+from ..core import geometry, occ, user_text
 from ..core.deferred import DeferredShape
 from ..core.layers import PATH_SEPARATOR
 from ..core.occ import (
@@ -1367,7 +1368,22 @@ def object_appearance(attrs, layers: dict, materials: dict,
             "layer_locked": layer.get("locked", False),
             "layer_print_width": layer.get("print_width", 0.0),
             "color": color, "material": _shading(material),
-            "visible": visible}
+            "visible": visible,
+            # the object's own; a piece of a block is given its block's
+            # as well by instance_to_objects
+            "user_text": user_text_of(attrs)}
+
+
+def user_text_of(attrs) -> dict:
+    """An object's Attribute User Text as {key: value}, in the file's order.
+
+    Read off the attributes, which is where Rhino's Properties panel keeps
+    it; the geometry can carry text of its own, which almost nobody sets.
+    """
+    try:
+        return dict(attrs.GetUserStrings())
+    except Exception:                                           # noqa: BLE001
+        return {}
 
 
 def _shading(material: dict | None) -> dict | None:
@@ -1418,13 +1434,17 @@ def _xform_matrix(xform):
 
 
 def flatten_instance(geo, blocks: dict, depth: int = 0) -> list:
-    """An instance as [(member geometry, member attributes, 4x4)].
+    """An instance as [(member geometry, member attributes, 4x4, text)].
 
     Serpentine3D has no block object of its own, so an instance comes in as
     its content moved into place — the same trade Rhino's Explode makes. A
     definition can hold instances of other definitions, and each level's
     transform applies to everything below it, so this walks down composing
     them.
+
+    `text` is the user text of the instances inside this one that the
+    member sits in, outermost first, which the member's own attributes
+    cannot say; None when it sits in none or they carry none.
     """
     if depth >= MAX_BLOCK_DEPTH:
         return []
@@ -1433,11 +1453,13 @@ def flatten_instance(geo, blocks: dict, depth: int = 0) -> list:
     out = []
     for member_geo, member_attrs in definition.get("members", ()):
         if isinstance(member_geo, r3.InstanceReference):
-            for inner_geo, inner_attrs, inner in flatten_instance(
+            nested = user_text_of(member_attrs)
+            for inner_geo, inner_attrs, inner, text in flatten_instance(
                     member_geo, blocks, depth + 1):
-                out.append((inner_geo, inner_attrs, here @ inner))
+                out.append((inner_geo, inner_attrs, here @ inner,
+                            user_text.merged(nested, text)))
         else:
-            out.append((member_geo, member_attrs, here))
+            out.append((member_geo, member_attrs, here, None))
     return out
 
 
@@ -1471,13 +1493,20 @@ def _part_name(instance_name: str, member_attrs, index: int,
 def instance_to_objects(geo, instance_name: str, instance_meta: dict,
                         blocks: dict, layers: dict, materials: dict,
                         report=None) -> list:
-    """One placed block as the [(name, shape, meta)] it brings with it."""
+    """One placed block as the [(name, shape, meta)] it brings with it.
+
+    A piece keeps its own user text, as Rhino's Explode leaves it, and
+    takes any key it lacks from the blocks it sits in: a door's room is
+    said once, on the door, and is no less true of its handle.
+    """
     step = report or Progress()
     parts = flatten_instance(geo, blocks)
     out = []
-    for index, (member_geo, member_attrs, matrix) in enumerate(parts):
+    for index, (member_geo, member_attrs, matrix, text) in enumerate(parts):
         meta = object_appearance(member_attrs, layers, materials,
                                  parent=instance_meta)
+        meta["user_text"] = user_text.merged(
+            instance_meta.get("user_text"), text, meta["user_text"]) or {}
         name = _part_name(instance_name, member_attrs, index, len(parts))
         for shape in object_to_shapes(member_geo, step):
             if shape is None or shape.IsNull():
@@ -1779,6 +1808,8 @@ def export_3dm(scene, path: str, only_ids: list | None = None,
             attrs.MaterialIndex = _write_material(model, materials,
                                                   obj.material)
             attrs.MaterialSource = r3.ObjectMaterialSource.MaterialFromObject
+        for key, value in (obj.user_text or {}).items():
+            attrs.SetUserString(key, value)
         # rhino3dm cannot write a hatch, so a line hatch leaves as the
         # curves it is drawn with rather than as a mesh with no faces,
         # which is nothing; a solid one leaves as its filled mesh (#33)

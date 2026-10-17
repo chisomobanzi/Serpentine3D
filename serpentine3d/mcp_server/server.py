@@ -93,8 +93,9 @@ def _call(method: str, **params) -> str:
 
 @mcp.tool()
 def serp_scene_info() -> str:
-    """Get the current scene: objects (name/kind/layer/bbox), layers,
-    selection, bounds, and display mode."""
+    """Get the current scene: objects (name/kind/layer/bbox, and the
+    user_text keys and values of any that carry some), layers, selection,
+    bounds, and display mode. Set user text with the setusertext command."""
     return _call("scene_info")
 
 

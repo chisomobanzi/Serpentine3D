@@ -207,10 +207,12 @@ QListWidget, QTreeWidget, QTableWidget, QTreeView {
 QListWidget::item, QTreeWidget::item {
     padding: 3px;
 }
-QListWidget::item:selected, QTreeWidget::item:selected {
+QListWidget::item:selected, QTreeWidget::item:selected,
+QTableWidget::item:selected {
     background: #4a3f28;
     color: #f0d9a8;
 }
+QTableWidget QLineEdit { padding: 0 6px; border-radius: 0; }
 QHeaderView::section {
     background: #2e2f34;
     border: none;
@@ -306,6 +308,7 @@ QPushButton[link="true"] {
     color: #d9a441; text-align: left;
 }
 QPushButton[link="true"]:hover { color: #f0d9a8; text-decoration: underline; }
+QPushButton[link="true"]:disabled { color: #8a6a2f; }
 QLabel#commandEcho {
     color: #85868a;
     font-family: monospace;

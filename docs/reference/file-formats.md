@@ -7,7 +7,7 @@ format is chosen by extension.
 |---|:---:|:---:|---|
 | `.serp` | ✓ | ✓ | Native: JSON scene + embedded binary BREP, thumbnail and metadata |
 | `.step` / `.stp` | ✓ | ✓ | Exact BREP exchange via OpenCASCADE |
-| `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps import as trimmed NURBS faces, export as meshes (use STEP for exact surfaces); layers with visibility/lock and hidden objects preserved; writes Rhino 5–8 |
+| `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps import as trimmed NURBS faces, export as meshes (use STEP for exact surfaces); layers with visibility/lock, hidden objects and Attribute User Text preserved; writes Rhino 5–8 |
 | `.obj` | ✓ | ✓ | Tessellated mesh with `.mtl` colours |
 | `.fbx` | ✓ | ✓ | Autodesk FBX (**binary**) — tessellated meshes; imports/exports cleanly to Blender, Maya, Unreal, Unity |
 | `.stl` | ✓ | ✓ | 3D printing — watertight binary (or ASCII) STL for slicers, with draft→ultra mesh-quality presets on export |
@@ -42,6 +42,12 @@ format is chosen by extension.
   does not yet read every file: some saved by SketchUp 2018 and 2019 and by
   very old versions fail, and say so. Export those from SketchUp as OBJ, FBX
   or DXF instead.
+- **Rhino user text.** An object's Attribute User Text arrives with it and
+  is written back out on export, in the file's order, and a `.serp` keeps
+  it too. Properties shows and edits it under **User text**. A placed block
+  comes in as its pieces, so each piece keeps its own keys and takes any it
+  lacks from the block that placed it; geometry user text and the
+  document's own user text are not read.
 - **Exact vs. mesh.** `.serp` and `.step` carry exact geometry both ways;
   `.3dm` is exact for curves but writes surfaces and solids as meshes — for
   an exact round trip through Rhino, export STEP and `import` it there.

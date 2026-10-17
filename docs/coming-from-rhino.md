@@ -50,6 +50,11 @@ page maps your habits over and is honest about the gaps.
 - **Interchange** — reads and writes `.3dm` for Rhino 5–8 (curves stay exact
   NURBS; surfaces write as meshes — use STEP for an exact surface round
   trip), STEP, and more. See [File formats](reference/file-formats.md).
+- **Attribute User Text** comes in with a `.3dm` and goes back out with
+  it. Properties lists an object's keys and values under **User text**,
+  where you add, rename and remove them as in Rhino's panel, and
+  `setusertext` / `getusertext` work as Rhino's SetUserText and
+  GetUserText do.
 
 ## Bring your Rhino settings over
 

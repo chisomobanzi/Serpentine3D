@@ -96,7 +96,7 @@ class SerpApi:
         if shape is None or self.scene.get(obj.id) is None:
             return None
         mn, mx = g.bbox(shape)
-        return {
+        row = {
             "id": obj.id,
             "name": obj.name,
             "kind": obj.kind,
@@ -107,6 +107,11 @@ class SerpApi:
             "locked": bool(obj.locked),
             "bbox": [list(mn), list(mx)],
         }
+        if obj.user_text:
+            # only where there is some: most objects carry none, and a big
+            # scene would otherwise send thousands of empty ones
+            row["user_text"] = dict(obj.user_text)
+        return row
 
     # ------------------------------------------------------------------ info
 

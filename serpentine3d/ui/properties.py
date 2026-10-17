@@ -16,15 +16,17 @@ from itertools import product
 from math import atan, dist, isclose, pi, sin, tan
 from typing import NamedTuple
 
-from PySide6.QtCore import QSignalBlocker, QSize, QTimer, Signal, Qt
+from PySide6.QtCore import QEvent, QSignalBlocker, QSize, QTimer, Signal, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFontComboBox, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
-    QStackedWidget, QTabBar, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFontComboBox,
+    QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPlainTextEdit,
+    QPushButton, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 from ..core import geometry as g
+from ..core import user_text as ut
 from ..core.layers import (HATCH_INK, HATCH_LAYER_COLOR, MAX_CUT_LINE_WIDTH,
                            MIN_HATCH_SPACING, PATH_SEPARATOR,
                            hatch_token_rgb, section_fill_dict)
@@ -423,6 +425,243 @@ class _DetailLayers(QWidget):
             self.hide_layer(layer_id)
 
 
+class _PairTable(QTableWidget):
+    """Keys and values, a column of each.
+
+    Delete and Backspace take the picked pairs away. Without this they
+    would fall through to the window, whose Delete deletes the object the
+    pairs belong to.
+    """
+
+    removeRequested = Signal()
+
+    _REMOVE = (Qt.Key.Key_Delete, Qt.Key.Key_Backspace)
+    _BARE = (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.KeypadModifier)
+
+    def event(self, ev):
+        if (ev.type() == QEvent.Type.ShortcutOverride
+                and ev.key() in self._REMOVE and ev.modifiers() in self._BARE):
+            ev.accept()
+            return True
+        return super().event(ev)
+
+    def keyPressEvent(self, ev):
+        if ev.key() in self._REMOVE and ev.modifiers() in self._BARE:
+            self.removeRequested.emit()
+            ev.accept()
+            return
+        super().keyPressEvent(ev)
+
+    def sizeHint(self):
+        """As tall as it is allowed to be: every pair, up to a point."""
+        return QSize(super().sizeHint().width(), self.maximumHeight())
+
+
+# The key a row of the user text stands for, as the object spells it; None
+# on a row still being typed in, which the object does not hold yet.
+_HELD_KEY = Qt.ItemDataRole.UserRole
+# How many pairs show before the table scrolls instead of growing, and how
+# few it shrinks to in a short dock before the dock has to give way.
+_USER_TEXT_ROWS = 8
+_USER_TEXT_MIN_ROWS = 2
+# The key column fits its keys between these widths, wide enough to type a
+# new one into; the value has the rest.
+_KEY_WIDTHS = (72, 120)
+
+
+class _UserText(QWidget):
+    """A model object's user text, Rhino's Attribute User Text: a table of
+    keys and values to edit in place, under a line with Add and Remove.
+
+    The whole width of the page, not the field column: a value is the long
+    half, and the column beside the labels cut most of them off.
+
+    `edit(label, text)` is told the object's whole new text, None for none,
+    and `label` names the undo step. A pair being added belongs to the table
+    until both halves are in: Rhino has no way to keep a key with no value.
+    """
+
+    def __init__(self, edit):
+        super().__init__()
+        self._edit = edit
+        self._shown = None          # (object id, its text) as last filled
+        self._text = None
+        self._filling = False
+        self.caption = QLabel("User text")
+        self.caption.setToolTip(
+            "Keys and values this object carries, which Rhino calls "
+            "Attribute User Text; a .3dm brings them in and takes them "
+            "back out")
+        self.none_label = QLabel("None")
+        self.none_label.setStyleSheet(f"color: {theme.TEXT_MUTED};")
+        self.table = _PairTable(0, 2)
+        self.table.setHorizontalHeaderLabels(["Key", "Value"])
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setMinimumSectionSize(_KEY_WIDTHS[0])
+        header.setMaximumSectionSize(_KEY_WIDTHS[1])
+        header.setStretchLastSection(True)
+        header.setHighlightSections(False)
+        self.table.verticalHeader().hide()
+        self.table.verticalHeader().setDefaultSectionSize(
+            theme.LIST_ROW_HEIGHT)
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setWordWrap(False)
+        self.table.itemChanged.connect(self._changed)
+        self.table.itemSelectionChanged.connect(self._picked)
+        self.table.removeRequested.connect(self.remove_selected)
+        self.add_link = _link("Add")
+        self.add_link.setToolTip("Add a key and its value")
+        self.add_link.clicked.connect(self.add)
+        self.remove_link = _link("Remove")
+        self.remove_link.setToolTip("Take the picked keys away")
+        self.remove_link.clicked.connect(self.remove_selected)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(12)
+        top.addWidget(self.caption)
+        top.addWidget(self.none_label)
+        top.addStretch(1)
+        top.addWidget(self.add_link)
+        top.addWidget(self.remove_link)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 4, 0, 0)
+        column.setSpacing(6)
+        column.addLayout(top)
+        column.addWidget(self.table)
+        self._fill(None)
+
+    def show_for(self, obj):
+        """Show this object's text, unless it is what is shown already: a
+        refresh for some other reason must not lose a pair being typed."""
+        shown = None if obj is None else (obj.id, obj.user_text)
+        if shown == self._shown:
+            return
+        self._shown = shown
+        self._text = None if obj is None else obj.user_text
+        self._fill(self._text)
+
+    def pairs(self) -> list:
+        """What the table shows, row by row."""
+        return [(self.table.item(r, 0).text(), self.table.item(r, 1).text())
+                for r in range(self.table.rowCount())]
+
+    def add(self):
+        """A new row, its key ready to type."""
+        row = self._append("", "", None)
+        self._fit()
+        key = self.table.item(row, 0)
+        self.table.setCurrentItem(key)
+        self.table.editItem(key)
+
+    def remove_selected(self):
+        rows = {i.row() for i in self.table.selectionModel().selectedRows()}
+        if not rows and self.table.currentRow() >= 0:
+            rows = {self.table.currentRow()}
+        if not rows:
+            return
+        text = self._text
+        for row in rows:
+            held = self.table.item(row, 0).data(_HELD_KEY)
+            if held is not None:
+                text = ut.with_value(text, held, "")
+        self._commit("remove user text", text)
+
+    # -- filling
+
+    def _fill(self, text):
+        self._filling = True
+        try:
+            self.table.setRowCount(0)
+            for key, value in (text or {}).items():
+                self._append(key, value, key)
+        finally:
+            self._filling = False
+        self._fit()
+
+    def _append(self, key: str, value: str, held) -> int:
+        was, self._filling = self._filling, True
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        key_item, value_item = QTableWidgetItem(key), QTableWidgetItem(value)
+        key_item.setData(_HELD_KEY, held)
+        # a long value is cut off in a narrow dock; hovering reads it whole
+        key_item.setToolTip(key)
+        value_item.setToolTip(value)
+        self.table.setItem(row, 0, key_item)
+        self.table.setItem(row, 1, value_item)
+        self._filling = was
+        return row
+
+    def _fit(self):
+        """Tall enough for every pair, up to a point, and there only when
+        there is a pair to show. A short dock squeezes it to two rows and a
+        scroll bar rather than push Add off the bottom, or Layers out."""
+        rows = self.table.rowCount()
+        self.none_label.setVisible(rows == 0)
+        self.table.setVisible(rows > 0)
+        self.remove_link.setVisible(rows > 0)
+        frame = (self.table.horizontalHeader().sizeHint().height()
+                 + 2 * self.table.frameWidth())
+        row = self.table.verticalHeader().defaultSectionSize()
+        self.table.setMinimumHeight(
+            frame + row * min(rows, _USER_TEXT_MIN_ROWS))
+        self.table.setMaximumHeight(frame + row * min(rows, _USER_TEXT_ROWS))
+        self.table.updateGeometry()
+        self._picked()
+
+    def _picked(self):
+        self.remove_link.setEnabled(
+            bool(self.table.selectionModel().selectedRows()))
+
+    # -- editing
+
+    def _changed(self, item):
+        if self._filling:
+            return
+        row = item.row()
+        key_item, value_item = self.table.item(row, 0), self.table.item(row, 1)
+        if key_item is None or value_item is None:
+            return
+        change = (row, item.column(), key_item.data(_HELD_KEY),
+                  key_item.text().strip(), value_item.text())
+        # Once the table has finished with the item: the edit refills the
+        # table, which would free the item under the call telling us of it.
+        QTimer.singleShot(0, self, lambda: self._apply(*change))
+
+    def _apply(self, row, column, held, key, value):
+        text = self._text
+        if held is None:                            # a pair being added
+            if key and value:
+                self._commit("user text", ut.with_value(text, key, value))
+            elif (key and column == 0 and self.table.state()
+                    != QAbstractItemView.State.EditingState):
+                cell = self.table.item(row, 1)      # on to its value
+                if cell is not None:
+                    self.table.editItem(cell)
+            return
+        if column == 0:                             # a key renamed
+            if key == held:
+                return
+            try:
+                self._commit("rename user text", ut.renamed(text, held, key))
+            except (KeyError, ValueError):
+                self._fill(text)                    # put back what it was
+            return
+        if value != ut.value_of(text, held):        # a value changed
+            self._commit("user text" if value else "remove user text",
+                         ut.with_value(text, held, value))
+
+    def _commit(self, label: str, text):
+        before = self._shown
+        self._edit(label, text)
+        if self._shown == before:
+            # Nothing changed, so nothing refilled the table: put back what
+            # the object holds rather than leave a typed row that is not.
+            self._fill(self._text)
+
+
 def _show_common_text(combo, values):
     """An editable drop-down showing the one value shared, or blank."""
     combo.setEditText(next(iter(values)) if len(values) == 1 else "")
@@ -748,6 +987,12 @@ class PropertiesPanel(QWidget):
         self.hatch_angle.valueChanged.connect(self._change_hatch)
         form.addRow("Angle", self.hatch_angle)
         self._hatch_checkpoint_id = None
+
+        # The keys and values a model object carries, Rhino's Attribute User
+        # Text: what a .3dm brings in and takes back out, edited here the way
+        # Rhino's own panel edits it. Last, so it pushes no editor down.
+        self.user_text = _UserText(self._set_user_text)
+        form.addRow(self.user_text)
 
         self.object_page = QWidget()
         page = QVBoxLayout(self.object_page)
@@ -1748,6 +1993,7 @@ class PropertiesPanel(QWidget):
         # a model object's own, which _refresh_model shows when there is one
         self.form.setRowVisible(self.print_width_combo, False)
         self.form.setRowVisible(self.section_hatch, False)
+        self.form.setRowVisible(self.user_text, False)
         self.section_look.hide()
         self.color_reset.setText("By sheet" if paper else "By layer")
         self.color_reset.setToolTip(
@@ -1764,6 +2010,7 @@ class PropertiesPanel(QWidget):
         if obj is None:
             self._blank_editors()
             self.layer_combo.setEnabled(False)
+            self.user_text.show_for(None)
         else:
             self.name_edit.setEnabled(True)
             self.name_edit.setText(obj.name)
@@ -1776,6 +2023,8 @@ class PropertiesPanel(QWidget):
             self._show_swatch(self._ink_of(obj))
             self.color_reset.setEnabled(obj.color is not None)
             self._show_own_looks(obj)
+            self.form.setRowVisible(self.user_text, True)
+            self.user_text.show_for(obj)
 
     def _show_own_looks(self, obj):
         """A model object's print width and section hatch, its own or its
@@ -1810,6 +2059,14 @@ class PropertiesPanel(QWidget):
                 layer.color)
         else:
             self.section_look.hide()
+
+    def _set_user_text(self, label: str, text):
+        """A change to the picked object's user text, as one undo step."""
+        obj, paper = self._current()
+        if obj is None or paper or text == obj.user_text:
+            return
+        self.history.checkpoint(label)
+        self.scene.update(obj.id, user_text=text)
 
     def _change_print_width(self, *_args):
         if self._updating:

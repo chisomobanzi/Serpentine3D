@@ -214,6 +214,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `bringtofront` (`bf`) | Draw the selected objects on top of overlapping ones. |
 | `changelayer` (`tolayer`) | Move objects to a layer by name (created if missing). |
 | `count` | Count objects: totals by block, kind and layer (for takeoffs). |
+| `getusertext` | Report the user text on the selected objects, as Rhino's GetUserText does: one key's value, or with Enter every key. |
 | `group` | Group objects and keep them selected. |
 | `insert` | Insert |
 | `linetype` (`lt`, `setlinetype`) | Set the dash style of selected objects (Continuous/Dashed/…/ByLayer). |
@@ -227,6 +228,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `sectionhatch` (`sectionstyle`) | Set how a section cut through selected objects is filled. |
 | `sendbackward` (`sendbackwards`) | Nudge the selected objects one step towards the back. |
 | `sendtoback` (`sb`) | Draw the selected objects behind overlapping ones. |
+| `setusertext` (`setattributeusertext`) | Set a key of user text on the selected objects, as Rhino's SetUserText does. |
 | `ungroup` | Ungroup objects and keep them selected. |
 | `unlockall` (`unlock`) | Unlockall |
 | `what` | Report details of the selected objects. |

@@ -83,6 +83,9 @@ class SceneObject:
     # layers.section_fill_dict makes it; None -> the layer's
     section_fill: dict | None = None
     draw_order: int = 0                # higher draws on top (breaks depth ties)
+    # {key: value}, Rhino's Attribute User Text, kept by its rules: see
+    # core/user_text.py, and never edit it in place
+    user_text: dict | None = None
     _mesh: DisplayMesh | None = field(default=None, repr=False, compare=False)
     _bounds: tuple | None = field(default=None, repr=False, compare=False)
     # The scene holding this object, so a bare `.shape` read on something
@@ -301,7 +304,7 @@ class Scene:
 
     def add_from(self, shape, like: SceneObject) -> SceneObject:
         """Add a shape carrying over another object's display attributes
-        (layer, colour, material, annotation, group)."""
+        (layer, colour, material, annotation, group) and its user text."""
         obj = self.add(shape, layer_id=like.layer_id)
         fields = {}
         if like.color is not None:
@@ -316,6 +319,8 @@ class Scene:
             fields["print_width"] = like.print_width
         if like.section_fill:
             fields["section_fill"] = dict(like.section_fill)
+        if like.user_text:
+            fields["user_text"] = dict(like.user_text)
         if fields:
             obj = self.update(obj.id, **fields)
         return obj
@@ -355,7 +360,9 @@ class Scene:
         # The file's word on the kind was a guess made without the geometry.
         obj.kind = geometry.shape_kind(shapes[0])
         for extra in shapes[1:]:
-            self.add(extra, layer_id=obj.layer_id)
+            # with the original's colour and user text, as eager import
+            # gives both pieces the one object's attributes
+            self.add_from(extra, obj)
         self.notify("objects")
         return obj
 

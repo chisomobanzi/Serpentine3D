@@ -352,6 +352,56 @@ def cmd_printwidth(ctx):
     ctx.echo(f"Set print width {said} on {len(objs)} object(s).")
 
 
+@command("setusertext", aliases=("setattributeusertext",))
+def cmd_setusertext(ctx):
+    """Set a key of user text on the selected objects, as Rhino's
+    SetUserText does.
+
+    The key, then its value; no value takes the key away. A key already
+    there under another case is the same key, and keeps its spelling."""
+    from ..core import user_text
+    objs = yield SelectReq("Select objects to set user text on")
+    if not objs:
+        ctx.echo("Nothing selected.")
+        return
+    key = ((yield TextReq("Key")) or "").strip()
+    if not key:
+        ctx.echo("A key needs a name.")
+        return
+    value = yield TextReq(f"Value for {key} (Enter for none, which takes "
+                          "the key away)", default="")
+    with ctx.scene.batched():
+        for o in objs:
+            ctx.scene.update(o.id, user_text=user_text.with_value(
+                o.user_text, key, value))
+    ctx.echo(f"Set {key} = {value} on {len(objs)} object(s)." if value
+             else f"Took {key} off {len(objs)} object(s).")
+
+
+@command("getusertext", mutates=False)
+def cmd_getusertext(ctx):
+    """Report the user text on the selected objects, as Rhino's
+    GetUserText does: one key's value, or with Enter every key."""
+    from ..core import user_text
+    objs = yield SelectReq("Select objects to read user text from")
+    if not objs:
+        ctx.echo("Nothing selected.")
+        return
+    key = ((yield TextReq("Key (Enter for all of them)", default=""))
+           or "").strip()
+    for o in objs:
+        text = o.user_text or {}
+        if key:
+            held = user_text.key_in(text, key)
+            ctx.echo(f"{o.name}: {held} = {text[held]}" if held is not None
+                     else f"{o.name} has no {key}.")
+        elif text:
+            ctx.echo("\n".join([f"{o.name}:", *(f"  {k} = {v}"
+                                                for k, v in text.items())]))
+        else:
+            ctx.echo(f"{o.name} has no user text.")
+
+
 @command("sectionhatch", aliases=("sectionstyle",))
 def cmd_sectionhatch(ctx):
     """Set how a section cut through selected objects is filled.

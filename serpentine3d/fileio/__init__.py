@@ -256,6 +256,9 @@ def _add_items(scene, items: list, adding) -> int:
             # what the file held together stays together: clicking one
             # selects them all, as the group command's own ids do
             added.group_id = meta["group"]
+        if meta.get("user_text"):
+            # each object its own copy: several share one meta
+            added.user_text = dict(meta["user_text"])
         adding.tick(done / count, f"Adding object {done} of {count}")
     return len(items)
 
