@@ -4,6 +4,18 @@
 
 ### Added
 
+- **CurveBoolean (`curveboolean`, `curvebool`) (#67).** Overlapping
+  closed curves on one plane split it into regions the way a Venn
+  diagram does, and you click the regions to keep: click one to keep
+  it, click it again to let it go, or press Alt+A (or type All) to keep
+  every region. The regions you are about to get are previewed as you
+  move. Enter finishes, and a closed curve comes back round each kept
+  outline, with the seams between neighbouring regions fused away and
+  holes kept as holes. The picked curves are replaced. Open curves and
+  curves off the first one's plane are skipped with a word about each,
+  a single closed curve is left as it is, and two regions that only
+  touch at a corner come back as two curves.
+
 - **A section cut's line has its own width and colour (#82).** The line
   round a cut face used to be the same 0.5 mm of ink on every sheet, and a
   clipping plane in the model drew no line round its caps at all. Now the

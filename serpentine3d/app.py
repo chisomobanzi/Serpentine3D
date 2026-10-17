@@ -2877,6 +2877,17 @@ class MainWindow(QMainWindow):
         if self._match_user_shortcut(ev):
             ev.accept()
             return
+        # Alt+A answers the running command's All keyword, when it offers
+        # one: CurveBoolean's way to keep every region in one press. The
+        # word is on a clickable chip too, and typing it works the same.
+        if (ev.modifiers() & Qt.KeyboardModifier.AltModifier
+                and not ev.modifiers() & Qt.KeyboardModifier.ControlModifier
+                and ev.key() == Qt.Key.Key_A):
+            req = self.processor.request
+            if req is not None and "All" in getattr(req, "extra_options", ()):
+                self.processor.provide_text("All")
+                ev.accept()
+                return
         # any printable key focuses the command line (Rhino behaviour)
         text = ev.text()
         if self.command_workspace.mode == "ai":

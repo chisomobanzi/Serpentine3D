@@ -74,7 +74,7 @@ Most Rhino command names and aliases resolve directly. A few worth knowing:
 | `Dir` `Flip` | `dir` `flip` |
 | `ExtrudeCrv` `Revolve` `Loft` `Sweep1/2` | `extrude` `revolve` `loft` `sweep1` `sweep2` |
 | `FilletEdge` `ChamferEdge` `Shell` | `filletedge` `chamferedge` `shell` |
-| `BooleanUnion / Difference / Intersection` | `booleanunion` `booleandifference` `booleanintersection` |
+| `BooleanUnion / Difference / Intersection` `CurveBoolean` | `booleanunion` `booleandifference` `booleanintersection` `curveboolean` |
 | `Move` `Copy` `Rotate` `Scale` `Mirror` `Array` | `move` `copy` `rotate` `scale` `mirror` `array` |
 | `Trim` `Split` `Join` `Explode` `Offset` | `trim` `split` `join` `offset` |
 | `Layout` `Detail` `Make2D` `Dim` | `layout` `detail` `make2d` `dim` |

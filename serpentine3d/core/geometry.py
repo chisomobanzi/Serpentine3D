@@ -10,6 +10,7 @@ import math
 import os
 import struct
 import tempfile
+import warnings
 
 from . import occ
 from .tolerance import tight, tol
@@ -3579,6 +3580,157 @@ def boolean_difference(a, b) -> TopoDS_Shape:
 
 def boolean_intersection(a, b) -> TopoDS_Shape:
     return _boolean(BRepAlgoAPI_Common, a, b, "intersection")
+
+
+def curve_regions(curves: list) -> list:
+    """The atomic regions a set of planar closed curves divides the plane into.
+
+    Every curve bounds a face, and every face is cut at the places the
+    others cross it, so what comes back is a set of faces that tile the
+    area the curves cover: no two interiors overlap, and the edge of one
+    is exactly the edge of its neighbour. That is what makes each face a
+    thing a CurveBoolean user can point at — a click lands in one region
+    and in no other.
+
+    Booleans between faces that merely touch along an edge can fail, so
+    every operation is attempted and its failure read as "no common
+    material" rather than as an error.
+    """
+    faces = []
+    for shape in curves:
+        face = planar_face(shape)
+        area = surface_area(face)
+        c = centroid(face)
+        # A curve drawn over another describes the same region twice, and a
+        # doubled region would come back doubled.
+        if any(math.isclose(surface_area(f), area, rel_tol=1e-7)
+               and math.dist(centroid(f), c) < tol() for f in faces):
+            continue
+        faces.append(face)
+    if not faces:
+        return []
+    regions = [faces[0]]
+    for face in faces[1:]:
+        pieces = []
+        for region in regions:
+            for op in (boolean_difference, boolean_intersection):
+                try:
+                    pieces.extend(faces_of(op(region, face)))
+                except GeometryError:
+                    pass
+        # The part of the new face no region placed earlier already covers.
+        outside = face
+        for region in regions:
+            try:
+                outside = boolean_difference(outside, region)
+            except GeometryError:
+                outside = None
+                break
+        if outside is not None:
+            pieces.extend(faces_of(outside))
+        regions = [f for f in pieces if surface_area(f) > tol() ** 2]
+    # Reconciliation: the regions must tile exactly the area the curves
+    # cover. A shortfall means a cut silently lost material, and the pick
+    # would be lying about what a click keeps.
+    try:
+        total = faces[0]
+        for f in faces[1:]:
+            total = boolean_union(total, f)
+        union_area = surface_area(total)
+        covered = sum(surface_area(r) for r in regions)
+    except GeometryError:
+        union_area = covered = None
+    if (union_area is not None and covered is not None
+            and covered < union_area - max(10 * tol() ** 2,
+                                           1e-6 * union_area)):
+        warnings.warn(
+            "CurveBoolean: some regions could not be computed — "
+            "the result may be incomplete.", stacklevel=2)
+    return regions
+
+
+def region_containing(regions, point: Point, plane_point: Point,
+                      plane_normal: Point) -> tuple[int | None, str]:
+    """Where a picked point falls: the region it is in, or why it is not.
+
+    Returns ``(index, "in")`` when the click is inside a region, and
+    ``(None, "on")`` / ``(None, "out")`` when it lands on a boundary
+    curve or outside everything. The click comes from the CPlane, which
+    is not always the plane the curves lie in, so it is dropped onto the
+    curves' plane first. The classifier reads the trimmed face itself, so
+    a hole is outside and a boundary curve is "on" — a click on a curve
+    is never read as being inside the region the curve bounds. Being
+    inside beats being on a boundary: a boundary is shared, so "on" is
+    only the answer when no region claims the point.
+    """
+    from OCP.TopAbs import TopAbs_State
+
+    along = sum((a - b) * n for a, b, n in
+                zip(point, plane_point, plane_normal))
+    p = tuple(a - along * n for a, n in zip(point, plane_normal))
+    for index, region in enumerate(regions):
+        if _region_state(region, p) == TopAbs_State.TopAbs_IN:
+            return index, "in"
+    for region in regions:
+        if _region_state(region, p) == TopAbs_State.TopAbs_ON:
+            return None, "on"
+    return None, "out"
+
+
+def _region_state(face, p: Point):
+    """IN/ON/OUT for a point already lying in the face's plane.
+
+    A failed classification is read as "outside" — the pick loop treats
+    it as a miss and asks again, which is the safe answer.
+    """
+    from OCP.BRepClass import BRepClass_FaceClassifier
+    from OCP.TopAbs import TopAbs_State
+
+    try:
+        cls = BRepClass_FaceClassifier()
+        cls.Perform(face, _pnt(p), tol())
+        return cls.State()
+    except Exception:                       # noqa: BLE001
+        return TopAbs_State.TopAbs_OUT
+
+
+def merge_planar_regions(faces: list) -> TopoDS_Shape:
+    """One shape from coplanar region faces, their shared edges fused.
+
+    Kept regions that share an edge belong to one outline, the way Rhino's
+    CurveBoolean combines regions: sewing stitches the faces and unifying
+    same-domain faces lifts the seams, so the boundaries read as a single
+    loop. The area has to survive the merge — if neither path hands back
+    the full area it was given, the untouched faces are returned instead,
+    and their boundaries still come back as separate loops.
+    """
+    if len(faces) == 1:
+        return faces[0]
+    total = sum(surface_area(f) for f in faces)
+
+    def _intact(shape):
+        return (shape is not None and not shape.IsNull()
+                and math.isclose(surface_area(shape), total,
+                                 rel_tol=1e-3, abs_tol=tol() ** 2))
+
+    try:
+        joined = join_surfaces(faces)
+        merged = merge_coplanar_faces(joined)
+        if _intact(merged):
+            return merged
+    except GeometryError:
+        pass
+    # Sewing cannot stitch faces that only touch at a vertex; a union
+    # fold can still succeed there.
+    try:
+        fused = faces[0]
+        for f in faces[1:]:
+            fused = boolean_union(fused, f)
+        if _intact(fused):
+            return fused
+    except GeometryError:
+        pass
+    return make_compound(faces)
 
 
 # --- transforms -------------------------------------------------------------

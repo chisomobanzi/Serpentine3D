@@ -12,6 +12,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `booleandifference` (`difference`, `bd`) | Booleandifference |
 | `booleanintersection` (`intersection`, `bi`) | Booleanintersection |
 | `booleanunion` (`union`, `bu`) | Booleanunion |
+| `curveboolean` (`curvebool`) | Closed curves around the regions of overlapping planar curves. |
 
 ## Camera
 

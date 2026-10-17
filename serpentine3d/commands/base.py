@@ -886,10 +886,10 @@ class CommandProcessor:
         if not self.busy or self.request is None:
             return
         if isinstance(self.request, PointReq):
-            self.ctx.last_point = value
             # Enter answers with None and an option answers with its name;
             # neither is somewhere you can snap to
             if value is not None and not isinstance(value, str):
+                self.ctx.last_point = value
                 try:
                     self.picked_points.append(
                         tuple(float(c) for c in value)[:3])
