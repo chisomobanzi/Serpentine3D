@@ -17,6 +17,7 @@ screenshots/
 packaging/windows/Output/
 # generated at build time from serpentine3d.__version__
 packaging/windows/file_version_info.txt
+packaging/windows/pyinstaller_build.log
 *.dmg
 packaging/macos/serp3d.icns
 packaging/macos/*.iconset/
