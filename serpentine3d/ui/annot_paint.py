@@ -81,10 +81,9 @@ def draw_leader(painter, to_dev, k, leader):
     painter.drawText(int(tx), int(ty), leader.text)
 
 
-def fill_cut_solid(painter, to_dev, regions, color=None, outline=None):
+def fill_cut_solid(painter, to_dev, regions, color=None):
     """Flood the cut faces of a section that name a solid material, in
-    `color` (r, g, b in 0..1) or, with none, the grey poché of ink, and
-    with an `outline` pen stroke each face's edge again over its flood.
+    `color` (r, g, b in 0..1) or, with none, the grey poché of ink.
 
     `regions` are the solid rings `cut_hatching` hands back, in paper
     millimetres: for each face the ring round the outside first and
@@ -94,8 +93,8 @@ def fill_cut_solid(painter, to_dev, regions, color=None, outline=None):
 
     One path per face, not one for the lot: cut faces overlap on the
     page all the time, and even-odd across two of them would leave the
-    overlap unpainted. Nothing is outlined here, because the cut draws
-    its own outline, heavier than a hairline.
+    overlap unpainted. Nothing is outlined here: the cut draws its own
+    lines, after the floods, each face's in its own pen.
     """
     from PySide6.QtGui import QPainterPath
     if not regions:
@@ -111,12 +110,6 @@ def fill_cut_solid(painter, to_dev, regions, color=None, outline=None):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
         painter.drawPath(path)
-        if outline is not None:
-            # A colour is opaque where the grey poché was not, so the
-            # outline drawn before it would be lost under it.
-            painter.setPen(outline)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
     painter.setBrush(QColor(0, 0, 0, 0))
 
 

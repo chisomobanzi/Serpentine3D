@@ -13,9 +13,14 @@ away; then lay a sheet over the plane where the count is not zero, cut by
 the other planes. Counting rather than flipping a bit keeps two touching
 solids of one material from cancelling where they overlap.
 
+Round each cap goes its cut line (#82), in the width and colour the
+solid's section says. The stencil knows where a cap is but not where it
+ends, so the line is worked out on the CPU instead: where the plane meets
+the solid's triangles, kept until the plane or the solid changes.
+
 The pure parts are here: which planes and which objects, the hatch's basis
-on the plane, the look of a cap and how far apart its lines fall. The
-viewport does the drawing with the programs below.
+on the plane, the look of a cap and its line, and how far apart its lines
+fall. The viewport does the drawing with the programs below.
 """
 
 from __future__ import annotations
@@ -132,6 +137,82 @@ def cap_style(fill, display_rgb) -> CapStyle:
            else INK_ON_SCREEN)
     return CapStyle(pattern, shade, (*ink, LINE_ALPHA),
                     math.radians(fill.angle), fill.spacing)
+
+
+def cut_line_style(fill):
+    """The line round a cap, as ((r, g, b, a), pixels), or None for a
+    section with no cut line. Its width on the paper is drawn the way a
+    layer's print width is on screen; ink is the ink its hatch draws in."""
+    from ..core.layers import screen_width_for
+    if fill.cut_line_width <= 0:
+        return None
+    rgb = (tuple(float(c) for c in fill.cut_line_color[:3])
+           if fill.cut_line_color else INK_ON_SCREEN)
+    return (*rgb, 1.0), screen_width_for(fill.cut_line_width)
+
+
+def plane_cut_segments(vertices, triangles, origin, normal) -> np.ndarray:
+    """Where a plane meets a mesh's triangles, as (K, 2, 3) segments.
+
+    Every triangle with corners both sides of the plane is crossed along
+    two of its edges, and the two crossings are a segment of the cut. A
+    corner lying on the plane counts as behind it, so each triangle has
+    two crossings or none; one that only touches the plane at a corner
+    has nothing to give and is left out, rather than drawn as a speck.
+    """
+    v = np.asarray(vertices, float).reshape(-1, 3)
+    t = np.asarray(triangles).reshape(-1, 3)
+    if not len(t) or not len(v):
+        return np.zeros((0, 2, 3))
+    d = (v - np.asarray(origin, float)) @ np.asarray(normal, float)
+    ahead = d > 0
+    # A dragged plane asks this of the whole mesh every frame, and almost
+    # none of it is crossed: find the few that are before any arithmetic.
+    first = ahead[t[:, 0]]
+    t = t[(first != ahead[t[:, 1]]) | (first != ahead[t[:, 2]])]
+    if not len(t):
+        return np.zeros((0, 2, 3))
+    sides = ahead[t]
+    count = sides.sum(axis=1)
+    # the corner on its own side of the plane, and the two across from it
+    lone = np.where(count == 1, np.argmax(sides, axis=1),
+                    np.argmin(sides, axis=1))
+    rows = np.arange(len(t))
+    a = t[rows, lone]
+    b = t[rows, (lone + 1) % 3]
+    c = t[rows, (lone + 2) % 3]
+
+    def crossing(i, j):
+        s = d[i] / (d[i] - d[j])
+        return v[i] + s[:, None] * (v[j] - v[i])
+
+    segs = np.stack([crossing(a, b), crossing(a, c)], axis=1)
+    length = np.linalg.norm(segs[:, 1] - segs[:, 0], axis=1)
+    return segs[length > 1e-12]
+
+
+class CutLines:
+    """Each solid's cut line under each plane, worked out once and kept
+    while neither moves: a plane standing still in a scene that is being
+    orbited asks the same question every frame. What a frame did not ask
+    for is let go at its end, so a deleted solid or a plane dragged on is
+    not held on to."""
+
+    def __init__(self):
+        self._kept: dict = {}
+        self._used: dict = {}
+
+    def segments(self, oid, mesh, plane: CapPlane) -> np.ndarray:
+        key = (oid, tuple(plane.origin), tuple(plane.normal))
+        hit = self._used.get(key) or self._kept.get(key)
+        if hit is None or hit[0] is not mesh:
+            hit = (mesh, plane_cut_segments(mesh.vertices, mesh.triangles,
+                                            plane.origin, plane.normal))
+        self._used[key] = hit
+        return hit[1]
+
+    def end_frame(self):
+        self._kept, self._used = self._used, {}
 
 
 def group_by_style(items) -> list:

@@ -10,10 +10,12 @@ import math
 
 import numpy as np
 from OpenGL import GL
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import (QColor, QFont, QPainter, QPainterPath, QPen,
+                           QPolygonF)
 
 from ..core import hlr, linetype
+from ..core.layers import screen_width_for
 from ..utils.math3d import look_at, ortho, perspective
 from . import theme
 
@@ -25,7 +27,7 @@ BORDER_ACTIVE = (0.85, 0.64, 0.25, 1.0)
 LINE_VISIBLE = (0.10, 0.10, 0.12, 1.0)
 LINE_HIDDEN = (0.45, 0.45, 0.5, 1.0)
 HATCH_INK = (0.25, 0.27, 0.32, 1.0)       # a cut's hatch lines, in ink
-CUT_OUTLINE = (0.05, 0.05, 0.07, 1.0)     # the heavy line round a cut face
+CUT_OUTLINE = (0.05, 0.05, 0.07, 1.0)     # the line round a cut face, in ink
 DIM_COLOR = (0.20, 0.30, 0.55, 1.0)
 POINT_MARK_PX = 4.0                     # half a point's cross, on screen
 ZOOM_PAD = 1.05                         # air around what a zoom was asked for
@@ -33,6 +35,12 @@ ZOOM_PAD = 1.05                         # air around what a zoom was asked for
 # it. Named, because anything that wants what the hidden-line pass worked
 # out has to skip the same details, or it makes the pass happen anyway.
 MODES_3D = ("wireframe", "shaded", "ghosted")
+
+
+def _cut_ink(color) -> tuple:
+    """The (r, g, b, a) a cut line draws in on screen: its section's
+    colour, or with none the ink a cut has always been outlined in."""
+    return CUT_OUTLINE if color is None else (*color[:3], 1.0)
 
 
 def point_marks(points, size: float) -> np.ndarray:
@@ -724,29 +732,30 @@ class LayoutView:
         for ink, segs in hlr_visible_segments(data.get("visible_by_obj", []),
                                               to_paper, picked, held):
             self._draw_segs(paper_mvp, segs, ink, 1.6)
-        # section-cut faces: heavy outline, and each face hatched the way
-        # whatever it was cut from says
+        # section-cut faces: each hatched and outlined the way whatever it
+        # was cut from says
         regions = data.get("cut") or []
         if regions:
             from ..core.layout import section_drawing
             # Solid comes back on its own and is flooded by the painter
             # afterwards, in `_paint_cut_fills`: GL has lines, and a face
             # with a bore in it is not a thing lines can fill.
-            lines, loops, _floods = section_drawing(
+            lines, outlines, _floods = section_drawing(
                 regions, cx, cy, s, self._region_fills(data))
             for color, segs in lines:
                 self._draw_segs(paper_mvp, np.asarray(
                     [[[a[0], a[1], 0], [b[0], b[1], 0]] for a, b in segs],
                     np.float32),
                     HATCH_INK if color is None else (*color, 1.0), 1.0)
-            outline = []
-            for loop in loops:
-                ring = np.asarray([(x, y, 0.0) for x, y in loop] +
-                                  [(loop[0][0], loop[0][1], 0.0)], np.float32)
-                outline.append(np.stack([ring[:-1], ring[1:]], axis=1))
-            if outline:
+            for color, width_mm, rings in outlines:
+                outline = []
+                for loop in rings:
+                    ring = np.asarray([(x, y, 0.0) for x, y in loop] +
+                                      [(loop[0][0], loop[0][1], 0.0)],
+                                      np.float32)
+                    outline.append(np.stack([ring[:-1], ring[1:]], axis=1))
                 self._draw_segs(paper_mvp, np.concatenate(outline),
-                                CUT_OUTLINE, 2.2)
+                                _cut_ink(color), screen_width_for(width_mm))
         GL.glDisable(GL.GL_SCISSOR_TEST)
 
     # ------------------------------------------------------- QPainter texts
@@ -798,7 +807,9 @@ class LayoutView:
         The rest of a cut goes out with the detail in GL, which draws
         lines; a face with a bore in it is not something lines can fill,
         so it comes back over here to the painter. Under the labels and
-        the annotations, the way a detail's own ink is.
+        the annotations, the way a detail's own ink is. A flood is opaque,
+        so the cut lines GL drew are stroked again over it, every one of
+        them in its own pen: the order the plot draws them in.
         """
         from ..core.layout import section_drawing
         from . import annot_paint
@@ -816,7 +827,7 @@ class LayoutView:
             fills = self._region_fills(data)
             if not any(f.pattern == "solid" for f in fills):
                 continue
-            _lines, _loops, floods = section_drawing(
+            _lines, outlines, floods = section_drawing(
                 data.get("cut") or [], detail.x + detail.w / 2,
                 detail.y + detail.h / 2, 1.0 / detail.scale_denom, fills)
             x0, y0 = self.paper_to_screen(detail.x, detail.y + detail.h)
@@ -824,10 +835,20 @@ class LayoutView:
             painter.save()
             painter.setClipRect(int(x0), int(y0),
                                 int(x1 - x0), int(y1 - y0))
-            edge = QPen(QColor.fromRgbF(*CUT_OUTLINE[:3]), 2.2)
             for color, rings in floods:
                 annot_paint.fill_cut_solid(painter, self.paper_to_screen,
-                                           [rings], color, edge)
+                                           [rings], color)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for color, width_mm, rings in outlines:
+                path = QPainterPath()
+                for ring in rings:
+                    path.addPolygon(QPolygonF(
+                        [QPointF(*self.paper_to_screen(x, y))
+                         for x, y in ring]))
+                    path.closeSubpath()
+                painter.setPen(QPen(QColor.fromRgbF(*_cut_ink(color)[:3]),
+                                    screen_width_for(width_mm)))
+                painter.drawPath(path)
             painter.restore()
 
     def _region_fills(self, data) -> list:

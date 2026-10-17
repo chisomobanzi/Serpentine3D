@@ -126,10 +126,12 @@ def _directions(segments):
 
 
 def test_each_cut_is_hatched_at_its_own_angle_and_spacing():
-    lines, loops, floods = section_drawing(
+    lines, outlines, floods = section_drawing(
         [[SQUARE], [SQUARE]], 0.0, 0.0, 1.0,
         [SectionFill("lines", 30.0, 2.0), SectionFill("lines", 120.0, 4.0)])
-    assert floods == [] and len(loops) == 2
+    assert floods == []
+    ((_ink, _width, rings),) = outlines      # both outlined alike: one pen
+    assert len(rings) == 2
     (ink, segments), = lines          # both in ink: one group
     assert ink is None
     assert _directions(segments) == {30, 120}
@@ -151,9 +153,9 @@ def test_a_coloured_cut_comes_out_in_its_colour():
 
 
 def test_none_draws_only_the_outline_whatever_its_colour():
-    lines, loops, floods = section_drawing(
+    lines, outlines, floods = section_drawing(
         [[SQUARE]], 0.0, 0.0, 1.0, [SectionFill("none", color=(1, 0, 0))])
-    assert lines == [] and floods == [] and len(loops) == 1
+    assert lines == [] and floods == [] and len(outlines) == 1
 
 
 class _Recorder:

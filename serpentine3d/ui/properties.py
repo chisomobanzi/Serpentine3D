@@ -25,8 +25,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import geometry as g
-from ..core.layers import (HATCH_INK, HATCH_LAYER_COLOR, MIN_HATCH_SPACING,
-                           PATH_SEPARATOR, section_fill_dict)
+from ..core.layers import (HATCH_INK, HATCH_LAYER_COLOR, MAX_CUT_LINE_WIDTH,
+                           MIN_HATCH_SPACING, PATH_SEPARATOR,
+                           hatch_token_rgb, section_fill_dict)
 from ..core.layout import (PAPER_SIZES, SECTION_FILLS, DetailView,
                            PaperObject, TextNote, parse_scale, sheet_label)
 from ..core.text import TextShape
@@ -47,6 +48,7 @@ PRINT_WIDTHS = ("0.13", "0.18", "0.25", "0.35", "0.5", "0.7", "1.0")
 # millimetres of paper. Typed values work too.
 HATCH_ANGLES = ("0", "30", "45", "60", "90", "135")
 HATCH_SPACINGS = ("1", "1.5", "2", "2.5", "3", "4", "5")
+CUT_LINE_NONE = "None"                 # a cut with no line round it
 _INK_SWATCH = (0.06, 0.06, 0.07)       # how Ink shows in the colour list
 _LINED = ("lines", "cross")            # the fills that are drawn as lines
 _BY_LAYER = "By layer"                 # an object taking its layer's value
@@ -101,17 +103,23 @@ def _link(text: str = "") -> QPushButton:
 
 
 class _Look(NamedTuple):
-    """One section hatch as the angle, spacing and colour rows show it:
-    the token its colour is kept as, and the (r, g, b) that draws in."""
+    """One section style as the look rows show it: for the hatch and for
+    the cut line, the token each colour is kept as and the (r, g, b) that
+    draws in."""
     pattern: str
     angle: float
     spacing: float
     color: str
     rgb: tuple | None
+    cut_line_width: float
+    cut_line_color: str
+    cut_rgb: tuple | None
 
 
-# how each part of a hatch's look is named in an undo step
-_LOOK_WORDS = {"angle": "angle", "spacing": "spacing", "color": "colour"}
+# how each part of a section's look is named in an undo step
+_LOOK_WORDS = {"angle": "angle", "spacing": "spacing", "color": "colour",
+               "cut_line_width": "cut line width",
+               "cut_line_color": "cut line colour"}
 
 
 def _number_combo(values, setter, tip: str) -> QComboBox:
@@ -127,16 +135,79 @@ def _number_combo(values, setter, tip: str) -> QComboBox:
     return combo
 
 
-class _HatchLook:
-    """A section hatch's angle, spacing and colour as three form rows: on a
-    layer's page, and on an object's that has a hatch of its own.
+class _TokenColour:
+    """A colour kept as a token, "ink", "layer" or "#rrggbb", as a
+    drop-down: Ink, Layer colour, the colour of its own when it has one,
+    and Choose…, which asks for one.
 
-    `changed(key, value)` is told of an edit, key "angle", "spacing" or
-    "color", and only of one that changes something; `revert()` puts the
-    page back when what was typed is not a number, or a colour dialog
-    closed without a choice. A row shows only where the patterns shown
-    have a use for it: angle and spacing are a line pattern's, and None
-    has no colour to be drawn in.
+    `chosen(token)` is told of every pick; `revert()` puts the page back
+    when the colour dialog is closed without a choice.
+    """
+
+    def __init__(self, chosen, revert, title: str, tip: str):
+        self._chosen = chosen
+        self._revert = revert
+        self._title = title
+        self._start = None
+        self._showing = False
+        self.combo = QComboBox()
+        self.combo.addItem(icons.swatch(_INK_SWATCH), "Ink", HATCH_INK)
+        self.combo.addItem("Layer colour", HATCH_LAYER_COLOR)
+        self.combo.addItem("Choose…", "choose")
+        self.combo.setToolTip(tip)
+        self.combo.currentIndexChanged.connect(self._picked)
+
+    def show(self, tokens: set, own_rgb, layer_rgb):
+        """Show the one token in `tokens`, or a blank for several; a
+        colour of its own is listed with `own_rgb` as its swatch, and
+        `layer_rgb` is the Layer colour entry's."""
+        self._showing = True
+        try:
+            combo = self.combo
+            combo.setItemIcon(combo.findData(HATCH_LAYER_COLOR),
+                              icons.swatch(layer_rgb))
+            for i in reversed(range(combo.count())):
+                if str(combo.itemData(i)).startswith("#"):
+                    combo.removeItem(i)
+            current = next(iter(tokens)) if len(tokens) == 1 else None
+            if current is not None and current.startswith("#"):
+                combo.insertItem(combo.findData("choose"),
+                                 icons.swatch(own_rgb), current.upper(),
+                                 current)
+            combo.setCurrentIndex(-1 if current is None
+                                  else combo.findData(current))
+            self._start = own_rgb
+        finally:
+            self._showing = False
+
+    def _picked(self, index):
+        if self._showing or index < 0:
+            return
+        token = self.combo.itemData(index)
+        if token == "choose":
+            from PySide6.QtWidgets import QColorDialog
+            color = QColorDialog.getColor(
+                QColor.fromRgbF(*(self._start or _INK_SWATCH)), self.combo,
+                self._title)
+            if not color.isValid():
+                self._revert()          # put back what it was
+                return
+            token = color.name()
+        self._chosen(token)
+
+
+class _HatchLook:
+    """A section style's look as form rows, on a layer's page and on an
+    object's that has a style of its own: the hatch's angle, spacing and
+    colour, then the width and colour of the line round the cut (#82).
+
+    `changed(key, value)` is told of an edit, key "angle", "spacing",
+    "color", "cut_line_width" or "cut_line_color", and only of one that
+    changes something; `revert()` puts the page back when what was typed
+    is not a number, or a colour dialog closed without a choice. A hatch
+    row shows only where the patterns shown have a use for it: angle and
+    spacing are a line pattern's, and None has no colour to be drawn in.
+    Every pattern has a cut line, None too: an empty cut is all outline.
     """
 
     def __init__(self, changed, revert):
@@ -153,24 +224,34 @@ class _HatchLook:
             HATCH_SPACINGS, self._spacing_edited,
             "How far apart the hatch lines are on the printed sheet, in "
             "millimetres, whatever the detail's scale")
-        self.color = QComboBox()
-        self.color.addItem(icons.swatch(_INK_SWATCH), "Ink", HATCH_INK)
-        self.color.addItem("Layer colour", HATCH_LAYER_COLOR)
-        self.color.addItem("Choose…", "choose")
-        self.color.setToolTip(
+        self._hatch_ink = _TokenColour(
+            lambda token: self._offer("color", token), revert,
+            "Hatch colour",
             "The colour a cut's hatch or fill is drawn in: Ink is the near "
             "black the rest of the sheet is drawn in")
-        self.color.currentIndexChanged.connect(self._color_chosen)
+        self.color = self._hatch_ink.combo
+        self.cut_width = _number_combo(
+            (CUT_LINE_NONE, *PRINT_WIDTHS), self._cut_width_edited,
+            "How wide the line round a cut face is on the printed sheet, in "
+            "millimetres; None draws no line round it")
+        self._cut_ink = _TokenColour(
+            lambda token: self._offer("cut_line_color", token), revert,
+            "Cut line colour",
+            "The colour of the line round a cut face: Ink is the near black "
+            "the rest of the sheet is drawn in")
+        self.cut_color = self._cut_ink.combo
 
     def add_rows(self, form: QFormLayout):
         self._form = form
         form.addRow("Hatch angle (°)", self.angle)
         form.addRow("Hatch spacing (mm)", self.spacing)
         form.addRow("Hatch colour", self.color)
+        form.addRow("Cut line (mm)", self.cut_width)
+        form.addRow("Cut line colour", self.cut_color)
 
     def show(self, looks: list, layer_rgb):
         """Show `looks` (`_Look`s; a value they disagree on shows blank),
-        with `layer_rgb` as the Layer colour entry's swatch."""
+        with `layer_rgb` as the Layer colour entries' swatch."""
         self._showing = True
         try:
             self._looks = looks
@@ -178,37 +259,33 @@ class _HatchLook:
                               {_width_text(k.angle) for k in looks})
             _show_common_text(self.spacing,
                               {_width_text(k.spacing) for k in looks})
-            combo = self.color
-            combo.setItemIcon(combo.findData(HATCH_LAYER_COLOR),
-                              icons.swatch(layer_rgb))
-            for i in reversed(range(combo.count())):
-                if str(combo.itemData(i)).startswith("#"):
-                    combo.removeItem(i)
-            tokens = {k.color for k in looks}
-            current = next(iter(tokens)) if len(tokens) == 1 else None
-            if current is not None and current.startswith("#"):
-                combo.insertItem(combo.findData("choose"),
-                                 icons.swatch(looks[0].rgb), current.upper(),
-                                 current)
-            combo.setCurrentIndex(-1 if current is None
-                                  else combo.findData(current))
+            self._hatch_ink.show({k.color for k in looks}, looks[0].rgb,
+                                 layer_rgb)
+            _show_common_text(self.cut_width,
+                              {_cut_width_text(k.cut_line_width)
+                               for k in looks})
+            self._cut_ink.show({k.cut_line_color for k in looks},
+                               looks[0].cut_rgb, layer_rgb)
             patterns = {k.pattern for k in looks}
             lined = any(p in _LINED for p in patterns)
             self._form.setRowVisible(self.angle, lined)
             self._form.setRowVisible(self.spacing, lined)
-            self._form.setRowVisible(combo, bool(patterns - {"none"}))
+            self._form.setRowVisible(self.color, bool(patterns - {"none"}))
+            self._form.setRowVisible(self.cut_width, True)
+            self._form.setRowVisible(self.cut_color, True)
         finally:
             self._showing = False
 
     def hide(self):
-        for row in (self.angle, self.spacing, self.color):
+        for row in (self.angle, self.spacing, self.color, self.cut_width,
+                    self.cut_color):
             self._form.setRowVisible(row, False)
 
     def _offer(self, key: str, value):
         """Pass an edit on, unless every look shown has it already."""
         if all(getattr(k, key) == value for k in self._looks):
-            if key == "color":
-                self._revert()          # the list has moved off it
+            if key in ("color", "cut_line_color", "cut_line_width"):
+                self._revert()          # the row has moved off it
             return
         self._changed(key, value)
 
@@ -230,21 +307,16 @@ class _HatchLook:
             return
         self._offer("spacing", max(MIN_HATCH_SPACING, spacing))
 
-    def _color_chosen(self, index):
-        if self._showing or index < 0:
+    def _cut_width_edited(self, *_args):
+        if self._showing:
             return
-        token = self.color.itemData(index)
-        if token == "choose":
-            from PySide6.QtWidgets import QColorDialog
-            start = self._looks[0].rgb if self._looks else None
-            color = QColorDialog.getColor(
-                QColor.fromRgbF(*(start or _INK_SWATCH)), self.color,
-                "Hatch colour")
-            if not color.isValid():
-                self._revert()          # put back what it was
-                return
-            token = color.name()
-        self._offer("color", token)
+        text = self.cut_width.currentText().strip()
+        width = 0.0 if text.lower() == CUT_LINE_NONE.lower() \
+            else _parse_width(text)
+        if width is None:
+            self._revert()
+            return
+        self._offer("cut_line_width", min(width, MAX_CUT_LINE_WIDTH))
 
 
 def _paper_and_turn(layout) -> tuple:
@@ -1314,6 +1386,8 @@ class PropertiesPanel(QWidget):
         self.layer_hatch_angle = self.layer_look.angle
         self.layer_hatch_spacing = self.layer_look.spacing
         self.layer_hatch_color = self.layer_look.color
+        self.layer_cut_width = self.layer_look.cut_width
+        self.layer_cut_color = self.layer_look.cut_color
         self.layer_visible = QCheckBox("Visible")
         self.layer_visible.clicked.connect(lambda: self._layer_switch(
             self.layer_visible, "layer visibility",
@@ -1393,7 +1467,9 @@ class PropertiesPanel(QWidget):
                 if len(hatches) == 1 else -1)
             self.layer_look.show(
                 [_Look(la.hatch, la.hatch_angle, la.hatch_spacing,
-                       la.hatch_color, self.scene.layers.hatch_rgb(la.id))
+                       la.hatch_color, self.scene.layers.hatch_rgb(la.id),
+                       la.cut_line_width, la.cut_line_color,
+                       hatch_token_rgb(la.cut_line_color, la.color))
                  for la in layers],
                 layers[0].color if len({la.color for la in layers}) == 1
                 else _MIXED_MARK)
@@ -1511,11 +1587,17 @@ class PropertiesPanel(QWidget):
                           lambda i: self.scene.layers.set_hatch(i, pattern))
 
     def _set_layer_look(self, key: str, value):
-        """An edit to the picked layers' hatch angle, spacing or colour."""
-        setter = {"angle": self.scene.layers.set_hatch_angle,
-                  "spacing": self.scene.layers.set_hatch_spacing,
-                  "color": self.scene.layers.set_hatch_color}[key]
-        self._edit_layers(f"layer hatch {_LOOK_WORDS[key]}",
+        """An edit to the picked layers' hatch angle, spacing or colour, or
+        to the width or colour of their cut line."""
+        layers = self.scene.layers
+        setter = {"angle": layers.set_hatch_angle,
+                  "spacing": layers.set_hatch_spacing,
+                  "color": layers.set_hatch_color,
+                  "cut_line_width": layers.set_cut_line_width,
+                  "cut_line_color": layers.set_cut_line_color}[key]
+        what = _LOOK_WORDS[key]
+        self._edit_layers(f"layer {what}" if key.startswith("cut_line")
+                          else f"layer hatch {what}",
                           lambda i: setter(i, value))
 
     def _movable_here(self) -> list[str]:
@@ -1719,10 +1801,12 @@ class PropertiesPanel(QWidget):
         self.section_hatch.setCurrentIndex(
             0 if not own else self.section_hatch.findData(own["pattern"]))
         if own:
+            fill = self.scene.section_fill_of(obj)
             self.section_look.show(
                 [_Look(own["pattern"], own["angle"], own["spacing"],
-                       own["color"],
-                       self.scene.section_fill_of(obj).color)],
+                       own["color"], fill.color, fill.cut_line_width,
+                       own.get("cut_line_color", HATCH_INK),
+                       fill.cut_line_color)],
                 layer.color)
         else:
             self.section_look.hide()
@@ -1768,17 +1852,21 @@ class PropertiesPanel(QWidget):
         else:
             layer = self.scene.layers.get(obj.layer_id)
             fill = section_fill_dict(choice, layer.hatch_angle,
-                                     layer.hatch_spacing, layer.hatch_color)
+                                     layer.hatch_spacing, layer.hatch_color,
+                                     layer.cut_line_width,
+                                     layer.cut_line_color)
         self.history.checkpoint("object section hatch")
         self.scene.update(obj.id, section_fill=fill)
 
     def _set_object_look(self, key: str, value):
         """An edit to the hatch angle, spacing or colour of an object's own
-        section hatch."""
+        section style, or to the width or colour of its cut line."""
         obj, paper = self._current()
         if obj is None or paper or not obj.section_fill:
             return
-        self.history.checkpoint(f"object hatch {_LOOK_WORDS[key]}")
+        what = _LOOK_WORDS[key]
+        self.history.checkpoint(f"object {what}" if key.startswith("cut_line")
+                                else f"object hatch {what}")
         self.scene.update(obj.id, section_fill=section_fill_dict(
             **dict(obj.section_fill, **{key: value})))
 
@@ -2245,6 +2333,11 @@ def _capital(text: str) -> str:
 def _width_text(width: float) -> str:
     """A width as the drop-downs write it: 1.4, 2, 0.25."""
     return f"{width:g}"
+
+
+def _cut_width_text(width: float) -> str:
+    """A cut line's width as its row shows it: None for no line at all."""
+    return CUT_LINE_NONE if width <= 0 else _width_text(width)
 
 
 def _screen_text(layer) -> str:

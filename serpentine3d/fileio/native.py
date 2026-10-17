@@ -15,7 +15,8 @@ import base64
 import json
 
 from ..core import geometry
-from ..core.layers import DEFAULT_SCREEN_WIDTH, Layer, section_fill_dict
+from ..core.layers import (DEFAULT_CUT_LINE_WIDTH, DEFAULT_SCREEN_WIDTH,
+                           Layer, section_fill_dict)
 
 # The newest version this reader understands. Anything newer is refused
 # with the version it asks for, never a traceback.
@@ -128,6 +129,8 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "hatch_angle": layer.hatch_angle,
                 "hatch_spacing": layer.hatch_spacing,
                 "hatch_color": layer.hatch_color,
+                "cut_line_width": layer.cut_line_width,
+                "cut_line_color": layer.cut_line_color,
                 "parent": layer.parent,
             }
             for layer in scene.layers.all()
@@ -367,11 +370,15 @@ def _check_version(doc: dict):
 
 
 def _copy_hatch_look(layers, layer_id: str, ld: dict):
-    """A layer's hatch angle, spacing and colour, or the 45 degrees,
-    2.5 mm and ink every cut had before a layer could say otherwise."""
+    """A layer's hatch angle, spacing and colour and the width and colour
+    of its cut line, or the 45 degrees, 2.5 mm, ink and 0.5 mm of ink
+    every cut had before a layer could say otherwise."""
     layers.set_hatch_angle(layer_id, ld.get("hatch_angle", 45.0))
     layers.set_hatch_spacing(layer_id, ld.get("hatch_spacing", 2.5))
     layers.set_hatch_color(layer_id, ld.get("hatch_color", "ink"))
+    layers.set_cut_line_width(layer_id, ld.get("cut_line_width",
+                                               DEFAULT_CUT_LINE_WIDTH))
+    layers.set_cut_line_color(layer_id, ld.get("cut_line_color", "ink"))
 
 
 def _restore_widths(layers, layer_id: str, ld: dict):
@@ -495,7 +502,8 @@ def _load_doc(scene, doc: dict, blobs=None):
         if od.get("section_fill"):
             updates["section_fill"] = section_fill_dict(**{
                 k: v for k, v in od["section_fill"].items()
-                if k in ("pattern", "angle", "spacing", "color")})
+                if k in ("pattern", "angle", "spacing", "color",
+                         "cut_line_width", "cut_line_color")})
         if od.get("locked"):
             updates["locked"] = True
         if od.get("group"):

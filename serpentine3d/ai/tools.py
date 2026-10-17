@@ -157,7 +157,8 @@ TOOLS: list[dict] = [
             "print_width mm (0 = printer default), screen_width px or "
             "'from print', hatch none/lines/cross/solid, hatch_angle "
             "degrees, hatch_spacing mm on paper, hatch_color "
-            "ink/layer/#rrggbb}). "
+            "ink/layer/#rrggbb, cut_line_width mm on paper round a cut "
+            "(0 = none), cut_line_color ink/layer/#rrggbb}). "
             "A layer can live under another: pass parent "
             "to 'create', and name a layer by its path ('Walls::Interior') "
             "where two layers share a name."),

@@ -337,14 +337,18 @@ def cut_patterns(data: dict) -> list:
 
 @dataclass(frozen=True)
 class SectionFill:
-    """What a cut face is filled with: the pattern, the angle and spacing
-    of its lines on the paper (degrees, millimetres), and the colour they
-    are drawn in, as an (r, g, b) in 0..1, or None for the ink the rest of
-    the sheet is drawn in."""
+    """How a cut face is drawn: the pattern it is filled with, the angle
+    and spacing of its lines on the paper (degrees, millimetres), and the
+    colour they are drawn in, as an (r, g, b) in 0..1, or None for the ink
+    the rest of the sheet is drawn in. Then the line round the face: its
+    width on the paper in millimetres, 0 for none, and its colour, the
+    same way (#82)."""
     pattern: str = "lines"
     angle: float = 45.0
     spacing: float = 2.5
     color: tuple | None = None
+    cut_line_width: float = 0.5
+    cut_line_color: tuple | None = None
 
 
 def section_drawing(regions: list, cx: float, cy: float, s: float,
@@ -360,7 +364,9 @@ def section_drawing(regions: list, cx: float, cy: float, s: float,
     - the hatch lines, as (colour, segments) with one entry per colour
       in the order the colours first come up, so a painter changes pen
       once a colour rather than once a face;
-    - the loops to draw a line round, every ring of every face;
+    - the outlines, as (colour, width, rings) with one entry per pen in
+      the order the pens first come up, every ring of every face that
+      has a cut line; a face whose cut line is 0 wide is left out;
     - the faces to flood, as (colour, rings) with the bore among the
       rings: solid is not a set of segments, it is the face itself.
 
@@ -373,7 +379,8 @@ def section_drawing(regions: list, cx: float, cy: float, s: float,
     """
     fills = fills or []
     lines: dict = {}
-    loops, floods = [], []
+    outlines: dict = {}
+    floods = []
     for i, region in enumerate(regions):
         paper = [[(cx + px * s, cy + py * s) for px, py in ring]
                  for ring in region if len(ring) >= 3]
@@ -388,9 +395,12 @@ def section_drawing(regions: list, cx: float, cy: float, s: float,
             if fill.pattern == "cross":
                 segments.extend(
                     hatch_region(paper, fill.angle + 90.0, fill.spacing))
-        loops.extend(paper)
+        if fill.cut_line_width > 0:
+            outlines.setdefault((fill.cut_line_color, fill.cut_line_width),
+                                []).extend(paper)
     return [(color, segs) for color, segs in lines.items() if segs], \
-        loops, floods
+        [(color, width, rings)
+         for (color, width), rings in outlines.items()], floods
 
 
 def cut_hatching(regions: list, cx: float, cy: float, s: float,
@@ -406,8 +416,9 @@ def cut_hatching(regions: list, cx: float, cy: float, s: float,
     fills = [SectionFill(patterns[i] if patterns and i < len(patterns)
                          else "", angle, spacing)
              for i in range(len(regions))]
-    lines, loops, floods = section_drawing(regions, cx, cy, s, fills)
-    return ([seg for _color, segs in lines for seg in segs], loops,
+    lines, outlines, floods = section_drawing(regions, cx, cy, s, fills)
+    return ([seg for _color, segs in lines for seg in segs],
+            [ring for _color, _width, rings in outlines for ring in rings],
             [rings for _color, rings in floods])
 
 

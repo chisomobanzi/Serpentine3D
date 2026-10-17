@@ -4,6 +4,18 @@
 
 ### Added
 
+- **A section cut's line has its own width and colour (#82).** The line
+  round a cut face used to be the same 0.5 mm of ink on every sheet, and a
+  clipping plane in the model drew no line round its caps at all. Now the
+  layer page in Properties has a Cut line width (in millimetres on the
+  paper, or None) and a Cut line colour (Ink, the layer's colour, or one
+  of its own) beside the section hatch. An object with a section style of
+  its own carries its own cut line too, all of a piece the way Rhino's
+  section style does, and starts from its layer's. The sheet, the PDF and
+  SVG plot, and the caps a clipping plane leaves in the model all draw it.
+  Scripts set it with `cut_line_width` and `cut_line_color` in a layer's
+  style. Files from before open with the 0.5 mm of ink they always had.
+
 - **Interface scale and font (Settings → Display).** A scale slider,
   100% to 150%, grows the whole interface (text, icons, panels), and an
   interface-font picker (with the system default as a choice) applies

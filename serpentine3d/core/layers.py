@@ -27,6 +27,12 @@ HATCH_INK = "ink"
 HATCH_LAYER_COLOR = "layer"
 MIN_HATCH_SPACING = 0.2         # mm on paper: closer is a grey smear
 
+# The line round a cut face, in millimetres on the paper: the 0.5 mm every
+# cut was outlined with before a layer could say, and no more than a pen
+# wider than any made. 0 draws no line round it at all.
+DEFAULT_CUT_LINE_WIDTH = 0.5
+MAX_CUT_LINE_WIDTH = 5.0
+
 
 def hatch_color_token(value) -> str:
     """A hatch colour as a layer keeps it: "ink", "layer" or "#rrggbb".
@@ -78,13 +84,24 @@ def _tidy_spacing(mm) -> float:
     return max(MIN_HATCH_SPACING, float(mm))
 
 
+def _tidy_cut_width(mm) -> float:
+    """None (0) up to the widest pen; what is not a width at all is none."""
+    return max(0.0, min(float(mm), MAX_CUT_LINE_WIDTH))
+
+
 def section_fill_dict(pattern="lines", angle=45.0, spacing=2.5,
-                      color=HATCH_INK) -> dict:
-    """A section hatch of an object's own, as the object keeps it: the
-    same four things a layer has, put right the way a layer's are."""
+                      color=HATCH_INK,
+                      cut_line_width=DEFAULT_CUT_LINE_WIDTH,
+                      cut_line_color=HATCH_INK) -> dict:
+    """A section style of an object's own, as the object keeps it: the
+    same six things a layer has, put right the way a layer's are. A style
+    kept before cut lines had a width and colour gets the ones every cut
+    was outlined with then."""
     return {"pattern": _tidy_pattern(pattern), "angle": _tidy_angle(angle),
             "spacing": _tidy_spacing(spacing),
-            "color": hatch_color_token(color)}
+            "color": hatch_color_token(color),
+            "cut_line_width": _tidy_cut_width(cut_line_width),
+            "cut_line_color": hatch_color_token(cut_line_color)}
 
 
 def screen_width_for(print_mm: float) -> float:
@@ -122,6 +139,8 @@ class Layer:
     hatch_angle: float = 45.0      # degrees on the paper, within half a turn
     hatch_spacing: float = 2.5     # mm on the paper between hatch lines
     hatch_color: str = HATCH_INK   # "ink", "layer" or "#rrggbb"
+    cut_line_width: float = DEFAULT_CUT_LINE_WIDTH  # mm round a cut; 0 = none
+    cut_line_color: str = HATCH_INK  # "ink", "layer" or "#rrggbb"
     parent: str | None = None      # the layer this one sits under, if any
 
 
@@ -318,6 +337,16 @@ class LayerManager:
     def set_hatch_color(self, layer_id: str, color):
         self._layers[layer_id] = replace(
             self._layers[layer_id], hatch_color=hatch_color_token(color))
+
+    def set_cut_line_width(self, layer_id: str, mm: float):
+        """How wide, in millimetres on the paper, the line round a cut
+        through this layer's material is drawn; 0 draws none."""
+        self._layers[layer_id] = replace(self._layers[layer_id],
+                                         cut_line_width=_tidy_cut_width(mm))
+
+    def set_cut_line_color(self, layer_id: str, color):
+        self._layers[layer_id] = replace(
+            self._layers[layer_id], cut_line_color=hatch_color_token(color))
 
     def hatch_rgb(self, layer_id: str):
         """The (r, g, b) a layer's hatch is drawn in, or None for ink."""

@@ -378,7 +378,8 @@ def cmd_sectionhatch(ctx):
         angle = yield NumberReq("Hatch angle (degrees)", default=angle)
         spacing = yield NumberReq("Hatch spacing on paper (mm)",
                                   default=spacing, minimum=0.2)
-    fill = section_fill_dict(pattern, angle, spacing, layer.hatch_color)
+    fill = section_fill_dict(pattern, angle, spacing, layer.hatch_color,
+                             layer.cut_line_width, layer.cut_line_color)
     # one notification, not one an object; each gets its own copy
     with ctx.scene.batched():
         for o in objs:

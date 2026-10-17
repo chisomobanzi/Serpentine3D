@@ -24,6 +24,8 @@ _LAYER_STYLE = {
     "hatch_angle": "set_hatch_angle",
     "hatch_spacing": "set_hatch_spacing",
     "hatch_color": "set_hatch_color",
+    "cut_line_width": "set_cut_line_width",
+    "cut_line_color": "set_cut_line_color",
 }
 
 
@@ -155,6 +157,9 @@ class SerpApi:
                            "angle": layer.hatch_angle,
                            "spacing": layer.hatch_spacing,
                            "color": layer.hatch_color},
+                 # the line round a cut: mm on paper, 0 for none
+                 "cut_line": {"width": layer.cut_line_width,
+                              "color": layer.cut_line_color},
                  "object_count": sum(1 for row in rows
                                      if row["layer"] == layer.name)}
                 for layer in self.scene.layers.all()
@@ -495,11 +500,18 @@ class SerpApi:
                 str(style["hatch"]).lower() not in SECTION_FILLS:
             raise ApiError(f"Unknown hatch '{style['hatch']}'; "
                            f"known: {', '.join(SECTION_FILLS)}")
-        if "hatch_color" in style and \
-                hatch_color_token(style["hatch_color"]) == HATCH_INK and \
-                str(style["hatch_color"]).lower() != HATCH_INK:
-            raise ApiError("hatch_color is 'ink', 'layer', '#rrggbb' or "
-                           "[r, g, b] in 0..1")
+        for key in ("hatch_color", "cut_line_color"):
+            if key in style and \
+                    hatch_color_token(style[key]) == HATCH_INK and \
+                    str(style[key]).lower() != HATCH_INK:
+                raise ApiError(f"{key} is 'ink', 'layer', '#rrggbb' or "
+                               "[r, g, b] in 0..1")
+        if "cut_line_width" in style:
+            try:
+                float(style["cut_line_width"])
+            except (TypeError, ValueError):
+                raise ApiError("cut_line_width is millimetres on the paper, "
+                               "0 for no line") from None
         mgr = self.scene.layers
         self.history.checkpoint("layer style")
         # print width first: a screen width that follows it is worked

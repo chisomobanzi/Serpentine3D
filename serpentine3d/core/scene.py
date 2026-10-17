@@ -15,8 +15,8 @@ import numpy as np
 
 from . import geometry
 from .deferred import DeferredShape
-from .layers import (DEFAULT_LAYER_ID, LayerManager, hatch_token_rgb,
-                     screen_width_for)
+from .layers import (DEFAULT_CUT_LINE_WIDTH, DEFAULT_LAYER_ID, HATCH_INK,
+                     LayerManager, hatch_token_rgb, screen_width_for)
 from .layout import SectionFill
 from .tessellate import DisplayMesh, tessellate
 
@@ -553,15 +553,23 @@ class Scene:
 
     def section_fill_of(self, obj: SceneObject):
         """Everything a cut through this object is drawn with: the
-        pattern, its angle and spacing on the paper, and its colour."""
+        pattern, its angle and spacing on the paper, and its colour, then
+        the width and colour of the line round it. A style of its own is
+        all of a piece, cut line and all, the way Rhino's is."""
         layer = self.layers.get(obj.layer_id)
         own = obj.section_fill
         if own:
-            return SectionFill(own["pattern"], own["angle"], own["spacing"],
-                               hatch_token_rgb(own["color"], layer.color))
+            return SectionFill(
+                own["pattern"], own["angle"], own["spacing"],
+                hatch_token_rgb(own["color"], layer.color),
+                own.get("cut_line_width", DEFAULT_CUT_LINE_WIDTH),
+                hatch_token_rgb(own.get("cut_line_color", HATCH_INK),
+                                layer.color))
         return SectionFill(layer.hatch, layer.hatch_angle,
                            layer.hatch_spacing,
-                           self.layers.hatch_rgb(layer.id))
+                           self.layers.hatch_rgb(layer.id),
+                           layer.cut_line_width,
+                           hatch_token_rgb(layer.cut_line_color, layer.color))
 
     def render_color_of(self, obj: SceneObject) -> tuple[float, float, float]:
         """The colour rendered mode draws the object's surfaces in.

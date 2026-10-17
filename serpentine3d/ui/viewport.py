@@ -1216,6 +1216,7 @@ class Viewport(QOpenGLWidget):
         self._point_prog = 0
         self._count_prog = self._cap_prog = 0     # section caps
         self._cap_quad = None
+        self._cut_lines = _caps.CutLines()       # the line round each cap
         # Point clouds: how big a point is on screen and how many the frame
         # may hold before the finer levels are dropped (display settings).
         self.point_size = float(config.get("display", "point_size",
@@ -2547,6 +2548,7 @@ class Viewport(QOpenGLWidget):
                     and obj.mesh_ready and obj.mesh.bounds() is not None):
                 solids.append((obj, gpu))
         if not planes or not solids:
+            self._cut_lines.end_frame()
             return
         boxes = [obj.mesh.bounds() for obj, _gpu in solids]
         lows = np.array([b[0] for b in boxes], float)
@@ -2569,8 +2571,10 @@ class Viewport(QOpenGLWidget):
                     np.asarray(corner, float) - np.asarray(plane.origin)))
                     for obj, _gpu in cut for corner in obj.mesh.bounds())
                 by_id = {obj.id: (obj, gpu) for obj, gpu in cut}
+                fills = {obj.id: self.scene.section_fill_of(obj)
+                         for obj, _gpu in cut}
                 looks = [(obj.id, _caps.cap_style(
-                    self.scene.section_fill_of(obj),
+                    fills[obj.id],
                     self._cap_color(obj, locked_layers, mode)))
                     for obj, _gpu in cut]
                 for style, ids in _caps.group_by_style(looks):
@@ -2578,8 +2582,12 @@ class Viewport(QOpenGLWidget):
                         mvp, plane, [by_id[oid][1] for oid in ids])
                     self._lay_cap(mvp, plane, others, style, ppu,
                                   reach * 1.5 + 1.0)
+                self._draw_cut_lines(mvp, plane, others,
+                                     [(obj, fills[obj.id]) for obj, _ in cut])
         finally:
+            self._cut_lines.end_frame()
             GL.glDisable(GL.GL_STENCIL_TEST)
+            GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
             GL.glColorMask(True, True, True, True)
             GL.glDepthMask(True)
             GL.glEnable(GL.GL_DEPTH_TEST)
@@ -2631,10 +2639,13 @@ class Viewport(QOpenGLWidget):
 
     def _lay_cap(self, mvp, plane, others, style, ppu, extent):
         """The sheet over the plane where the stencil says solid, cut by
-        every other plane, hidden by anything nearer."""
+        every other plane, hidden by anything nearer. Set back a touch, the
+        way a face is, so its cut line lies on it the way an edge does."""
         GL.glColorMask(True, True, True, True)
         GL.glDepthMask(True)
         GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
+        GL.glPolygonOffset(1.0, 1.0)
         GL.glStencilFunc(GL.GL_NOTEQUAL, 0, 0xFF)
         GL.glStencilOp(GL.GL_KEEP, GL.GL_KEEP, GL.GL_KEEP)
         for k in range(_caps.MAX_PLANES):
@@ -2660,6 +2671,49 @@ class Viewport(QOpenGLWidget):
         GL.glUniform3f(self._uloc(prog, "uFill"), *style.fill)
         GL.glUniform4f(self._uloc(prog, "uLine"), *style.line)
         self._cap_quad.draw(extent)
+        GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
+
+    def _draw_cut_lines(self, mvp, plane, others, cut):
+        """The line round every cap one plane lays, where the plane meets
+        each solid's faces, in the width and colour the solid's section
+        says (#82). `cut` is (object, section fill) for every solid the
+        plane passes through.
+
+        Not on the stencil: half the line's width lies outside the cap.
+        Cut by every other plane, as the cap is, but not by this one: the
+        line lies on it, and would come and go with the rounding. Drawn a
+        hair nearer than it is, so an edge or an isocurve that happens to
+        lie on the plane too goes under it rather than through it in
+        dashes. About the plane's origin, as the cap is, so a model far
+        from the world's origin still draws in small float32 numbers.
+        """
+        groups: dict = {}
+        for obj, fill in cut:
+            style = _caps.cut_line_style(fill)
+            if style is None:
+                continue
+            segs = self._cut_lines.segments(obj.id, obj.mesh, plane)
+            if len(segs):
+                groups.setdefault(style, []).append(segs)
+        if not groups:
+            return
+        origin = np.asarray(plane.origin, float)
+        GL.glDisable(GL.GL_STENCIL_TEST)
+        GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)      # the wide line's quads
+        GL.glPolygonOffset(0.0, -2.0)
+        try:
+            for k in range(_caps.MAX_PLANES):
+                (GL.glEnable if k < len(others) else GL.glDisable)(
+                    GL.GL_CLIP_DISTANCE0 + k)
+            self._set_clip_uniforms(self._thick_prog,
+                                    anchored_clips(others, origin))
+            for (color, width), parts in groups.items():
+                self._draw_thick_segments(
+                    (np.concatenate(parts) - origin).astype(np.float32),
+                    anchored(mvp, origin), color, width)
+        finally:
+            GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
+            GL.glEnable(GL.GL_STENCIL_TEST)
 
     def _draw_point_markers(self, mvp, points, color, selected: bool,
                             anchor=None):

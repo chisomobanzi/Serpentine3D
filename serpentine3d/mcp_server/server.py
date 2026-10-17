@@ -211,8 +211,9 @@ def serp_layers(action: str = "list", name: str = "", new_name: str = "",
     layer), 'delete', 'style' (how a layer draws: style={linetype,
     print_width mm (0 = printer default), screen_width px or 'from print',
     hatch none/lines/cross/solid, hatch_angle degrees, hatch_spacing mm on
-    paper, hatch_color ink/layer/#rrggbb}). A layer can live under
-    another: pass parent to 'create', and name a layer by its path
+    paper, hatch_color ink/layer/#rrggbb, cut_line_width mm on paper round
+    a cut (0 = none), cut_line_color ink/layer/#rrggbb}). A layer can live
+    under another: pass parent to 'create', and name a layer by its path
     ('Walls::Interior') where two layers share a name."""
     return _call("layers", action=action, name=name or None,
                  new_name=new_name or None, color=color, visible=visible,

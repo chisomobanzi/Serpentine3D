@@ -264,3 +264,29 @@ def test_a_second_plane_trims_the_first_one_s_cap(cut_box):
     beyond = _pixel_at(vp, image, (16.0, 7.0, 0.0))
     assert not _is_red(beyond), \
         f"the cap ran on past the second plane: {beyond.name()}"
+
+
+def test_the_cap_is_outlined_in_its_cut_line_colour(cut_box):
+    """The line round a cap, where the plane meets the solid's sides, in
+    the width and colour its layer gives its cut line (#82)."""
+    w, vp, box = cut_box
+    w.scene.layers.set_hatch(box.layer_id, "none")
+    w.scene.layers.set_cut_line_width(box.layer_id, 1.0)
+    w.scene.layers.set_cut_line_color(box.layer_id, "#ff0000")
+    w.scene.notify()
+    image = vp.grabFramebuffer()
+    edge = _pixel_at(vp, image, (20.0, 7.0, 0.0))
+    assert _is_red(edge), f"no line round the cut: {edge.name()}"
+    inside = _pixel_at(vp, image, (10.0, 7.0, 0.0))
+    assert not _is_red(inside), \
+        f"the line spread across the cap: {inside.name()}"
+
+
+def test_a_cut_line_of_none_leaves_the_cap_unoutlined(cut_box):
+    w, vp, box = cut_box
+    w.scene.layers.set_hatch(box.layer_id, "none")
+    w.scene.layers.set_cut_line_width(box.layer_id, 0.0)
+    w.scene.layers.set_cut_line_color(box.layer_id, "#ff0000")
+    w.scene.notify()
+    edge = _pixel_at(vp, vp.grabFramebuffer(), (20.0, 7.0, 0.0))
+    assert not _is_red(edge), f"a line of None was drawn: {edge.name()}"

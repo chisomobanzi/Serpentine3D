@@ -177,7 +177,7 @@ def _paint_detail_vector(painter, layout_view, detail, layout, k):
         region_fills = getattr(layout_view, "_region_fills", None)
         fills = (region_fills(data) if region_fills is not None
                  else [SectionFill(p or "lines") for p in cut_patterns(data)])
-        lines, loops, floods = section_drawing(regions, cx, cy, s, fills)
+        lines, outlines, floods = section_drawing(regions, cx, cy, s, fills)
         for color, segs in lines:
             painter.setPen(QPen(QColor(60, 62, 70) if color is None
                                 else QColor.fromRgbF(*color[:3]), 0.15 * k))
@@ -192,11 +192,17 @@ def _paint_detail_vector(painter, layout_view, detail, layout, k):
             annot_paint.fill_cut_solid(
                 painter, lambda x, y: (x * k, (layout.paper_h - y) * k),
                 [rings], color)
-        painter.setPen(QPen(QColor(10, 10, 12), 0.5 * k))
-        for loop in loops:
-            ring = list(loop) + [loop[0]]     # closed, or one side is missing
-            painter.drawPolyline(QPolygonF(
-                [QPointF(x * k, (layout.paper_h - y) * k) for x, y in ring]))
+        # Each face's cut line at its own width on the paper, in ink unless
+        # its section says a colour (#82).
+        for color, width_mm, rings in outlines:
+            painter.setPen(QPen(QColor(10, 10, 12) if color is None
+                                else QColor.fromRgbF(*color[:3]),
+                                width_mm * k))
+            for loop in rings:
+                ring = list(loop) + [loop[0]]  # closed, or a side is missing
+                painter.drawPolyline(QPolygonF(
+                    [QPointF(x * k, (layout.paper_h - y) * k)
+                     for x, y in ring]))
     painter.restore()
 
 
