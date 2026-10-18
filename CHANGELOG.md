@@ -55,7 +55,10 @@
   away and keys match whatever their case, both as in Rhino, and Delete in
   the table takes the picked pair away, not the object. `setusertext` and
   `getusertext` do the same from the command line, and `scene_info` reports
-  them to scripts and assistants. Asked for on the forum.
+  them to scripts and assistants. A .serp holding user text asks for this
+  release or newer, since an older one would open it and drop the keys
+  without a word; a file with none opens in every release it did before.
+  Asked for on the forum.
 
 ### Changed
 

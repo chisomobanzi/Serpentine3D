@@ -234,6 +234,59 @@ def test_a_file_hand_edited_into_nonsense_still_opens(tmp_path):
     assert _named(back, "box").user_text == {"Count": "3", "Kept": "yes"}
 
 
+def _document(path):
+    import json
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        return json.loads(z.read("document.json"))
+
+
+def _tagged_scene(kind):
+    import numpy as np
+
+    from serpentine3d.core.picture import PictureShape
+    from serpentine3d.core.pointcloud import PointCloudShape
+    shape = {"box": lambda: g.make_box((0, 0, 0), 1, 1, 1),
+             "picture": lambda: PictureShape(dict(
+                 origin=[0, 0, 0], u=[10, 0, 0], v=[0, 10, 0],
+                 path="reference.png")),
+             "cloud": lambda: PointCloudShape(np.eye(3))}[kind]()
+    scene = Scene()
+    obj = scene.add(shape, name="tagged")
+    scene.update(obj.id, user_text=dict(DOOR))
+    return scene
+
+
+@pytest.mark.parametrize("kind", ["box", "picture", "cloud"])
+def test_a_file_with_user_text_names_the_release_that_reads_it(
+        kind, tmp_path, monkeypatch):
+    """A release before user text opens the file, drops every key without a
+    word, and a save there loses them for good, so it is told instead,
+    as it is about pictures and hatches."""
+    path = str(tmp_path / "tagged.serp")
+    native.save_scene(_tagged_scene(kind), path)
+    doc = _document(path)
+    assert doc["version"] == 6
+    assert doc["requires"] == "0.13.0"
+
+    monkeypatch.setattr(native, "FORMAT_VERSION", 5)
+    existing = Scene()
+    box = existing.add(g.make_box((0, 0, 0), 1, 1, 1))
+    with pytest.raises(ValueError, match="0.13.0"):
+        native.load_scene(existing, path)
+    assert existing.get(box.id) is box
+
+
+def test_a_file_without_user_text_keeps_the_version_it_had(tmp_path):
+    """Asking for a newer reader only when the file needs one keeps
+    ordinary drawings opening in every release that could open them."""
+    scene = Scene()
+    scene.add(g.make_box((0, 0, 0), 1, 1, 1), name="plain")
+    path = str(tmp_path / "plain.serp")
+    native.save_scene(scene, path)
+    assert _document(path)["version"] == native.PLAIN_VERSION
+
+
 # ------------------------------------------------------- going back out
 
 def _written(path):

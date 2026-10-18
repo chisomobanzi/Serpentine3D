@@ -20,7 +20,7 @@ from ..core.layers import (DEFAULT_CUT_LINE_WIDTH, DEFAULT_SCREEN_WIDTH,
 
 # The newest version this reader understands. Anything newer is refused
 # with the version it asks for, never a traceback.
-FORMAT_VERSION = 5
+FORMAT_VERSION = 6
 # What a document with none of the version-3 kinds is written as.
 PLAIN_VERSION = 2
 # The Serpentine3D release a version-3 file asks its reader to be.
@@ -197,6 +197,11 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
     if any(isinstance(shape, HatchShape) for shape in new_shapes):
         doc["version"] = 5
         doc["requires"] = "0.10.5"
+    # A release before user text opens the file and drops every key without
+    # a word, and a save there loses them for good.
+    if any(obj.user_text for obj in scene.all()):
+        doc["version"] = 6
+        doc["requires"] = "0.13.0"
     _write_container(doc, path, thumbnail, blobs)
 
 
