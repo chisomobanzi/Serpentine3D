@@ -201,7 +201,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
     # a word, and a save there loses them for good.
     if any(obj.user_text for obj in scene.all()):
         doc["version"] = 6
-        doc["requires"] = "0.13.0"
+        doc["requires"] = "0.12.1"
     _write_container(doc, path, thumbnail, blobs)
 
 

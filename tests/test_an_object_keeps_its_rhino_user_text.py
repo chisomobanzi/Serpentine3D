@@ -267,12 +267,12 @@ def test_a_file_with_user_text_names_the_release_that_reads_it(
     native.save_scene(_tagged_scene(kind), path)
     doc = _document(path)
     assert doc["version"] == 6
-    assert doc["requires"] == "0.13.0"
+    assert doc["requires"] == "0.12.1"
 
     monkeypatch.setattr(native, "FORMAT_VERSION", 5)
     existing = Scene()
     box = existing.add(g.make_box((0, 0, 0), 1, 1, 1))
-    with pytest.raises(ValueError, match="0.13.0"):
+    with pytest.raises(ValueError, match="0.12.1"):
         native.load_scene(existing, path)
     assert existing.get(box.id) is box
 
