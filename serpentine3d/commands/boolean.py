@@ -3,7 +3,8 @@
 from functools import reduce
 
 from ..core import geometry as g
-from .base import CancelCommand, PointReq, SelectReq, command
+from .base import CancelCommand, SelectReq, command
+from .regions import coplanar_curves, pick_regions
 
 _SOLIDISH = ("solid", "surface", "compound")
 
@@ -92,46 +93,40 @@ def cmd_curveboolean(ctx):
     touch at a point — two squares sharing a corner — come back as two
     curves meeting there: a cut that falls through a point does not join
     outlines.
+
+    The curves are consumed, as they always were. KeepObjects leaves them
+    where they are instead, for when the same outlines are about to be
+    booleaned another way or are the construction the drawing is set out
+    from.
     """
     objs = yield SelectReq("Select planar closed curves to boolean",
-                           kinds=("curve",), min_count=1)
+                           kinds=("curve",), min_count=1,
+                           choices={"KeepObjects": ["No", "Yes"]})
     closed = []
     for o in objs:
         if g.is_closed_curve(o.shape):
             closed.append(o)
         else:
-            ctx.echo(f"Skipped {o.name} — open curves cannot bound a region.")
+            ctx.echo(f"Skipped {o.name}, open curves cannot bound a region.")
     if not closed:
         raise CancelCommand
     if len(closed) == 1:
         # Boundary mode off: the curve is its own boundary already. Nothing
         # changed, so the checkpoint is dropped — no no-op undo step.
         ctx.select_result(closed)
-        ctx.echo("One closed curve — boundary mode off, nothing to boolean.")
+        ctx.echo("One closed curve, boundary mode off, nothing to boolean.")
         ctx.history.discard_checkpoint()
         return
     try:
-        first_face = g.planar_face(closed[0].shape)
-        normal = g.face_normal(first_face)
-        origin = g.centroid(first_face)
+        coplanar, origin, normal = coplanar_curves(ctx, closed)
     except g.GeometryError as exc:
         ctx.echo(f"{exc}")
         raise CancelCommand
-    coplanar = []
-    for o in closed:
-        off = max(
-            abs(sum((a - b) * n for a, b, n in zip(p, origin, normal)))
-            for p in g.sample_curve(o.shape, 8))
-        if off > g.tol():
-            ctx.echo(f"Skipped {o.name} — not on the plane of the other "
-                     "curves.")
-        else:
-            coplanar.append(o)
     if len(coplanar) < 2:
         if coplanar:
             # One curve left on the plane: boundary mode off for it too.
             ctx.select_result(coplanar)
-            ctx.echo("One curve left on the plane — boundary mode off, "
+            ctx.echo("One curve left on the plane, boundary mode off, "
                      "nothing to boolean.")
             ctx.history.discard_checkpoint()
             return
@@ -145,67 +140,14 @@ def cmd_curveboolean(ctx):
     if not regions:
         ctx.echo("The curves share no usable regions.")
         raise CancelCommand
-    kept: set = set()
-    # The ghost is a merge of kept faces plus the hovered one, and a merge
-    # is the expensive part of every mousemove — cache it per (hovered,
-    # kept) pair and only recompute when one of them changes.
-    ghost_cache: dict = {}
-
-    def _ghost(p):
-        hit = None
-        if isinstance(p, (tuple, list)):
-            try:
-                hit, _ = g.region_containing(regions, p, origin, normal)
-            except g.GeometryError:
-                hit = None
-        key = (hit, tuple(sorted(kept)))
-        if key in ghost_cache:
-            return ghost_cache[key]
-        shape = None
-        if hit is not None or kept:
-            sel = set(kept)
-            if hit is not None:
-                sel.add(hit)
-            try:
-                shape = g.merge_planar_regions(
-                    [regions[i] for i in sorted(sel)])
-            except g.GeometryError:
-                shape = None
-        ghost_cache[key] = shape
-        return shape
-
-    while True:
-        p = yield PointReq("Pick region to keep (Enter to finish)",
-                           allow_empty=True, extra_options=("All",),
-                           rubber_band=False, preview_fn=_ghost)
-        if p is None:
-            break
-        if p == "All":
-            kept = set(range(len(regions)))
-            ctx.echo("All regions kept — click one to remove it, "
-                     "Enter to finish.")
-            continue
-        try:
-            hit, state = g.region_containing(regions, p, origin, normal)
-        except g.GeometryError:
-            hit, state = None, "out"
-        if state == "on":
-            ctx.echo("That point is on a curve — click inside a region.")
-            continue
-        if hit is None:
-            ctx.echo("Not inside a region.")
-            continue
-        if hit in kept:
-            kept.remove(hit)
-            ctx.echo(f"Region {hit + 1} removed.")
-        else:
-            kept.add(hit)
-            ctx.echo(f"Region {hit + 1} kept.")
+    kept = yield from pick_regions(
+        ctx, regions, origin, normal,
+        choices={"KeepObjects": ["No", "Yes"]})
     if not kept:
         ctx.echo("No regions kept — nothing to boolean.")
         raise CancelCommand
     try:
-        merged = g.merge_planar_regions([regions[i] for i in sorted(kept)])
+        merged = g.merge_planar_regions([regions[i] for i in kept])
         wires = g.free_boundaries(merged)
         # Outer loops first, holes after: the order FreeBounds hands the
         # boundaries back in is not a promise, and the bigger the loop
@@ -215,7 +157,10 @@ def cmd_curveboolean(ctx):
         ctx.echo(f"{exc}")
         raise CancelCommand
     made = [ctx.scene.add(w, layer_id=coplanar[0].layer_id) for w in wires]
-    for o in coplanar:
-        ctx.scene.remove(o.id)
+    if ctx.opt("KeepObjects", "No") == "No":
+        for o in coplanar:
+            ctx.scene.remove(o.id)
     ctx.select_result(made)
-    ctx.echo(f"CurveBoolean -> {len(made)} curve(s).")
+    ctx.echo(f"CurveBoolean -> {len(made)} curve(s)"
+             + (", curves kept." if ctx.opt("KeepObjects", "No") == "Yes"
+                else "."))

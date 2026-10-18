@@ -113,6 +113,16 @@ class HatchShape(TopoDS_Compound):
                                 values["angle"], values["spacing"],
                                 self._frame)
 
+    def with_region(self, region):
+        """The same hatch over a different region, as a trim leaves.
+
+        The frame comes along unchanged, so the pattern of a cut hatch
+        stays where it was drawn: the pieces' lines line up with each
+        other across the cut instead of each restarting at its own corner.
+        """
+        return self._from_parts(region, self._pattern, self._angle,
+                                self._spacing, self._frame)
+
     def transformed(self, matrix):
         """Move, turn or scale the region and its pattern together.
 

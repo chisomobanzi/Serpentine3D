@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QComboBox
+from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit
 
 from serpentine3d.app import MainWindow
 from serpentine3d.core import geometry as g
@@ -140,6 +140,34 @@ def test_enter_in_the_viewport_still_repeats_the_last_command():
     w.viewport.setFocus()
     QTest.keyClick(w.viewport, Qt.Key.Key_Return)
     assert w.processor.busy and w.processor.active.name == "circle"
+
+
+def test_a_field_in_another_window_does_not_swallow_this_one_s_enter():
+    """Whose cursor counts is this window's own.
+
+    The check used to ask QApplication for the focus widget, which is the
+    application's, not the window's: a field holding a cursor in some
+    other window (another test's leftovers, say) made this window believe
+    it was being typed in when a key was sent straight to its viewport,
+    and the viewport stopped repeating the last command. It is also what
+    kept the suite from running its tests in parallel, where windows
+    outlive each other.
+    """
+    stray = QLineEdit()
+    stray.show()
+    stray.setFocus()
+    QApplication.processEvents()
+    assert isinstance(QApplication.focusWidget(), QLineEdit)
+
+    w = _window()
+    _ran_and_gave_up(w, "circle")
+    w.viewport.setFocus()
+    QTest.keyClick(w.viewport, Qt.Key.Key_Return)
+
+    try:
+        assert w.processor.busy and w.processor.active.name == "circle"
+    finally:
+        stray.deleteLater()
 
 
 if __name__ == "__main__":

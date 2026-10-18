@@ -4,6 +4,44 @@
 
 ### Added
 
+- **Hatch asks for its pattern, spacing and angle in one popup (#45).**
+  What used to be three prompts one after another is a single window with
+  the three together, so what the hatch is made of can be read off and
+  changed in one place, as Rhino's hatch dialog does. A solid pattern
+  greys out the spacing and the angle, which it has no use for. Nothing
+  that answered the prompts stops working: without a window, in a macro,
+  a script, an MCP call or a journal replay, the same three questions are
+  asked in the same order as before, and an answer typed after the
+  command's name (`hatch Solid`) is taken as typed, with the popup left
+  closed. The area about to be filled is ghosted while the question
+  stands, the way the regions are while they are being picked, so a
+  hatch is never chosen for an area you cannot see.
+
+- **Boundary mode for Hatch (#45).** Two outlines running through each
+  other leave regions nobody can guess at, so Hatch asks which of them to
+  fill: click a region to keep it, click it again to let it go, All
+  (Alt+A) for every one, Enter to finish, with what you are about to get
+  ghosted as you move. You can now take the overlap of two curves on its
+  own, or fill what would otherwise be a hole. It is asked only where the
+  answer is not already obvious: one closed curve is its own boundary,
+  curves lying apart make one hatch each, and a curve inside another is
+  its hole, so all three are filled straight away as before. It is the
+  same question CurveBoolean asks, asked from the same place, so what you
+  learn in one works in the other.
+
+- **A hatch takes Trim, Split and DupBorder (#45).** DupBorder hands back
+  the closed curves around a hatch, the hole as its own curve. Trim and
+  Split cut it with curves the way they cut a surface, and the pieces are
+  hatches rather than loose linework: each keeps the pattern, angle and
+  spacing it was cut from, and draws its lines where the whole one did,
+  so the halves still line up across the cut.
+
+- **CurveBoolean can keep the curves it worked from.** KeepObjects leaves
+  them where they are instead of consuming them, for when the same
+  outlines are about to be booleaned another way, or are the construction
+  the rest of the drawing is set out from. The default is what it always
+  did.
+
 - **Rhino's Attribute User Text is kept.** The keys and values an object
   carries in a .3dm were dropped on import, so a round trip through
   Serpentine3D lost a drawing's part numbers, rooms and schedule data for

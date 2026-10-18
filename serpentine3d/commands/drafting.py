@@ -12,9 +12,10 @@ from ..core.layout import (
 # a detail view named "front" should look where the front view looks
 from ..ui.camera import STANDARD_VIEWS as _VIEW_ANGLES
 from .base import (
-    FileReq, NumberReq, OptionReq, PointReq, SelectReq, TextReq, TextEditorReq,
-    command, has_text_editor,
+    FileReq, FormField, FormReq, NumberReq, OptionReq, PointReq, SelectReq,
+    TextReq, TextEditorReq, command, has_text_editor,
 )
+from .regions import coplanar_curves, pick_regions
 
 
 def _window(ctx):
@@ -585,13 +586,11 @@ def cmd_hatch(ctx):
         if p is None:
             break
         pts.append([p[0], p[1]])
-    pattern = yield OptionReq("Pattern", options=choices, default=offered)
     look = _layer_look(ctx)
-    spacing, angle = look.spacing, look.angle
-    if pattern != "Solid":
-        spacing = yield NumberReq("Line spacing (mm)", default=look.spacing,
-                                  minimum=0.2)
-        angle = yield NumberReq("Angle (degrees)", default=look.angle)
+    answers = yield _hatch_form(ctx, spacing=look.spacing, angle=look.angle,
+                                pattern=offered, unit=" (mm)", minimum=0.2)
+    pattern, spacing, angle = (answers["pattern"], answers["spacing"],
+                               answers["angle"])
     lay.hatches.append(Hatch(points=pts, pattern=pattern.lower(),
                              angle=angle, spacing=spacing,
                              color=_color_list(look.color)))
@@ -600,9 +599,16 @@ def cmd_hatch(ctx):
 
 
 def _hatch_in_the_model(ctx):
-    """Hatch the closed planar curves picked, a curve inside another being a
-    hole in it, one hatch object for each region they make. The curves are
-    kept, as Rhino keeps them, and what was made is left selected."""
+    """Hatch the closed planar curves picked, one hatch per region.
+
+    Curves that run through each other leave regions nobody can guess at,
+    so those are picked: Rhino's boundary mode (#45), and the pick is the
+    one CurveBoolean asks. Anywhere the answer is obvious there is no
+    question at all: one closed curve is its own boundary, curves lying
+    apart make one hatch each, and a curve inside another is its hole.
+    The curves are kept, as Rhino keeps them, and what was made is left
+    selected.
+    """
     from ..core.hatch import HatchShape
     objs = yield SelectReq("Select closed planar curves to hatch",
                            kinds=("curve",))
@@ -610,7 +616,7 @@ def _hatch_in_the_model(ctx):
     for obj in objs:
         try:
             g.planar_face(obj.shape)          # closed and flat, or it says
-            boundaries.append(obj.shape)
+            boundaries.append(obj)
         except (g.GeometryError, Exception):  # noqa: BLE001
             refused.append(obj.name)
     if refused:
@@ -618,21 +624,23 @@ def _hatch_in_the_model(ctx):
                  f"{', '.join(refused)}.")
     if not boundaries:
         return
-    try:
-        regions = g.planar_regions(boundaries)
-    except g.GeometryError as exc:
-        ctx.echo(f"Could not make a region to hatch: {exc}")
+    if _curves_overlap(boundaries):
+        regions = yield from _regions_to_fill(ctx, boundaries)
+    else:
+        try:
+            regions = g.planar_regions([o.shape for o in boundaries])
+        except g.GeometryError as exc:
+            ctx.echo(f"Could not make a region to hatch: {exc}")
+            return
+    if not regions:
         return
-    pattern = yield OptionReq("Pattern", options=_pattern_choices(),
-                              default=_layer_pattern(ctx))
-    pattern = pattern.lower()
-    spacing, angle = 1.0, 45.0
-    if pattern != "solid":
-        size = max(float(np.ptp(np.array(g.bbox(r)), axis=0).max())
-                   for r in regions)
-        spacing = yield NumberReq("Line spacing", default=_round_spacing(size),
-                                  minimum=1e-6)
-        angle = yield NumberReq("Angle (degrees)", default=45.0)
+    size = max(float(np.ptp(np.array(g.bbox(r)), axis=0).max())
+               for r in regions)
+    answers = yield _hatch_form(ctx, spacing=_round_spacing(size),
+                                preview=_region_ghost(regions))
+    pattern = str(answers["pattern"]).lower()
+    spacing = float(answers["spacing"])
+    angle = float(answers["angle"])
     xdir = tuple(ctx.cplane.xdir) if ctx.cplane is not None else None
     made = []
     for region in regions:
@@ -647,6 +655,132 @@ def _hatch_in_the_model(ctx):
         ctx.select_result(made)
         ctx.echo(f"{len(made)} hatch{'es' if len(made) != 1 else ''} "
                  f"placed ({pattern}).")
+
+
+def _curves_overlap(curves) -> bool:
+    """Whether any two of these outlines cross, so there is a choice.
+
+    Boundary mode is only worth asking about when the answer is not
+    already obvious. Curves that lie apart make one hatch each and a
+    curve inside another is its hole, which is what the command has
+    always done and what Rhino does; it is two outlines running through
+    each other that leave regions nobody can guess at.
+
+    Only pairs whose boxes meet are intersected, so a sheet of separate
+    outlines costs a box comparison per pair rather than a boolean, and
+    is filled without asking however many outlines it has.
+    """
+    if len(curves) < 2:
+        return False
+    faces, areas, boxes = [], [], []
+    for obj in curves:
+        try:
+            face = g.planar_face(obj.shape)
+        except (g.GeometryError, Exception):          # noqa: BLE001
+            return True            # cannot tell: let the pick decide
+        faces.append(face)
+        areas.append(g.surface_area(face))
+        boxes.append(g.bbox(face))
+    lo, hi = np.array(boxes, float).transpose(1, 0, 2)
+    tol = g.tol()
+    # Every pair's boxes at once. Inclusive, so a flat box (every curve on
+    # z=0 has one) still meets the boxes beside it on its own plane.
+    meet = np.all((lo[:, None] <= hi[None] + tol)
+                  & (lo[None] <= hi[:, None] + tol), axis=2)
+    for i, j in zip(*np.nonzero(np.triu(meet, k=1))):
+        try:
+            common = g.surface_area(
+                g.boolean_intersection(faces[i], faces[j]))
+        except (g.GeometryError, Exception):          # noqa: BLE001
+            continue               # they do not meet at all
+        if common <= tol:
+            continue               # apart, or touching along an edge
+        # Sharing all of one of them is nesting, not crossing.
+        if abs(common - areas[i]) > tol and abs(common - areas[j]) > tol:
+            return True
+    return False
+
+
+def _hatch_form(ctx, spacing: float, angle: float = 45.0, pattern=None,
+                unit: str = "", minimum: float = 1e-6, preview=None):
+    """What a hatch is made of, asked as one thing (#45).
+
+    A window shows the three together, so the pattern, how close its lines
+    run and which way they lie can be read off and changed in one place,
+    the way Rhino's hatch dialog does. Without one they are three prompts
+    in a row, as they always were, and a solid pattern is not asked about
+    a spacing or an angle it has no use for.
+
+    `preview` is what is about to be filled, ghosted while the question
+    stands. A pick of several curves shows the regions as they are
+    clicked; where there was nothing to pick there would otherwise be
+    nothing to see, and which area a pattern is about to land on is worth
+    as much then as it is during the pick.
+    """
+    not_solid = lambda a: str(a.get("pattern", "")).lower() != "solid"
+    ghost = None if preview is None else (lambda _value: preview)
+    return FormReq(
+        "Hatch", title="Hatch",
+        fields=(
+            FormField("pattern",
+                      OptionReq("Pattern", options=_pattern_choices(),
+                                default=pattern or _layer_pattern(ctx),
+                                preview_fn=ghost)),
+            FormField("spacing",
+                      NumberReq(f"Line spacing{unit}", default=float(spacing),
+                                minimum=float(minimum), preview_fn=ghost),
+                      when=not_solid),
+            FormField("angle",
+                      NumberReq("Angle (degrees)", default=float(angle),
+                                preview_fn=ghost),
+                      when=not_solid),
+        ))
+
+
+def _region_ghost(regions):
+    """The area about to be hatched, as one shape to ghost."""
+    if not regions:
+        return None
+    if len(regions) == 1:
+        return regions[0]
+    try:
+        return g.make_compound(list(regions))
+    except Exception:                                 # noqa: BLE001
+        return regions[0]
+
+
+def _regions_to_fill(ctx, curves):
+    """The regions of several curves that the pick kept, or an empty list.
+
+    Boundary mode. Curves off the first one's plane are dropped with a
+    word, and if that leaves a single curve it is its own boundary again.
+    """
+    try:
+        coplanar, origin, normal = coplanar_curves(ctx, curves)
+    except (g.GeometryError, Exception) as exc:    # noqa: BLE001
+        ctx.echo(f"Could not make a region to hatch: {exc}")
+        return []
+    if len(coplanar) < 2:
+        try:
+            return g.planar_regions([o.shape for o in coplanar])
+        except g.GeometryError as exc:
+            ctx.echo(f"Could not make a region to hatch: {exc}")
+            return []
+    try:
+        regions = g.curve_regions([o.shape for o in coplanar])
+    except g.GeometryError as exc:
+        ctx.echo(f"Could not make a region to hatch: {exc}")
+        return []
+    if not regions:
+        ctx.echo("The curves share no usable regions.")
+        return []
+    kept = yield from pick_regions(
+        ctx, regions, origin, normal,
+        prompt="Pick region to hatch (Enter to finish)")
+    if not kept:
+        ctx.echo("No regions picked, nothing hatched.")
+        return []
+    return [regions[i] for i in kept]
 
 
 def _round_spacing(size: float) -> float:

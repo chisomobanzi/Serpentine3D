@@ -10,7 +10,7 @@ import numpy as np
 from PySide6.QtCore import QEvent, QObject, QProcess, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
+    QApplication, QDialog, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
     QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QProgressDialog,
     QStackedWidget, QTabBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
@@ -238,6 +238,8 @@ class MainWindow(QMainWindow):
         self.processor = CommandProcessor(self.ctx)
         self._cursor_preview = None
         self._file_picker_open = False
+        self._form_dialog_open = False
+        self._offered_form = None
         self.ctx.add_echo_listener(self.command_line.echo)
         self.processor.add_listener(self._sync_command_state)
         self.processor.add_listener(self._resume_dropped_imports)
@@ -1262,6 +1264,7 @@ class MainWindow(QMainWindow):
         self._update_status()
         self._offer_file_picker(req)
         self._offer_text_editor(req)
+        self._offer_form(req)
 
     def _selected_text_face(self):
         """The held planar face used as a lettering plane, if there is one."""
@@ -1509,6 +1512,50 @@ class MainWindow(QMainWindow):
             req.values.update(values)
         for pane in self.all_viewports():
             pane.set_inline_text_typography(obj_id, values)
+
+    def _offer_form(self, req):
+        """Show a running command's form as one popup (#45).
+
+        The processor is already asking the first field as an ordinary
+        prompt, so a command stays answerable by typing if this never
+        runs; what the popup adds is seeing the answers together. OK
+        answers the whole form, Cancel cancels the command, as closing a
+        file picker does.
+
+        It opens on the next turn of the event loop, not from in here.
+        `hatch Solid` feeds its answer straight after the command starts,
+        and a popup opened now would be up before the answer arrived,
+        showing the layer's pattern for OK to make instead. Waiting lets
+        typed answers win: one that moves the form on, or finishes it,
+        means someone is typing, and the rest is asked at the prompt.
+        """
+        form = self.processor.form
+        if (form is None or form is self._offered_form
+                or self.processor.headless or not self.processor.busy
+                or self.processor.request is not req):
+            return
+        self._offered_form = form
+        QTimer.singleShot(0, self, lambda: self._show_form(form, req))
+
+    def _show_form(self, form, req):
+        """The popup `_offer_form` waited a turn to open."""
+        if (self.processor.form is not form or self.processor.request is not req
+                or self._form_dialog_open or not self.processor.busy):
+            return
+        from .ui.form_dialog import FormDialog
+        self._form_dialog_open = True
+        try:
+            dialog = FormDialog(form, parent=self)
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            values = dialog.values() if accepted else None
+        finally:
+            self._form_dialog_open = False
+        if self.processor.form is not form:
+            return                      # answered another way meanwhile
+        if values is None:
+            self.processor.cancel()
+        else:
+            self.processor.provide_form(values)
 
     def _offer_file_picker(self, req):
         """Let a live command's pending FileReq use the window chooser."""
@@ -2861,7 +2908,13 @@ class MainWindow(QMainWindow):
         return False
 
     def _text_editor_has_focus(self):
-        field = QApplication.focusWidget()
+        # This window's own focus, not the application's. In the app the
+        # two are the same widget, since a key only climbs to here from
+        # inside this window. A key sent straight to a widget, as a test
+        # sends it, is not: asking QApplication then let a field left
+        # focused in some other window swallow this one's Enter, and the
+        # viewport stopped repeating the last command.
+        field = self.focusWidget()
         return (isinstance(field, (QLineEdit, QPlainTextEdit, QTextEdit))
                 and not field.isReadOnly()
                 and field is not getattr(

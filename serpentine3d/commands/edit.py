@@ -366,9 +366,10 @@ def _add_split_piece(ctx, shape, target):
 
 @command("split")
 def cmd_split(ctx):
-    targets = yield SelectReq("Select curve, surface or picture to split",
-                              kinds=("curve", "surface", "solid", "picture"),
-                              max_count=1)
+    targets = yield SelectReq(
+        "Select curve, surface, hatch or picture to split",
+        kinds=("curve", "surface", "solid", "picture", "hatch"),
+        max_count=1)
     cutters = yield SelectReq("Select cutting objects",
                               allow_preselected=False)
     target = targets[0]
@@ -397,7 +398,7 @@ def cmd_trim(ctx):
         picked = yield SelectReq(
             "Click the part to trim away"
             + (", Enter when done" if trimmed else ""),
-            kinds=("curve", "surface", "solid", "picture"),
+            kinds=("curve", "surface", "solid", "picture", "hatch"),
             min_count=0 if trimmed else 1, max_count=1,
             allow_preselected=False, want_point=True)
         if not picked:

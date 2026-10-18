@@ -25,7 +25,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+# xdist: the tests are independent, so they can run side by side
+# (CONTRIBUTING says how many at once).
+dev = ["pytest>=8.0", "pytest-xdist>=3.5"]
 docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 
 [project.urls]

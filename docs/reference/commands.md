@@ -12,7 +12,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `booleandifference` (`difference`, `bd`) | Booleandifference |
 | `booleanintersection` (`intersection`, `bi`) | Booleanintersection |
 | `booleanunion` (`union`, `bu`) | Booleanunion |
-| `curveboolean` (`curvebool`) | Closed curves around the regions of overlapping planar curves. |
+| `curveboolean` (`curvebool`) | Closed curves around the regions of overlapping planar curves. KeepObjects leaves the curves it worked from in place. |
 
 ## Camera
 
@@ -141,7 +141,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `exportdxf` | Export the active layout sheet (or the model) to DXF. |
 | `exportpdf` (`pdf`) | Exportpdf |
 | `exportsvg` | Exportsvg |
-| `hatch` | Fill a region with a pattern, on a sheet or in the model, starting from its layer's hatch. |
+| `hatch` | Fill a region with a pattern, on a sheet or in the model, starting from its layer's hatch. Curves that cross ask which of the regions they make to fill (All, or Alt+A, for every one). |
 | `layout` | Layout |
 | `leader` | Leader |
 | `make2d` | Make2d |

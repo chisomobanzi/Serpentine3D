@@ -26,7 +26,11 @@ jobs:
       - name: Unit tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: uv run pytest tests/ -q --ignore=tests/e2e_dod.py
+        # -n auto: the tests are independent and each one brings its own
+        # settings, journal and autosave directories, so they run one per
+        # core. Memory is the limit, not cores: each worker can pass 2 GB,
+        # which the standard runner's four cores and 16 GB hold.
+        run: uv run pytest tests/ -q -n auto --ignore=tests/e2e_dod.py
 
   headless-smoke:
     runs-on: ubuntu-latest

@@ -321,11 +321,16 @@ def cmd_edgesrf(ctx):
 
 @command("dupborder")
 def cmd_dupborder(ctx):
-    objs = yield SelectReq("Select surfaces or polysurfaces",
-                           kinds=("surface", "solid"))
+    objs = yield SelectReq("Select surfaces, polysurfaces or hatches",
+                           kinds=("surface", "solid", "hatch"))
     made = []
     for o in objs:
-        for w in g.free_boundaries(o.shape):
+        # A hatch is bounded by the region it fills, and knows that
+        # boundary already; its compound also holds the pattern's lines,
+        # which are not a border and must not come back as one (#45).
+        borders = (o.shape.to_curves() if o.kind == "hatch"
+                   else g.free_boundaries(o.shape))
+        for w in borders:
             made.append(ctx.scene.add(w, layer_id=o.layer_id))
     if made:
         ctx.echo(f"Duplicated {len(made)} border curve(s).")

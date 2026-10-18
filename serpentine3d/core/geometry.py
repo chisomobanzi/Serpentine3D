@@ -2637,6 +2637,13 @@ def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
     if isinstance(target, PictureShape):
         return [target.with_region(face) for face in
                 split_shape(target.face(), cutters, direction)]
+    from .hatch import HatchShape
+    if isinstance(target, HatchShape):
+        # Cut the region it fills, not the compound: the pattern's lines
+        # are drawn from the region and would otherwise be cut as loose
+        # linework, leaving a heap of segments where a hatch was (#45).
+        return [target.with_region(face) for face in
+                split_shape(target.region, cutters, direction)]
     from .occ import BRepAlgoAPI_Splitter, TopTools_ListOfShape
     kind = shape_kind(target)
     length = math.sqrt(sum(float(v) ** 2 for v in direction))
