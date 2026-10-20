@@ -1,13 +1,15 @@
-"""A glTF or USD export comes out the size the model is.
+"""A glTF, USD or FBX export comes out the size the model is.
 
 glTF measures in metres, always. The exporter wrote document units straight
 into it, so a 20 mm ring opened in Blender 20 m across, and a phone showing
 it in AR would have stood a ring the size of a house on the table. USD says
 how long its unit is in `metersPerUnit`, and that said a millimetre whatever
-the document was in, so an inch model came in 25.4 times too small.
+the document was in, so an inch model came in 25.4 times too small. FBX says
+it in `UnitScaleFactor`, and that said a metre, so the ring came in 20 m
+across from FBX as well.
 
-So the glTF is written in metres, and the USD says what the document's unit
-really is.
+So the glTF is written in metres, and the USD and the FBX say what the
+document's unit really is.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import pytest
 from serpentine3d import fileio
 from serpentine3d.core import geometry as g
 from serpentine3d.core.scene import Scene
+from serpentine3d.fileio import fbx
 from serpentine3d.utils.units import UNITS, convert
 
 
@@ -85,3 +88,29 @@ def test_a_usd_says_how_long_its_unit_is(units, tmp_path):
                    dtype=object)
     coords = np.array([[float(c) for c in p.split(",")] for p in xyz])
     assert coords.max(axis=0) == pytest.approx([10, 20, 30])
+
+
+def _declared(data: bytes, prop: str) -> float:
+    """A number a binary FBX declares among its GlobalSettings."""
+    def s(text):
+        return b"S" + struct.pack("<I", len(text)) + text.encode()
+    entry = s(prop) + s("double") + s("Number") + s("")
+    at = data.index(entry) + len(entry)
+    assert data[at:at + 1] == b"D", f"{prop} is not written as a double"
+    return struct.unpack("<d", data[at + 1:at + 9])[0]
+
+
+@pytest.mark.parametrize("units", UNITS)
+def test_an_fbx_says_how_long_its_unit_is(units, tmp_path):
+    path = tmp_path / "block.fbx"
+    fileio.export_file(_box_scene(units), str(path))
+    data = path.read_bytes()
+
+    # FBX counts its unit in centimetres
+    cm = convert(1.0, units, "cm")
+    assert _declared(data, "UnitScaleFactor") == pytest.approx(cm)
+    assert _declared(data, "OriginalUnitScaleFactor") == pytest.approx(cm)
+
+    # The vertices stay in document units: the unit says how long they are
+    (_, mesh), = fbx.import_fbx(str(path))
+    assert mesh.vertices.max(axis=0) == pytest.approx([10, 20, 30])

@@ -8,6 +8,9 @@ Export is binary because Blender refuses ASCII FBX outright ("ASCII FBX files
 are not supported"), while binary is imported by Blender/Maya/Unreal/Unity.
 An ASCII writer (`_ascii_doc`/`_write_ascii_geometry`) is retained to exercise
 the ASCII reader in tests.
+
+Vertices go out in document units, and the file says how long that unit is,
+so importers bring the model in at its real size.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ import numpy as np
 
 from ..core.mesh import MeshShape
 from ..core.tessellate import tessellate
+from ..utils.units import convert
 
 _MAGIC = b"Kaydara FBX Binary  \x00\x1a\x00"
 
@@ -109,8 +113,9 @@ def _ascii_doc(geoms) -> str:
     return "\n".join(L + conns) + "\n"
 
 
-def export_fbx(named_shapes, path: str):
-    """named_shapes: [(name, shape)] or [(name, shape, color)]."""
+def export_fbx(named_shapes, path: str, *, units: str = "mm"):
+    """named_shapes: [(name, shape)] or [(name, shape, color)], measured in
+    `units` (a document unit, see utils/units.py)."""
     geoms = []
     for entry in named_shapes:
         name, shape = entry[0], entry[1]
@@ -124,7 +129,8 @@ def export_fbx(named_shapes, path: str):
                if len(mesh.normals) else None)
         geoms.append((_safe(name), np.asarray(mesh.vertices, float),
                       poly, pvn, color))
-    _write_fbx(path, geoms)                # binary: Blender rejects ASCII FBX
+    # binary: Blender rejects ASCII FBX
+    _write_fbx(path, geoms, convert(1.0, units, "cm"))
 
 
 def _write_ascii_geometry(path, name, verts, poly_indices, normals=None):
@@ -327,8 +333,9 @@ def _p(name, typ, sub, flags, *vals):
     return ("P", props, [])
 
 
-def _build_document(geoms):
-    """Full FBX node tree (geoms: [(name, verts, poly, pvn, color)])."""
+def _build_document(geoms, unit_cm: float):
+    """Full FBX node tree (geoms: [(name, verts, poly, pvn, color)]), the
+    vertices' unit `unit_cm` centimetres long."""
     ng = len(geoms)
     top = [
         ("FBXHeaderExtension", [], [
@@ -348,11 +355,14 @@ def _build_document(geoms):
                 _p("FrontAxisSign", "int", "Integer", "", -1),
                 _p("CoordAxis", "int", "Integer", "", 0),
                 _p("CoordAxisSign", "int", "Integer", "", 1),
-                # 100 = model units are cm-equivalents, so importers that map
-                # FBX cm -> their own metres bring geometry back 1:1 (Blender
-                # otherwise shrinks it 100x).
-                _p("UnitScaleFactor", "double", "Number", "", 100.0),
-                _p("OriginalUnitScaleFactor", "double", "Number", "", 100.0),
+                # How long the vertices' unit is, in FBX's centimetres. This
+                # said 100, a metre, whatever the document was in: the numbers
+                # came back 1:1, so a 20 mm ring opened in Blender 20 m across.
+                # Saying the document's unit brings it in at its real size.
+                _p("UnitScaleFactor", "double", "Number", "",
+                   float(unit_cm)),
+                _p("OriginalUnitScaleFactor", "double", "Number", "",
+                   float(unit_cm)),
             ]),
         ]),
         ("Documents", [], [
@@ -418,11 +428,11 @@ def _build_document(geoms):
     return top
 
 
-def _write_fbx(path, geoms):
+def _write_fbx(path, geoms, unit_cm: float):
     """Write a binary FBX (v7.4) document tools accept — Blender rejects
     ASCII FBX, so this is the shipped export format."""
     body, pos = b"", 27
-    for node in _build_document(geoms):
+    for node in _build_document(geoms, unit_cm):
         b, pos = _ser_node(node, pos)
         body += b
     body += b"\x00" * 13                  # top-level list terminator

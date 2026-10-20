@@ -368,7 +368,7 @@ def _export_shapes(scene, path, ext, objs, only_ids, thumbnail, stl_quality,
     if ext == ".fbx":
         from . import fbx
         fbx.export_fbx([(o.name, o.shape, scene.color_of(o))
-                        for o in objs], path)
+                        for o in objs], path, units=scene.units)
         return
     if ext == ".stl":
         from . import stl
