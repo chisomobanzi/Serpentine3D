@@ -72,6 +72,12 @@
   sew, gave the second piece none of the object's colour or material once
   it was shown, though a file opened with it showing gave both. Now it
   gets them, and the object's user text.
+- **A glTF or USD export is the size of the model.** glTF measures in
+  metres, and the export wrote document units into it, so a 20 mm ring
+  opened in Blender 20 m across, as it would in anything else that shows
+  glTF at real size. USD said every model was in millimetres, so one drawn
+  in inches came in 25.4 times too small. Both now come out at their real
+  size, whatever units the document is in.
 
 ## 0.12.0 (2026-10-17)
 

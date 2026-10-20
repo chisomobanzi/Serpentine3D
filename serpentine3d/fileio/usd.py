@@ -1,13 +1,15 @@
 """USD export as plain-text .usda — no dependencies.
 
 One UsdGeomMesh per object under a root Xform, with display colours.
-USD is Y-up by default; we declare Z-up so coordinates pass through."""
+USD is Y-up by default; we declare Z-up so coordinates pass through, and
+how long the document's unit is so they pass through at their size."""
 
 from __future__ import annotations
 
 import re
 
 from ..core.tessellate import tessellate
+from ..utils.units import convert
 
 
 def _safe(name: str) -> str:
@@ -26,7 +28,7 @@ def export_usda(scene, path: str, only_ids: list | None = None):
         "#usda 1.0",
         "(",
         '    upAxis = "Z"',
-        '    metersPerUnit = 0.001',
+        f"    metersPerUnit = {convert(1.0, scene.units, 'm'):g}",
         '    defaultPrim = "Serpentine3D"',
         ")",
         "",

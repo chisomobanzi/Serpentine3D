@@ -1,7 +1,8 @@
 """Binary glTF (.glb) export — hand-written, no dependencies.
 
 One mesh node per object, tessellated, with per-object base colours.
-Y-up conversion (glTF convention) from Serpentine3D's Z-up."""
+Y-up conversion (glTF convention) from Serpentine3D's Z-up, and metres,
+which is all glTF measures in, from whatever units the document is in."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import struct
 import numpy as np
 
 from ..core.tessellate import tessellate
+from ..utils.units import convert
 
 # Z-up -> Y-up: (x, y, z) -> (x, z, -y)
 _ZUP_TO_YUP = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], np.float32)
@@ -20,6 +22,10 @@ def export_glb(scene, path: str, only_ids: list | None = None):
     objs = scene.all()
     if only_ids:
         objs = [o for o in objs if o.id in only_ids]
+
+    # Written in document units, a 20 mm ring opened 20 m across: every
+    # reader takes glTF's numbers as metres, and so does AR at real size.
+    to_m = convert(1.0, scene.units, "m")
 
     buffers = bytearray()
     accessors, buffer_views, meshes, nodes, materials = [], [], [], [], []
@@ -40,7 +46,7 @@ def export_glb(scene, path: str, only_ids: list | None = None):
         mesh = tessellate(obj.shape)
         if not mesh.has_faces:
             continue
-        verts = (mesh.vertices @ _ZUP_TO_YUP.T).astype(np.float32)
+        verts = (mesh.vertices @ _ZUP_TO_YUP.T * to_m).astype(np.float32)
         norms = (mesh.normals @ _ZUP_TO_YUP.T).astype(np.float32)
         idx = mesh.triangles.astype(np.uint32).ravel()
 
