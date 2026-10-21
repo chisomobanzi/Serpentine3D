@@ -84,6 +84,18 @@ class CommandInput(QLineEdit):
     def keyPressEvent(self, ev):
         key = ev.key()
         self.deleting = key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete)
+
+        #------------------- Added by DarkWrangler 10/20/2026----------------------------
+        # If the user presses Delete and there is no text being typed out, 
+        # bounce focus and the key event back to the native 3D canvas viewport.
+        if key == Qt.Key.Key_Delete and not self.text() and not self.text_pending:
+            ev.ignore()  # Reject text bar consumption
+            if hasattr(self.window(), 'viewport'):
+                self.window().viewport.setFocus()
+                self.window().viewport.keyPressEvent(ev)
+            return
+        #----------------------------------------------------------------------------
+
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             # QLineEdit fires returnPressed but leaves the event ignored;
             # consume it here or it bubbles to the main window, whose
