@@ -79,6 +79,11 @@
   USD said every model was in millimetres, so one drawn in inches came in
   25.4 times too small. All three now come out at their real size,
   whatever units the document is in.
+- **Delete works from an empty command line.** Typing a command leaves the
+  keyboard in the command line, and Delete went nowhere from there, so
+  Ctrl+A then Delete picked everything and deleted nothing. An empty
+  command line now hands Delete to the model, on a sheet as well, and with
+  text typed Delete still edits the text. Contributed by DarkWrangler (#97).
 
 ## 0.12.0 (2026-10-17)
 
