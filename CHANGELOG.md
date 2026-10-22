@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.1 (2026-10-22)
 
 ### Added
 
@@ -16,7 +16,8 @@
   Objects that are in the same place but come to the same selection, a
   group answering for its members, are not a choice and are not offered
   as one. Holding the button still and Alt-click are untouched: they
-  reach what is behind, which is a different question.
+  reach what is behind, which is a different question. Contributed by
+  Jonas Pedrotti (#90).
 
 - **Hatch asks for its pattern, spacing and angle in one popup (#45).**
   What used to be three prompts one after another is a single window with
@@ -91,7 +92,8 @@
   of each other now fillet instead of failing. Trim=No leaves both curves
   where they are and adds the arc on its own. The radius and Trim are
   remembered for as long as the program runs, as Rhino remembers them,
-  and open at 0 and Yes again when it is started afresh.
+  and open at 0 and Yes again when it is started afresh. Contributed by
+  Jonas Pedrotti (#95).
 
 - **Fillet's scripted input is now radius, curve, curve.** The radius is
   an option on the prompt, so a script, macro or recorded journal gives
@@ -106,6 +108,7 @@
   sew, gave the second piece none of the object's colour or material once
   it was shown, though a file opened with it showing gave both. Now it
   gets them, and the object's user text.
+
 - **A glTF, USD or FBX export is the size of the model.** glTF measures in
   metres, and the export wrote document units into it, so a 20 mm ring
   opened in Blender 20 m across, as it would in anything else that shows
@@ -113,13 +116,14 @@
   USD said every model was in millimetres, so one drawn in inches came in
   25.4 times too small. All three now come out at their real size,
   whatever units the document is in.
+
 - **Delete works from an empty command line.** Typing a command leaves the
   keyboard in the command line, and Delete went nowhere from there, so
   Ctrl+A then Delete picked everything and deleted nothing. An empty
   command line now hands Delete to the model, on a sheet as well, and with
   text typed Delete still edits the text. Contributed by DarkWrangler (#97).
 
-- **Fillet carries a drawn curve on to its corner.** Two curves that
+- **Fillet carries a drawn curve on to its corner (#95).** Two curves that
   cross nowhere were refused, however near they lay and wherever they
   were picked. A line or an arc is carried out to a corner by its own
   geometry, which is how a gap between two of those has always been
@@ -130,15 +134,15 @@
   curves that head away from each other still have no corner, and still
   say so.
 
-- **Fillet no longer fails on a polyline, or eats the rest of it.**
+- **Fillet no longer fails on a polyline, or eats the rest of it (#95).**
   Picking a curve made of more than one piece raised
   `Standard_TypeMismatch: TopoDS::Edge`; the piece nearest the pick is
   the one filleted, and everything else the polyline is made of comes
   through the fillet untouched instead of being dropped. What lay past
   the corner on the side nobody picked is what the trim takes, as it is
-  for a single curve. Where the kernel rounds a
-  crossing on the side nobody picked, only its arc is taken and both
-  curves are cut to the corner, so what is kept is what was clicked.
+  for a single curve. Where the kernel rounds a crossing on the side
+  nobody picked, only its arc is taken and both curves are cut to the
+  corner, so what is kept is what was clicked.
 
 ## 0.12.0 (2026-10-17)
 
