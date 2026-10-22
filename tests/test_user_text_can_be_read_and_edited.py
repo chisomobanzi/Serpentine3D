@@ -393,3 +393,12 @@ def test_scene_info_reports_an_objects_user_text(window):
     assert "user_text" not in rows["plain"], \
         "an object with none should not pad every row of a big scene"
     assert box.id and plain.id
+
+def test_delete_in_an_empty_command_line_deletes_the_pick(window):
+    box = window.scene.add(g.make_box((0, 0, 0), 5, 5, 5))
+    window.selection.set([box.id])
+    window.command_line.focus()
+    QApplication.processEvents()
+    QTest.keyClick(window.command_line.input, Qt.Key.Key_Delete)
+    QApplication.processEvents()
+    assert window.scene.get(box.id) is None
