@@ -605,7 +605,7 @@ class LayoutView:
         with vp._into_detail(pw / ratio, ph / ratio, ratio,
                              None if detail.perspective
                              else detail.scale_denom,
-                             self.px_per_mm):
+                             self.px_per_mm, detail.id):
             vp._draw_objects(mvp64, view, mode_override=mode,
                              light_background=True,
                              hidden_layers=detail.hidden_layers)
@@ -615,9 +615,9 @@ class LayoutView:
 
     def _detail_hlr(self, detail) -> dict:
         vp = self.vp
-        # The live clipping planes, which a layer's visibility can change
-        # without the scene's revision moving.
-        clips = tuple(f for f in vp._clip_frames() if f[2])
+        # The clipping planes that cut this detail, which a layer's
+        # visibility can change without the scene's revision moving.
+        clips = tuple(f for f in vp._clip_frames(detail.id) if f[2])
         key = (vp.scene.revision, round(detail.azimuth, 6),
                round(detail.elevation, 6), tuple(detail.target),
                detail.perspective, detail.section_offset,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..core import clipping
 from ..core import geometry as g
 from ..core.layout import (
     PAPER_SIZES, DetailView, Layout, LinearDim, TextNote, parse_scale,
@@ -109,6 +110,8 @@ def cmd_layout(ctx):
     elif action == "Duplicate":
         copy = lay.duplicate(
             unique_layout_name(scene.layouts, f"{lay.name} copy"))
+        # a copied detail is cut by the planes the original is cut by
+        clipping.carry_views(scene, lay.copied_details(copy))
         scene.layouts.append(copy)
         ctx.echo(f"Duplicated as '{copy.name}'.")
     scene.notify()

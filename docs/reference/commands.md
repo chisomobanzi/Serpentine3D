@@ -72,8 +72,10 @@ Commands that need a file open a filtered chooser by default. Append
 | `cplane` | Reposition the construction plane (drawing plane + grid). |
 | `curvature` | Curvature |
 | `curvatureanalysis` (`curvmap`) | Curvatureanalysis |
+| `disableclippinginview` (`dcv`) | Switch clipping planes off in the view you are in (the pane, or the detail you are inside) and leave them cutting every other view. |
 | `disableclippingplane` (`dcc`) | Pause clipping planes (they stay in the scene, the cut stops). |
 | `distance` (`dist`) | Distance |
+| `enableclippinginview` (`ecv`) | Switch clipping planes back on in the view you are in (the pane, or the detail you are inside). |
 | `enableclippingplane` (`ecc`) | Re-enable paused clipping planes. |
 | `floatviewport` (`floatvp`) | Open a floating viewport window (drag it to another monitor). |
 | `front` | Front |

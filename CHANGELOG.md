@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Added
+
+- **A clipping plane can be switched off in some views and not others.**
+  Rhino lets a clipping plane choose the views it cuts, and a sheet needs
+  it: a plan detail cut at sill height, a section detail cut down the
+  middle and an elevation not cut at all, each by its own plane, all from
+  one model. A plane still cuts every view to begin with, each model pane
+  and each detail on every sheet, and any of them can be switched off.
+  The pane's title menu lists the planes that cut it under Clipping
+  Planes, a tick each. A plane's Properties lists every view it cuts,
+  the panes and then each sheet's details, with Paused above them. A
+  detail's Properties lists the planes that cut it. In the view you are
+  working in, `disableclippinginview` (`dcv`) and `enableclippinginview`
+  (`ecv`) do the same from the command line, and inside a detail they
+  mean the detail. A pane keeps its place in the list when it is turned
+  to another view, a detail keeps its setting in the file, and a
+  duplicated sheet's details are cut the way the originals were.
+  `disableclippingplane` still pauses a plane everywhere, and now keeps
+  the views it is switched off in for when it resumes; scripts read the
+  setting from `scene_info`. Enter on nothing at any of the four
+  commands' prompts now means every plane, as the prompts always said,
+  rather than cancelling.
+
 ### Fixed
 
 - **A clipping plane cuts a detail as well (#94).** A detail is a view of

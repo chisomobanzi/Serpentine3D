@@ -1113,6 +1113,13 @@ class Layout:
                     item.id = _uid()        # bare lists, with no id to move
         return dup
 
+    def copied_details(self, dup: Layout) -> list:
+        """(this sheet's detail id, the copy's) for each detail of a sheet
+        `duplicate` made from this one: the copy keeps the order, and
+        only the ids moved."""
+        return [(old.id, new.id) for old, new in zip(self.details,
+                                                     dup.details)]
+
     def detail_at(self, px: float, py: float) -> DetailView | None:
         for d in reversed(self.details):        # topmost first
             if d.contains(px, py):

@@ -19,6 +19,7 @@ from PySide6.QtGui import QCursor, QOpenGLContext
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from ..core import clipping as _clipping
 from ..core import linetype as _lt
 from ..core import spatial
 from ..utils import config as _cfg
@@ -608,12 +609,15 @@ class DrawTarget(NamedTuple):
     `ratio` is how many of the picture's own pixels make one of those. A
     detail says how many of those pixels a millimetre of the sheet takes,
     `px_per_mm`, and one with a scale (a parallel view) its `scale_denom`,
-    how many model units a millimetre of the sheet holds."""
+    how many model units a millimetre of the sheet holds. `view` is the
+    detail's id, which is what a clipping plane knows it by
+    (core/clipping.py)."""
     width: float
     height: float
     ratio: float
     scale_denom: float | None = None
     px_per_mm: float | None = None
+    view: str | None = None
 
 
 class _CapQuad:
@@ -652,18 +656,28 @@ def anchored(matrix, anchor):
     return m.astype(np.float32)
 
 
-def clip_plane_frames(objects):
+def clip_plane_frames(objects, view: str | None = None):
     """Where each clipping plane sits and which way it faces.
 
-    One `(origin, normal, enabled)` per clipping plane, the origin at the
+    One `(origin, normal, cuts)` per clipping plane, the origin at the
     middle of its rectangle and the normal pointing at the half of the model
     it takes away. Paused planes come back too, marked paused: pausing one is
     what you do while you are still deciding which way round it goes, so that
-    is the moment you most want to see the answer.
+    is the moment you most want to see the answer. Asked about one `view`,
+    a plane switched off in it comes back the way a paused one does
+    (core/clipping.py).
 
     A plane the geometry cannot be read from is skipped rather than guessed
     at. This runs inside the paint.
     """
+    return [(o, n, _clipping.cuts(setting, view))
+            for setting, o, n in _plane_frames(objects)]
+
+
+def _plane_frames(objects) -> list:
+    """`(clip_plane setting, origin, normal)` for each clipping plane whose
+    geometry can be read: the part of a frame that costs a trip into
+    OpenCASCADE, and is the same whichever view asks."""
     from ..core import geometry as g
     frames = []
     for obj in objects:
@@ -681,8 +695,7 @@ def clip_plane_frames(objects):
             o = np.asarray(g.centroid(obj.shape), float)
         except Exception:                                  # noqa: BLE001
             continue
-        frames.append((tuple(o), tuple(n),
-                       bool(obj.clip_plane.get("enabled"))))
+        frames.append((obj.clip_plane, tuple(o), tuple(n)))
     return frames
 
 
@@ -1170,6 +1183,11 @@ class Viewport(QOpenGLWidget):
         from .layout_view import LayoutView
         self.space = "model"                # "model" | layout id
         self._target: DrawTarget | None = None   # a detail being drawn
+        # Which pane this is, to a clipping plane switched off in some
+        # views (core/clipping.py). Named for the view the pane was made
+        # for, and kept when it is turned to another: the window names
+        # its Top, Front and Right panes, and the first pane is this.
+        self.view_key = "perspective"
         self.layout_view = LayoutView(self)
         from .gumball import Gumball
         self.gumball = Gumball(self)
@@ -2356,7 +2374,8 @@ class Viewport(QOpenGLWidget):
     @contextmanager
     def _into_detail(self, width: float, height: float, ratio: float,
                      scale_denom: float | None = None,
-                     px_per_mm: float | None = None):
+                     px_per_mm: float | None = None,
+                     view: str | None = None):
         """Draw the model into a detail's picture rather than the pane.
 
         Whatever is measured in pixels while the model draws, a wide
@@ -2366,7 +2385,7 @@ class Viewport(QOpenGLWidget):
         """
         old = self._target
         self._target = DrawTarget(float(width), float(height), float(ratio),
-                                  scale_denom, px_per_mm)
+                                  scale_denom, px_per_mm, view)
         try:
             yield
         finally:
@@ -3472,24 +3491,35 @@ class Viewport(QOpenGLWidget):
             self._ghost = None
         self.update()
 
-    def _clip_frames(self):
-        """Read native plane geometry once, shared by the cut and its arrow.
+    def _clip_frames(self, view: str | None = None):
+        """The clipping planes as `view` sees them, the one being drawn
+        unless another is named: see clip_plane_frames.
 
-        Layer visibility can change without a scene revision. Including it
-        keeps a hidden plane from continuing to cut, and avoids repeatedly
-        entering OpenCASCADE from every pane's repaint.
+        Native plane geometry is read once a revision, shared by the cut
+        and its arrow and by every view that asks; a sheet asks once for
+        each detail on it, every frame. Layer visibility can change
+        without a scene revision. Including it keeps a hidden plane from
+        continuing to cut, and avoids repeatedly entering OpenCASCADE from
+        every pane's repaint.
         """
         key = (self.scene.revision, self._visible_layers())
         cache = getattr(self, "_clip_frames_cache", None)
         if cache is None or cache[0] != key:
-            cache = (key, clip_plane_frames(self.scene.visible_objects()))
+            cache = (key, _plane_frames(self.scene.visible_objects()), {})
             self._clip_frames_cache = cache
-        return cache[1]
+        view = self._view_drawn() if view is None else view
+        frames = cache[2].get(view)
+        if frames is None:
+            frames = [(o, n, _clipping.cuts(setting, view))
+                      for setting, o, n in cache[1]]
+            cache[2][view] = frames
+        return frames
 
-    def _clip_vectors(self) -> list:
-        """vec4 clip equations from enabled clipping-plane objects.
-        Keeps the half-space behind each plane's normal."""
-        frames = self._clip_frames()
+    def _clip_vectors(self, view: str | None = None) -> list:
+        """vec4 clip equations from the planes that cut `view`, the one
+        being drawn unless another is named. Keeps the half-space behind
+        each plane's normal."""
+        frames = self._clip_frames(view)
         cache = getattr(self, "_clip_cache", None)
         if cache is not None and cache[0] is frames:
             return cache[1]
@@ -3500,6 +3530,23 @@ class Viewport(QOpenGLWidget):
                 if on][:4]
         self._clip_cache = (frames, vecs)
         return vecs
+
+    def _view_drawn(self) -> str:
+        """The view being drawn, to a clipping plane: the detail while one
+        is, this pane otherwise."""
+        target = self._target
+        if target is not None and target.view is not None:
+            return target.view
+        return self.view_key
+
+    def clip_view(self) -> str | None:
+        """The view a clipping plane is switched on or off in from this
+        pane: the pane's own in the model, the detail you are inside on a
+        sheet, and on bare paper none at all."""
+        if self.space == "model":
+            return self.view_key
+        detail = self.layout_view._entered()
+        return None if detail is None else detail.id
 
     def _set_clip_uniforms(self, prog, clips):
         self._use(prog)
@@ -4058,7 +4105,7 @@ class Viewport(QOpenGLWidget):
             with self._into_detail(px_w, px_h, 1.0,
                                    None if detail.perspective
                                    else detail.scale_denom,
-                                   px_w / max(detail.w, 1e-9)):
+                                   px_w / max(detail.w, 1e-9), detail.id):
                 self._draw_objects(mvp64, view,
                                    mode_override=detail.display_mode,
                                    light_background=True,

@@ -163,7 +163,11 @@ class MainWindow(QMainWindow):
         self.properties = PropertiesPanel(
             self.scene, self.selection, self.history,
             # a sheet's selection belongs to whichever pane is showing it
-            viewport_source=lambda: self.active_viewport)
+            viewport_source=lambda: self.active_viewport,
+            # the model panes a clipping plane lists among its views
+            panes_source=lambda: [
+                (vp.view_key, self._viewport_title(vp))
+                for vp in self.all_viewports() if vp.space == "model"])
         self.properties.modelTextChanged.connect(
             self._model_text_changed_from_properties)
         self.properties.textTypographyChanged.connect(
@@ -518,6 +522,7 @@ class MainWindow(QMainWindow):
         self._wire_viewport(vp)
         self.dock_viewports.append(vp)
         dock = self._dock_viewport(vp, "Viewport", closable=True)
+        vp.view_key = dock.objectName()       # its own, to a clipping plane
         areas = {"Right": Qt.DockWidgetArea.RightDockWidgetArea,
                  "Left": Qt.DockWidgetArea.LeftDockWidgetArea,
                  "Top": Qt.DockWidgetArea.TopDockWidgetArea,
@@ -598,6 +603,7 @@ class MainWindow(QMainWindow):
                    lambda m=mode: vp.set_display_mode(m))
         self._action(menu, "Display settings…", None,
                      lambda: self._show_display_settings(vp))
+        self._clip_planes_menu(vp, menu)
         if self.scene.layouts:
             # A space tab swaps the whole arrangement, but a space is still
             # a property of one pane underneath, and this is where you say
@@ -620,6 +626,36 @@ class MainWindow(QMainWindow):
         self._action(menu, "Single Viewport", None,
                      lambda: self.run_command("1view"))
         return menu
+
+    def _clip_planes_menu(self, vp, menu):
+        """Which clipping planes cut this pane, each one a tick to switch
+        it off or on here and nowhere else (core/clipping.py). Inside a
+        detail it is the detail that is cut; on bare paper, or with no
+        planes to list, there is nothing to offer."""
+        view = vp.clip_view()
+        planes = [o for o in self.scene.visible_objects() if o.clip_plane]
+        if view is None or not planes:
+            return
+        # Made with its parent rather than by addMenu(title), whose menu
+        # PySide6 deletes with the Python name for it, here at the return.
+        sub = QMenu("Clipping Planes", menu)
+        menu.addMenu(sub)
+        for obj in planes:
+            label = obj.name if obj.clip_plane.get("enabled") \
+                else f"{obj.name} (paused)"
+            act = sub.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(view not in obj.clip_plane.get("off_in", ()))
+            act.triggered.connect(
+                lambda on, i=obj.id: self.set_clip_view(i, view, on))
+
+    def set_clip_view(self, plane_id: str, view: str, on: bool) -> bool:
+        """Switch one clipping plane on or off in one view, as one undo
+        step. Returns whether anything changed."""
+        from .core import clipping
+        return clipping.switch(
+            self.scene, plane_id, view, on,
+            before=lambda: self.history.checkpoint("clipping plane views"))
 
     def _show_display_settings(self, vp):
         """Open one set of controls for the pane whose menu was used."""
@@ -728,6 +764,9 @@ class MainWindow(QMainWindow):
                 # primary's world XY back is what left Front and Right
                 # looking straight down the plane they had to pick on
                 aux.set_view(view)                 # named orthographic view
+                # and the pane a clipping plane knows it by, whatever it
+                # is turned to later (core/clipping.py)
+                aux.view_key = view
                 aux.camera.target = self.viewport.camera.target.copy()
                 aux.camera.distance = self.viewport.camera.distance
                 self._wire_viewport(aux)
@@ -2584,10 +2623,12 @@ class MainWindow(QMainWindow):
         which leaves you where you were: a copy you made by hand is a copy
         you are about to change.
         """
+        from .core import clipping
         from .core.layout import unique_layout_name
         self.history.checkpoint("duplicate layout")
         dup = lay.duplicate(
             unique_layout_name(self.scene.layouts, f"{lay.name} copy"))
+        clipping.carry_views(self.scene, lay.copied_details(dup))
         self.scene.layouts.append(dup)
         self.scene.notify("layouts")
         self.switch_space(dup.id)

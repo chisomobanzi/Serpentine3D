@@ -111,6 +111,12 @@ class SerpApi:
             # only where there is some: most objects carry none, and a big
             # scene would otherwise send thousands of empty ones
             row["user_text"] = dict(obj.user_text)
+        if obj.clip_plane:
+            # whether it is paused, and the views it is switched off in:
+            # "perspective", "top", "front", "right", or a detail's id
+            row["clip_plane"] = {
+                key: list(value) if isinstance(value, list) else value
+                for key, value in obj.clip_plane.items()}
         return row
 
     # ------------------------------------------------------------------ info

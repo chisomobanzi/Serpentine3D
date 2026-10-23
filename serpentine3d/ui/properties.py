@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from ..core import clipping
 from ..core import geometry as g
 from ..core import user_text as ut
 from ..core.layers import (HATCH_INK, HATCH_LAYER_COLOR, MAX_CUT_LINE_WIDTH,
@@ -425,6 +426,146 @@ class _DetailLayers(QWidget):
             self.hide_layer(layer_id)
 
 
+def _cleared(layout):
+    """Empty a layout of the rows a list widget built last time."""
+    while layout.count():
+        row = layout.takeAt(0)
+        if row.widget() is not None:
+            row.widget().deleteLater()
+
+
+def _detail_label(detail, view_name: str) -> str:
+    """A detail as a list of views names it: the view it looks along and
+    its scale, which is what tells two details on one sheet apart."""
+    if detail.perspective:
+        return view_name
+    return f"{view_name} {detail.scale_text()}"
+
+
+class _ClipViews(QWidget):
+    """The views a clipping plane cuts, a tick each: the model panes, then
+    each sheet's details under the sheet's name (core/clipping.py), and
+    Paused above them, which stops it cutting any of them and keeps the
+    ticks for when it resumes. `switch(key, on)` and `pause(paused)` are
+    told what was clicked."""
+
+    def __init__(self, switch, pause):
+        super().__init__()
+        self._switch = switch
+        self._pause = pause
+        self._boxes: list = []          # (key, QCheckBox), in the order shown
+        self._sheets: list = []
+        self.paused = QCheckBox("Paused")
+        self.paused.setToolTip("Cut no view until it is unticked; the "
+                               "views ticked below come back then")
+        self.paused.toggled.connect(lambda on: self._pause(on))
+        self._rows = QVBoxLayout()
+        self._rows.setContentsMargins(0, 0, 0, 0)
+        self._rows.setSpacing(2)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(4)
+        column.addWidget(self.paused)
+        column.addLayout(self._rows)
+
+    def show_for(self, plane, panes, layouts, view_name):
+        """`panes` is (key, label) for each model pane; `view_name` names
+        the view a detail looks along."""
+        setting = plane.clip_plane or {}
+        off = set(setting.get("off_in", ()))
+        with QSignalBlocker(self.paused):
+            self.paused.setChecked(not setting.get("enabled"))
+        _cleared(self._rows)
+        self._boxes = []
+        self._sheets = []
+
+        def tick(key, label):
+            box = QCheckBox(label)
+            box.setChecked(key not in off)
+            box.setEnabled(bool(setting.get("enabled")))
+            box.toggled.connect(lambda on, k=key: self._switch(k, on))
+            self._rows.addWidget(box)
+            self._boxes.append((key, box))
+
+        def heading(text):
+            label = QLabel(text)
+            label.setStyleSheet(f"color: {theme.TEXT_MUTED};")
+            self._rows.addWidget(label)
+
+        if panes:
+            heading("Model")
+            for key, label in panes:
+                tick(key, label)
+        for lay in layouts:
+            if not lay.details:
+                continue
+            heading(lay.name)
+            self._sheets.append(lay.name)
+            seen = Counter()
+            for detail in lay.details:
+                label = _detail_label(detail, view_name(detail))
+                seen[label] += 1
+                tick(detail.id, label if seen[label] == 1
+                     else f"{label} ({seen[label]})")
+
+    # read by the tests, and a summary of what the rows say
+    def views(self) -> list:
+        return [(key, box.text(), box.isChecked())
+                for key, box in self._boxes]
+
+    def sheets(self) -> list:
+        return list(self._sheets)
+
+    def cutting(self) -> bool:
+        return not self.paused.isChecked()
+
+    def views_enabled(self) -> bool:
+        return all(box.isEnabled() for _key, box in self._boxes)
+
+    def set_view(self, key: str, on: bool):
+        for k, box in self._boxes:
+            if k == key:
+                box.setChecked(on)
+
+    def set_cutting(self, on: bool):
+        self.paused.setChecked(not on)
+
+
+class _DetailClips(QWidget):
+    """The clipping planes that cut a detail, a tick each, so a plan can
+    be cut at sill height and the elevation beside it not at all
+    (core/clipping.py). `switch(plane id, on)` is told what was clicked."""
+
+    def __init__(self, switch):
+        super().__init__()
+        self._switch = switch
+        self._boxes: list = []          # (plane id, QCheckBox)
+        self._rows = QVBoxLayout(self)
+        self._rows.setContentsMargins(0, 0, 0, 0)
+        self._rows.setSpacing(2)
+
+    def show_for(self, detail, planes):
+        _cleared(self._rows)
+        self._boxes = []
+        for obj in planes:
+            setting = obj.clip_plane
+            label = obj.name if setting.get("enabled") \
+                else f"{obj.name} (paused)"
+            box = QCheckBox(label)
+            box.setChecked(detail.id not in setting.get("off_in", ()))
+            box.toggled.connect(lambda on, i=obj.id: self._switch(i, on))
+            self._rows.addWidget(box)
+            self._boxes.append((obj.id, box))
+
+    def planes(self) -> list:
+        return [(box.text(), box.isChecked()) for _i, box in self._boxes]
+
+    def set_plane(self, plane_id: str, on: bool):
+        for i, box in self._boxes:
+            if i == plane_id:
+                box.setChecked(on)
+
+
 class _PairTable(QTableWidget):
     """Keys and values, a column of each.
 
@@ -755,7 +896,7 @@ class PropertiesPanel(QWidget):
     subjectsChanged = Signal()
 
     def __init__(self, scene, selection, history, parent=None,
-                 viewport_source=None):
+                 viewport_source=None, panes_source=None):
         super().__init__(parent)
         self.scene = scene
         self.selection = selection
@@ -763,6 +904,9 @@ class PropertiesPanel(QWidget):
         # What is picked on a sheet is held by the layout view of whichever
         # pane is showing it, so the panel has to be able to go and ask.
         self._viewport_source = viewport_source
+        # The window's model panes, (view key, title), which a clipping
+        # plane lists among the views it cuts
+        self._panes_source = panes_source
         self._updating = False
         # {object id: (scene revision, what it measured)}. Exact mass
         # properties cost between 86 and 486 ms on one solid of an ordinary
@@ -877,6 +1021,11 @@ class PropertiesPanel(QWidget):
         # a detail only: the layers it leaves out (#38)
         self.detail_layers = _DetailLayers(self._set_detail_layers)
         form.addRow("Hidden here", self.detail_layers)
+        # a detail's clipping planes, and a clipping plane's views
+        self.detail_clips = _DetailClips(self._set_detail_clip)
+        form.addRow("Clipped by", self.detail_clips)
+        self.clip_views = _ClipViews(self._set_clip_view, self._pause_clip)
+        form.addRow("Cuts", self.clip_views)
         form.addRow("Info", self.measure_label)
         self.text_content = QPlainTextEdit()
         self.text_content.setObjectName("text_content")
@@ -1098,6 +1247,7 @@ class PropertiesPanel(QWidget):
             self._show_scale(detail)
             self._show_detail_view(detail)
             self._show_detail_layers(detail)
+            self._show_detail_clips(detail)
         self._show_hatch()
         editable = self._editable_text()
         editable_id = editable.id if editable is not None else None
@@ -1564,6 +1714,48 @@ class PropertiesPanel(QWidget):
             self._paper_edit("detail layers", detail,
                              hidden_layers=list(hidden))
 
+    def _show_detail_clips(self, detail):
+        """The clipping planes there are, ticked where they cut this
+        detail; no row when there are none."""
+        planes = [o for o in self.scene.visible_objects() if o.clip_plane]
+        self.form.setRowVisible(self.detail_clips, bool(planes))
+        if planes:
+            self.detail_clips.show_for(detail, planes)
+
+    def _set_detail_clip(self, plane_id: str, on: bool):
+        detail = self._detail_pick()
+        if detail is not None:
+            clipping.switch(self.scene, plane_id, detail.id, on,
+                            before=self._clip_checkpoint)
+
+    def _clip_checkpoint(self):
+        self.history.checkpoint("clipping plane views")
+
+    def _show_clip_views(self, obj):
+        """A clipping plane's views, ticked where it cuts them."""
+        shown = bool(obj.clip_plane)
+        self.form.setRowVisible(self.clip_views, shown)
+        if shown:
+            panes = self._panes_source() if self._panes_source else []
+            self.clip_views.show_for(obj, panes, self.scene.layouts,
+                                     self._detail_view_name)
+
+    def _set_clip_view(self, view: str, on: bool):
+        obj = self._selected()
+        if obj is not None and obj.clip_plane:
+            clipping.switch(self.scene, obj.id, view, on,
+                            before=self._clip_checkpoint)
+
+    def _pause_clip(self, paused: bool):
+        obj = self._selected()
+        if obj is None or not obj.clip_plane \
+                or bool(obj.clip_plane.get("enabled")) != paused:
+            return
+        self.history.checkpoint("pause clipping plane" if paused
+                                else "resume clipping plane")
+        self.scene.update(obj.id, clip_plane={**obj.clip_plane,
+                                              "enabled": not paused})
+
     # ------------------------------------------------------------ layer page
 
     def _build_layer_page(self):
@@ -1990,6 +2182,8 @@ class PropertiesPanel(QWidget):
         self.form.setRowVisible(self.detail_view_combo, detail)
         # one detail's own; refresh shows it again for a single detail
         self.form.setRowVisible(self.detail_layers, False)
+        self.form.setRowVisible(self.detail_clips, False)
+        self.form.setRowVisible(self.clip_views, False)
         # a model object's own, which _refresh_model shows when there is one
         self.form.setRowVisible(self.print_width_combo, False)
         self.form.setRowVisible(self.section_hatch, False)
@@ -2023,6 +2217,7 @@ class PropertiesPanel(QWidget):
             self._show_swatch(self._ink_of(obj))
             self.color_reset.setEnabled(obj.color is not None)
             self._show_own_looks(obj)
+            self._show_clip_views(obj)
             self.form.setRowVisible(self.user_text, True)
             self.user_text.show_for(obj)
 

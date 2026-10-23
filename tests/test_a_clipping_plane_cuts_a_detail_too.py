@@ -213,9 +213,10 @@ def test_a_detail_is_measured_as_the_picture_it_is(pane):
     drawn: the detail while it is, and the pane again afterwards."""
     pane.resize(640, 480)
     assert pane._target_size() == (640.0, 480.0)
-    with pane._into_detail(300, 200, 2.0, scale_denom=10.0, px_per_mm=1.25):
+    with pane._into_detail(300, 200, 2.0, scale_denom=10.0, px_per_mm=1.25,
+                           view="d1"):
         target = pane._draw_target()
-        assert tuple(target) == (300.0, 200.0, 2.0, 10.0, 1.25)
+        assert tuple(target) == (300.0, 200.0, 2.0, 10.0, 1.25, "d1")
         assert pane._target_size() == (300.0, 200.0)
     assert pane._target_size() == (640.0, 480.0)
     assert pane._draw_target().scale_denom is None
@@ -355,3 +356,19 @@ def test_a_section_still_cuts_what_the_plane_left(hidden):
     tallest = max(s[:, 1].max() for s in sections)
     assert tallest == pytest.approx(0.0, abs=1e-3), \
         "the section was taken through the half the plane took away"
+
+
+def test_a_detail_the_plane_is_switched_off_in_draws_whole(cut):
+    """A plane switched off in one detail (core/clipping.py) leaves that
+    detail whole, on the sheet and in the PDF, and still cuts the rest."""
+    from serpentine3d.core import clipping
+    w, vp, lay, layer_id, plane_id = cut
+    off = _detail("front", "shaded")
+    on = _detail("front", "shaded")
+    lay.details.extend([off, on])
+    clipping.switch(w.scene, plane_id, off.id, False)
+    taken = (0.0, -20.0, 10.0)
+    assert _near(vp, off, vp.render_detail_image(off, PX_W, PX_H), taken,
+                 _blue), "the detail the plane is off in was cut"
+    assert not _near(vp, on, vp.render_detail_image(on, PX_W, PX_H), taken,
+                     _blue), "switching it off in one detail took it out of all"
