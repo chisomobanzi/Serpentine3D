@@ -136,6 +136,17 @@
   grid writes no depth, so it now stretches only the far plane, and the
   near plane is measured against the drawing.
 
+- **A Front or Right view of a far model sorts its faces again.** A
+  parallel view spreads the depth buffer evenly through its depth range,
+  and that range reached back to the grid as well as the model, so the
+  grid and whatever is drawn on the construction plane stayed inside it.
+  With the model 6,200 km out and the construction plane still at the
+  world's origin, faces were sorted in steps of 0.4 units: a window 4 mm
+  proud of its wall went behind it. The range now wraps the model alone,
+  and the grid, a rubber band on a far construction plane or a ghost
+  outside the model are drawn with their depth clamped rather than
+  clipped away.
+
 ## 0.12.1 (2026-10-22)
 
 ### Added

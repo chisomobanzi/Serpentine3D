@@ -231,7 +231,14 @@ class Camera:
 
         if self.projection == "parallel":
             # Depth along the view direction; negative is fine in ortho, a
-            # corner behind the eye plane still projects.
+            # corner behind the eye plane still projects. Around the drawing
+            # alone: a slab spreads its 24 bits of depth evenly, and one
+            # stretched back to a grid at the world's origin from a model
+            # 6,200 km out sorted faces in steps of 0.4 units. What falls
+            # outside it, the grid and some overlays, the viewport keeps by
+            # clamping depth instead (Viewport._paint_frame).
+            if self.drawing_bounds is not None:
+                corners = _corners(self.drawing_bounds)
             fwd = normalize(self.target - eye)
             depths = (corners - eye) @ fwd
             span = float(depths.max() - depths.min())

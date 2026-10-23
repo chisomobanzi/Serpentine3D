@@ -1522,6 +1522,8 @@ class Viewport(QOpenGLWidget):
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
         GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glDepthFunc(GL.GL_LESS)          # a parallel view changes both
+        GL.glDisable(GL.GL_DEPTH_CLAMP)     # for its overlays, below
         GL.glClearColor(*theme.VIEWPORT_BG_BOTTOM, 1.0)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
 
@@ -1571,10 +1573,25 @@ class Viewport(QOpenGLWidget):
         # in, and each overlay rebases what it uploads to match, so the
         # gumball and the rubber band hold as still as the meshes do.
         mvp = anchored(mvp64, self._frame_anchor)
+        # A parallel view's slab wraps the drawing alone (Camera.clip_planes),
+        # so the grid, a rubber band on a construction plane back at the
+        # world's origin or a ghost behind the model can fall outside it.
+        # Clamping depth keeps them, at the front or the back of the slab,
+        # where clipping would cut them away. What is drawn after the model
+        # compares with LEQUAL, so a ghost clamped to the back still shows
+        # wherever nothing stands in front of it.
+        parallel = self.camera.projection == "parallel"
+        if parallel:
+            GL.glEnable(GL.GL_DEPTH_CLAMP)
 
         if self.display_mode == "technical":
             self._paint_technical(w, h)
+            if parallel:
+                GL.glDepthFunc(GL.GL_LEQUAL)
             self._draw_pending(mvp)
+            if parallel:
+                GL.glDepthFunc(GL.GL_LESS)
+                GL.glDisable(GL.GL_DEPTH_CLAMP)
             self._draw_selection_box(w, h)
             return
 
@@ -1582,6 +1599,8 @@ class Viewport(QOpenGLWidget):
             self._draw_grid(mvp64)
         self._sync_gpu()
         self._draw_objects(mvp64, view)
+        if parallel:
+            GL.glDepthFunc(GL.GL_LEQUAL)
         self._draw_image_planes(mvp)
         self._draw_pending(mvp)
         self._draw_control_points(mvp)
@@ -1589,6 +1608,9 @@ class Viewport(QOpenGLWidget):
         self._draw_direction_arrows(mvp)
         self._draw_clip_normals(mvp)
         self.gumball.paint(mvp)
+        if parallel:
+            GL.glDepthFunc(GL.GL_LESS)
+            GL.glDisable(GL.GL_DEPTH_CLAMP)
         self._draw_axis_triad(view, w, h)
         self._draw_frame_guides(w, h)
         self._draw_selection_box(w, h)
@@ -2079,12 +2101,15 @@ class Viewport(QOpenGLWidget):
         if not self.cplane.is_world_xy():
             mvp = mvp @ self.cplane.basis_matrix()
         mvp = mvp.astype(np.float32)
-        GL.glDepthMask(False)
+        # Drawn first, on a cleared buffer, and writing no depth, so testing
+        # depth could only ever turn it away, as it did a grid clamped to
+        # the back of a parallel view's slab (see _paint_frame).
+        GL.glDisable(GL.GL_DEPTH_TEST)
         self._draw_lines(self._grid["minor"], mvp, theme.GRID_MINOR)
         self._draw_lines(self._grid["major"], mvp, theme.GRID_MAJOR)
         self._draw_lines(self._grid["axis_x"], mvp, theme.GRID_AXIS_X)
         self._draw_lines(self._grid["axis_y"], mvp, theme.GRID_AXIS_Y)
-        GL.glDepthMask(True)
+        GL.glEnable(GL.GL_DEPTH_TEST)
 
     def set_cplane(self, cplane):
         self.cplane = cplane
