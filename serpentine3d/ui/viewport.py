@@ -2353,13 +2353,17 @@ class Viewport(QOpenGLWidget):
         loop over every visible object, which at cave-file scale is too dear
         to pay per frame. The grid rides along because it is drawn with the
         same projection — a far plane snug around a small model would
-        otherwise crop the grid it sits on.
+        otherwise crop the grid it sits on. It stretches only the far
+        plane, though: the near plane is set by the drawing alone
+        (`drawing_bounds`), or a grid at the world's origin would clip a
+        georeferenced model away as soon as it was zoomed in on.
         """
         key = (self.scene.revision, self._grid_params, self.grid_visible)
         if self._cam_bounds_key == key:
             return
         self._cam_bounds_key = key
         box = self.scene.bbox()
+        self.camera.drawing_bounds = box
         if self.grid_visible:
             extent = float(self._grid_params[0])
             grid = ((-extent, -extent, 0.0), (extent, extent, 0.0))

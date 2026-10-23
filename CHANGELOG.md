@@ -126,6 +126,16 @@
   near home is written exactly as before and opens in every release it
   did before.
 
+- **Zooming in on a far model no longer empties the view.** The clip
+  planes wrap the drawing and the grid together, and the near plane is
+  held to a millionth of the far one so the depth buffer keeps its
+  precision. The grid stays at the world's origin, so for a model at
+  survey coordinates the far plane reached 6,200 km back to it and the
+  near plane sat 6.5 m from the eye: zoomed in on a survey peg or a patch
+  of scan, everything was clipped away until the grid was hidden. The
+  grid writes no depth, so it now stretches only the far plane, and the
+  near plane is measured against the drawing.
+
 ## 0.12.1 (2026-10-22)
 
 ### Added

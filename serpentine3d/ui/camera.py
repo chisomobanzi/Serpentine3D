@@ -148,6 +148,13 @@ def eased(t: float) -> float:
     return 1.0 - (1.0 - t) ** 3
 
 
+def _corners(bounds) -> np.ndarray:
+    """The eight corners of a ((x,y,z),(x,y,z)) box, as an (8, 3) array."""
+    lo, hi = (np.asarray(c, float) for c in bounds)
+    return np.array([(x, y, z) for x in (lo[0], hi[0])
+                     for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+
+
 class Camera:
     def __init__(self):
         self.target = np.zeros(3)
@@ -158,6 +165,7 @@ class Camera:
         self.sensor_name = "Super35"
         self.projection = "perspective"        # or "parallel" (orthographic)
         self.scene_bounds = None               # ((x,y,z),(x,y,z)); clip_planes
+        self.drawing_bounds = None             # the same, without the grid
         self._vp_cache = None                  # see _view_proj
 
     @property
@@ -218,12 +226,7 @@ class Camera:
                 return d - depth, d + depth
             return max(d * 0.001, 0.01), d * 100.0 + 1000.0
 
-        mn, mx = (np.asarray(self.scene_bounds[0], float),
-                  np.asarray(self.scene_bounds[1], float))
-        corners = np.array([(x, y, z)
-                            for x in (mn[0], mx[0])
-                            for y in (mn[1], mx[1])
-                            for z in (mn[2], mx[2])])
+        corners = _corners(self.scene_bounds)
         eye = self.position
 
         if self.projection == "parallel":
@@ -240,8 +243,16 @@ class Camera:
         farthest = float(np.linalg.norm(corners - eye, axis=1).max())
         far = max(farthest * 1.05, d * 1.05, 1e-3)
         # Proportional to the zoom, but never so deep a ratio that the
-        # depth buffer runs out of teeth across the scene.
-        near = max(d * 0.001, far * 1e-6)
+        # depth buffer runs out of teeth across the drawing. The drawing's
+        # reach, not the grid's: the grid writes no depth, and one left at
+        # the world's origin while the model sits 6,200 km out held the
+        # near plane 6.5 m from the eye, past anything zoomed in on.
+        reach = far
+        if self.drawing_bounds is not None:
+            drawn = _corners(self.drawing_bounds)
+            reach = max(float(np.linalg.norm(drawn - eye, axis=1).max())
+                        * 1.05, d * 1.05, 1e-3)
+        near = max(d * 0.001, reach * 1e-6)
         return near, far
 
     def proj_matrix(self, width: int, height: int) -> np.ndarray:
@@ -424,11 +435,13 @@ class Camera:
         setter, so it cannot outlive a move it did not hear about: every
         field here is public and callers do assign to them directly.
         """
-        bounds = self.scene_bounds
+        bounds, drawn = self.scene_bounds, self.drawing_bounds
         key = (width, height, self.projection, self.fov, self.distance,
                self.azimuth, self.elevation, tuple(self.target),
                None if bounds is None else (tuple(bounds[0]),
-                                            tuple(bounds[1])))
+                                            tuple(bounds[1])),
+               None if drawn is None else (tuple(drawn[0]),
+                                           tuple(drawn[1])))
         cached = self._vp_cache
         if cached is None or cached[0] != key:
             pos = self.position
