@@ -6,6 +6,8 @@ the pane is showing the sheet, and the planes were only handed to the
 shader in model space, so every detail showed the model whole. A detail
 drawn in 3D (wireframe, shaded, ghosted) now takes the same cut, on screen
 and in the PDF, and a shaded one closes what it cuts with the same caps.
+A hidden-line detail, which is what `detail` places, takes it too: see
+the end of this file.
 
 A cap measured itself against the pane, which a detail is not: its cut
 line was widened for the pane's size and its hatch spaced by the pane's
@@ -234,3 +236,122 @@ def test_a_cut_line_in_a_detail_is_its_print_width_on_the_sheet():
     assert caps.cut_line_style(fill)[1] == on_screen
     assert caps.cut_line_style(SectionFill(cut_line_width=0.0),
                                px_per_mm=4.0) is None
+
+
+# --- a hidden-line detail ----------------------------------------------------
+#
+# What the `detail` command places, so the case #94 was about. Its lines
+# come from OpenCASCADE's hidden-line pass rather than the GPU, so the
+# planes cut the shapes themselves first, as a detail's own section does,
+# and the faces they leave on a solid are hatched like that section's.
+
+@pytest.fixture
+def hidden(_qapp):
+    from serpentine3d.app import MainWindow
+    w = MainWindow()
+    w.resize(1200, 800)
+    box = w.scene.add(g.make_box((-20, -20, -20), 40, 40, 40))
+    plane = w.scene.add(_plane_rect(), name="Clip")
+    w.scene.update(plane.id, clip_plane={"enabled": True})
+    lay = Layout(name="Sheet")
+    w.scene.layouts.append(lay)
+    w.switch_space(lay.id)
+    yield w, w.viewport.layout_view, lay, box.id, plane.id
+    w.mark_saved()
+    w.close()
+
+
+def _box_lines(lv, det, box_id):
+    """Every point of the box's visible lines, in the detail's frame."""
+    pts = [p for oid, _lt, polys in lv._detail_hlr(det)["visible_by_obj"]
+           if oid == box_id for poly in polys for p in poly]
+    assert pts, "the box drew nothing, so the test proves nothing"
+    return np.asarray(pts, float)
+
+
+def test_a_hidden_line_detail_takes_the_cut(hidden):
+    """Seen from the front the detail's up is the model's z, so the box
+    reaches 20 above the plane whole and nothing above it once cut."""
+    w, lv, lay, box_id, plane_id = hidden
+    det = _detail("front", "hidden")
+    lay.details.append(det)
+
+    w.scene.update(plane_id, clip_plane={"enabled": False})
+    assert _box_lines(lv, det, box_id)[:, 1].max() == pytest.approx(20.0)
+
+    w.scene.update(plane_id, clip_plane={"enabled": True})
+    lines = _box_lines(lv, det, box_id)
+    assert lines[:, 1].max() == pytest.approx(0.0, abs=1e-6), \
+        "the detail drew the half the clipping plane takes away"
+    assert lines[:, 1].min() == pytest.approx(-20.0)
+
+
+def test_the_face_a_plane_leaves_is_hatched(hidden):
+    """Looking straight down the plane, the box's cut is a 40-unit square,
+    hatched in whatever the box's layer hatches its cuts with."""
+    w, lv, lay, box_id, plane_id = hidden
+    det = _detail("top", "hidden")
+    lay.details.append(det)
+
+    cuts = [(oid, region) for oid, _pattern, region
+            in lv._detail_hlr(det)["cut_by_obj"]]
+    assert [oid for oid, _ in cuts] == [box_id]
+    outside = np.asarray(cuts[0][1][0], float)
+    assert outside.min(axis=0) == pytest.approx((-20.0, -20.0), abs=1e-3)
+    assert outside.max(axis=0) == pytest.approx((20.0, 20.0), abs=1e-3)
+
+
+def test_a_paused_or_hidden_plane_leaves_the_detail_whole(hidden):
+    """The detail's lines are cached, so this is also that the cache
+    hears of it: hiding a layer does not change the scene's revision."""
+    w, lv, lay, box_id, plane_id = hidden
+    det = _detail("front", "hidden")
+    lay.details.append(det)
+    assert _box_lines(lv, det, box_id)[:, 1].max() < 1.0
+
+    layer = w.scene.layers.create("Planes")
+    w.scene.update(plane_id, layer_id=layer.id)
+    assert _box_lines(lv, det, box_id)[:, 1].max() < 1.0
+    w.scene.layers.set_visible(layer.id, False)
+    assert _box_lines(lv, det, box_id)[:, 1].max() == pytest.approx(20.0)
+    assert lv._detail_hlr(det)["cut_by_obj"] == []
+
+    w.scene.layers.set_visible(layer.id, True)
+    w.scene.update(plane_id, clip_plane={"enabled": False})
+    assert _box_lines(lv, det, box_id)[:, 1].max() == pytest.approx(20.0)
+
+
+def test_the_plane_itself_still_draws(hidden):
+    """A plane is not cut by itself: it lies on the face it would cut
+    with, and could come back whole or vanish on rounding. It draws as it
+    does in every other view, and its layer can be left out of a detail
+    (#38) for a clean section that still cuts."""
+    w, lv, lay, box_id, plane_id = hidden
+    det = _detail("top", "hidden")
+    lay.details.append(det)
+    drawn = {oid for oid, _lt, polys in lv._detail_hlr(det)["visible_by_obj"]
+             if polys}
+    assert plane_id in drawn
+
+    layer = w.scene.layers.create("Planes")
+    w.scene.update(plane_id, layer_id=layer.id)
+    det.hidden_layers = [layer.id]
+    data = lv._detail_hlr(det)
+    assert plane_id not in {oid for oid, _lt, _p in data["visible_by_obj"]}
+    assert [oid for oid, _p, _r in data["cut_by_obj"]] == [box_id]
+
+
+def test_a_section_still_cuts_what_the_plane_left(hidden):
+    """A detail's own section (detailsection) and a clipping plane can be
+    on at once: the section is taken through what the plane left."""
+    w, lv, lay, box_id, plane_id = hidden
+    det = _detail("front", "hidden")
+    det.section_offset = 0.0        # through the middle, facing the eye
+    lay.details.append(det)
+    data = lv._detail_hlr(det)
+    sections = [np.asarray(region[0], float)
+                for oid, _p, region in data["cut_by_obj"] if oid == box_id]
+    assert sections, "the section cut nothing"
+    tallest = max(s[:, 1].max() for s in sections)
+    assert tallest == pytest.approx(0.0, abs=1e-3), \
+        "the section was taken through the half the plane took away"

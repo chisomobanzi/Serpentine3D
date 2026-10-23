@@ -17,6 +17,7 @@ from PySide6.QtGui import (QColor, QFont, QPainter, QPainterPath, QPen,
 from ..core import hlr, linetype
 from ..core.layers import screen_width_for
 from ..utils.math3d import look_at, ortho, perspective
+from . import section_caps as _caps
 from . import theme
 
 PAPER_COLOR = (0.94, 0.94, 0.92, 1.0)
@@ -614,10 +615,13 @@ class LayoutView:
 
     def _detail_hlr(self, detail) -> dict:
         vp = self.vp
+        # The live clipping planes, which a layer's visibility can change
+        # without the scene's revision moving.
+        clips = tuple(f for f in vp._clip_frames() if f[2])
         key = (vp.scene.revision, round(detail.azimuth, 6),
                round(detail.elevation, 6), tuple(detail.target),
                detail.perspective, detail.section_offset,
-               tuple(detail.hidden_layers))
+               tuple(detail.hidden_layers), clips)
         cached = self._hlr_cache.get(detail.id)
         if cached is not None and cached[0] == key:
             return cached[1]
@@ -636,16 +640,36 @@ class LayoutView:
 
         cut_regions = []
         cut_by_obj = []
-        if shapes and detail.section_offset is not None \
-                and not detail.perspective:
-            shapes, cut_regions, owners = _section_cut(
-                shapes, np.asarray(detail.target, float), d, right, up,
-                detail.section_offset)   # shapes 1:1 with input, keeps order
+        target = np.asarray(detail.target, float)
+        sectioned = (bool(shapes) and detail.section_offset is not None
+                     and not detail.perspective)
+
+        def owned(owners, regions):
             # What each cut face is made of, carried out beside it: a cut
             # is filled with the material of the thing it went through,
             # and this is the only place that still knows which that was.
-            cut_by_obj = [(objs[i].id, vp.scene.hatch_of(objs[i]), region)
-                          for i, region in zip(owners, cut_regions)]
+            cut_regions.extend(regions)
+            cut_by_obj.extend((objs[i].id, vp.scene.hatch_of(objs[i]), region)
+                              for i, region in zip(owners, regions))
+
+        planes = _caps.cap_planes(clips) if shapes else []
+        if planes:
+            # The planes first, the way the GPU cuts every other view
+            # (#94); a section of the detail's own then cuts what they
+            # left, and their cut faces stop where it starts.
+            also = []
+            if sectioned:
+                at = target + d * float(detail.section_offset)
+                also.append(_half_space(at, d, right, up, _reach(shapes, at)))
+            shapes, regions, owners = _clip_cut(
+                shapes, [not o.clip_plane for o in objs], planes, target,
+                right, up, also)
+            owned(owners, regions)
+        if sectioned:
+            shapes, regions, owners = _section_cut(
+                shapes, target, d, right, up,
+                detail.section_offset)   # shapes 1:1 with input, keeps order
+            owned(owners, regions)
 
         if not shapes:
             data = {"visible": [], "hidden": [], "cut": cut_regions,
@@ -1385,6 +1409,100 @@ class LayoutView:
         return True
 
 
+def _reach(shapes, point) -> float:
+    """A length that, laid out from `point`, swallows every shape."""
+    from ..core import geometry as g
+    diag = 0.0
+    for s in shapes:
+        mn, mx = g.bbox(s)
+        diag = max(diag, float(np.linalg.norm(np.subtract(mx, mn))),
+                   float(np.linalg.norm(np.subtract(mx, point))),
+                   float(np.linalg.norm(np.subtract(mn, point))))
+    return diag * 2 + 10
+
+
+def _half_space(origin, normal, u, v, reach):
+    """A solid filling the side of a plane `normal` points into, as far
+    as `reach` in every direction: subtract it, and what is on that side
+    is gone. `u` and `v` lie in the plane."""
+    from ..core import geometry as g
+    origin, u, v = (np.asarray(a, float) for a in (origin, u, v))
+    corners = [origin + u * su * reach + v * sv * reach
+               for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    quad = g.make_polyline([tuple(c) for c in corners], closed=True)
+    return g.extrude(g.planar_face(quad), tuple(float(c) for c in normal),
+                     reach, cap=False)
+
+
+# What a clipping plane can cut in a hidden-line detail: what the GPU
+# would take away in any other view. A hatch is left whole, since cutting
+# it would hand back bare faces that no longer know their pattern.
+_CLIPPED_KINDS = ("solid", "surface", "curve", "compound", "point")
+
+
+def _clip_cut(shapes, cuttable, planes, target, right, up, also=()):
+    """Cut shapes with the half-spaces live clipping planes take away, the
+    way the GPU does in every other view (#94).
+
+    `planes` are section_caps.CapPlane, `cuttable` is aligned with
+    `shapes` and says which may be cut (not the planes themselves), and
+    `also` holds other cutters, a detail's own section, that a plane's cut
+    face is trimmed by but that this does not apply. Returns (cut_shapes,
+    regions, owners) as `_section_cut` does: the faces a plane leaves on a
+    solid, flattened into the detail's frame, so they hatch as a section's
+    do. One seen edge on covers nothing and is left out.
+    """
+    from ..core import geometry as g
+    target = np.asarray(target, float)
+    cutters = [_half_space(p.origin, p.normal, p.u, p.v,
+                           _reach(shapes, p.origin)) for p in planes]
+
+    def flat(pts):
+        return [(float(np.dot(np.subtract(p, target), right)),
+                 float(np.dot(np.subtract(p, target), up))) for p in pts]
+
+    def minus(shape, knives):
+        for knife in knives:
+            shape = g.boolean_difference(shape, knife)
+        return shape
+
+    out_shapes, regions, owners = [], [], []
+    for i, s in enumerate(shapes):
+        kind = g.shape_kind(s) if cuttable[i] else None
+        if kind not in _CLIPPED_KINDS:
+            out_shapes.append(s)
+            continue
+        try:
+            out_shapes.append(minus(s, cutters))
+        except Exception:                                  # noqa: BLE001
+            out_shapes.append(s)          # drawn whole rather than not at all
+            continue
+        if kind != "solid":
+            continue                      # no inside, so nothing to hatch
+        for k, plane in enumerate(planes):
+            try:
+                base = minus(s, [c for j, c in enumerate(cutters) if j != k]
+                             + list(also))
+                faces = g.section_regions(base, tuple(plane.origin),
+                                          tuple(plane.normal))
+            except Exception:                              # noqa: BLE001
+                continue
+            for face in faces:
+                loops = [poly for poly in map(flat, g.face_loops(face, 96))
+                         if len(poly) >= 3]
+                if loops and _area(loops[0]) > 1e-9 * _reach([s], target) ** 2:
+                    regions.append(loops)
+                    owners.append(i)
+    return out_shapes, regions, owners
+
+
+def _area(loop) -> float:
+    """The area a closed loop of (x, y) points encloses."""
+    pts = np.asarray(loop, float)
+    x, y = pts[:, 0], pts[:, 1]
+    return abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))) / 2
+
+
 def _section_cut(shapes, target, d, right, up, offset):
     """Cut shapes with a half-space in front of the section plane.
 
@@ -1398,19 +1516,7 @@ def _section_cut(shapes, target, d, right, up, offset):
     from ..core import geometry as g
 
     plane_pt = target + d * float(offset)
-    # extent large enough to swallow the whole scene
-    import numpy as np
-    diag = 0.0
-    for s in shapes:
-        mn, mx = g.bbox(s)
-        diag = max(diag, float(np.linalg.norm(np.subtract(mx, mn))),
-                   float(np.linalg.norm(np.subtract(mx, plane_pt))),
-                   float(np.linalg.norm(np.subtract(mn, plane_pt))))
-    L = diag * 2 + 10
-    corners = [plane_pt + right * sx * L + up * sy * L
-               for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
-    quad = g.make_polyline([tuple(c) for c in corners], closed=True)
-    cutter = g.extrude(g.planar_face(quad), tuple(d), L, cap=False)
+    cutter = _half_space(plane_pt, d, right, up, _reach(shapes, plane_pt))
 
     def flat(pts):
         """Model points onto the plane the detail is drawn on."""
