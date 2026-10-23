@@ -1207,10 +1207,25 @@ class PropertiesPanel(QWidget):
         return self._sheet_picks("object")
 
     def _detail_pick(self) -> DetailView | None:
-        """The one detail picked on the sheet, or None: the scale row, like
-        every other row here, edits a single thing."""
+        """The one detail picked on the sheet, or the one you are inside
+        with nothing picked, or None: the scale row, like every other row
+        here, edits a single thing."""
         picks = self._sheet_picks("detail")
-        return picks[0] if len(picks) == 1 else None
+        if picks:
+            return picks[0] if len(picks) == 1 else None
+        return self._detail_here()
+
+    def _detail_here(self) -> DetailView | None:
+        """The detail the pane is inside, while nothing in the model is
+        picked: what you are looking through is what there is to show, as
+        Rhino's Properties show an active detail (#93). Once something is
+        picked inside it, that is what the panel is about."""
+        src = self._viewport_source
+        vp = src() if src is not None else None
+        if (vp is None or getattr(vp, "space", "model") == "model"
+                or self.selection.ids or self.selection.subobjects):
+            return None
+        return vp.layout_view._entered()
 
     def _current(self) -> tuple:
         """What the editors here act on: (object, on_paper).
@@ -1301,10 +1316,13 @@ class PropertiesPanel(QWidget):
 
     def subjects(self) -> list[str]:
         """What could be shown, in tab order: "objects" while anything is
-        selected (in the model or on a sheet), then "layers" or "sheets",
-        whichever is picked in its list: one look at a time."""
+        selected (in the model or on a sheet) or a detail is being looked
+        through, then "layers" or "sheets", whichever is picked in its
+        list: one look at a time."""
         out = []
-        if any(self._objects_signature()):
+        # the detail you are inside counts, but is not a pick: going in
+        # is no reason to let go of a layer you were looking at
+        if any(self._objects_signature()) or self._detail_here() is not None:
             out.append("objects")
         if self._picked_layers():
             out.append("layers")
@@ -1372,6 +1390,9 @@ class PropertiesPanel(QWidget):
             return said("Objects", f"{n} objects selected",
                         f"{_kinds_text(kinds)} on paper", f"{n} objects")
         details = self._sheet_picks("detail")
+        here = None if details else self._detail_here()
+        if here is not None:
+            details = [here]
         if details:
             n = len(details)
             if n == 1:

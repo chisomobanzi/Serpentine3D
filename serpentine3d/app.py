@@ -1730,10 +1730,13 @@ class MainWindow(QMainWindow):
         return obj is not None and obj.kind == "curve"
 
     def _delete_selected(self):
-        if self.viewport.space != "model":
-            # On a sheet the pick is the layout's own, not the scene's.
-            if self.viewport.layout_view.delete_selected():
-                self.viewport.update()
+        lv = self.ctx.sheet_view()
+        if lv is not None:
+            # On bare paper the pick is the layout's own, not the scene's.
+            # Inside a detail it is the model's, seen through the detail,
+            # by the same rule Copy and the commands go by (#93).
+            if lv.delete_selected():
+                lv.vp.update()
                 self._update_status()
             return
         # A held control point, face or curve segment is as much a pick as

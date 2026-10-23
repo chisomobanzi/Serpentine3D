@@ -40,6 +40,18 @@
   layer out of the detail for a clean section that still cuts. Reported
   by lourencovp.
 
+- **Inside a detail, Properties and Delete follow what you pick (#93).**
+  The click before a double-click picks the detail on the sheet, as the
+  `detail` command does with one it has just placed, and going inside
+  left that pick behind. So a box picked through the detail could be
+  moved and changed, but Properties stayed on the detail, and Delete
+  took the whole detail off the sheet and left the box. Going into a
+  detail now lets go of what was picked on the sheet. Inside one,
+  Properties shows what you have picked in the model and Delete deletes
+  it, as Copy and the commands already did; with nothing picked, it
+  shows the detail you are in, so its scale and view can still be
+  changed from there. Reported by lourencovp.
+
 ## 0.12.1 (2026-10-22)
 
 ### Added

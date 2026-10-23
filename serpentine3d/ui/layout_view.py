@@ -1083,8 +1083,33 @@ class LayoutView:
             self.vp.layoutSelectionChanged.emit()
             return hit[1]
         detail = lay.detail_at(px, py)
-        self.entered_detail = detail.id if detail else None
+        if detail is not None:
+            self._go_into(detail)
+        else:
+            self._come_out()
         return None
+
+    def _go_into(self, detail):
+        """Step inside a detail, letting go of what was picked on the sheet.
+
+        Inside a detail what you pick is the model seen through it. A pick
+        left on the sheet went on competing with that one: the click before
+        a double-click picks the detail, and so does the `detail` command
+        that placed it, so Properties stayed on the detail and Delete took
+        the detail away rather than the object picked inside (#93).
+        """
+        self.entered_detail = detail.id
+        self.selected = []
+        self.corners = []
+        self.vp.layoutSelectionChanged.emit()
+
+    def _come_out(self):
+        """Leave the detail you are inside, if you are inside one, and say
+        so: what is picked means the sheet again."""
+        if self.entered_detail is None:
+            return
+        self.entered_detail = None
+        self.vp.layoutSelectionChanged.emit()
 
     def step_into_detail(self, sx: float, sy: float):
         """Enter the detail under the cursor, and say which one, or None.
@@ -1101,7 +1126,7 @@ class LayoutView:
         detail = lay.detail_at(px, py)
         if detail is None or detail.id == self.entered_detail:
             return None
-        self.entered_detail = detail.id
+        self._go_into(detail)
         return detail
 
     def click_outside_exits(self, sx: float, sy: float) -> bool:
@@ -1111,7 +1136,7 @@ class LayoutView:
             return False
         px, py = self.screen_to_paper(sx, sy)
         if not detail.contains(px, py):
-            self.entered_detail = None
+            self._come_out()
             return True
         return False
 
