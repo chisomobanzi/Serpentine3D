@@ -230,11 +230,15 @@ class SerpApi:
             if not ok:
                 raise ApiError(messages[-1] if messages
                                else f"Unknown command {command}")
-            for value in (inputs or []):
+            values = [",".join(str(v) for v in value)
+                      if isinstance(value, (list, tuple)) else str(value)
+                      for value in (inputs or [])]
+            answered = []
+            for text in values:
                 if not self.processor.busy:
                     break
-                text = (",".join(str(v) for v in value)
-                        if isinstance(value, (list, tuple)) else str(value))
+                answered.append(
+                    (getattr(self.processor.request, "prompt", ""), text))
                 if _is_selection_request(self.processor):
                     self._feed_selection(text)
                 else:
@@ -245,6 +249,10 @@ class SerpApi:
                 raise ApiError(
                     f"Command needs more input: '{prompt}'. "
                     f"Provide additional values in `inputs`.")
+            if len(answered) < len(values):
+                from .commands.base import unused_inputs_message
+                raise ApiError(unused_inputs_message(
+                    command, answered, values[len(answered):], messages))
         except Exception:
             # The command this call started is this call's to clean up: left
             # at its prompt, it would refuse every later external call, undo
