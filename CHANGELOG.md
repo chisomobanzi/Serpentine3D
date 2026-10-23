@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A clipping plane cuts a detail as well (#94).** A detail is a view of
+  the model, and a section is what most wants putting on a sheet, but
+  every detail drew the model whole, whatever the clipping planes said.
+  A detail drawn in wireframe, shaded or ghosted now takes the same cut
+  as a model view, on the sheet and in the PDF, and a shaded one closes
+  what it cuts with the same caps. On a sheet a cap reads the way a
+  hidden-line detail's cut does: its hatch falls at the hatch's spacing
+  on the paper and its outline is its print width, so both stay put as
+  the sheet zooms and come out the same in the PDF. A detail drawn
+  hidden-line or technical still ignores clipping planes, and is cut
+  with `detailsection` instead. Reported by lourencovp.
+
 ## 0.12.1 (2026-10-22)
 
 ### Added

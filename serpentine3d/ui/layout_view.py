@@ -601,9 +601,13 @@ class LayoutView:
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
         proj, view = self.detail_matrices(detail, pw, ph)
         mvp64 = proj @ view
-        vp._draw_objects(mvp64, view, mode_override=mode,
-                         light_background=True,
-                         hidden_layers=detail.hidden_layers)
+        with vp._into_detail(pw / ratio, ph / ratio, ratio,
+                             None if detail.perspective
+                             else detail.scale_denom,
+                             self.px_per_mm):
+            vp._draw_objects(mvp64, view, mode_override=mode,
+                             light_background=True,
+                             hidden_layers=detail.hidden_layers)
         GL.glDisable(GL.GL_SCISSOR_TEST)
         GL.glViewport(0, 0, int(vp.width() * ratio),
                       int(vp.height() * ratio))

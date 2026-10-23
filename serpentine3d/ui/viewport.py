@@ -8,6 +8,8 @@ import os
 import sys
 import time
 import traceback
+from contextlib import contextmanager
+from typing import NamedTuple
 
 import numpy as np
 import shiboken6
@@ -598,6 +600,22 @@ def rebased(pts, anchor):
 CAP_MODES = ("shaded", "zebra", "curvature", "draft", "rendered")
 
 
+class DrawTarget(NamedTuple):
+    """The picture the model is being drawn into, which is the pane unless
+    it is a detail (#94): on a sheet, or rasterised for a PDF.
+
+    `width` and `height` are in the pixels a line's width is given in, and
+    `ratio` is how many of the picture's own pixels make one of those. A
+    detail says how many of those pixels a millimetre of the sheet takes,
+    `px_per_mm`, and one with a scale (a parallel view) its `scale_denom`,
+    how many model units a millimetre of the sheet holds."""
+    width: float
+    height: float
+    ratio: float
+    scale_denom: float | None = None
+    px_per_mm: float | None = None
+
+
 class _CapQuad:
     """The sheet a section cap is laid on: two triangles in the plane's
     (u, v), remade only when the extent it has to reach changes."""
@@ -1151,6 +1169,7 @@ class Viewport(QOpenGLWidget):
         self._own_cplane = False            # until `cplane` says otherwise
         from .layout_view import LayoutView
         self.space = "model"                # "model" | layout id
+        self._target: DrawTarget | None = None   # a detail being drawn
         self.layout_view = LayoutView(self)
         from .gumball import Gumball
         self.gumball = Gumball(self)
@@ -2319,8 +2338,12 @@ class Viewport(QOpenGLWidget):
     def _draw_objects(self, mvp, view, mode_override=None,
                       light_background=False, hidden_layers=()):
         """Draw the scene. `hidden_layers` are left out on top of what is
-        hidden anyway, with what is under them: a detail's own (#38)."""
-        clips = self._clip_vectors() if self.space == "model" else []
+        hidden anyway, with what is under them: a detail's own (#38).
+
+        Cut by the clipping planes wherever it is drawn: a detail on a
+        sheet is a view of the model too, and a section is the thing most
+        worth putting on a sheet (#94)."""
+        clips = self._clip_vectors()
         try:
             self._draw_objects_with_clips(mvp, view, clips, mode_override,
                                           light_background, hidden_layers)
@@ -2329,6 +2352,55 @@ class Viewport(QOpenGLWidget):
             # after a failed upload makes its shaders' unwritten distances
             # undefined, so release them even when an object cannot draw.
             self._end_clips(clips)
+
+    @contextmanager
+    def _into_detail(self, width: float, height: float, ratio: float,
+                     scale_denom: float | None = None,
+                     px_per_mm: float | None = None):
+        """Draw the model into a detail's picture rather than the pane.
+
+        Whatever is measured in pixels while the model draws, a wide
+        line's width and a cap's hatch, is measured against the picture
+        being made, and a detail's is its own rectangle, or the raster a
+        PDF makes of it, never the pane it sits in. See DrawTarget.
+        """
+        old = self._target
+        self._target = DrawTarget(float(width), float(height), float(ratio),
+                                  scale_denom, px_per_mm)
+        try:
+            yield
+        finally:
+            self._target = old
+
+    def _draw_target(self) -> DrawTarget:
+        """The picture being drawn into: a detail's, or the pane."""
+        if self._target is not None:
+            return self._target
+        return DrawTarget(float(self.width()), float(self.height()),
+                          self.devicePixelRatioF())
+
+    def _target_size(self) -> tuple[float, float]:
+        """The picture's width and height, in the pixels a line's width is
+        given in. _draw_target without the pixel ratio, which is a call
+        into Qt, since every wide line asks this."""
+        if self._target is not None:
+            return self._target.width, self._target.height
+        return float(self.width()), float(self.height())
+
+    def _cap_period(self, spacing_mm: float, ppu: float):
+        """How far apart a cap's hatch lines fall, in model units, or None
+        for no lines.
+
+        A detail with a scale hatches its cut at the hatch's own spacing on
+        the sheet, the way a hidden-line detail does and the way it prints.
+        Anywhere else the spacing keeps to the screen, which is what a
+        model view zooming in and out needs (section_caps.hatch_period).
+        """
+        scale = self._draw_target().scale_denom
+        if scale:
+            return float(spacing_mm) * float(scale) if spacing_mm > 0 \
+                else None
+        return _caps.hatch_period(spacing_mm, ppu)
 
     def _draw_objects_with_clips(self, mvp, view, clips, mode_override=None,
                                 light_background=False, hidden_layers=()):
@@ -2568,9 +2640,11 @@ class Viewport(QOpenGLWidget):
                                          anchor=gpu.anchor)
         self._line_width(1.0)
         if clips and mode in CAP_MODES:
-            self._draw_section_caps(mvp, clips, objects, locked_layers, mode)
+            self._draw_section_caps(mvp, view, clips, objects, locked_layers,
+                                    mode)
 
-    def _draw_section_caps(self, mvp, clips, objects, locked_layers, mode):
+    def _draw_section_caps(self, mvp, view, clips, objects, locked_layers,
+                           mode):
         """Close every solid a live clipping plane cuts with a cap, in its
         section's fill (see ui/section_caps.py for how).
 
@@ -2592,9 +2666,11 @@ class Viewport(QOpenGLWidget):
         boxes = [obj.mesh.bounds() for obj, _gpu in solids]
         lows = np.array([b[0] for b in boxes], float)
         highs = np.array([b[1] for b in boxes], float)
-        ratio = self.devicePixelRatioF()
-        width, height = self.width() * ratio, self.height() * ratio
-        right, _up = self.camera.right_up()
+        # Measured in the picture being made, along its own right: a
+        # detail's, not the pane's or the model camera's.
+        target = self._draw_target()
+        width, height = target.width * target.ratio, target.height * target.ratio
+        right = np.asarray(view, float)[0, :3]
         GL.glEnable(GL.GL_STENCIL_TEST)
         try:
             for i, plane in enumerate(planes):
@@ -2702,7 +2778,7 @@ class Viewport(QOpenGLWidget):
             GL.glUniform4fv(self._uloc(prog, "uClips"), len(others),
                             np.asarray(anchored_clips(others, origin),
                                        np.float32))
-        period = _caps.hatch_period(style.spacing_mm, ppu)
+        period = self._cap_period(style.spacing_mm, ppu)
         pattern = style.pattern if period else _caps.PLAIN
         GL.glUniform1i(self._uloc(prog, "uPattern"), pattern)
         GL.glUniform1f(self._uloc(prog, "uPeriod"), period or 1.0)
@@ -2724,11 +2800,13 @@ class Viewport(QOpenGLWidget):
         hair nearer than it is, so an edge or an isocurve that happens to
         lie on the plane too goes under it rather than through it in
         dashes. About the plane's origin, as the cap is, so a model far
-        from the world's origin still draws in small float32 numbers.
+        from the world's origin still draws in small float32 numbers. In a
+        detail, at its print width on the sheet (#94).
         """
         groups: dict = {}
+        px_per_mm = self._draw_target().px_per_mm
         for obj, fill in cut:
-            style = _caps.cut_line_style(fill)
+            style = _caps.cut_line_style(fill, px_per_mm)
             if style is None:
                 continue
             segs = self._cut_lines.segments(obj.id, obj.mesh, plane)
@@ -2899,7 +2977,7 @@ class Viewport(QOpenGLWidget):
         self._use(prog)
         self._set_mvp(prog, np.asarray(mvp, np.float32))
         self._set_uniform(prog, "uViewport", GL.glUniform2f,
-                          float(self.width()), float(self.height()))
+                          *self._target_size())
         self._set_uniform(prog, "uWidthPx", GL.glUniform1f, float(width))
         self._set_color4(prog, color)
         GL.glBindVertexArray(self._preview_thick.vao)
@@ -2922,7 +3000,7 @@ class Viewport(QOpenGLWidget):
         # this is the path llvmpipe takes for every wide line it draws.
         self._set_mvp(prog, np.asarray(mvp, np.float32))
         self._set_uniform(prog, "uViewport", GL.glUniform2f,
-                          float(self.width()), float(self.height()))
+                          *self._target_size())
         self._set_uniform(prog, "uWidthPx", GL.glUniform1f, float(width))
         self._set_color4(prog, color)
         GL.glBindVertexArray(gpu.thick_vao)
@@ -3974,10 +4052,17 @@ class Viewport(QOpenGLWidget):
             self._sync_gpu()
             proj, view = self.layout_view.detail_matrices(detail, px_w, px_h)
             mvp64 = proj @ view
-            self._draw_objects(mvp64, view,
-                               mode_override=detail.display_mode,
-                               light_background=True,
-                               hidden_layers=detail.hidden_layers)
+            # A raster for the PDF, so its own pixels are what a line is
+            # measured in, and a sheet's millimetre is the detail's width
+            # in them over its width on the sheet.
+            with self._into_detail(px_w, px_h, 1.0,
+                                   None if detail.perspective
+                                   else detail.scale_denom,
+                                   px_w / max(detail.w, 1e-9)):
+                self._draw_objects(mvp64, view,
+                                   mode_override=detail.display_mode,
+                                   light_background=True,
+                                   hidden_layers=detail.hidden_layers)
             img = fbo.toImage()
             fbo.release()
             ratio = self.devicePixelRatioF()

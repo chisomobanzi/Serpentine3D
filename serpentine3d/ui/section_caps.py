@@ -139,16 +139,23 @@ def cap_style(fill, display_rgb) -> CapStyle:
                     math.radians(fill.angle), fill.spacing)
 
 
-def cut_line_style(fill):
+def cut_line_style(fill, px_per_mm: float | None = None):
     """The line round a cap, as ((r, g, b, a), pixels), or None for a
     section with no cut line. Its width on the paper is drawn the way a
-    layer's print width is on screen; ink is the ink its hatch draws in."""
+    layer's print width is on screen; ink is the ink its hatch draws in.
+
+    On a sheet, where there is a millimetre to measure by (`px_per_mm`
+    pixels to it), the line is its width on the paper, as a hidden-line
+    detail draws it and as it prints (#94). Never under a pixel either way.
+    """
     from ..core.layers import screen_width_for
     if fill.cut_line_width <= 0:
         return None
     rgb = (tuple(float(c) for c in fill.cut_line_color[:3])
            if fill.cut_line_color else INK_ON_SCREEN)
-    return (*rgb, 1.0), screen_width_for(fill.cut_line_width)
+    width = (screen_width_for(fill.cut_line_width) if px_per_mm is None
+             else max(1.0, round(fill.cut_line_width * px_per_mm, 2)))
+    return (*rgb, 1.0), width
 
 
 def plane_cut_segments(vertices, triangles, origin, normal) -> np.ndarray:
