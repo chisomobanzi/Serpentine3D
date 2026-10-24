@@ -120,10 +120,9 @@ def test_smooth_shapes_are_measured_as_they_were():
         math.pi * 4 * 7, rel=1e-9)
 
 
-def test_a_shape_with_no_crease_is_not_split():
+def test_a_face_with_no_crease_is_not_split():
     """The split is paid only where it is needed."""
-    box = g.make_box((0, 0, 0), 1, 2, 3)
-    sphere = g.make_sphere((0, 0, 0), 1.0)
-
-    assert occ.without_creases(box) is box
-    assert occ.without_creases(sphere) is sphere
+    for shape in (g.make_box((0, 0, 0), 1, 2, 3), g.make_sphere((0, 0, 0), 1.0)):
+        for face in g.faces_of(shape):
+            [piece] = occ.smooth_pieces(face)
+            assert piece is face

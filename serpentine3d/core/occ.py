@@ -23,7 +23,7 @@ from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeWire, BRepBuilderAPI_MakeFace,
     BRepBuilderAPI_MakeVertex, BRepBuilderAPI_MakePolygon,
     BRepBuilderAPI_Transform, BRepBuilderAPI_GTransform, BRepBuilderAPI_Copy,
-    BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid,
+    BRepBuilderAPI_Sewing, BRepBuilderAPI_MakeSolid, BRepBuilderAPI_NurbsConvert,
 )
 from OCP.BRepPrimAPI import (
     BRepPrimAPI_MakePrism, BRepPrimAPI_MakeRevol, BRepPrimAPI_MakeBox,
@@ -44,12 +44,14 @@ from OCP.BRepOffsetAPI import (
 from OCP.ChFi2d import ChFi2d_FilletAPI
 from OCP.GeomAbs import GeomAbs_JoinType, GeomAbs_CurveType
 from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
-from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Curve2d, BRepAdaptor_Surface
 from OCP.BRepTopAdaptor import BRepTopAdaptor_FClass2d
 from OCP.TopAbs import TopAbs_State
 from OCP.gp import gp_Pnt2d
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
-from OCP.BRepGProp import BRepGProp
+from OCP.BRepGProp import (
+    BRepGProp, BRepGProp_Domain, BRepGProp_Face, BRepGProp_Sinert, BRepGProp_Vinert,
+)
 from OCP.BRepBndLib import BRepBndLib
 from OCP.BRepTools import BRepTools
 from OCP.BRepCheck import BRepCheck_Analyzer
@@ -61,7 +63,7 @@ from OCP.Geom import (
     Geom_BSplineCurve, Geom_Circle, Geom_TrimmedCurve, Geom_Plane,
     Geom_Ellipse, Geom_Line,
 )
-from OCP.GeomAbs import GeomAbs_Shape, GeomAbs_C2
+from OCP.GeomAbs import GeomAbs_Shape, GeomAbs_C2, GeomAbs_SurfaceType
 from OCP.GCPnts import GCPnts_TangentialDeflection, GCPnts_UniformDeflection
 from OCP.TColgp import TColgp_Array1OfPnt, TColgp_HArray1OfPnt
 from OCP.TColStd import TColStd_Array1OfReal, TColStd_Array1OfInteger
@@ -74,6 +76,7 @@ from OCP.STEPControl import (
 from OCP.IFSelect import IFSelect_ReturnStatus
 from OCP.Interface import Interface_Static
 from OCP.ShapeFix import ShapeFix_Shape
+from OCP.ShapeUpgrade import ShapeUpgrade_ShapeDivideContinuity
 
 BACKEND = "OCP"
 
@@ -147,49 +150,200 @@ def linear_properties(shape) -> GProp_GProps:
     BRepGProp.LinearProperties_s(shape, props)
     return props
 
-def without_creases(shape):
-    """`shape` with every face whose surface has a crease in it split there.
+# --- area, volume and centre --------------------------------------------------
+#
+# OpenCascade's default integration lays one Gauss rule across a whole face in
+# each direction, never split at a knot and never more than 61 points. Its
+# volume integral takes the count from the face's edges and the surface's V
+# direction, never U, so a bow limb from Rhino got 8 points across 16 spans
+# and read 0.8% light (#104). The adaptive integration places its points span
+# by span instead. Each face gets the default only where every curve it
+# integrates along is one smooth piece, and the adaptive integration
+# everywhere else.
+#
+# The adaptive integration refines along a face's edges, but takes its points
+# across each span from its tolerance alone (6 for a cubic at 1e-6, 8 at 1e-8)
+# and never refines there. So its tolerance is set by what the face is:
+#
+#                                      volume   area
+#   up to _FEW_SPANS spans              1e-6    1e-8
+#   up to _MANY_SPANS                   1e-6    1e-6
+#   more                                1e-4    1e-4
+#   a sweep made NURBS, up to _MANY     1e-8    as its spans
+#
+# A volume's integrand is a polynomial on a polynomial surface, which 6
+# points take exactly; a sweep made NURBS is rational, in 120-degree arcs,
+# and read a vase 3e-6 out at 1e-6. An area's integrand is a square root,
+# which 6 points left 4e-4 out on a two-span strip; on a face of more spans
+# each span is smaller and 6 do, while 1e-8 sent the integration bisecting
+# a bottle's 36-span face for six seconds, chasing an error across the
+# spans it cannot reduce. Past _MANY_SPANS its time grows with every span
+# it crosses, and a mug's body of 204 took four seconds at 1e-6. (At 1e-3 or
+# looser it takes each span once with no error estimate, twice as fast, but
+# read a head's area 4e-4 out.)
 
-    The default integration below samples each face as one smooth piece.
-    A surface built as a chain of patches meeting at creases (knots at full
-    multiplicity, as Rhino writes a revolved profile) is not one: the sample
-    points fall mostly in the long parameter spans and miss the short ones,
-    and a mug's body read 20% short, a synthetic one 98% (#34). Split at
-    the creases, each piece is smooth and the same method is exact.
+_FEW_SPANS, _MANY_SPANS = 8, 64
 
-    A shape with no creased face comes back as it is, so everything else
-    measures exactly as before and pays nothing for the check.
-    """
-    from OCP.GeomAbs import GeomAbs_Shape
-    creased = False
+
+def _faces(shape) -> list:
+    out = []
     exp = TopExp_Explorer(shape, FACE)
-    while exp.More() and not creased:
-        surf = BRep_Tool.Surface_s(TopoDS.Face_s(exp.Current()))
-        creased = surf is not None and surf.Continuity() == GeomAbs_Shape.GeomAbs_C0
+    while exp.More():
+        out.append(TopoDS.Face_s(exp.Current()))
         exp.Next()
-    if not creased:
-        return shape
-    from OCP.ShapeUpgrade import ShapeUpgrade_ShapeDivideContinuity
+    return out
+
+
+def smooth_pieces(face) -> list:
+    """`face` cut where its surface has a crease, as a list of faces.
+
+    A surface built as a chain of patches meeting at creases (knots at full
+    multiplicity, as Rhino writes a revolved profile) is not one smooth
+    piece, and integrated whole a mug's body read 20% short, a synthetic one
+    98% (#34). Cut at the creases, each piece is smooth.
+
+    A NURBS face closed both ways stays whole, because the splitter cuts
+    those wrong: a ring scaled to an oval read half its volume (#104). The
+    adaptive integration copes with their creases whole, to a few parts in
+    a million. A face with no crease is its own only piece and costs nothing.
+    """
+    surf = BRep_Tool.Surface_s(face)
+    if surf is None or surf.Continuity() != GeomAbs_Shape.GeomAbs_C0:
+        return [face]
+    nurbs = BRepAdaptor_Surface(face).GetType() in (
+        GeomAbs_SurfaceType.GeomAbs_BSplineSurface,
+        GeomAbs_SurfaceType.GeomAbs_BezierSurface)
+    if nurbs and surf.IsUClosed() and surf.IsVClosed():
+        return [face]
     try:
-        split = ShapeUpgrade_ShapeDivideContinuity(shape)
+        split = ShapeUpgrade_ShapeDivideContinuity(face)
         split.SetBoundaryCriterion(GeomAbs_Shape.GeomAbs_C1)
         split.SetPCurveCriterion(GeomAbs_Shape.GeomAbs_C1)
         split.SetSurfaceSegmentMode(True)
         split.Perform()
         out = split.Result()
     except Exception:                                       # noqa: BLE001
-        return shape
-    return shape if out is None or out.IsNull() else out
+        return [face]
+    if out is None or out.IsNull():
+        return [face]
+    return _faces(out) or [face]
+
+
+_CONICS = (GeomAbs_CurveType.GeomAbs_Line, GeomAbs_CurveType.GeomAbs_Circle,
+           GeomAbs_CurveType.GeomAbs_Ellipse, GeomAbs_CurveType.GeomAbs_Hyperbola,
+           GeomAbs_CurveType.GeomAbs_Parabola)
+
+
+def _one_piece(curve) -> bool:
+    """Whether an adaptor curve is a line, a conic or a single span: one
+    smooth piece, which one Gauss rule integrates."""
+    kind = curve.GetType()
+    if kind in _CONICS or kind == GeomAbs_CurveType.GeomAbs_BezierCurve:
+        return True
+    return (kind == GeomAbs_CurveType.GeomAbs_BSplineCurve
+            and curve.BSpline().NbKnots() == 2)
+
+
+def _edges_in_one_piece(face) -> bool:
+    exp = TopExp_Explorer(face, EDGE)
+    while exp.More():
+        if not _one_piece(BRepAdaptor_Curve2d(TopoDS.Edge_s(exp.Current()), face)):
+            return False
+        exp.Next()
+    return True
+
+
+def _integration(face, volume: bool):
+    """How to integrate `face`: as (face, tolerance), the face perhaps made
+    NURBS, the tolerance None for the default integration.
+
+    The default stays where every curve it integrates along is one smooth
+    piece: an elementary surface, a single span, or a sweep of one, bounded
+    by edges that are. There it is as exact as it ever was. A sweep of a
+    longer curve is made NURBS first: its spans are the curve's, and only a
+    NURBS surface shows them to the adaptive integration, which read an
+    extrusion kept as a sweep 1% to 12% out. Offsets and the rest have no
+    spans to show it, and keep the default as before. The tolerance is the
+    table's above.
+    """
+    T = GeomAbs_SurfaceType
+    s = BRepAdaptor_Surface(face)
+    kind = s.GetType()
+    swept = False
+    if kind in (T.GeomAbs_SurfaceOfExtrusion, T.GeomAbs_SurfaceOfRevolution):
+        whole = _one_piece(s.BasisCurve())
+        if not whole:
+            try:
+                face = TopoDS.Face_s(BRepBuilderAPI_NurbsConvert(face, True).Shape())
+            except Exception:                               # noqa: BLE001
+                return face, None
+            s, swept = BRepAdaptor_Surface(face), True
+    elif kind in (T.GeomAbs_Plane, T.GeomAbs_Cylinder, T.GeomAbs_Cone,
+                  T.GeomAbs_Sphere, T.GeomAbs_Torus, T.GeomAbs_BezierSurface):
+        whole = True
+    elif kind == T.GeomAbs_BSplineSurface:
+        whole = s.BSpline().NbUKnots() == 2 and s.BSpline().NbVKnots() == 2
+    else:
+        return face, None
+    if whole and _edges_in_one_piece(face):
+        return face, None
+    spans = 1
+    if s.GetType() == T.GeomAbs_BSplineSurface:
+        spans = (s.BSpline().NbUKnots() - 1) * (s.BSpline().NbVKnots() - 1)
+    if spans > _MANY_SPANS:
+        return face, 1e-4
+    if volume:
+        return face, 1e-8 if swept else 1e-6
+    return face, 1e-8 if spans <= _FEW_SPANS else 1e-6
+
+
+def _middle(shape) -> gp_Pnt:
+    """The mean of `shape`'s vertices, as BRepGProp's roughBaryCenter."""
+    xyz, n = gp_XYZ(0, 0, 0), 0
+    exp = TopExp_Explorer(shape, VERTEX)
+    while exp.More():
+        xyz.Add(BRep_Tool.Pnt_s(TopoDS.Vertex_s(exp.Current())).XYZ())
+        n += 1
+        exp.Next()
+    return gp_Pnt(xyz.Divided(n)) if n else gp_Pnt(0, 0, 0)
+
+
+def _integrated(shape, inertia) -> GProp_GProps:
+    """`shape`'s area or volume properties, face by face, summed the way
+    BRepGProp sums them: each face about the middle of the shape's
+    vertices, into a system placed at the shape's origin."""
+    volume = inertia is BRepGProp_Vinert
+    origin = gp_Pnt(0, 0, 0).Transformed(shape.Location().Transformation())
+    props = GProp_GProps(origin)
+    faces = _faces(shape)
+    if any(BRep_Tool.Surface_s(f) is None for f in faces):
+        # a face with only a mesh, which BRepGProp measures from the mesh
+        whole = BRepGProp.VolumeProperties_s if volume else BRepGProp.SurfaceProperties_s
+        whole(shape, props)
+        return props
+    at = _middle(shape)
+    for face in faces:
+        if face.Orientation() not in (TopAbs_Orientation.TopAbs_FORWARD,
+                                      TopAbs_Orientation.TopAbs_REVERSED):
+            continue
+        for piece in smooth_pieces(face):
+            piece, eps = _integration(piece, volume)
+            region = [BRepGProp_Face(piece)]
+            if piece.NbChildren():
+                region.append(BRepGProp_Domain(piece))
+            if eps is None:
+                props.Add(inertia(*region, at))
+            else:
+                props.Add(inertia(*region, at, eps))
+    return props
+
 
 def surface_properties(shape) -> GProp_GProps:
-    props = GProp_GProps()
-    BRepGProp.SurfaceProperties_s(without_creases(shape), props)
-    return props
+    return _integrated(shape, BRepGProp_Sinert)
+
 
 def volume_properties(shape) -> GProp_GProps:
-    props = GProp_GProps()
-    BRepGProp.VolumeProperties_s(without_creases(shape), props)
-    return props
+    return _integrated(shape, BRepGProp_Vinert)
 
 def brep_write(shape, path: str):
     BinTools.Write_s(shape, path)

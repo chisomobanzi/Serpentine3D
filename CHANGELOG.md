@@ -73,6 +73,22 @@
 
 ### Fixed
 
+- **A solid measures its true volume, whatever its faces are made of
+  (#104).** A bow limb from Rhino, a valid solid of 18 NURBS faces, read
+  0.8% light, while its area and a fine mesh of it were right. The exact
+  volume came from OpenCascade's default integration, which lays one rule
+  of up to 61 points across a whole face and, for a volume, counts them
+  from the face's edges and one direction of its surface but never the
+  other. A small face at the limb's tip, 16 spans across, got as few as 8
+  points and read 12% short, and that was nearly all of the 0.8%. A face
+  of many spans now has its volume, area and centre integrated span by
+  span; a face that is one smooth piece is measured as before. The same
+  blind spot read an extrusion of a curve through 30 points 2% heavy, and
+  openNURBS sample files up to 1.6% out in volume and 0.8% in area. None
+  of those is now off by more than 0.01%, though an area takes about
+  twice as long to work out. A NURBS face closed both ways, as a ring
+  scaled to an oval is, no longer reads half its volume. Reported by
+  DarkBiscuits.
 - **A detail's scale is real size in any units (#102).** A detail took
   the model units one millimetre of paper shows for its ratio, which it
   is only in millimetres. In an inch document "1:4" showed four inches to
