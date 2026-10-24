@@ -653,6 +653,11 @@ class Scene:
         from ..utils.units import format_length
         return format_length(value, self.units)
 
+    def format_paper_length(self, mm: float) -> str:
+        """A length on a sheet, in the units the sheet is read in."""
+        from ..utils.units import format_paper_length
+        return format_paper_length(mm, self.units)
+
     def bbox(self) -> tuple[tuple, tuple] | None:
         objs = self.visible_objects()
         if not objs:

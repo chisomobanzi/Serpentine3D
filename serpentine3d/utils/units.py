@@ -121,6 +121,29 @@ def format_length(value: float, doc_units: str = "mm",
     return f"{_trim(value, precision)} {doc_units}"
 
 
+# A sheet is kept in millimetres whatever the document's units, and is read
+# and typed in the units Rhino's templates give their layouts: inches in an
+# inch or a feet document, millimetres in a metric one.
+
+def paper_units(doc_units: str) -> str:
+    """The units a sheet is read and typed in, in a document in `doc_units`."""
+    return "in" if doc_units in ("in", "ft") else "mm"
+
+
+def format_paper_length(mm: float, doc_units: str, precision: int = 3) -> str:
+    """A length on paper, kept in millimetres, as its sheet reads it."""
+    unit = paper_units(doc_units)
+    return format_length(mm / TO_MM[unit], unit, precision)
+
+
+def format_paper_size(w: float, h: float, doc_units: str) -> str:
+    """A sheet's or a frame's width and height, kept in millimetres."""
+    unit = paper_units(doc_units)
+    if unit == "mm":
+        return f"{w:g} × {h:g} mm"
+    return f"{_trim(w / TO_MM[unit], 3)} × {_trim(h / TO_MM[unit], 3)} {unit}"
+
+
 def _format_ft_in(value_ft: float, denom: int) -> str:
     sign = "-" if value_ft < 0 else ""
     total_in = abs(value_ft) * 12.0

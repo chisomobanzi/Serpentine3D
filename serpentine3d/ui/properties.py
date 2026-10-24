@@ -38,6 +38,8 @@ from ..core.layout import (PAPER_SIZES, SECTION_FILLS, DetailView,
                            section_fills_of, sheet_label)
 from ..core.text import TextShape
 from ..core.linetype import LINETYPES
+from ..utils.units import (TO_MM, format_paper_length, format_paper_size,
+                           paper_units)
 from . import icons, theme
 from .dock_title import DockTitleBar
 from .layout_view import LINE_VISIBLE
@@ -383,13 +385,14 @@ def _paper_and_turn(layout) -> tuple:
     return None, turn
 
 
-def _paper_name(w: float, h: float) -> str:
-    """A3 landscape, or the size in millimetres when it is not a standard."""
+def _paper_name(w: float, h: float, units: str) -> str:
+    """A3 landscape, or the size when it is not a standard, in the units
+    the sheet is read in."""
     class _Sheet:
         paper_w, paper_h = w, h
     name, turn = _paper_and_turn(_Sheet)
     return (f"{name} {turn.lower()}" if name
-            else f"{w:g} × {h:g} mm {turn.lower()}")
+            else f"{format_paper_size(w, h, units)} {turn.lower()}")
 
 
 class _DetailLayers(QWidget):
@@ -1449,7 +1452,8 @@ class PropertiesPanel(QWidget):
             n = len(details)
             if n == 1:
                 detail = details[0]
-                frame = f"frame {detail.w:g} × {detail.h:g} mm"
+                frame = ("frame "
+                         + format_paper_size(detail.w, detail.h, self.scene.units))
                 line = (frame if detail.perspective else
                         f"{detail.scale_text(self.scene.units)} · {frame}")
                 return said("Detail", f"{self._detail_view_name(detail)} view",
@@ -1501,7 +1505,7 @@ class PropertiesPanel(QWidget):
         if len(sheets) == 1:
             lay = sheets[0]
             n = len(lay.details)
-            parts = [_paper_name(lay.paper_w, lay.paper_h),
+            parts = [_paper_name(lay.paper_w, lay.paper_h, self.scene.units),
                      "no details" if n == 0 else
                      f"{n} detail{'s' if n != 1 else ''}"]
             path = self._group_path(lay.group)
@@ -2464,7 +2468,8 @@ class PropertiesPanel(QWidget):
         frame on the sheet, in paper millimetres like `_paper_measures`, and
         the scale row below."""
         self._blank_editors()
-        self.measure_label.setText(f"Frame: {detail.w:g} × {detail.h:g} mm")
+        self.measure_label.setText(
+            "Frame: " + format_paper_size(detail.w, detail.h, self.scene.units))
 
     def _show_scale(self, detail: DetailView):
         """Say what the detail's scale is: the list highlights it when it is a
@@ -2793,14 +2798,21 @@ class PropertiesPanel(QWidget):
         return "—"
 
     def _paper_measures(self, obj) -> str:
-        """Millimetres of paper, not the document's units: a border is 320mm
-        around on the sheet whether the model is drawn in metres or inches."""
+        """In the sheet's units, not the model's: a border is 320 mm around on
+        a sheet whether the model is drawn in metres or in millimetres, and
+        12.6" in an inch or a feet document, as its sheet is read."""
         try:
             kind = g.shape_kind(obj.shape)
+            units = self.scene.units
             if kind == "curve":
-                return f"Length: {g.curve_length(obj.shape):.2f} mm"
+                length = g.curve_length(obj.shape)
+                if paper_units(units) == "mm":
+                    return f"Length: {length:.2f} mm"
+                return f"Length: {format_paper_length(length, units)}"
             if kind in ("surface", "solid"):
-                return f"Area: {g.surface_area(obj.shape):.2f} mm²"
+                area = g.surface_area(obj.shape)
+                unit = paper_units(units)
+                return f"Area: {area / TO_MM[unit] ** 2:.2f} {unit}²"
         except Exception:
             pass
         return "—"

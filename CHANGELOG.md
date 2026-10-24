@@ -73,6 +73,20 @@
 
 ### Fixed
 
+- **A sheet reads in inches in an inch or feet document.** A dimension on
+  bare paper wrote its paper millimetres with the document's unit after
+  them, so 50.8 mm of paper read 50.8" in an inch document and 50.8 cm in
+  a centimetre one. Typing on paper took a bare number as millimetres but
+  a unit as the document's, so `1in,1in` on an inch sheet landed 1 mm in.
+  A sheet now reads and is typed in the units Rhino's templates give their
+  layouts: inches in an inch or feet document, millimetres in a metric
+  one. That goes for dimensions on bare paper, on screen and in the PDF
+  and DXF, the length beside the cursor, the gumball, Properties, sheet
+  sizes and whatever is typed there, where `50mm` and `1in` still mean
+  what they say. A dimension over a detail reads the model, as before, and
+  text height, print widths and hatch spacing stay in millimetres. A sheet
+  is still kept in millimetres, so a drawing opens and plots as it did,
+  and its dimensions on bare paper read in the sheet's units too.
 - **A detail's scale is real size in any units (#102).** A detail took
   the model units one millimetre of paper shows for its ratio, which it
   is only in millimetres. In an inch document "1:4" showed four inches to

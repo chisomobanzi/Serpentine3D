@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from ..core import geometry
+from ..utils.units import TO_MM, paper_units
 
 Point = tuple[float, float, float]
 
@@ -507,6 +508,24 @@ class CommandContext:
         lv = getattr(vp, "layout_view", None)
         return getattr(lv, "entered_detail", None) is None
 
+    def typed_units(self) -> tuple[str, float]:
+        """The units a length is typed in here, and how many of the units it
+        is kept in make one of them. In the model and in a detail both are
+        the document's units; bare paper is kept in millimetres but typed in
+        the units its sheet is read in, inches in an inch or a feet document."""
+        if self.on_bare_paper():
+            unit = paper_units(self.scene.units)
+            return unit, TO_MM[unit]
+        return self.scene.units, 1.0
+
+    def from_typed(self, value: float) -> float:
+        """A number typed here as a length, in the units it is kept in."""
+        return value * self.typed_units()[1]
+
+    def as_typed(self, length: float) -> float:
+        """A length as kept, in the units it would be typed in here."""
+        return length / self.typed_units()[1]
+
     def sheet_view(self):
         """The layout view, when a command asking for objects means the sheet.
 
@@ -619,7 +638,16 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
         # Prompts measuring a dimension or factor keep their numeric zero.
         if text == "0" and req.number_from is None and not req.allow_number:
             return True, (0.0, 0.0, 0.0)
-        pt = parse_point(text, ctx.last_point, ctx.scene.units, ctx.cplane)
+        # On bare paper a typed point is the sheet's, in the units it is
+        # read in; it has no construction plane to be measured on.
+        units, per = ctx.typed_units()
+        cplane = None if ctx.on_bare_paper() else ctx.cplane
+        last = ctx.last_point          # a raw number, after a prompt took one
+        if per != 1.0 and isinstance(last, (tuple, list)):
+            last = tuple(c / per for c in last)
+        pt = parse_point(text, last, units, cplane)
+        if pt is not None and per != 1.0:
+            pt = tuple(c * per for c in pt)
         # A command that runs along an axis of its own says so; failing
         # that, Tab lets you aim one by hand, and failing that the cursor is
         # aiming one anyway. A number means the same thing in all three: how
@@ -631,14 +659,17 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
             along = ctx.locked_direction() or ctx.aim_direction()
         if pt is None and (along is not None or req.allow_number):
             from ..utils.units import parse_length
-            v = parse_length(text, ctx.scene.units)
+            v = parse_length(text, units)
             if v is not None:
                 if callable(along):
-                    pt = tuple(along(v))
+                    pt = tuple(along(v * per))
                 elif along is not None:
                     base, direction = along
-                    pt = tuple(b + v * d for b, d in zip(base, direction))
+                    pt = tuple(b + v * per * d
+                               for b, d in zip(base, direction))
                 else:
+                    # an angle or a factor as often as a length, so the
+                    # command that asked says which and converts a length
                     return True, float(v)     # allow_number: the raw value
         if pt is None:
             return False, ("Expected coordinates like 3,4,0 "
@@ -648,9 +679,11 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
         if not text and req.default is not None:
             return True, req.default
         from ..utils.units import parse_length
-        v = parse_length(text, ctx.scene.units)
+        units, per = ctx.typed_units()
+        v = parse_length(text, units)
         if v is None:
             return False, "Expected a length (e.g. 250, 3'6\", 30cm)"
+        v *= per
         if req.minimum is not None and v < req.minimum:
             return False, f"Value must be >= {req.minimum}"
         return True, v

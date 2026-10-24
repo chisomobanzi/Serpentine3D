@@ -229,7 +229,7 @@ def cmd_circle(ctx):
         ctx.echo("Zero radius — no circle created.")
         return
     obj = ctx.add(g.make_circle(center, r, normal=normal))
-    ctx.echo(f"Created {obj.name} (r={r:g}).")
+    ctx.echo(f"Created {obj.name} (r={ctx.as_typed(r):g}).")
 
 
 @command("arc", aliases=("a",), space="any")
@@ -368,7 +368,8 @@ def cmd_ellipse(ctx):
             ctx.echo("Zero second axis — no ellipse created.")
             return
         obj = ctx.add(shape)
-        ctx.echo(f"Created {obj.name} ({r1:g} x {_half_width(tp):g}).")
+        ctx.echo(f"Created {obj.name} ({ctx.as_typed(r1):g} x "
+                 f"{ctx.as_typed(_half_width(tp)):g}).")
         return
 
     normal = tuple(ctx.cplane.normal)
@@ -404,7 +405,8 @@ def cmd_ellipse(ctx):
         ctx.echo("Zero minor radius — no ellipse created.")
         return
     obj = ctx.add(shape)
-    ctx.echo(f"Created {obj.name} ({r1:g} x {math.dist(center, tp):g}).")
+    ctx.echo(f"Created {obj.name} ({ctx.as_typed(r1):g} x "
+             f"{ctx.as_typed(math.dist(center, tp)):g}).")
 
 
 def _rect_from_center(ctx):
@@ -432,7 +434,7 @@ def _rect_from_center(ctx):
                                 2 * abs(cp.from_world(p)[1] - vc)),
         allow_number=True)
     if isinstance(c2, float):
-        du = abs(c2) / 2
+        du = abs(ctx.from_typed(c2)) / 2
         if du < 1e-9:
             ctx.echo("Zero length — no rectangle created.")
             return
@@ -531,6 +533,7 @@ def cmd_rectangle(ctx):
                         preview_fn=_rect_to, rubber_sides=frame_sides(c1, cp),
                         allow_number=True)
     if isinstance(c2, float):
+        c2 = ctx.from_typed(c2)
         if abs(c2) < 1e-9:
             ctx.echo("Zero length — no rectangle created.")
             return

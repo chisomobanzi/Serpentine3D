@@ -39,6 +39,10 @@ KEYBOARD_ONLY = {
         "the size of the sheet, which is not in the model at all",
     ("layout", "Paper height (mm)"):
         "the size of the sheet, which is not in the model at all",
+    ("layout", "Paper width (in)"):
+        "the size of the sheet, which is not in the model at all",
+    ("layout", "Paper height (in)"):
+        "the size of the sheet, which is not in the model at all",
     ("text", "Text height (mm)"):
         "annotation height on the printed sheet, not model space",
     ("hatch", "Line spacing"):
