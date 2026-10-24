@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from ..core import clipping
 from ..core import geometry as g
 from ..core import user_text as ut
-from ..core.layers import (HATCH_BACKGROUND_OBJECT, HATCH_INK,
+from ..core.layers import (HATCH_BACKGROUND_NONE, HATCH_INK,
                            HATCH_LAYER_COLOR, MAX_CUT_LINE_WIDTH,
                            MIN_HATCH_SPACING, PATH_SEPARATOR,
                            hatch_token_rgb, section_fill_dict)
@@ -84,6 +84,7 @@ def _with(names, extra) -> tuple:
     known = {n.lower() for n in names}
     return (*names, *(e for e in extra if e and e.lower() not in known))
 _BY_LAYER = "By layer"                 # an object taking its layer's value
+_BY_LAYER_TOKEN = "bylayer"
 
 # the tab mark for more than one layer, which have no one colour between them
 _MIXED_MARK = (0.6, 0.6, 0.62)
@@ -142,7 +143,7 @@ class _Look(NamedTuple):
     cut_line_width: float
     cut_line_color: str
     cut_rgb: tuple | None
-    background: str = HATCH_BACKGROUND_OBJECT
+    background: str = HATCH_BACKGROUND_NONE
     background_rgb: tuple | None = None
 
 
@@ -169,26 +170,26 @@ def _number_combo(values, setter, tip: str) -> QComboBox:
 class _TokenColour:
     """A colour kept as a token, "ink", "layer" or "#rrggbb", as a
     drop-down: Ink, Layer colour, the colour of its own when it has one,
-    and Choose…, which asks for one. A hatch's background starts from
-    Object instead of Ink (`first`).
+    and Choose…, which asks for one. Other lists start from other entries
+    (`first`): a background from None, a hatch's own from By layer.
 
     `chosen(token)` is told of every pick; `revert()` puts the page back
     when the colour dialog is closed without a choice.
     """
 
     def __init__(self, chosen, revert, title: str, tip: str,
-                 first=("Ink", HATCH_INK, _INK_SWATCH)):
+                 first=(("Ink", HATCH_INK, _INK_SWATCH),)):
         self._chosen = chosen
         self._revert = revert
         self._title = title
         self._start = None
         self._showing = False
         self.combo = QComboBox()
-        label, token, swatch = first
-        if swatch is None:
-            self.combo.addItem(label, token)
-        else:
-            self.combo.addItem(icons.swatch(swatch), label, token)
+        for label, token, swatch in first:
+            if swatch is None:
+                self.combo.addItem(label, token)
+            else:
+                self.combo.addItem(icons.swatch(swatch), label, token)
         self.combo.addItem("Layer colour", HATCH_LAYER_COLOR)
         self.combo.addItem("Choose…", "choose")
         self.combo.setToolTip(tip)
@@ -271,10 +272,10 @@ class _HatchLook:
         self._ground = _TokenColour(
             lambda token: self._offer("background", token), revert,
             "Hatch background",
-            "What a cut shows under its hatch: Object is a darker shade of "
-            "the object on screen and bare paper on a sheet; a colour fills "
-            "the cut with it on both",
-            first=("Object", HATCH_BACKGROUND_OBJECT, None))
+            "What a hatch shows under its lines: None leaves it bare, a "
+            "cut a darker shade of its object on screen; a colour fills it, "
+            "on screen and on paper",
+            first=(("None", HATCH_BACKGROUND_NONE, None),))
         self.background = self._ground.combo
         self.cut_width = _number_combo(
             (CUT_LINE_NONE, *PRINT_WIDTHS), self._cut_width_edited,
@@ -1187,6 +1188,28 @@ class PropertiesPanel(QWidget):
             "Angle of the lines, from the x axis of the plane it was drawn on")
         self.hatch_angle.valueChanged.connect(self._change_hatch)
         form.addRow("Angle", self.hatch_angle)
+        # Its colour and background: its layer's hatch colour and
+        # background unless it says otherwise (#91).
+        self._hatch_ink = _TokenColour(
+            lambda token: self._set_hatch_style("color", token),
+            self._show_hatch, "Hatch colour",
+            "The colour the hatch's lines are drawn in: By layer is its "
+            "layer's hatch colour",
+            first=((_BY_LAYER, _BY_LAYER_TOKEN, None),
+                   ("Ink", HATCH_INK, _INK_SWATCH)))
+        self.hatch_color = self._hatch_ink.combo
+        self.hatch_color.setObjectName("hatch_color")
+        form.addRow("Hatch colour", self.hatch_color)
+        self._hatch_ground = _TokenColour(
+            lambda token: self._set_hatch_style("background", token),
+            self._show_hatch, "Hatch background",
+            "What the hatch shows under its lines: By layer is its layer's "
+            "hatch background, None leaves it bare",
+            first=((_BY_LAYER, _BY_LAYER_TOKEN, None),
+                   ("None", HATCH_BACKGROUND_NONE, None)))
+        self.hatch_background = self._hatch_ground.combo
+        self.hatch_background.setObjectName("hatch_background")
+        form.addRow("Hatch background", self.hatch_background)
         self._hatch_checkpoint_id = None
 
         # The keys and values a model object carries, Rhino's Attribute User
@@ -2337,7 +2360,7 @@ class PropertiesPanel(QWidget):
                        own["color"], fill.color, fill.cut_line_width,
                        own.get("cut_line_color", HATCH_INK),
                        fill.cut_line_color,
-                       own.get("background", HATCH_BACKGROUND_OBJECT),
+                       own.get("background", HATCH_BACKGROUND_NONE),
                        fill.background)],
                 layer.color)
         else:
@@ -2633,9 +2656,18 @@ class PropertiesPanel(QWidget):
         self.form.setRowVisible(self.hatch_pattern, obj is not None)
         self.form.setRowVisible(self.hatch_spacing, lines)
         self.form.setRowVisible(self.hatch_angle, lines)
+        self.form.setRowVisible(self.hatch_color, obj is not None)
+        self.form.setRowVisible(self.hatch_background, lines)
         if obj is None:
             return
         hatch = obj.shape
+        own = obj.hatch_style or {}
+        layer = self.scene.layers.get(obj.layer_id)
+        color, ground = self.scene.hatch_look_of(obj)
+        self._hatch_ink.show({own.get("color") or _BY_LAYER_TOKEN}, color,
+                             layer.color)
+        self._hatch_ground.show({own.get("background") or _BY_LAYER_TOKEN},
+                                ground, layer.color)
         for widget, value in ((self.hatch_spacing, hatch.spacing),
                               (self.hatch_angle, hatch.angle)):
             with QSignalBlocker(widget):
@@ -2646,6 +2678,21 @@ class PropertiesPanel(QWidget):
             self.hatch_pattern.setCurrentIndex(
                 self.hatch_pattern.findData(hatch.pattern))
         self.hatch_spacing.setSuffix(f" {self.scene.units}")
+
+    def _set_hatch_style(self, key: str, token):
+        """A hatch's own colour or background, or By layer again."""
+        obj = self._editable_hatch()
+        if obj is None:
+            return
+        style = dict(obj.hatch_style or {})
+        if token == _BY_LAYER_TOKEN:
+            style.pop(key, None)
+        else:
+            style[key] = token
+        if style == (obj.hatch_style or {}):
+            return
+        self.history.checkpoint(f"hatch {_LOOK_WORDS[key]}")
+        self.scene.update(obj.id, hatch_style=style or None)
 
     def _change_hatch(self, *_):
         if self._updating:

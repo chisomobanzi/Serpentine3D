@@ -302,9 +302,10 @@ def test_the_face_a_plane_leaves_is_hatched(hidden):
     assert outside.max(axis=0) == pytest.approx((20.0, 20.0), abs=1e-3)
 
 
-def test_a_paused_or_hidden_plane_leaves_the_detail_whole(hidden):
-    """The detail's lines are cached, so this is also that the cache
-    hears of it: hiding a layer does not change the scene's revision."""
+def test_a_hidden_plane_still_cuts_and_a_paused_one_does_not(hidden):
+    """Hiding a plane, or its layer, gets it out of the way of what it is
+    cutting; pausing it is what stops the cut. The detail's lines are
+    cached, so this is also that the cache hears of a pause."""
     w, lv, lay, box_id, plane_id = hidden
     det = _detail("front", "hidden")
     lay.details.append(det)
@@ -312,27 +313,25 @@ def test_a_paused_or_hidden_plane_leaves_the_detail_whole(hidden):
 
     layer = w.scene.layers.create("Planes")
     w.scene.update(plane_id, layer_id=layer.id)
-    assert _box_lines(lv, det, box_id)[:, 1].max() < 1.0
     w.scene.layers.set_visible(layer.id, False)
-    assert _box_lines(lv, det, box_id)[:, 1].max() == pytest.approx(20.0)
-    assert lv._detail_hlr(det)["cut_by_obj"] == []
+    assert _box_lines(lv, det, box_id)[:, 1].max() < 1.0, \
+        "hiding the plane's layer stopped its cut"
 
     w.scene.layers.set_visible(layer.id, True)
     w.scene.update(plane_id, clip_plane={"enabled": False})
     assert _box_lines(lv, det, box_id)[:, 1].max() == pytest.approx(20.0)
 
 
-def test_the_plane_itself_still_draws(hidden):
-    """A plane is not cut by itself: it lies on the face it would cut
-    with, and could come back whole or vanish on rounding. It draws as it
-    does in every other view, and its layer can be left out of a detail
-    (#38) for a clean section that still cuts."""
+def test_a_sheet_shows_what_the_plane_cut_and_not_the_plane(hidden):
+    """A plane is a tool for the model: a sheet draws the section it
+    makes, and not the plane, the way a section line is not drawn on the
+    section it makes. Its layer left out of a detail (#38) still cuts."""
     w, lv, lay, box_id, plane_id = hidden
     det = _detail("top", "hidden")
     lay.details.append(det)
-    drawn = {oid for oid, _lt, polys in lv._detail_hlr(det)["visible_by_obj"]
-             if polys}
-    assert plane_id in drawn
+    data = lv._detail_hlr(det)
+    assert plane_id not in {oid for oid, _lt, _p in data["visible_by_obj"]}
+    assert [oid for oid, _p, _r in data["cut_by_obj"]] == [box_id]
 
     layer = w.scene.layers.create("Planes")
     w.scene.update(plane_id, layer_id=layer.id)

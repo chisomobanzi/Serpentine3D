@@ -25,10 +25,10 @@ SCREEN_PX_PER_MM = 4.0
 # sheet is drawn in, the layer's own colour, or one of its own as #rrggbb.
 HATCH_INK = "ink"
 HATCH_LAYER_COLOR = "layer"
-# What a cut face shows under its hatch (#91): a darker shade of the
-# object on screen and the bare paper on a sheet, as it always did, or a
-# colour of its own, the layer's or a #rrggbb, on both.
-HATCH_BACKGROUND_OBJECT = "object"
+# What a hatch shows under its lines (#91): none, which leaves a cut a
+# darker shade of its object on screen and the bare paper on a sheet, as
+# it always did, or a colour, the layer's or a #rrggbb, on both.
+HATCH_BACKGROUND_NONE = "none"
 MIN_HATCH_SPACING = 0.2         # mm on paper: closer is a grey smear
 
 # The line round a cut face, in millimetres on the paper: the 0.5 mm every
@@ -64,14 +64,14 @@ def hatch_color_token(value) -> str:
 
 
 def hatch_background_token(value) -> str:
-    """A hatch background as a layer keeps it: "object", "layer" or
+    """A hatch background as a layer keeps it: "none", "layer" or
     "#rrggbb", an (r, g, b) in 0..1 becoming its #rrggbb. Anything else
-    is the object's, which is what every cut had before it could say."""
+    is none, which is what every cut had before it could say."""
     text = value.strip().lower() if isinstance(value, str) else None
-    if text == HATCH_BACKGROUND_OBJECT or text == HATCH_INK:
-        return HATCH_BACKGROUND_OBJECT
+    if text in (HATCH_BACKGROUND_NONE, "object", HATCH_INK):
+        return HATCH_BACKGROUND_NONE
     token = hatch_color_token(value)
-    return HATCH_BACKGROUND_OBJECT if token == HATCH_INK else token
+    return HATCH_BACKGROUND_NONE if token == HATCH_INK else token
 
 
 def hatch_token_rgb(token: str, layer_color):
@@ -113,7 +113,7 @@ def section_fill_dict(pattern="lines", angle=45.0, spacing=2.5,
                       color=HATCH_INK,
                       cut_line_width=DEFAULT_CUT_LINE_WIDTH,
                       cut_line_color=HATCH_INK,
-                      background=HATCH_BACKGROUND_OBJECT) -> dict:
+                      background=HATCH_BACKGROUND_NONE) -> dict:
     """A section style of an object's own, as the object keeps it: the
     same things a layer has, put right the way a layer's are. A style
     kept before cut lines had a width and colour gets the ones every cut
@@ -162,7 +162,7 @@ class Layer:
     hatch_angle: float = 45.0      # degrees on the paper, within half a turn
     hatch_spacing: float = 2.5     # mm on the paper between hatch lines
     hatch_color: str = HATCH_INK   # "ink", "layer" or "#rrggbb"
-    hatch_background: str = HATCH_BACKGROUND_OBJECT  # or "layer", "#rrggbb"
+    hatch_background: str = HATCH_BACKGROUND_NONE  # "none", "layer", "#.."
     cut_line_width: float = DEFAULT_CUT_LINE_WIDTH  # mm round a cut; 0 = none
     cut_line_color: str = HATCH_INK  # "ink", "layer" or "#rrggbb"
     parent: str | None = None      # the layer this one sits under, if any
@@ -364,7 +364,7 @@ class LayerManager:
 
     def set_hatch_background(self, layer_id: str, color):
         """What a cut through this layer's material shows under its hatch:
-        "object" for the object's own shade, or a colour."""
+        "none", or a colour."""
         self._layers[layer_id] = replace(
             self._layers[layer_id],
             hatch_background=hatch_background_token(color))

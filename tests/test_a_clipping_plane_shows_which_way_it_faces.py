@@ -190,18 +190,24 @@ def test_a_paused_plane_cuts_nothing(pane):
     assert pane._clip_vectors() == []
 
 
-def test_hiding_and_showing_a_planes_layer_changes_the_cut(pane):
+def test_hiding_a_planes_layer_keeps_the_cut_and_drops_the_arrow(pane):
+    """Hidden, a plane is out of the way of what it cuts, and still cuts;
+    only a plane on screen has an arrow to draw. Hiding a layer does not
+    move the scene's revision, so this is also that the frames hear of
+    it."""
     layer = pane.scene.layers.create("Clipping")
     obj = pane.scene.add(_rect_on_xy(), layer_id=layer.id)
     pane.scene.update(obj.id, clip_plane={"enabled": True})
     revision = pane.scene.revision
     assert len(pane._clip_vectors()) == 1
+    assert len(pane._clip_frames(shown=True)) == 1
 
     pane.scene.layers.set_visible(layer.id, False)
     assert pane.scene.revision == revision
-    assert pane._clip_vectors() == []
-    pane.scene.layers.set_visible(layer.id, True)
     assert len(pane._clip_vectors()) == 1
+    assert pane._clip_frames(shown=True) == []
+    pane.scene.layers.set_visible(layer.id, True)
+    assert len(pane._clip_frames(shown=True)) == 1
 
 
 def test_a_failed_draw_releases_clipping_before_qt_draws(pane, monkeypatch):

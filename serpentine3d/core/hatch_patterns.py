@@ -33,9 +33,11 @@ BUILTIN_NAMES = ("lines", "cross", "solid", "dash", "dots", "plus",
                  "squares", "triangles", "brick")
 LEGACY = ("lines", "cross", "solid")
 
-# A dot in a dash run is drawn as a dash this short, against the pattern's
-# row spacing, so a screen, a plot and a model hatch all have a mark to show.
-DOT_FRACTION = 0.03
+# A dot in a dash run is drawn as a small circle this wide across, against
+# the hatch's spacing, so a screen, a plot and a model hatch all have a
+# round mark to show rather than a fleck of a line.
+DOT_FRACTION = 0.1
+DOT_SIDES = 12
 
 
 class PatternError(ValueError):
@@ -260,8 +262,9 @@ def segment_estimate(rings, pattern: HatchPattern, spacing: float) -> int:
         dy = abs(ln.offset[1]) * scale
         rows = span / dy if dy > 1e-12 else 1.0
         run = sum(abs(d) for d in ln.dashes) * scale
-        per_row = (span / run * max(1, sum(1 for d in ln.dashes if d >= 0))
-                   if run > 1e-12 else 1.0)
+        # a dot is drawn as the sides of a small circle
+        marks = sum(DOT_SIDES if d == 0 else 1 for d in ln.dashes if d >= 0)
+        per_row = (span / run * max(1, marks) if run > 1e-12 else 1.0)
         total += rows * max(per_row, 1.0)
     return int(total)
 
@@ -314,8 +317,7 @@ def _family(out, edges, ln, origin, angle, scale, limit):
         rows, step, shift = range(0, 1), 0.0, 0.0
     run = [d * scale for d in ln.dashes]
     period = sum(abs(d) for d in run)
-    dot = DOT_FRACTION * max(step, 1e-12) if step else DOT_FRACTION * scale
-    pieces = _dash_pieces(run, dot) if period > 1e-12 else None
+    pieces = _dash_pieces(run) if period > 1e-12 else None
     # Edges the family's lines run along. A line lying on one is the
     # boundary itself, which is drawn already; Rhino and AutoCAD leave it
     # out, and drawn twice it would only thicken the outline.
@@ -350,58 +352,100 @@ def _family(out, edges, ln, origin, angle, scale, limit):
                 return
 
 
-def _dash_pieces(run, dot) -> np.ndarray:
+def _dash_pieces(run) -> np.ndarray:
     """The inked parts of one period of a dash run, as (start, end) from
-    the period's start: dashes as they are and dots as the shortest of
-    dashes centred where they fall."""
+    the period's start: dashes as they are and dots where they fall, as
+    pieces with no length."""
     pieces = []
     at = 0.0
     for d in run:
-        if d > 0:
+        if d >= 0:
             pieces.append((at, at + d))
-        elif d == 0:
-            pieces.append((at - dot / 2, at + dot / 2))
         at += abs(d)
     return np.asarray(pieces, float).reshape(-1, 2)
 
 
 def _dashes_between(a, b, start, period, pieces) -> list:
     """The dashes of a run repeating every `period` from `start`, clipped
-    to [a, b]."""
+    to [a, b]; a dot inside it comes back as a piece with no length."""
     first = math.floor((a - start) / period) - 1
     last = math.floor((b - start) / period) + 1
     bases = start + period * np.arange(first, last + 1)
     lo = (bases[:, None] + pieces[None, :, 0]).ravel()
     hi = (bases[:, None] + pieces[None, :, 1]).ravel()
+    dots = (hi - lo <= 1e-12) & (lo > a) & (lo < b)
     lo, hi = np.maximum(lo, a), np.minimum(hi, b)
-    keep = hi > lo + 1e-12
+    keep = (hi > lo + 1e-12) | dots
     return list(zip(lo[keep].tolist(), hi[keep].tolist()))
+
+
+def is_dot(segment) -> bool:
+    """Whether a pattern segment is a dot: one with no length."""
+    a, b = segment
+    return a == b
+
+
+def dot_ring(centre, radius: float) -> list:
+    """A dot as the segments of a small circle round it, in the plane its
+    centre is given in (two or three coordinates)."""
+    c = np.asarray(centre, float)
+    out = []
+    for k in range(DOT_SIDES):
+        t0 = 2 * math.pi * k / DOT_SIDES
+        t1 = 2 * math.pi * (k + 1) / DOT_SIDES
+        p = c.copy()
+        q = c.copy()
+        p[:2] += (radius * math.cos(t0), radius * math.sin(t0))
+        q[:2] += (radius * math.cos(t1), radius * math.sin(t1))
+        out.append((tuple(p.tolist()), tuple(q.tolist())))
+    return out
 
 
 # --- what the app draws -----------------------------------------------------
 
 def fill_segments(rings, pattern: HatchPattern | None, name: str,
                   angle: float, spacing: float,
-                  limit: int | None = None) -> list:
+                  limit: int | None = None, dots: bool = False):
     """The segments a fill draws over a region, whatever it is called.
 
     Lines and Cross are drawn as they always were; the app's other
     patterns and those from the library are drawn family by family; a name
     this drawing has no pattern for draws Lines, which is what such a fill
     has always drawn. Solid and None draw no segments at all.
+
+    A dot comes back as the sides of a small circle; with `dots` the
+    segments come back with the dots apart, as (segments, [(centre,
+    radius)]), for a painter that fills them: a circle a pixel or two
+    across drawn as lines is a jumble of pixels, filled it is a dot.
     """
     from .layout import hatch_region
     key = str(name or "").lower()
     if key not in LEGACY and pattern is None:
         pattern = BUILTIN.get(key)
     if key in ("solid", "none") or (pattern is not None and pattern.solid):
-        return []
+        return ([], []) if dots else []
     if pattern is not None and key not in LEGACY:
-        return pattern_segments(rings, pattern, angle, spacing, limit)
+        out, marks = [], []
+        radius = DOT_FRACTION * spacing / 2
+        for seg in pattern_segments(rings, pattern, angle, spacing, limit):
+            if not is_dot(seg):
+                out.append(seg)
+            elif dots:
+                marks.append((seg[0], radius))
+            else:
+                out.extend(dot_ring(seg[0], radius))
+        return (out, marks) if dots else out
     out = list(hatch_region(rings, angle, spacing))
     if key == "cross":
         out.extend(hatch_region(rings, angle + 90.0, spacing))
-    return out
+    return (out, []) if dots else out
+
+
+def dot_polygon(centre, radius: float) -> list:
+    """A dot as the corners of the small circle to fill, in (x, y)."""
+    return [(centre[0] + radius * math.cos(2 * math.pi * k / DOT_SIDES),
+             centre[1] + radius * math.sin(2 * math.pi * k / DOT_SIDES))
+            for k in range(DOT_SIDES)]
 
 
 def import_name(pattern: HatchPattern, source: str = "") -> tuple:
@@ -445,11 +489,96 @@ def merge_into(library: dict, patterns, source: str = "") -> dict:
 
 def definition_for(library: dict | None, name) -> HatchPattern | None:
     """The families a fill is drawn from: None for Lines, Cross and Solid,
-    which draw themselves, and for a name the drawing has no pattern by,
-    which draws as Lines."""
+    which draw themselves, and for a name there is no pattern by, which
+    draws as Lines. A drawing's own pattern comes before an installed one
+    of the same name: the drawing is drawn as it was saved."""
     if is_legacy(name):
         return None
-    return lookup(library, name)
+    return resolve(library, name)
+
+
+def resolve(library: dict | None, name) -> HatchPattern | None:
+    """The pattern a name means: one of the app's own, the drawing's own,
+    or one installed on this computer, in that order."""
+    return lookup(library, name) or lookup(installed(), name)
+
+
+# --- installed patterns -----------------------------------------------------
+#
+# Patterns loaded from a .pat file are installed, the way a font is: kept
+# beside the settings and offered in every drawing from then on. A drawing
+# saves the ones it uses, so it is drawn the same on a computer that never
+# installed them.
+
+_INSTALLED: tuple | None = None          # (path, mtime, {name: pattern})
+
+
+def installed_path() -> str:
+    import os
+    from ..utils.config import CONFIG_PATH
+    settings = os.environ.get("SERP3D_CONFIG", CONFIG_PATH)
+    return os.path.join(os.path.dirname(settings), "hatch_patterns.json")
+
+
+def installed() -> dict:
+    """{name: HatchPattern} of every installed pattern; read once and again
+    whenever the file changes."""
+    import json
+    import os
+    global _INSTALLED
+    path = installed_path()
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return {}
+    if _INSTALLED is not None and _INSTALLED[:2] == (path, mtime):
+        return _INSTALLED[2]
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        patterns = {}
+        for entry in data.get("patterns", []):
+            pattern = HatchPattern.from_dict(entry)
+            patterns[pattern.name] = pattern
+    except (OSError, ValueError, KeyError, TypeError):
+        patterns = {}
+    _INSTALLED = (path, mtime, patterns)
+    return patterns
+
+
+def _write_installed(patterns: dict):
+    import json
+    import os
+    global _INSTALLED
+    path = installed_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"patterns": [p.to_dict() for p in patterns.values()]},
+                  fh, indent=1)
+    os.replace(tmp, path)
+    _INSTALLED = None
+
+
+def install(patterns, source: str = "") -> dict:
+    """Install patterns, as `merge_into` names them; says what each is
+    called: {name in the file: name installed}."""
+    library = dict(installed())
+    named = merge_into(library, patterns, source)
+    _write_installed(library)
+    return named
+
+
+def uninstall(name) -> bool:
+    """Take an installed pattern off this computer. Says whether there was
+    one by that name."""
+    library = dict(installed())
+    keys = [k for k in library if k.lower() == str(name).lower()]
+    for key in keys:
+        del library[key]
+    if keys:
+        _write_installed(library)
+    return bool(keys)
 
 
 def lookup(library: dict | None, name) -> HatchPattern | None:

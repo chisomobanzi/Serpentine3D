@@ -2552,6 +2552,11 @@ class Viewport(QOpenGLWidget):
         GL.glUniform1i(self._uloc(self._mesh_prog, "uRendered"),
                        1 if mode == "rendered" else 0)
         for obj in objects:
+            if obj.clip_plane is not None and self._target is not None:
+                # A sheet shows what a plane cut, not the plane: it is a
+                # tool for the model, the way a section line is not drawn
+                # on the section it makes.
+                continue
             gpu = self._gpu.get(obj.id)
             if gpu is None:
                 entry = self._tess_pending.get(obj.id)
@@ -2588,6 +2593,16 @@ class Viewport(QOpenGLWidget):
                 continue
             line_color = color
             surface = color
+            hatch_ground = None
+            own_ink = False
+            if obj.kind == "hatch" and not selected:
+                # A hatch is drawn in its layer's hatch colour, or its own;
+                # ink is the drawing's, and on a dark model the object's
+                # colour stands for it, as it does for every other line.
+                ink, hatch_ground = self.scene.hatch_look_of(obj)
+                if ink is not None and not locked:
+                    color = line_color = tuple(ink)
+                    own_ink = True
             if mode == "rendered" and not selected and not locked:
                 # An imported object can display one colour and render
                 # another; edges stay on the one it displays, the way Rhino
@@ -2597,7 +2612,7 @@ class Viewport(QOpenGLWidget):
             # one leaves nothing to shade. Lift the fill only — edges keep the
             # object's real colour, so black stays black in wireframe.
             fill_color = theme.shaded_fill(surface)
-            if light_background and not selected:
+            if light_background and not selected and not own_ink:
                 # dark linework on paper-white detail backgrounds
                 line_color = (min(color[0], 0.3), min(color[1], 0.3),
                               min(color[2], 0.33))
@@ -2606,8 +2621,11 @@ class Viewport(QOpenGLWidget):
                 fill_alpha_obj = 0.0
             elif obj.kind == "hatch":
                 # a hatch is a mark on the drawing, filled whatever the
-                # display mode, as Rhino draws a solid one in wireframe
-                fill_alpha_obj = 1.0
+                # display mode, as Rhino draws a solid one in wireframe;
+                # a line hatch's face is its background, if it has one
+                solid_hatch = bool(getattr(obj.shape, "solid", False))
+                fill_alpha_obj = 1.0 if solid_hatch or (
+                    hatch_ground is not None) else 0.0
             elif obj.clip_plane is not None:
                 fill_alpha_obj = 0.18
             else:
@@ -2621,9 +2639,12 @@ class Viewport(QOpenGLWidget):
                 flat_fill = obj.kind == "hatch"   # `flat` is the MVP here
                 GL.glUniform1i(self._uloc(self._mesh_prog, "uFlat"),
                                1 if flat_fill else 0)
+                face_color = (line_color if flat_fill else fill_color)
+                if flat_fill and hatch_ground is not None \
+                        and not getattr(obj.shape, "solid", False):
+                    face_color = tuple(hatch_ground)
                 GL.glUniform3f(
-                    self._uloc(self._mesh_prog, "uColor"),
-                    *(line_color if flat_fill else fill_color))
+                    self._uloc(self._mesh_prog, "uColor"), *face_color)
                 GL.glUniform1f(
                     self._uloc(self._mesh_prog, "uAlpha"),
                     fill_alpha_obj)
@@ -2902,6 +2923,12 @@ class Viewport(QOpenGLWidget):
         px_per_mm = self._draw_target().px_per_mm
         for obj, fill in cut:
             style = _caps.cut_line_style(fill, px_per_mm)
+            if self._looks_selected(obj.id):
+                # A picked solid shows where it is cut, in gold: on a
+                # sheet the cut can be all there is to see of it, and its
+                # own edges are gone with the half the plane took away.
+                width = max(2.2, style[1] if style is not None else 0.0)
+                style = ((*self._selection_color(obj.id), 1.0), width)
             if style is None:
                 continue
             segs = self._cut_lines.segments(obj.id, obj.mesh, plane)
@@ -3398,7 +3425,7 @@ class Viewport(QOpenGLWidget):
         exactly when you need to be told. Seen head on, a ring with a cross
         or a dot stands in for the arrow (`clip_end_on_marks`).
         """
-        frames = self._clip_frames()
+        frames = self._clip_frames(shown=True)
         if not frames:
             return
         w, h = self.width(), self.height()
@@ -3574,6 +3601,10 @@ class Viewport(QOpenGLWidget):
         from ..core.hatch import HatchGroup, HatchShape
         self._ghost_solid = (isinstance(shape, (HatchShape, HatchGroup))
                              and shape.solid)
+        if isinstance(shape, (HatchShape, HatchGroup)) and not shape.solid:
+            # only its lines: the face a line hatch carries is its
+            # background, and a ghost of it read as a tint over the area
+            shape = shape.drawn()
         try:
             from ..core.tessellate import tessellate
             self._ghost = tessellate(shape)
@@ -3581,28 +3612,39 @@ class Viewport(QOpenGLWidget):
             self._ghost = None
         self.update()
 
-    def _clip_frames(self, view: str | None = None):
+    def _clip_frames(self, view: str | None = None, shown: bool = False):
         """The clipping planes as `view` sees them, the one being drawn
         unless another is named: see clip_plane_frames.
+
+        A plane cuts whether it is shown or not: hiding it, or its layer,
+        gets it out of the way of the model it is cutting, and pausing it
+        is what stops it. `shown` asks for the ones on screen alone, which
+        are the ones to draw an arrow on.
 
         Native plane geometry is read once a revision, shared by the cut
         and its arrow and by every view that asks; a sheet asks once for
         each detail on it, every frame. Layer visibility can change
-        without a scene revision. Including it keeps a hidden plane from
-        continuing to cut, and avoids repeatedly entering OpenCASCADE from
-        every pane's repaint.
+        without a scene revision, so it is part of the key the arrows are
+        kept under.
         """
         key = (self.scene.revision, self._visible_layers())
         cache = getattr(self, "_clip_frames_cache", None)
         if cache is None or cache[0] != key:
-            cache = (key, _plane_frames(self.scene.visible_objects()), {})
+            visible = {o.id for o in self.scene.visible_objects()}
+            every, shown_frames = [], []
+            for plane in (o for o in self.scene.all() if o.clip_plane):
+                frame = _plane_frames([plane])      # one read a plane
+                every.extend(frame)
+                if plane.id in visible:
+                    shown_frames.extend(frame)
+            cache = (key, every, shown_frames, {})
             self._clip_frames_cache = cache
         view = self._view_drawn() if view is None else view
-        frames = cache[2].get(view)
+        frames = cache[3].get((view, shown))
         if frames is None:
             frames = [(o, n, _clipping.cuts(setting, view))
-                      for setting, o, n in cache[1]]
-            cache[2][view] = frames
+                      for setting, o, n in cache[2 if shown else 1]]
+            cache[3][(view, shown)] = frames
         return frames
 
     def _clip_vectors(self, view: str | None = None) -> list:

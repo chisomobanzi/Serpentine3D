@@ -215,7 +215,7 @@ def serp_layers(action: str = "list", name: str = "", new_name: str = "",
     print_width mm (0 = printer default), screen_width px or 'from print',
     hatch none/lines/cross/solid or a pattern loaded with the hatchpatterns
     command, hatch_angle degrees, hatch_spacing mm on paper, hatch_color
-    ink/layer/#rrggbb, hatch_background object/layer/#rrggbb (what a cut
+    ink/layer/#rrggbb, hatch_background none/layer/#rrggbb (what a cut
     shows under its hatch), cut_line_width mm on paper round a cut
     (0 = none), cut_line_color ink/layer/#rrggbb}). A layer can live
     under another: pass parent to 'create', and name a layer by its path

@@ -118,7 +118,7 @@ def draw_hatch(painter, to_dev, k, hatch, scene=None):
     """A sheet's hatch, its pattern looked up in the drawing's library
     when it is not one of the app's own (#92). Its fill only: the edge of
     a hatch is the linework drawn round it, as in Rhino and AutoCAD."""
-    from ..core.hatch_patterns import fill_segments, lookup
+    from ..core.hatch_patterns import dot_polygon, fill_segments, resolve
     pts = hatch.points
     if len(pts) < 3:
         return
@@ -130,7 +130,8 @@ def draw_hatch(painter, to_dev, k, hatch, scene=None):
              for ring in rings]
     color = getattr(hatch, "color", None)
     ink = HATCH_INK if color is None else QColor.fromRgbF(*color[:3])
-    definition = lookup(getattr(scene, "hatch_patterns", None), hatch.pattern)
+    definition = resolve(getattr(scene, "hatch_patterns", None),
+                         hatch.pattern)
     if hatch.pattern == "solid" or (definition and definition.solid):
         from PySide6.QtGui import QPainterPath
         path = QPainterPath()
@@ -145,9 +146,21 @@ def draw_hatch(painter, to_dev, k, hatch, scene=None):
         return
     painter.setPen(QPen(ink, max(0.15 * k, 1.0)))
     painter.setBrush(QColor(0, 0, 0, 0))
-    for a, b in fill_segments(rings, definition, hatch.pattern, hatch.angle,
-                              hatch.spacing, limit=MAX_PAPER_SEGMENTS):
+    segs, dots = fill_segments(rings, definition, hatch.pattern, hatch.angle,
+                               hatch.spacing, limit=MAX_PAPER_SEGMENTS,
+                               dots=True)
+    for a, b in segs:
         _line(painter, to_dev, a, b)
+    if dots:
+        # a dot filled, not a circle a pixel across drawn as lines
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(ink)
+        smallest = 1.5 / max(k, 1e-6)     # a pixel and a half, on screen
+        for centre, radius in dots:
+            painter.drawPolygon(QPolygonF(
+                [QPointF(*to_dev(x, y)) for x, y in dot_polygon(
+                    centre, max(radius, smallest))]))
+        painter.setBrush(QColor(0, 0, 0, 0))
 
 
 def draw_lin_dim(painter, to_dev, k, dim, scene=None):

@@ -156,11 +156,20 @@ def test_dashes_are_drawn_with_their_gaps():
         "half of every row is gap"
 
 
-def test_dots_are_drawn_as_marks_you_can_see():
-    segs = pattern_segments([SQUARE], _patterns()["DOTS"], 0.0, 1.0)
+def test_dots_are_drawn_as_small_circles():
+    """A dot is a point of the pattern, drawn as a small circle: its
+    sides where lines are drawn, filled where a sheet can fill it."""
+    from serpentine3d.core.hatch_patterns import (DOT_SIDES, fill_segments,
+                                                  is_dot)
+    dots = _patterns()["DOTS"]
+    points = pattern_segments([SQUARE], dots, 0.0, 1.0)
+    assert len(points) > 50 and all(is_dot(s) for s in points)
 
-    assert len(segs) > 50
-    assert all(0 < math.dist(a, b) < 0.1 for a, b in segs)
+    sides = fill_segments([SQUARE], dots, "DOTS", 0.0, 1.0)
+    assert len(sides) == DOT_SIDES * len(points)
+    segs, marks = fill_segments([SQUARE], dots, "DOTS", 0.0, 1.0, dots=True)
+    assert segs == [] and len(marks) == len(points)
+    assert all(r == pytest.approx(0.05) for _c, r in marks)
 
 
 def test_every_family_is_drawn_and_stays_in_the_region():
@@ -285,7 +294,8 @@ def test_a_drawing_keeps_its_patterns_and_hatches_through_a_save(tmp_path):
 
     back = Scene()
     native.load_scene(back, path)
-    assert back.hatch_patterns == scene.hatch_patterns
+    # what the drawing uses is saved with it, and nothing it does not
+    assert back.hatch_patterns == {"ANSI31": _patterns()["ANSI31"]}
     assert back.layers.get(DEFAULT_LAYER_ID).hatch == "ANSI31"
     (hatch,) = [o.shape for o in back.all() if o.kind == "hatch"]
     assert hatch.definition == _patterns()["AR-BRICK"]
@@ -328,7 +338,11 @@ def test_a_dxf_hatch_is_written_with_the_pattern_it_is_drawn_with(tmp_path):
 
 # --- the command ------------------------------------------------------------
 
-def test_the_command_loads_a_pat_file_into_the_drawing(env, tmp_path):
+def test_the_command_installs_a_pat_file_for_every_drawing(env, tmp_path):
+    """Loaded patterns are installed, as a font is: offered in this
+    drawing and in every one after it."""
+    from serpentine3d.core.hatch_patterns import installed
+
     scene, _sel, history, _ctx, proc = env
     path = tmp_path / "classic.pat"
     path.write_text(PAT, encoding="utf-8")
@@ -337,9 +351,28 @@ def test_the_command_loads_a_pat_file_into_the_drawing(env, tmp_path):
     proc.provide_text("Load")
     proc.provide_text(str(path))
 
-    assert list(scene.hatch_patterns) == ["ANSI31", "ANSI37", "DASH (classic)",
-                                          "DOTS (classic)", "AR-BRICK"]
-    assert scene.hatch_patterns["ANSI31"] == _patterns()["ANSI31"]
+    assert list(installed()) == ["ANSI31", "ANSI37", "DASH (classic)",
+                                 "DOTS (classic)", "AR-BRICK"]
+    assert installed()["ANSI31"] == _patterns()["ANSI31"]
+    assert "ANSI31" in section_fills_of(scene)
+    assert "AR-BRICK" in section_fills_of(Scene()), "a new drawing has it"
+
+
+def test_a_drawing_saves_an_installed_pattern_it_uses(env, tmp_path):
+    """So it is drawn the same on a computer that never installed it."""
+    from serpentine3d.core.hatch_patterns import install, uninstall
+    from serpentine3d.fileio import native
+
+    install(parse_pat(PAT))
+    scene = Scene()
+    scene.layers.set_hatch(DEFAULT_LAYER_ID, "ANSI37")
+    path = str(tmp_path / "uses.serp")
+    native.save_scene(scene, path)
+    uninstall("ANSI37")
+
+    back = Scene()
+    native.load_scene(back, path)
+    assert back.hatch_pattern("ANSI37") == _patterns()["ANSI37"]
 
 
 def test_a_hatch_can_be_drawn_with_a_loaded_pattern(env, tmp_path):

@@ -306,7 +306,9 @@ def cmd_matchprops(ctx):
                              material=dict(s.material) if s.material else None,
                              print_width=s.print_width,
                              section_fill=(dict(s.section_fill)
-                                           if s.section_fill else None))
+                                           if s.section_fill else None),
+                             hatch_style=(dict(s.hatch_style)
+                                          if s.hatch_style else None))
     ctx.echo(f"Matched properties on {len(targets)} object(s) from {s.name}.")
 
 

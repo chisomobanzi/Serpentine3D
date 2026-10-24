@@ -3,13 +3,14 @@
 Reported: the hatch colour can be set, but the colour of the object still
 shows as the background of the hatch where a clipping plane cuts it. A
 layer, and an object with a section style of its own, now say what a cut
-shows under its hatch: Object, the darker shade of the object it always
+shows under its hatch: None, the darker shade of the object it always
 was on screen and bare paper on a sheet, or a colour, the layer's or one
 of its own, which fills the cut on screen and on paper alike.
 """
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from serpentine3d.core import geometry as g
@@ -31,19 +32,19 @@ def _scene():
 
 
 @pytest.mark.parametrize("given, kept", [
-    ("object", "object"), ("Layer", "layer"), ("#FFFFFF", "#ffffff"),
-    ((1.0, 1.0, 1.0), "#ffffff"), ("tartan", "object"), (None, "object"),
-    ("ink", "object"),
+    ("none", "none"), ("object", "none"), ("Layer", "layer"), ("#FFFFFF", "#ffffff"),
+    ((1.0, 1.0, 1.0), "#ffffff"), ("tartan", "none"), (None, "none"),
+    ("ink", "none"),
 ])
-def test_the_background_is_the_object_s_the_layer_s_or_its_own(given, kept):
+def test_the_background_is_none_the_layer_s_or_its_own(given, kept):
     lm = LayerManager()
     lm.set_hatch_background(DEFAULT_LAYER_ID, given)
 
     assert lm.get(DEFAULT_LAYER_ID).hatch_background == kept
 
 
-def test_a_layer_starts_on_the_object_s_shade():
-    assert LayerManager().get(DEFAULT_LAYER_ID).hatch_background == "object"
+def test_a_layer_starts_with_no_background():
+    assert LayerManager().get(DEFAULT_LAYER_ID).hatch_background == "none"
 
 
 def test_a_cut_reads_its_background_off_its_layer():
@@ -178,14 +179,14 @@ def test_the_layer_page_shows_and_sets_the_background(_qapp):
 
     scene, history, props, walls = _layer_page("Walls")
     combo = props.layer_hatch_background
-    assert combo.currentText() == "Object"
+    assert combo.currentText() == "None"
     assert props.layer_form.isRowVisible(combo)
 
     combo.setCurrentIndex(combo.findData("layer"))
     QApplication.processEvents()
     assert scene.layers.get(walls.id).hatch_background == "layer"
     history.undo()
-    assert scene.layers.get(walls.id).hatch_background == "object"
+    assert scene.layers.get(walls.id).hatch_background == "none"
 
 
 def test_a_fill_with_no_lines_has_no_background_to_set(_qapp):
@@ -268,3 +269,95 @@ def test_a_detail_cut_by_a_clipping_plane_shows_the_background(
         w.mark_saved()
         w.close()
         QApplication.processEvents()
+
+
+# --- a hatch object -----------------------------------------------------------
+
+def _hatch(scene, pattern="lines"):
+    from serpentine3d.core.hatch import HatchShape
+    (face,) = g.planar_regions([g.make_polyline(
+        [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0)], closed=True)])
+    return scene.add(HatchShape(face, pattern, spacing=1.0), name="Hatch")
+
+
+def test_a_hatch_takes_its_layer_s_colour_and_background():
+    scene = Scene()
+    hatch = _hatch(scene)
+    assert scene.hatch_look_of(hatch) == (None, None), "ink, on nothing"
+
+    scene.layers.set_hatch_color(hatch.layer_id, "#aa55ff")
+    scene.layers.set_hatch_background(hatch.layer_id, "#ff5500")
+    color, ground = scene.hatch_look_of(scene.get(hatch.id))
+    assert color == pytest.approx((0xaa / 255, 0x55 / 255, 1.0))
+    assert ground == pytest.approx((1.0, 0x55 / 255, 0.0))
+
+
+def test_a_hatch_can_have_a_colour_and_background_of_its_own():
+    scene = Scene()
+    hatch = _hatch(scene)
+    scene.layers.set_hatch_background(hatch.layer_id, "#ff5500")
+    hatch = scene.update(hatch.id, hatch_style={"color": "#00aa00",
+                                                "background": "none"})
+    color, ground = scene.hatch_look_of(hatch)
+    assert color == pytest.approx((0.0, 0xaa / 255, 0.0))
+    assert ground is None, "None of its own over the layer's orange"
+
+
+def test_a_hatch_s_own_look_is_saved(tmp_path):
+    from serpentine3d.fileio import native
+
+    scene = Scene()
+    hatch = _hatch(scene)
+    scene.update(hatch.id, hatch_style={"background": "layer"})
+    path = str(tmp_path / "own.serp")
+    native.save_scene(scene, path)
+    back = Scene()
+    native.load_scene(back, path)
+    (again,) = [o for o in back.all() if o.kind == "hatch"]
+    assert again.hatch_style == {"background": "layer"}
+
+
+def test_a_detail_draws_a_hatch_on_its_background_in_its_colour():
+    from serpentine3d.core.layout import detail_hatches
+    tris = [[(0, 0), (1, 0), (0, 1)]]
+    segs = [[(0, 0.5), (0.5, 0.5)]]
+    floods, lines = detail_hatches(
+        [("a", tris, segs, []), ("b", tris, segs, [((1.0, 1.0), 0.1)])],
+        [((1, 0, 0), (0, 0, 1), False, 0.5), (None, None, False, 0.0)],
+        10.0, 20.0, 2.0)
+    assert [c for c, _t in floods] == [(0, 0, 1), None], \
+        "a's background, and b's dot filled in its ink"
+    assert floods[0][1][0][1] == pytest.approx((12.0, 20.0))
+    dot = np.asarray(floods[1][1]).reshape(-1, 2)
+    assert np.linalg.norm(dot - (12.0, 22.0), axis=1).max() == \
+        pytest.approx(0.2), "a dot of radius 0.1 at (1, 1), on the paper"
+    assert {(c, w) for c, w, _s in lines} == {((1, 0, 0), 0.5),
+                                              (None, 0.0)}
+
+
+def test_the_hatch_page_offers_by_layer_first(_qapp):
+    from PySide6.QtWidgets import QApplication
+
+    from serpentine3d.core.history import History
+    from serpentine3d.core.selection import SelectionManager
+    from serpentine3d.ui.properties import PropertiesPanel
+
+    scene = Scene()
+    selection = SelectionManager(scene)
+    props = PropertiesPanel(scene, selection, History(scene))
+    props.show()
+    hatch = _hatch(scene)
+    selection.set([hatch.id])
+    QApplication.processEvents()
+    props.refresh()
+
+    for combo in (props.hatch_color, props.hatch_background):
+        assert combo.currentText() == "By layer"
+    props.hatch_background.setCurrentIndex(
+        props.hatch_background.findData("none"))
+    QApplication.processEvents()
+    assert scene.get(hatch.id).hatch_style == {"background": "none"}
+    props.hatch_background.setCurrentIndex(
+        props.hatch_background.findData("bylayer"))
+    QApplication.processEvents()
+    assert scene.get(hatch.id).hatch_style is None

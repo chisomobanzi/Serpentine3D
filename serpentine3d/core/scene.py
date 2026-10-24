@@ -16,7 +16,7 @@ import numpy as np
 from . import geometry
 from .deferred import DeferredShape
 from .layers import (DEFAULT_CUT_LINE_WIDTH, DEFAULT_LAYER_ID,
-                     HATCH_BACKGROUND_OBJECT, HATCH_INK, LayerManager,
+                     HATCH_BACKGROUND_NONE, HATCH_INK, LayerManager,
                      hatch_token_rgb, screen_width_for)
 from .layout import SectionFill
 from .tessellate import DisplayMesh, tessellate
@@ -83,6 +83,9 @@ class SceneObject:
     # its own section hatch, {"pattern", "angle", "spacing", "color"} as
     # layers.section_fill_dict makes it; None -> the layer's
     section_fill: dict | None = None
+    # a hatch's own colour and background, {"color", "background"} as
+    # tokens; a key left out, or None, takes the layer's (#91)
+    hatch_style: dict | None = None
     draw_order: int = 0                # higher draws on top (breaks depth ties)
     # {key: value}, Rhino's Attribute User Text, kept by its rules: see
     # core/user_text.py, and never edit it in place
@@ -324,6 +327,8 @@ class Scene:
             fields["print_width"] = like.print_width
         if like.section_fill:
             fields["section_fill"] = dict(like.section_fill)
+        if like.hatch_style:
+            fields["hatch_style"] = dict(like.hatch_style)
         if like.user_text:
             fields["user_text"] = dict(like.user_text)
         if fields:
@@ -579,7 +584,7 @@ class Scene:
                                 layer.color),
                 self.hatch_pattern(own["pattern"]),
                 hatch_token_rgb(own.get("background",
-                                        HATCH_BACKGROUND_OBJECT),
+                                        HATCH_BACKGROUND_NONE),
                                 layer.color))
         return SectionFill(layer.hatch, layer.hatch_angle,
                            layer.hatch_spacing,
@@ -589,6 +594,19 @@ class Scene:
                            self.hatch_pattern(layer.hatch),
                            hatch_token_rgb(layer.hatch_background,
                                            layer.color))
+
+    def hatch_look_of(self, obj: SceneObject) -> tuple:
+        """(colour, background) a hatch is drawn with, each (r, g, b) or
+        None: ink for the colour, nothing for the background. Its own, or
+        else its layer's, as a cut through its layer's material is."""
+        from .layers import hatch_background_token, hatch_color_token
+        layer = self.layers.get(obj.layer_id)
+        own = obj.hatch_style or {}
+        color = own.get("color") or layer.hatch_color
+        background = own.get("background") or layer.hatch_background
+        return (hatch_token_rgb(hatch_color_token(color), layer.color),
+                hatch_token_rgb(hatch_background_token(background),
+                                layer.color))
 
     def hatch_pattern(self, name):
         """The families a fill's name is drawn from in this drawing: one

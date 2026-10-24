@@ -5,23 +5,24 @@
 ### Added
 
 - **Hatch patterns from .pat files (#92).** The industry's hatch patterns
-  are stored in .pat files, and `hatchpatterns` (`loadpat`) loads one into
-  the drawing: acad.pat, acadiso.pat, a Revit export or a pattern found
-  online. Its patterns are offered beside the app's own wherever a
-  pattern is picked, for a hatch in the model or on a sheet and for the
-  section hatch of a layer or an object. Every pattern list in Properties
-  ends in Load patterns… and Delete patterns…; a load keeps what is picked
-  and switches it to the first pattern the file brought. `hatchpatterns`
-  also deletes a loaded pattern, whatever named it then drawing lines,
-  and purges every loaded one nothing uses. Dashes, gaps and dots are
-  drawn as the file says, on screen, on a clipping plane's cap, on a sheet
+  are stored in .pat files, and `hatchpatterns` (`loadpat`) installs the
+  ones in a file, the way a font is installed: acad.pat, acadiso.pat, a
+  Revit export or a pattern found online. From then on they are offered
+  in every drawing beside the app's own, wherever a pattern is picked,
+  for a hatch in the model or on a sheet and for the section hatch of a
+  layer or an object. A drawing saves the patterns it uses, so it is
+  drawn the same on a computer that never installed them. Every pattern
+  list in Properties ends in Load patterns… and Delete patterns…; a load
+  keeps what is picked and switches it to the first pattern the file
+  brought, and deleting a pattern an open drawing uses leaves the drawing
+  its copy. Dashes, gaps and dots are drawn as the file says, dots as
+  small filled circles, on screen, on a clipping plane's cap, on a sheet
   and in a PDF. A pattern's spacing is the distance between its rows, so
   a layer changed from Lines to ANSI31 keeps the look it had, whatever
-  unit the file was written in. What is loaded is saved with the drawing,
-  a hatch in the model carries its pattern with it, and a DXF export
-  writes the pattern under its own name, Lines and Cross where they lie
-  here. A layer may name a pattern the drawing has not loaded yet; its
-  cuts are drawn with lines until it is.
+  unit the file was written in. A hatch in the model carries its pattern
+  with it, and a DXF export writes the pattern under its own name, Lines
+  and Cross where they lie here. A layer may name a pattern there is no
+  pattern by yet; its cuts are drawn with lines until there is.
 - **A hatch is its fill.** As in Rhino and AutoCAD, a hatch no longer
   draws a line round itself or its holes, in the model, in a detail or on
   a sheet; its edge is the linework it was made from. It still snaps to

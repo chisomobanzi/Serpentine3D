@@ -16,8 +16,9 @@ from serpentine3d.core.hatch import HatchShape
 from serpentine3d.core.hatch_patterns import (BUILTIN, BUILTIN_NAMES,
                                               merge_into, parse_pat,
                                               same_pattern)
-from serpentine3d.core.layers import DEFAULT_LAYER_ID, section_fill_dict
-from serpentine3d.core.layout import HATCH_PATTERNS, Hatch, Layout
+from serpentine3d.core.layers import DEFAULT_LAYER_ID
+from serpentine3d.core.layout import (HATCH_PATTERNS, Hatch, Layout,
+                                      section_fills_of)
 
 PAT = "*ANSI31, Iron\n45, 0,0, 0,.125\n*ZIGZAG\n45, 0,0, 0,.25, .25,-.25\n"
 
@@ -112,43 +113,46 @@ def _loaded(env, tmp_path):
     return scene, proc, said
 
 
-def test_load_says_what_it_brought(env, tmp_path):
+def test_load_installs_and_says_what_it_brought(env, tmp_path):
+    from serpentine3d.core.hatch_patterns import installed
     scene, _proc, said = _loaded(env, tmp_path)
-    assert list(scene.hatch_patterns) == ["ANSI31", "ZIGZAG"]
+    assert list(installed()) == ["ANSI31", "ZIGZAG"]
+    assert scene.hatch_patterns == {}, "installed, not the drawing's"
     assert scene.loaded_patterns == ["ANSI31", "ZIGZAG"]
-    assert any("Loaded 2 hatch patterns" in line for line in said)
+    assert any("Installed 2 hatch patterns" in line for line in said)
 
 
-def test_delete_takes_a_loaded_pattern_out(env, tmp_path):
+def test_delete_uninstalls_a_pattern_nothing_uses(env, tmp_path):
+    from serpentine3d.core.hatch_patterns import installed
+    scene, proc, said = _loaded(env, tmp_path)
+
+    proc.run("hatchpatterns Delete")
+    assert proc.request.options == ["ANSI31", "ZIGZAG"]
+    proc.provide_text("ZIGZAG")
+
+    assert list(installed()) == ["ANSI31"]
+    assert "ZIGZAG" not in [n for n in section_fills_of(scene)]
+    assert said[-1] == "Deleted hatch pattern ZIGZAG."
+
+
+def test_a_drawing_keeps_a_deleted_pattern_it_uses(env, tmp_path):
+    """Deleting is never a way to break a drawing: the one open keeps the
+    pattern it uses, and goes on saving it."""
+    from serpentine3d.core.hatch_patterns import installed
     scene, proc, said = _loaded(env, tmp_path)
     scene.layers.set_hatch(DEFAULT_LAYER_ID, "ANSI31")
     lay = Layout(name="Sheet")
     lay.hatches.append(Hatch(points=[[0, 0], [5, 0], [5, 5]],
                              pattern="ANSI31"))
     scene.layouts.append(lay)
-    scene.add(HatchShape(_face(), "ANSI31", spacing=1.0,
-                         definition=scene.hatch_patterns["ANSI31"]))
 
     proc.run("hatchpatterns Delete")
-    assert proc.request.options == ["ANSI31", "ZIGZAG"]
     proc.provide_text("ANSI31")
 
-    assert list(scene.hatch_patterns) == ["ZIGZAG"]
-    assert any("1 layer and 1 sheet hatch named it" in line for line in said)
-    assert any("1 hatch in the model keep" in line for line in said)
-    assert scene.layers.get(DEFAULT_LAYER_ID).hatch == "ANSI31", \
-        "the name stays, and draws as lines until it is loaded again"
-    (hatch,) = [o for o in scene.all() if o.kind == "hatch"]
-    assert hatch.shape.definition is not None
-
-
-def test_delete_can_be_undone(env, tmp_path):
-    scene, proc, _said = _loaded(env, tmp_path)
-    history = env[2]
-    proc.run("hatchpatterns Delete")
-    proc.provide_text("ZIGZAG")
-    history.undo()
-    assert "ZIGZAG" in scene.hatch_patterns
+    assert "ANSI31" not in installed()
+    assert list(scene.hatch_patterns) == ["ANSI31"]
+    assert scene.hatch_pattern("ANSI31") is not None
+    assert "keeps it" in said[-1]
 
 
 def test_the_app_s_own_cannot_be_deleted(env):
@@ -158,18 +162,6 @@ def test_the_app_s_own_cannot_be_deleted(env):
     proc.run("hatchpatterns Delete")
     assert any("always stay" in line for line in said)
     assert not proc.busy
-
-
-def test_purge_takes_out_only_what_nothing_uses(env, tmp_path):
-    scene, proc, said = _loaded(env, tmp_path)
-    box = scene.add(g.make_box((0, 0, 0), 5, 5, 5))
-    scene.update(box.id, section_fill=section_fill_dict("ZIGZAG"))
-
-    proc.run("hatchpatterns Purge")
-
-    assert list(scene.hatch_patterns) == ["ZIGZAG"]
-    assert any("Purged 1 unused hatch pattern: ANSI31" in line
-               for line in said)
 
 
 def test_loading_keeps_what_was_picked(env, tmp_path):
@@ -214,7 +206,7 @@ def test_load_patterns_in_a_hatch_s_list_switches_it_to_the_first(window):
     combo.setCurrentIndex(combo.findData("load-patterns"))
     QApplication.processEvents()
 
-    assert "ANSI31" in w.scene.hatch_patterns
+    assert "ANSI31" in section_fills_of(w.scene)
     assert w.selection.ids == [obj.id], "the pick was let go"
     assert w.scene.get(obj.id).shape.pattern == "ANSI31"
     assert combo.currentData() == "ANSI31"

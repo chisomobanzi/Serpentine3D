@@ -274,12 +274,11 @@ def test_a_hatch_written_to_a_dxf_is_drawn_there_where_it_is_here(
     from ezdxf.render.hatching import hatch_entity
     entity = ezdxf.readfile(path).modelspace().query("HATCH")[0]
     drawn = list(hatch_entity(entity, jiggle_origin=False))
-    dot = 0.1 * hatch.spacing
     ref = [(tuple(a), tuple(b)) for a, b in drawn if (a - b).magnitude > 1e-3]
-    ours = [s for s in hatch.pattern_segments() if math.dist(*s) > dot]
-    assert _unmatched(ref, hatch.pattern_segments(), 1e-3) == 0
+    ours = hatch.line_segments()
+    assert _unmatched(ref, ours, 1e-3) == 0
     assert _unmatched(ours, ref, 1e-3) == 0
-    # a dot is a point there and the shortest of dashes here, on the spot
+    # a dot is a point there and a small circle round the same point here
     corners = [(0, 0), (50, 0), (50, 40), (10, 50)]
 
     def on_boundary(p):
@@ -293,16 +292,11 @@ def test_a_hatch_written_to_a_dxf_is_drawn_there_where_it_is_here(
 
     points = [(tuple(a), tuple(a)) for a, b in drawn
               if (a - b).magnitude <= 1e-9 and not on_boundary(tuple(a))]
-    dots = [(np.asarray(a), np.asarray(b))
-            for a, b in hatch.pattern_segments() if math.dist(a, b) <= dot]
+    centres = np.asarray([c for c, _r in hatch.dots()], float).reshape(-1, 3)
 
     def on_a_dot(p):
-        p = np.asarray(p)
-        for a, b in dots:
-            t = np.clip(np.dot(p - a, b - a) / np.dot(b - a, b - a), 0, 1)
-            if np.linalg.norm(a + t * (b - a) - p) < 1e-6:
-                return True
-        return False
+        return len(centres) and \
+            np.linalg.norm(centres - np.asarray(p), axis=1).min() < 1e-6
 
     assert all(on_a_dot(a) for a, _b in points)
     assert ref or points

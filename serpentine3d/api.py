@@ -507,7 +507,7 @@ class SerpApi:
         """Set how a layer draws, as the layer page in Properties does, in
         one undo step. A key the layer has no use for, or a value it
         cannot draw, is refused before anything changes."""
-        from .core.layers import (HATCH_BACKGROUND_OBJECT, HATCH_INK,
+        from .core.layers import (HATCH_BACKGROUND_NONE, HATCH_INK,
                                   hatch_background_token, hatch_color_token)
         from .core.layout import pattern_named, section_fills_of
         from .core.linetype import LINETYPES
@@ -525,10 +525,10 @@ class SerpApi:
                            f"known: {', '.join(fills)}")
         if "hatch_background" in style and \
                 hatch_background_token(style["hatch_background"]) == \
-                HATCH_BACKGROUND_OBJECT and \
+                HATCH_BACKGROUND_NONE and \
                 str(style["hatch_background"]).lower() != \
-                HATCH_BACKGROUND_OBJECT:
-            raise ApiError("hatch_background is 'object', 'layer', "
+                HATCH_BACKGROUND_NONE:
+            raise ApiError("hatch_background is 'none', 'layer', "
                            "'#rrggbb' or [r, g, b] in 0..1")
         for key in ("hatch_color", "cut_line_color"):
             if key in style and \

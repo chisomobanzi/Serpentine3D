@@ -405,17 +405,24 @@ float family(int i, vec2 p) {
     if (n > 0 && b.z > 1e-6) {
         float x = mod(along - row * b.x, b.z);
         float wa = max(fwidth(along), 1e-6);
+        // a dot is a small disc, a twentieth of a row across its radius,
+        // and never under a pixel and a half
+        float r = max(0.05, 1.5 * wa);
         float at = 0.0;
         float ink = 0.0;
+        float dot = 0.0;
         for (int k = 0; k < 8; ++k) {
             if (k >= n) break;
             float d = uDash[i * 8 + k];
             if (d > 0.0 && x >= at && x <= at + d) ink = 1.0;
-            if (d == 0.0 && (abs(x - at) < wa || abs(x - at - b.z) < wa))
-                ink = 1.0;
+            if (d == 0.0) {
+                float gap = min(abs(x - at), abs(x - at - b.z));
+                float dist = length(vec2(gap, off));
+                dot = max(dot, 1.0 - smoothstep(r - wa, r, dist));
+            }
             at += abs(d);
         }
-        m *= ink;
+        m = max(m * ink, dot);
     }
     return m;
 }

@@ -79,7 +79,7 @@ def test_a_section_fill_is_kept_tidy():
     assert section_fill_dict("", 200.0, 0.0, "tartan") == {
         "pattern": "lines", "angle": 20.0, "spacing": 0.2, "color": "ink",
         "cut_line_width": 0.5, "cut_line_color": "ink",
-        "background": "object"}
+        "background": "none"}
     assert section_fill_dict("Herringbone")["pattern"] == "Herringbone"
 
 

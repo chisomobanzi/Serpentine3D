@@ -158,7 +158,7 @@ TOOLS: list[dict] = [
             "'from print', hatch none/lines/cross/solid or a pattern "
             "loaded with the hatchpatterns command, hatch_angle "
             "degrees, hatch_spacing mm on paper, hatch_color "
-            "ink/layer/#rrggbb, hatch_background object/layer/#rrggbb "
+            "ink/layer/#rrggbb, hatch_background none/layer/#rrggbb "
             "(what a cut shows under its hatch), cut_line_width mm on "
             "paper round a cut "
             "(0 = none), cut_line_color ink/layer/#rrggbb}). "

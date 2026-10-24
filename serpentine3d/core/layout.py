@@ -149,9 +149,15 @@ SECTION_FILLS = ("none", *HATCH_PATTERNS)
 
 def hatch_patterns_of(scene) -> tuple:
     """Every pattern a hatch in this drawing can be drawn with: the app's
-    own, then those loaded into the drawing from a .pat file (#92)."""
-    library = getattr(scene, "hatch_patterns", None) or {}
-    return (*HATCH_PATTERNS, *library)
+    own, then in one list by name those installed from .pat files and
+    those the drawing brought with it (#92)."""
+    from .hatch_patterns import installed
+    names: dict = {}
+    for name in (*(getattr(scene, "hatch_patterns", None) or {}),
+                 *installed()):
+        names.setdefault(name.lower(), name)
+    return (*HATCH_PATTERNS,
+            *sorted(names.values(), key=lambda n: n.lower()))
 
 
 def section_fills_of(scene) -> tuple:
@@ -414,7 +420,8 @@ MAX_PAPER_SEGMENTS = 50000
 
 
 def section_drawing(regions: list, cx: float, cy: float, s: float,
-                    fills: list | None = None) -> tuple:
+                    fills: list | None = None,
+                    min_dot: float = 0.0, snap=None) -> tuple:
     """A detail's section cuts on the paper, ready to draw.
 
     `regions` arrive in the detail's projector frame, in model units;
@@ -441,7 +448,7 @@ def section_drawing(regions: list, cx: float, cy: float, s: float,
     it out separately: one of them was always going to be a version
     behind.
     """
-    from .hatch_patterns import fill_segments
+    from .hatch_patterns import dot_polygon, fill_segments
     fills = fills or []
     lines: dict = {}
     outlines: dict = {}
@@ -459,15 +466,69 @@ def section_drawing(regions: list, cx: float, cy: float, s: float,
         elif fill.pattern != "none":
             if fill.background is not None:
                 floods.append((fill.background, paper))
-            lines.setdefault(fill.color, []).extend(fill_segments(
+            segs, dots = fill_segments(
                 paper, fill.definition, fill.pattern, fill.angle,
-                fill.spacing, limit=MAX_PAPER_SEGMENTS))
+                fill.spacing, limit=MAX_PAPER_SEGMENTS, dots=True)
+            lines.setdefault(fill.color, []).extend(segs)
+            # a dot is filled, the way a solid face is, in the hatch's ink
+            floods.extend((fill.color, [dot_polygon(
+                c if snap is None else snap(*c), max(r, min_dot))])
+                for c, r in dots)
         if fill.cut_line_width > 0:
             outlines.setdefault((fill.cut_line_color, fill.cut_line_width),
                                 []).extend(paper)
     return [(color, segs) for color, segs in lines.items() if segs], \
         [(color, width, rings)
          for (color, width), rings in outlines.items()], floods
+
+
+def detail_hatches(hatches: list, looks: list, cx: float, cy: float,
+                   s: float, min_dot: float = 0.0, snap=None) -> tuple:
+    """A detail's hatch objects on the paper, ready to draw (#91, #92).
+
+    `hatches` are what the detail's pass carried out, (object id, fill
+    triangles, pattern lines, dots as (centre, radius)) in its projector
+    frame and model units,
+    and `looks` is aligned with them: each one's (colour, background), an
+    (r, g, b) or None, whether it is solid, and its print width in mm, 0
+    for the device's. Returns, in paper mm, the triangles to fill, as
+    (colour, triangles), and the lines to draw, as (colour, width,
+    segments): a background or a solid fill under its lines, and nothing
+    at all of its edge. A colour of None is ink: a solid's poché, a line's
+    pen. `min_dot` is the smallest radius a dot is drawn at, in paper mm,
+    so a screen shows one however far out it is zoomed, and `snap` moves a
+    dot's centre, in paper mm, onto the screen's pixels, so every dot a few
+    pixels across comes out the same shape.
+    """
+    import numpy as np
+    from .hatch_patterns import dot_polygon
+    floods, lines = [], {}
+    for (_oid, tris, segs, dots), (color, ground, solid, width) in zip(
+            hatches, looks):
+        if solid:
+            if len(tris):
+                floods.append((color, np.asarray(tris, float) * s
+                               + (cx, cy)))
+            continue
+        if ground is not None and len(tris):
+            floods.append((ground, np.asarray(tris, float) * s + (cx, cy)))
+        if len(segs):
+            lines.setdefault((color, float(width)), []).append(
+                np.asarray(segs, float) * s + (cx, cy))
+        if dots:
+            # each dot filled, as a fan of the small circle it is
+            fans = []
+            for centre, radius in dots:
+                at = (cx + centre[0] * s, cy + centre[1] * s)
+                if snap is not None:
+                    at = snap(*at)
+                ring = np.asarray(dot_polygon(at, max(radius * s, min_dot)),
+                                  float)
+                fans.extend((ring[0], ring[k], ring[k + 1])
+                            for k in range(1, len(ring) - 1))
+            floods.append((color, np.asarray(fans)))
+    return floods, [(color, width, np.concatenate(parts))
+                    for (color, width), parts in lines.items()]
 
 
 def cut_hatching(regions: list, cx: float, cy: float, s: float,

@@ -2551,17 +2551,64 @@ def face_loops(face, count: int = 96) -> list:
     Everything that draws or fills a cut face wants the same two things
     from it: which ring to run a line around, and which rings to leave
     empty.
+
+    Walked edge by edge, so every corner is a point of the loop: a ring
+    sampled evenly along its length cut each corner off, and a section's
+    cut line drew the chamfer. A straight edge is its two ends; a curved
+    one is followed to within a hundred-thousandth of the face's size, or
+    `count` points round a whole circle where that is finer.
     """
-    from OCP.BRepTools import BRepTools
+    import math
+    import numpy as np
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
+    from OCP.GCPnts import GCPnts_QuasiUniformDeflection
+    from OCP.GeomAbs import GeomAbs_Circle, GeomAbs_Line
+    from OCP.TopAbs import TopAbs_REVERSED
     f = occ.to_face(face)
     outer = BRepTools.OuterWire_s(f)
+    lo, hi = bbox(f)
+    size = float(np.linalg.norm(np.subtract(hi, lo))) or 1.0
     rings, holes = [], []
     exp = TopExp_Explorer(f, occ.WIRE)
     while exp.More():
         wire = occ.to_wire(exp.Current())
-        pts = sample_curve(wire, count)
-        (rings if wire.IsSame(outer) else holes).append(pts)
         exp.Next()
+        pts = []
+        walk = BRepTools_WireExplorer(wire, f)
+        while walk.More():
+            edge = walk.Current()
+            walk.Next()
+            ad = BRepAdaptor_Curve(edge)
+            a, b = ad.FirstParameter(), ad.LastParameter()
+            if ad.GetType() == GeomAbs_Line:
+                seq = [ad.Value(a), ad.Value(b)]
+            else:
+                deflection = max(size * 1e-5, 1e-9)
+                try:
+                    radius = ad.Circle().Radius() \
+                        if ad.GetType() == GeomAbs_Circle else None
+                except Exception:                          # noqa: BLE001
+                    radius = None
+                if radius:
+                    deflection = min(deflection, radius * (
+                        1 - math.cos(math.pi / max(count, 8))))
+                sample = GCPnts_QuasiUniformDeflection(ad, deflection, a, b)
+                seq = ([sample.Value(i)
+                        for i in range(1, sample.NbPoints() + 1)]
+                       if sample.IsDone() and sample.NbPoints() >= 2
+                       else [ad.Value(a), ad.Value(b)])
+            if edge.Orientation() == TopAbs_REVERSED:
+                seq.reverse()
+            for p in seq:
+                q = (p.X(), p.Y(), p.Z())
+                if not pts or math.dist(pts[-1], q) > size * 1e-9:
+                    pts.append(q)
+        if len(pts) > 1 and math.dist(pts[0], pts[-1]) <= size * 1e-9:
+            pts.pop()
+        if len(pts) < 3:
+            pts = sample_curve(wire, count)
+        (rings if wire.IsSame(outer) else holes).append(pts)
     return rings + holes
 
 
