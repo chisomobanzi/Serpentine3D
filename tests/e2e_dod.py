@@ -298,7 +298,8 @@ def main():
     sel2 = c.call("scene_info")["selected"]
     check("selcrv + invert", len(sel1) == 1 and sel2 == ["Solid 01"],
           f"{sel1} -> {sel2}")
-    c.call("command", command="isolate", inputs=["Solid 01", ""])
+    # invert left Solid 01 picked, so isolate asks for nothing
+    c.call("command", command="isolate")
     vis = [o for o in c.call("scene_info")["objects"] if o["visible"]]
     c.call("command", command="unisolate")
     vis2 = [o for o in c.call("scene_info")["objects"] if o["visible"]]
