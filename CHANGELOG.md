@@ -136,6 +136,33 @@
   grid writes no depth, so it now stretches only the far plane, and the
   near plane is measured against the drawing.
 
+- **A command that finishes before its inputs run out says so (#103).**
+  The API's `command` (and so MCP's `serp_command`) and a script's
+  `doc.run` raised an error for too few inputs but dropped spare ones
+  without a word. With a layout active, `exportpdf` does not ask which
+  layout, so `["Seat blank", "C:/work/seat.pdf"]` had the sheet name
+  answer the PDF path: the real path was ignored and the reply said it had
+  exported, to `Seat blank.pdf` in the working folder. Spare inputs are now
+  an error that names them, says which prompt each used input answered,
+  and says what the command did, since its result stands. The MCP tool's
+  own example passed `extrude` a cap answer it never asks for, and no
+  longer does.
+
+- **A model keeps its real size across STEP, Rhino, DXF and .serp (#101).**
+  The drawing's units were ignored by most exchange. STEP was written with
+  the drawing's numbers and a millimetre label, so a 1 in cube from an inch
+  drawing arrived elsewhere as a 1 mm one, and STEP came in as millimetres
+  whatever the drawing was in. A Rhino file came in at its numbers rather
+  than its unit system, and a .3dm we wrote always said millimetres.
+  Merging a .serp saved in other units kept its numbers. STEP is now
+  written in the drawing's unit, and STEP, .3dm and merged .serp files are
+  scaled into it, objects on hidden layers too, with a merged file's named
+  views and history lengths along with them. Import and Open say when they
+  converted ("converted from inches to millimetres"), and the API's
+  `import_file` returns that as `notes`. Every DXF we wrote, model or
+  sheet, also said it was in metres, which is ezdxf's default; it now says
+  what it is in. DXF import still takes a file's numbers as they are.
+
 - **A Front or Right view of a far model sorts its faces again.** A
   parallel view spreads the depth buffer evenly through its depth range,
   and that range reached back to the grid as well as the model, so the

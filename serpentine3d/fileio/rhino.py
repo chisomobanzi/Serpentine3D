@@ -28,6 +28,7 @@ from ..core.occ import (
     gp_Pnt,
 )
 from ..core.tessellate import tessellate
+from ..utils.units import TO_MM, converted_note, rescale
 from .obj import _shell_from_triangles
 from .progress import Cancelled, Progress
 # Safe to import at module level: the parallel importer only reaches back
@@ -43,6 +44,11 @@ _COLOR_FROM_PARENT = int(r3.ObjectColorSource.ColorFromParent)
 _MATERIAL_FROM_OBJECT = int(r3.ObjectMaterialSource.MaterialFromObject)
 # Rhino's shine is 0..255, where 255 is a mirror.
 MAX_SHINE = 255.0
+# Our document units by the name of Rhino's unit system, both ways.
+_OUR_UNITS = {"Millimeters": "mm", "Centimeters": "cm", "Meters": "m",
+              "Inches": "in", "Feet": "ft"}
+_RHINO_UNITS = {ours: getattr(r3.UnitSystem, theirs)
+                for theirs, ours in _OUR_UNITS.items()}
 
 
 # ------------------------------------------------------------------ knots
@@ -1649,16 +1655,44 @@ def _deferred_from_file(pending: PendingFile, index: int, kind: str):
     return DeferredShape(build, kind=kind)
 
 
-def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
-    """Returns [(name, shape, {layer, color})].
+def in_units(items: list, file_units: str | None, units: str,
+              notes: list | None = None) -> list:
+    """Importer `items` with their shapes scaled from the file's unit system,
+    named as rhino3dm names it, into the drawing's `units`.
+
+    A file with no unit, or one only Rhino knows how big (custom), is
+    taken to be in the drawing's own.
+    """
+    if file_units in (None, "None", "Unset", "CustomUnits"):
+        return items
+    system = getattr(r3.UnitSystem, file_units)
+    factor = (r3.UnitSystem.UnitScale(system, r3.UnitSystem.Millimeters)
+              / TO_MM[units])
+    if not np.isfinite(factor) or factor <= 0 or np.isclose(factor, 1.0,
+                                                           rtol=1e-12):
+        return items
+    if notes is not None:
+        notes.append(converted_note(_OUR_UNITS.get(file_units,
+                                                   file_units.lower()),
+                                    units))
+    return [(name, rescale(shape, factor), meta)
+            for name, shape, meta in items]
+
+
+def import_3dm(path: str, progress=None, units: str = "mm",
+               notes: list | None = None) -> list[tuple[str, object, dict]]:
+    """Returns [(name, shape, {layer, color})], scaled into `units`.
 
     A shape is either geometry or, for an object the file keeps out of
     sight, a `DeferredShape` that will convert it if anything asks.
+    The file's own unit system decides its size: an inch drawing came into
+    a millimetre one 25.4 times too small (#101).
     """
     report = progress or Progress()
     if _worth_parallelising(path):
         try:
-            return import_3dm_parallel(path, report)
+            return import_3dm_parallel(path, report, units=units,
+                                       notes=notes)
         except Cancelled:
             raise
         except Exception as exc:                                # noqa: BLE001
@@ -1715,7 +1749,7 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
             counter += 1
             name = attrs.Name or f"3dm object {counter:02d}"
             out.append((name, shape, meta))
-    return out
+    return in_units(out, model.Settings.ModelUnitSystem.name, units, notes)
 
 
 # ------------------------------------------------------------------- export
@@ -1762,6 +1796,8 @@ def _parents_first(layers) -> list:
 def export_3dm(scene, path: str, only_ids: list | None = None,
                version: int = 8):
     model = r3.File3dm()
+    # A new file says millimetres whatever it holds.
+    model.Settings.ModelUnitSystem = _RHINO_UNITS[scene.units]
     layer_index = {}
     layer_guid = {}
     for layer in _parents_first(scene.layers):

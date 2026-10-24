@@ -10,10 +10,16 @@ from __future__ import annotations
 import math
 
 import ezdxf
+from ezdxf import units as ezdxf_units
 import numpy as np
 
 from ..core import geometry, linetype
 from ..core.tessellate import tessellate
+
+
+# $INSUNITS by document unit.
+_INSUNITS = {"mm": ezdxf_units.MM, "cm": ezdxf_units.CM, "m": ezdxf_units.M,
+             "in": ezdxf_units.IN, "ft": ezdxf_units.FT}
 
 
 def _true_color(rgb) -> int:
@@ -22,7 +28,8 @@ def _true_color(rgb) -> int:
 
 
 def export_dxf(scene, path: str, only_ids: list | None = None):
-    doc = ezdxf.new("R2010")
+    # Told, or ezdxf labels the drawing metres whatever it holds (#101).
+    doc = ezdxf.new("R2010", units=_INSUNITS[scene.units])
     msp = doc.modelspace()
     for layer in scene.layers.all():
         if layer.name == "Default":
@@ -324,7 +331,7 @@ def _dxf_pattern(entity) -> tuple:
 
 def export_layout_dxf(window, layout, path: str):
     """The composed sheet as 2D DXF at paper-mm coordinates."""
-    doc = ezdxf.new("R2010")
+    doc = ezdxf.new("R2010", units=ezdxf_units.MM)
     msp = doc.modelspace()
     doc.layers.add("VISIBLE")
     doc.layers.add("HIDDEN")

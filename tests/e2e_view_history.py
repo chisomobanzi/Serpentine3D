@@ -134,7 +134,8 @@ def main() -> int:
     # --- lockother
     names = [o["name"] for o in c.call("scene_info")["objects"]]
     c.call("select", names=names[:1])
-    c.call("command", command="lockother", inputs=[""])
+    # the pick is what lockother keeps, so it asks for nothing
+    c.call("command", command="lockother")
     info = {o["name"]: o for o in c.call("scene_info")["objects"]}
     ok &= check("lockother-locks-the-rest",
                 info[names[1]]["locked"] and not info[names[0]]["locked"])

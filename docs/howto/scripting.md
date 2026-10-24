@@ -112,7 +112,9 @@ doc.export("block.stl")
 `doc.geo` is the full geometry module (`make_box`, `make_sphere`,
 `boolean_union`, …). `doc.run(command, inputs)` drives **any** interactive
 command by feeding its prompts as strings — an empty string finishes a
-selection or accepts a default.
+selection or accepts a default. Too few inputs raise a `RuntimeError`, and so
+does an input left over when the command finishes; that error names which
+prompt each input answered, and the command's result stands.
 
 | Method | Does |
 |---|---|
