@@ -21,6 +21,12 @@ format is chosen by extension.
 
 ## Notes
 
+- **Units.** A model keeps its real size across files. STEP is written in
+  the document's units and says so; `.3dm` and `.dxf` files say which
+  units they are in. On the way in, STEP, `.3dm`, `.skp`, `.e57` and a
+  `.serp` added to the scene are converted from their own units to the
+  document's, and Import says when it converted. DXF, OBJ and STL are read
+  at their numbers, as the document's units.
 - **E57 scans.** Choose File > Import or drag an `.e57` file into the window.
   Each scan becomes a separate named point cloud, positioned using its stored
   scan pose. E57 coordinates are in metres and are converted to the current

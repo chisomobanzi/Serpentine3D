@@ -230,11 +230,15 @@ class SerpApi:
             if not ok:
                 raise ApiError(messages[-1] if messages
                                else f"Unknown command {command}")
-            for value in (inputs or []):
+            values = [",".join(str(v) for v in value)
+                      if isinstance(value, (list, tuple)) else str(value)
+                      for value in (inputs or [])]
+            answered = []
+            for text in values:
                 if not self.processor.busy:
                     break
-                text = (",".join(str(v) for v in value)
-                        if isinstance(value, (list, tuple)) else str(value))
+                answered.append(
+                    (getattr(self.processor.request, "prompt", ""), text))
                 if _is_selection_request(self.processor):
                     self._feed_selection(text)
                 else:
@@ -245,6 +249,10 @@ class SerpApi:
                 raise ApiError(
                     f"Command needs more input: '{prompt}'. "
                     f"Provide additional values in `inputs`.")
+            if len(answered) < len(values):
+                from .commands.base import unused_inputs_message
+                raise ApiError(unused_inputs_message(
+                    command, answered, values[len(answered):], messages))
         except Exception:
             # The command this call started is this call's to clean up: left
             # at its prompt, it would refuse every later external call, undo
@@ -546,14 +554,15 @@ class SerpApi:
         if not os.path.exists(path):
             raise ApiError(f"File not found: {path}")
         self.history.checkpoint("import")
+        notes = []
         try:
-            n = fileio.import_file(self.scene, path)
+            n = fileio.import_file(self.scene, path, notes=notes)
         except Exception as exc:
             self.history.discard_checkpoint()
             raise ApiError(f"Import failed: {exc}") from exc
         if zoom_extents:
             self.viewport.zoom_extents()
-        return {"imported": n}
+        return {"imported": n, **({"notes": notes} if notes else {})}
 
     def export_file(self, path: str, selected_only: bool = False) -> dict:
         path = os.path.abspath(os.path.expanduser(path))

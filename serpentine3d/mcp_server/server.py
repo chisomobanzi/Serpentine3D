@@ -182,11 +182,13 @@ def serp_command(command: str, inputs: list[str] | None = None) -> str:
 
     Examples:
       command='circle', inputs=['0,0,0', '5']
-      command='extrude', inputs=['Curve 01', '', '20', 'Yes']
-        (object name(s), then '' to end selection, then distance, then cap)
+      command='extrude', inputs=['Curve 01', '', '20']
+        (object name(s), then '' to end selection, then distance)
       command='zoomextents'
 
-    Selection prompts accept object names, 'all', or '' to finish.
+    Selection prompts accept object names, 'all', or '' to finish. Too few
+    inputs is an error, and so is one left over when the command finishes:
+    the error says which prompt each input answered.
     """
     return _call("command", command=command, inputs=inputs or [])
 

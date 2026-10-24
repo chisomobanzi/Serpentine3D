@@ -15,6 +15,7 @@ import base64
 import json
 
 from ..core import geometry, user_text
+from ..utils.units import convert, converted_note, rescale
 from ..core.layers import (DEFAULT_CUT_LINE_WIDTH, DEFAULT_SCREEN_WIDTH,
                            Layer, section_fill_dict)
 
@@ -328,7 +329,7 @@ _CARRIED_FIELDS = ("visible", "locked", "group_id", "block_id", "color",
                    "draw_order", "print_width", "section_fill", "user_text")
 
 
-def merge_scene(scene, path: str) -> int:
+def merge_scene(scene, path: str, notes: list | None = None) -> int:
     """Add a .serp file's objects to `scene`, keeping everything already there.
 
     What Import means for every other format. The file is read into a scene
@@ -336,11 +337,18 @@ def merge_scene(scene, path: str) -> int:
     so `Kit::Parts` in the file lands on a `Kit::Parts` the scene already
     has, or on one made for it under the same parents. The scene's own
     settings stay the scene's: units, current layer, named views, layouts.
+    A file in other units is scaled into the scene's first (#101).
     Returns the number of objects added.
     """
     from ..core.scene import Scene
     incoming = Scene()
     load_scene(incoming, path)
+    # Scaled on the way across rather than in `incoming`, where replacing a
+    # shape rebuilds what its history built from it, which would then be
+    # scaled a second time.
+    factor = convert(1.0, incoming.units, scene.units)
+    if factor != 1.0 and notes is not None:
+        notes.append(converted_note(incoming.units, scene.units))
     layer_for = {}
 
     def target_layer(layer_id):
@@ -366,11 +374,17 @@ def merge_scene(scene, path: str) -> int:
     # What the objects lean on comes with them, but never over the scene's
     # own: a block the file instances, a style its dimensions are drawn in,
     # a view it named. Units, layouts and the current layer stay the scene's.
-    for block_id, shapes in incoming.block_defs.items():
-        scene.block_defs.setdefault(block_id, shapes)
+    for block_id, block in incoming.block_defs.items():
+        if factor != 1.0:
+            block = {**block, "shapes": [rescale(s, factor)
+                                         for s in block["shapes"]]}
+        scene.block_defs.setdefault(block_id, block)
     for name, style in incoming.annot_styles.items():
         scene.annot_styles.setdefault(name, style)
     for name, view in incoming.named_views.items():
+        if factor != 1.0:
+            view = {**view, "target": [c * factor for c in view["target"]],
+                    "distance": view["distance"] * factor}
         scene.named_views.setdefault(name, view)
     # The whole layer tree comes in, empty layers too, as it does in Rhino:
     # a layer is set up before anything is drawn on it.
@@ -378,7 +392,9 @@ def merge_scene(scene, path: str) -> int:
         target_layer(layer.id)
     new_id = {}
     for source in incoming.all():
-        obj = scene.add(source._shape, name=source.name,
+        shape = (source._shape if factor == 1.0
+                 else rescale(source._shape, factor))
+        obj = scene.add(shape, name=source.name,
                         layer_id=target_layer(source.layer_id))
         new_id[source.id] = obj.id
         carried = {f: getattr(source, f) for f in _CARRIED_FIELDS
@@ -392,9 +408,24 @@ def merge_scene(scene, path: str) -> int:
         record["inputs"] = [new_id.get(i, i) for i in record.get("inputs", [])]
         if "output" in record:
             record["output"] = new_id.get(record["output"], record["output"])
+        if factor != 1.0:
+            record["params"] = _rescaled_params(record.get("params", {}),
+                                                factor)
         scene.history_records.append(record)
     scene.layers.current_id = current
     return len(incoming.all())
+
+
+def _rescaled_params(params: dict, factor: float) -> dict:
+    """A history record's parameters with its lengths in the new units:
+    an extrusion's distance and a revolve's axis point. Directions and
+    angles have no size."""
+    params = dict(params)
+    if "dist" in params:
+        params["dist"] = float(params["dist"]) * factor
+    if "origin" in params:
+        params["origin"] = [float(c) * factor for c in params["origin"]]
+    return params
 
 
 def _check_version(doc: dict):

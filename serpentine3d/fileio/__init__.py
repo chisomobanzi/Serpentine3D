@@ -142,7 +142,8 @@ def ensure_suffix(path: str, name_filter: str) -> str:
     return f"{path}.{suffix}"
 
 
-def import_file(scene, path: str, progress=None, *, replace: bool = False) -> int:
+def import_file(scene, path: str, progress=None, *, replace: bool = False,
+                notes: list | None = None) -> int:
     """Import any supported file into the scene. Returns object count added.
 
     A .serp is added to what is there, like every other format, unless
@@ -152,6 +153,9 @@ def import_file(scene, path: str, progress=None, *, replace: bool = False) -> in
     `progress` is called as `progress(fraction, message)` while the work runs;
     answering False cancels it, raising `Cancelled`. E57 and Rhino report as
     they read; other formats bracket the read.
+
+    A file that says what unit it is in arrives at its real size in the
+    scene's units; `notes`, when given, hears what was converted.
     """
     ext = os.path.splitext(path)[1].lower()
     report = Progress(progress,
@@ -161,19 +165,20 @@ def import_file(scene, path: str, progress=None, *, replace: bool = False) -> in
     # answer a change by reading the whole scene made a big import cost
     # objects squared — see Scene.batched.
     with scene.batched():
-        n = _import_file(scene, path, ext, report, replace)
+        n = _import_file(scene, path, ext, report, replace, notes)
     report.done()
     return n
 
 
-def _import_file(scene, path: str, ext: str, report, replace: bool = False) -> int:
+def _import_file(scene, path: str, ext: str, report, replace: bool = False,
+                 notes: list | None = None) -> int:
     if ext == ".serp":
         if not replace:
-            return native.merge_scene(scene, path)
+            return native.merge_scene(scene, path, notes)
         native.load_scene(scene, path)
         return len(scene.all())
     if ext in (".step", ".stp"):
-        shapes = step.import_step(path)
+        shapes = step.import_step(path, scene.units, notes)
         base = os.path.splitext(os.path.basename(path))[0]
         for i, shape in enumerate(shapes, 1):
             name = base if len(shapes) == 1 else f"{base} {i:02d}"
@@ -221,7 +226,8 @@ def _import_file(scene, path: str, ext: str, report, replace: bool = False) -> i
         return len(named)
     if ext == ".3dm":
         from . import rhino
-        items = rhino.import_3dm(path, progress=report.part(0.0, 0.95))
+        items = rhino.import_3dm(path, progress=report.part(0.0, 0.95),
+                                 units=scene.units, notes=notes)
         return _add_items(scene, items, report.part(0.95, 1.0))
     if ext == ".skp":
         from . import skp
@@ -409,7 +415,7 @@ def _precision_note(objs, ext) -> str | None:
 def _export_shapes(scene, path, ext, objs, only_ids, thumbnail, stl_quality,
                    rhino_version):
     if ext in (".step", ".stp"):
-        n = step.export_step([o.shape for o in objs], path)
+        n = step.export_step([o.shape for o in objs], path, scene.units)
         return (f"{n} mesh object(s) left out: STEP cannot carry them"
                 if n else None)
     if ext == ".obj":

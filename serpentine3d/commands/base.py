@@ -705,6 +705,29 @@ def format_prompt(req: Req) -> str:
     return p
 
 
+def unused_inputs_message(command: str, answered: list[tuple[str, str]],
+                          unused: list[str], messages: list[str]) -> str:
+    """The error for scripted inputs left over once their command finished.
+
+    The command's result stands by then (the export is written, the curve
+    made), so the message says which prompt each used input answered and
+    what the command did: enough to spot the mix-up and not retry blind.
+    """
+    name = (command.split() or [command])[0]
+    count = f"{len(unused)} input{'' if len(unused) == 1 else 's'}"
+    took = "; ".join(f"{prompt} = {text!r}" for prompt, text in answered)
+    did = " ".join(m for m in messages if not m.startswith("> ")).rstrip()
+    if did and did[-1] not in ".!?":
+        did += "."
+    return (f"{name} finished with {count} unused: "
+            f"{', '.join(repr(t) for t in unused)}. "
+            + (f"Its prompts took: {took}. " if took
+               else "It asked for no input. ")
+            + (f"It still ran: {did} " if did else "It still ran. ")
+            + "Send only the inputs its prompts ask for, and check what it "
+              "did before running it again.")
+
+
 # --------------------------------------------------------------- processor
 
 class CommandProcessor:

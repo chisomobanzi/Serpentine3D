@@ -1940,7 +1940,8 @@ class MainWindow(QMainWindow):
             self._open_path(path)
 
     def _import_showing_progress(self, path: str, scene=None,
-                                 replace: bool = False) -> int:
+                                 replace: bool = False,
+                                 notes: list | None = None) -> int:
         """Import `path`, showing what it is doing and offering a way out.
 
         A set-design .3dm is minutes of work; with no dialog the window simply
@@ -1968,7 +1969,7 @@ class MainWindow(QMainWindow):
         try:
             return fileio.import_file(scene or self.scene, path,
                                       progress=fileio.throttled(report),
-                                      replace=replace)
+                                      replace=replace, notes=notes)
         finally:
             dlg.close()
 
@@ -1977,13 +1978,15 @@ class MainWindow(QMainWindow):
         welcome screen)."""
         try:
             self.history.checkpoint("open")
-            self._import_showing_progress(path, replace=True)
+            notes = []
+            self._import_showing_progress(path, replace=True, notes=notes)
             if self.journal is not None:
                 self.journal.note_load(path)
             if path.endswith(".serp"):
                 self.ctx.current_path = path
             self.command_line.echo(
-                f"Opened {path}: {len(self.scene.all())} object(s).")
+                f"Opened {path}: {len(self.scene.all())} object(s)"
+                + "".join(f", {note}" for note in notes) + ".")
             self.viewport.zoom_extents()
             self.mark_saved()
             self.add_recent(path)
@@ -2221,8 +2224,11 @@ class MainWindow(QMainWindow):
                 self.scene.notify("layouts")
                 self.command_line.echo(f"Imported {n} object(s).")
                 return
-            n = self._import_showing_progress(path)
-            self.command_line.echo(f"Imported {n} object(s).")
+            notes = []
+            n = self._import_showing_progress(path, notes=notes)
+            self.command_line.echo(
+                f"Imported {n} object(s)"
+                + "".join(f", {note}" for note in notes) + ".")
             self.viewport.zoom_extents()
         except fileio.Cancelled:
             self.history.discard_checkpoint()
