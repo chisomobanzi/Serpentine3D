@@ -121,6 +121,8 @@ class LinearDim:
     detail_id: str = ""
     m1: list | None = None     # [x, y, z]
     m2: list | None = None
+    # drawn on bare paper, so it measures the paper and not the model
+    measures_paper: bool = False
 
 
 @dataclass
@@ -197,6 +199,21 @@ class RadialDim:
     scale_denom: float = 1.0
     text: str = ""
     style: str = ""
+    measures_paper: bool = False
+
+
+def measured_text(dim, paper_length: float, scene=None) -> str:
+    """What a dimension says it measures, `paper_length` millimetres of
+    paper apart: the paper itself in the units its sheet is read in, if it
+    was drawn on bare paper, or else the model through a detail, at
+    `scale_denom` model units to the millimetre, in the document's units.
+    Its own text, when it has one, is the caller's to put first."""
+    if dim.measures_paper:
+        return (scene.format_paper_length(paper_length) if scene is not None
+                else f"{paper_length:g}")
+    measured = paper_length * dim.scale_denom
+    return (scene.format_length(measured) if scene is not None
+            else f"{measured:g}")
 
 
 @dataclass
@@ -1211,7 +1228,8 @@ class Layout:
                 if det.section_offset is not None:
                     det.section_offset *= factor
         for dim in [*self.dims, *self.rdims]:
-            dim.scale_denom *= factor
+            if not dim.measures_paper:
+                dim.scale_denom *= factor
         for bar in self.scale_bars:
             bar[2] *= factor
         if rescaled:
@@ -1432,11 +1450,29 @@ def layouts_from_json(data: list) -> list:
             pool = getattr(lay, key)
             for d in ld.get(key, []):
                 pool.append(_rebuild(cls, d))
+                if key in ("dims", "rdims") and "measures_paper" not in d:
+                    pool[-1].measures_paper = _drawn_on_paper(lay, pool[-1])
         lay.scale_bars = [list(b) for b in ld.get("scale_bars", [])]
         lay.title_block = dict(ld.get("title_block", {}))
         lay.revisions = [list(r) for r in ld.get("revisions", [])]
         layouts.append(lay)
     return layouts
+
+
+def _drawn_on_paper(lay: Layout, dim) -> bool:
+    """Whether a dimension saved before they said what they measure was
+    drawn on bare paper: one is given a scale of one there, and nothing
+    over a detail is unless the detail shows a model unit to the paper
+    millimetre, which a centimetre detail at 1:10 does. So it also has to
+    have no detail under it, and not be anchored to one."""
+    if getattr(dim, "detail_id", "") or abs(dim.scale_denom - 1.0) > 1e-12:
+        return False
+    if isinstance(dim, RadialDim):
+        x, y = dim.cx, dim.cy
+    else:
+        x, y = (dim.x1 + dim.x2) / 2, (dim.y1 + dim.y2) / 2
+    detail = lay.detail_at(x, y)
+    return detail is None or detail.perspective
 
 
 def _scale_ratio(text: str, units: str) -> float | None:

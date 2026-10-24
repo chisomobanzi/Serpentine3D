@@ -26,6 +26,7 @@ from PySide6.QtGui import QBrush, QColor, QPen, QPolygonF
 
 from ..core.layout import (copy_sheet_item, move_sheet_item,
                            sheet_item_bounds, sheet_pools)
+from ..utils.units import TO_MM, paper_units
 from .gumball import (
     ARC_R, AXIS_COLORS, CONE1, HOVER_COLOR, PAD0, PAD1, PAD_ALPHA, SHAFT0,
     SIZE_PX, _alt_held,
@@ -75,6 +76,15 @@ class PaperGumball:
     @property
     def vp(self):
         return self.lv.vp
+
+    def _per_typed(self) -> float:
+        """Millimetres of paper to the unit a distance is typed and read in."""
+        return TO_MM[paper_units(self.vp.scene.units)]
+
+    def _distance(self, mm: float) -> str:
+        if self._per_typed() == 1.0:
+            return f"{mm:.2f} mm"
+        return f'{mm / self._per_typed():.3f}"'
 
     def active(self) -> bool:
         lv = self.lv
@@ -342,9 +352,13 @@ class PaperGumball:
             self._move_to(self._wanted(px, py))
             dx, dy = self.drag["offset"]
             if self.drag["handle"][0] == "move":
-                label = f"{dx if self.drag['handle'][1] == X else dy:.2f} mm"
-            else:
+                label = self._distance(dx if self.drag['handle'][1] == X
+                                       else dy)
+            elif self._per_typed() == 1.0:
                 label = f"{dx:.2f}, {dy:.2f} mm"
+            else:
+                label = (f"{dx / self._per_typed():.3f}, "
+                         f'{dy / self._per_typed():.3f}"')
         self.drag["last_label"] = label
         return label
 
@@ -506,6 +520,7 @@ class PaperGumball:
             self._rotate_items_to(value)
         else:
             axis = self.drag["handle"][1]
+            value *= self._per_typed()
             self._move_to((value, 0.0) if axis == X else (0.0, value))
 
     def commit_typed(self) -> bool:

@@ -3,9 +3,9 @@
 Serpentine3D has two spaces, like Rhino:
 
 - **Model space** — one 3D world in real units.
-- **Layouts** — paper sheets in millimetres, shown as tabs. Each sheet
-  holds *detail views* (windows into the model), plus annotations that
-  live on the paper.
+- **Layouts** — paper sheets, shown as tabs, in millimetres in a metric
+  document and in inches in an inch or feet one. Each sheet holds *detail
+  views* (windows into the model), plus annotations that live on the paper.
 
 The tab strip along the bottom switches workspaces. **Model** holds the
 panes you model in; a sheet opens as the sheet, filling the viewport area.
@@ -81,6 +81,14 @@ Everything on a sheet is clickable: drag to move, Delete to remove,
 **Associative dimensions**: a `dim` picked fully inside a detail
 anchors to model space and re-projects when the detail pans or changes
 scale. Hand-moving the dimension breaks the anchor on purpose.
+
+**Paper units**: a dimension over a detail measures the model, in the
+document's units. One drawn on bare paper measures the paper, in the units
+the sheet is read in: millimetres in a metric document, inches in an inch or
+feet document, as Rhino's templates set their layouts. Points and lengths
+typed on bare paper are in those units too, so `2,1` on an inch sheet is two
+inches across and one up, and `50mm` or `1in` still mean what they say. Text
+height, print widths and hatch spacing stay in millimetres in any document.
 
 **Styles**: `dimstyle` creates named text/arrow sizes shared by the
 document (`Standard`, `Small`, `Heading` are built in).

@@ -14,6 +14,7 @@ from ezdxf import units as ezdxf_units
 import numpy as np
 
 from ..core import geometry, linetype
+from ..core.layout import measured_text
 from ..core.tessellate import tessellate
 
 
@@ -495,8 +496,7 @@ def export_layout_dxf(window, layout, path: str):
         for p, q in ((a, ao), (b, bo), (ao, bo)):
             msp.add_line((p[0], p[1]), (q[0], q[1]),
                          dxfattribs={"layer": "ANNOT"})
-        measured = length * dim.scale_denom
-        text = dim.text or window.scene.format_length(measured)
+        text = dim.text or measured_text(dim, length, window.scene)
         mid = (a + b) / 2 + nvec * (dim.offset + 2)
         msp.add_text(text, height=3.2, dxfattribs={
             "layer": "ANNOT"}).set_placement((mid[0], mid[1]))
