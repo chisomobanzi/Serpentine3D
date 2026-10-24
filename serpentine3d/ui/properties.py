@@ -32,7 +32,8 @@ from ..core.layers import (HATCH_INK, HATCH_LAYER_COLOR, MAX_CUT_LINE_WIDTH,
                            MIN_HATCH_SPACING, PATH_SEPARATOR,
                            hatch_token_rgb, section_fill_dict)
 from ..core.layout import (PAPER_SIZES, SECTION_FILLS, DetailView,
-                           PaperObject, TextNote, parse_scale, sheet_label)
+                           PaperObject, TextNote, parse_scale, scale_presets,
+                           sheet_label)
 from ..core.text import TextShape
 from ..core.linetype import LINETYPES
 from . import icons, theme
@@ -58,10 +59,6 @@ _BY_LAYER = "By layer"                 # an object taking its layer's value
 
 # the tab mark for more than one layer, which have no one colour between them
 _MIXED_MARK = (0.6, 0.6, 0.62)
-
-# the scales an architect draws at, smallest denominator first; anything else
-# is typed in and read by the same rules as the `detailscale` command
-SCALE_PRESETS = ["1:1", "1:2", "1:5", "1:10", "1:20", "1:50", "1:100", "1:200"]
 
 # what the Convert button says for each geometry output of model text
 CONVERT_LABELS = {"curves": "Convert to curves",
@@ -434,12 +431,12 @@ def _cleared(layout):
             row.widget().deleteLater()
 
 
-def _detail_label(detail, view_name: str) -> str:
+def _detail_label(detail, view_name: str, units: str) -> str:
     """A detail as a list of views names it: the view it looks along and
     its scale, which is what tells two details on one sheet apart."""
     if detail.perspective:
         return view_name
-    return f"{view_name} {detail.scale_text()}"
+    return f"{view_name} {detail.scale_text(units)}"
 
 
 class _ClipViews(QWidget):
@@ -468,9 +465,10 @@ class _ClipViews(QWidget):
         column.addWidget(self.paused)
         column.addLayout(self._rows)
 
-    def show_for(self, plane, panes, layouts, view_name):
+    def show_for(self, plane, panes, layouts, view_name, units):
         """`panes` is (key, label) for each model pane; `view_name` names
-        the view a detail looks along."""
+        the view a detail looks along, and `units` are the document's,
+        which its scale is written in."""
         setting = plane.clip_plane or {}
         off = set(setting.get("off_in", ()))
         with QSignalBlocker(self.paused):
@@ -503,7 +501,7 @@ class _ClipViews(QWidget):
             self._sheets.append(lay.name)
             seen = Counter()
             for detail in lay.details:
-                label = _detail_label(detail, view_name(detail))
+                label = _detail_label(detail, view_name(detail), units)
                 seen[label] += 1
                 tick(detail.id, label if seen[label] == 1
                      else f"{label} ({seen[label]})")
@@ -983,13 +981,15 @@ class PropertiesPanel(QWidget):
         self.lineweight_edit.setToolTip("Printed width in millimetres")
         self.lineweight_edit.editingFinished.connect(self._change_lineweight)
 
-        # a detail only: its scale, picked from the presets or typed. Picking
+        # a detail only: its scale, picked from the presets or typed, and
+        # read by the same rules as the `detailscale` command. Picking
         # applies at once; typing applies on Enter, so the half-typed "1:1"
-        # on the way to "1:100" is never taken for a choice.
+        # on the way to "1:100" is never taken for a choice. The presets
+        # are the document's units' (`_show_scale`).
         self.scale_combo = QComboBox()
         self.scale_combo.setEditable(True)
         self.scale_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.scale_combo.addItems(SCALE_PRESETS)
+        self.scale_combo.addItems(scale_presets(self.scene.units))
         self.scale_combo.setToolTip("Detail scale, e.g. 1:50")
         self.scale_combo.currentTextChanged.connect(self._scale_chosen)
         self.scale_combo.lineEdit().editingFinished.connect(self._scale_typed)
@@ -1398,8 +1398,8 @@ class PropertiesPanel(QWidget):
             if n == 1:
                 detail = details[0]
                 frame = f"frame {detail.w:g} × {detail.h:g} mm"
-                line = (frame if detail.perspective
-                        else f"{detail.scale_text()} · {frame}")
+                line = (frame if detail.perspective else
+                        f"{detail.scale_text(self.scene.units)} · {frame}")
                 return said("Detail", f"{self._detail_view_name(detail)} view",
                             _capital(line), "Detail")
             return said("Details", f"{n} details selected", "On paper",
@@ -1759,7 +1759,8 @@ class PropertiesPanel(QWidget):
         if shown:
             panes = self._panes_source() if self._panes_source else []
             self.clip_views.show_for(obj, panes, self.scene.layouts,
-                                     self._detail_view_name)
+                                     self._detail_view_name,
+                                     self.scene.units)
 
     def _set_clip_view(self, view: str, on: bool):
         obj = self._selected()
@@ -2374,8 +2375,18 @@ class PropertiesPanel(QWidget):
 
     def _show_scale(self, detail: DetailView):
         """Say what the detail's scale is: the list highlights it when it is a
-        preset, the text says it either way."""
-        text = detail.scale_text()
+        preset, the text says it either way. The list is the one the
+        document's units are offered, which a change of units changes."""
+        units = self.scene.units
+        presets = list(scale_presets(units))
+        if [self.scale_combo.itemText(i)
+                for i in range(self.scale_combo.count())] != presets:
+            # filling the list makes its first scale current, which is
+            # not a choice anyone made
+            with QSignalBlocker(self.scale_combo):
+                self.scale_combo.clear()
+                self.scale_combo.addItems(presets)
+        text = detail.scale_text(units)
         self.scale_combo.setCurrentIndex(self.scale_combo.findText(text))
         self.scale_combo.setEditText(text)
 
@@ -2762,7 +2773,7 @@ class PropertiesPanel(QWidget):
         detail = self._detail_pick()
         if detail is None:
             return
-        denom = parse_scale(text)
+        denom = parse_scale(text, self.scene.units)
         if denom is None or denom == detail.scale_denom:
             # not a scale, or the one it already has: put back what it still
             # is rather than leaving the box lying

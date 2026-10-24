@@ -664,12 +664,17 @@ def cmd_units(ctx):
         rescale = yield OptionReq(
             f"Scale model by {factor:g} so objects keep their real size?",
             options=["Yes", "No"], default="Yes")
+    # Before anything changes, so that one undo puts the units back with the
+    # model and the sheets. Taken after the units had changed, undo left the
+    # new units on the old model; and without a rescale there was none.
+    ctx.history.checkpoint("units")
     ctx.scene.units = choice
     if rescale == "Yes":
-        ctx.history.checkpoint("units rescale")
         for o in ctx.scene.all():
             ctx.scene.replace_shape(
                 o.id, g.scale(o.shape, (0, 0, 0), factor))
+    for lay in ctx.scene.layouts:
+        lay.convert_units(factor, rescaled=rescale == "Yes")
     ctx.scene.notify()
     ctx.echo(f"Document units: {UNIT_LABELS[choice]}."
              + (" Model rescaled." if rescale == "Yes" else ""))

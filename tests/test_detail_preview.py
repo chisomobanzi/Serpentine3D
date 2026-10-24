@@ -117,7 +117,7 @@ def test_the_ghost_shows_the_view_and_the_scale_you_chose(sheet):
     assert ghost.azimuth == pytest.approx(az)
     assert ghost.elevation == pytest.approx(el)
     assert ghost.scale_denom == pytest.approx(20.0)
-    assert ghost.scale_text() == "1:20"
+    assert ghost.scale_text("mm") == "1:20"
 
 
 def test_the_ghost_looks_at_the_model(sheet):

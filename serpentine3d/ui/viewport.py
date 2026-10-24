@@ -1719,7 +1719,7 @@ class Viewport(QOpenGLWidget):
             cx, cy = self.layout_view.paper_to_screen(ghost.x + ghost.w,
                                                       ghost.y + ghost.h)
             text = (f"{ghost.w:.1f} × {ghost.h:.1f} mm"
-                    f" · {ghost.scale_text()}")
+                    f" · {ghost.scale_text(self.scene.units)}")
         elif frame is not None:
             # Anything else dragged out as a frame, for the same reason: two
             # sides at the corner they meet at, rather than one number about a

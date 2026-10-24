@@ -230,7 +230,7 @@ TITLE_FIELDS = ("project", "title", "author", "date", "scale", "sheet")
 
 
 def draw_title_block(painter, to_dev, k, layout, sheet_index=1,
-                     sheet_count=1):
+                     sheet_count=1, scene=None):
     tb = layout.title_block
     if not tb:
         return
@@ -239,7 +239,8 @@ def draw_title_block(painter, to_dev, k, layout, sheet_index=1,
     fields.setdefault("date", datetime.date.today().isoformat())
     fields.setdefault("sheet", f"{sheet_index} / {sheet_count}")
     if not fields.get("scale") and layout.details:
-        fields["scale"] = layout.details[0].scale_text()
+        fields["scale"] = layout.details[0].scale_text(
+            scene.units if scene is not None else "mm")
 
     w, h = 92.0, 26.0
     m = layout.margin
@@ -359,7 +360,8 @@ def draw_all(painter, to_dev, k, layout, scene=None, sheet_index=1,
         draw_radial_dim(painter, to_dev, k, dim, scene)
     for dim in layout.adims:
         draw_angular_dim(painter, to_dev, k, dim)
-    draw_title_block(painter, to_dev, k, layout, sheet_index, sheet_count)
+    draw_title_block(painter, to_dev, k, layout, sheet_index, sheet_count,
+                     scene)
     draw_revision_table(painter, to_dev, k, layout)
     for bar in getattr(layout, "scale_bars", []):
         draw_scale_bar(painter, to_dev, k, bar[0], bar[1], bar[2], scene)

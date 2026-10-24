@@ -75,7 +75,7 @@ def test_refresh_displays_the_selected_details_existing_view_without_editing(she
     _pick(w, det)
     assert _control(panel).currentText() == name
     assert asdict(det) == before
-    assert _scale_combo(panel).currentText() == det.scale_text()
+    assert _scale_combo(panel).currentText() == det.scale_text("mm")
 
 
 def test_nonstandard_camera_displays_custom_and_survives_refresh(sheet):

@@ -1667,7 +1667,8 @@ class MainWindow(QMainWindow):
 
     def _on_detail_entered(self, detail):
         """A click stepped into a detail instead of placing a point."""
-        self.ctx.echo(f"Now drawing inside the detail ({detail.scale_text()})"
+        self.ctx.echo("Now drawing inside the detail "
+                      f"({detail.scale_text(self.scene.units)})"
                       " — pick again to place the point.")
         self._update_status()
 

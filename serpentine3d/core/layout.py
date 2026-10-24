@@ -1,16 +1,21 @@
 """Paper-space layouts: sheets, detail views, and annotations.
 
-Dimensions are millimetres of paper. A detail's scale is stored as the
-denominator N of 1:N — one millimetre of paper shows N model units
-(Serpentine3D treats one model unit as one millimetre for drafting).
+Dimensions are millimetres of paper. A detail keeps its scale as
+`scale_denom`, the model units one millimetre of paper shows. The scale it
+is written as is a ratio of real lengths, so the two differ by the
+document's units: 1:4 in an inch document is 4/25.4 inches to the paper
+millimetre (`format_scale`, `parse_scale`).
 """
 
 from __future__ import annotations
 
 import copy
 import math
+import re
 import uuid
 from dataclasses import dataclass, field, fields, replace
+
+from ..utils.units import TO_MM, parse_length
 
 # landscape (width, height) in mm
 PAPER_SIZES = {
@@ -24,6 +29,26 @@ PAPER_SIZES = {
 }
 
 STANDARD_SCALES = [1, 2, 5, 10, 20, 50, 100, 200, 500]
+
+# The scales a detail is offered at, in the order they are offered. Metric
+# drawings and workshop drawings in inches give theirs as ratios; architects
+# and engineers in feet and inches name theirs by a length of paper and the
+# length of model it stands for, and a scale on the list is labelled by the
+# name it has there. No ratio is on a list twice: 3" = 1'-0" is the 1:4
+# already on it.
+METRIC_SCALES = ("1:1", "1:2", "1:5", "1:10", "1:20", "1:50", "1:100",
+                 "1:200")
+IMPERIAL_SCALES = (
+    "1:1", "1:2", "1:4", "1:8",
+    '1" = 1\'-0"', '3/4" = 1\'-0"', '1/2" = 1\'-0"', '3/8" = 1\'-0"',
+    '1/4" = 1\'-0"', '3/16" = 1\'-0"', '1/8" = 1\'-0"', '1/16" = 1\'-0"',
+    '1" = 10\'', '1" = 20\'', '1" = 50\'', '1" = 100\'',
+)
+
+
+def scale_presets(units: str) -> tuple:
+    """The scales a detail is offered at in a document of `units`."""
+    return IMPERIAL_SCALES if units in ("in", "ft") else METRIC_SCALES
 
 
 def _uid() -> str:
@@ -43,7 +68,7 @@ class DetailView:
     elevation: float = math.radians(89.9)
     target: list = field(default_factory=lambda: [0.0, 0.0, 0.0])
     perspective: bool = False
-    scale_denom: float = 10.0               # 1:10
+    scale_denom: float = 10.0               # model units to the paper mm
     perspective_distance: float = 60.0      # camera distance when perspective
     display_mode: str = "wireframe"         # wireframe|shaded|hidden|technical
     locked: bool = False
@@ -58,13 +83,11 @@ class DetailView:
         return (self.x <= px <= self.x + self.w
                 and self.y <= py <= self.y + self.h)
 
-    def scale_text(self) -> str:
-        d = self.scale_denom
+    def scale_text(self, units: str) -> str:
+        """The scale as it is written in a document of `units`."""
         if self.perspective:
             return "perspective"
-        if d >= 1:
-            return f"1:{d:g}"
-        return f"{1 / d:g}:1"
+        return format_scale(self.scale_denom, units)
 
 
 @dataclass
@@ -1126,6 +1149,34 @@ class Layout:
                 return d
         return None
 
+    def convert_units(self, factor: float, rescaled: bool):
+        """The document's units changed, one old unit being `factor` new.
+
+        Every scale on the sheet is a ratio of real lengths, and stays the
+        ratio it was: a detail at 1:4 is at 1:4 in the new units too, and a
+        dimension or a scale bar reads lengths at the scale it did.
+        `rescaled` says the model was scaled by `factor` to keep its real
+        size, so what looks at it or is anchored to it moves with it, and
+        the sheet plots as it did.
+        """
+        for det in self.details:
+            det.scale_denom *= factor
+            if rescaled:
+                det.target = [c * factor for c in det.target]
+                det.perspective_distance *= factor
+                if det.section_offset is not None:
+                    det.section_offset *= factor
+        for dim in [*self.dims, *self.rdims]:
+            dim.scale_denom *= factor
+        for bar in self.scale_bars:
+            bar[2] *= factor
+        if rescaled:
+            for dim in self.dims:
+                if dim.m1 is not None:
+                    dim.m1 = [c * factor for c in dim.m1]
+                if dim.m2 is not None:
+                    dim.m2 = [c * factor for c in dim.m2]
+
     def add(self, shape, name: str | None = None) -> PaperObject:
         """Put geometry on the paper, in millimetres.
 
@@ -1344,20 +1395,56 @@ def layouts_from_json(data: list) -> list:
     return layouts
 
 
-def parse_scale(text: str) -> float | None:
-    """'1:50' -> 50, '2:1' -> 0.5, '50' -> 50."""
-    text = text.strip().lower().replace(" ", "")
-    if ":" in text:
-        a, _, b = text.partition(":")
+def _scale_ratio(text: str, units: str) -> float | None:
+    """The ratio of real lengths a typed scale says: N of 1:N."""
+    if "=" in text:
+        paper, _, model = text.partition("=")
+        # an architect's 1-1/2" is the 1 1/2" a length is typed as
+        paper = re.sub(r"(\d)\s*-\s*(\d+/\d+)", r"\1 \2", paper)
+        a, b = parse_length(paper, units), parse_length(model, units)
+        ratio = b / a if (a or 0) > 0 and (b or 0) > 0 else None
+    else:
+        text = text.strip().lower().replace(" ", "")
         try:
-            a, b = float(a), float(b)
-            if a <= 0 or b <= 0:
-                return None
-            return b / a
+            if ":" in text:
+                a, _, b = text.partition(":")
+                a, b = float(a), float(b)
+                ratio = b / a if a > 0 and b > 0 else None
+            else:
+                ratio = float(text)
         except ValueError:
             return None
-    try:
-        v = float(text)
-        return v if v > 0 else None
-    except ValueError:
+    if ratio is None or not 0 < ratio < math.inf:
         return None
+    return ratio
+
+
+def parse_scale(text: str, units: str) -> float | None:
+    """A typed scale, as the `scale_denom` it sets in a document of `units`.
+
+    A ratio is of real lengths, so it means the same in any units: '1:50'
+    is a fiftieth of real size, '2:1' twice it, a bare '50' is 1:50, and in
+    an inch document 1:50 is 50/25.4 inches to the paper millimetre.
+    Architects and engineers name theirs by a length of paper and the
+    length of model it stands for, 1/4" = 1'-0" (1:48) or 1" = 20'
+    (1:240); a length there without units is in the document's.
+    """
+    ratio = _scale_ratio(text, units)
+    return None if ratio is None else ratio / TO_MM[units]
+
+
+# what each scale on offer says, which is the same in any units
+_PRESET_RATIOS = {name: _scale_ratio(name, "mm")
+                  for name in (*METRIC_SCALES, *IMPERIAL_SCALES)}
+
+
+def format_scale(denom: float, units: str) -> str:
+    """A `scale_denom` written as the ratio of real lengths it is, 1:N or
+    N:1, or by its name when it is a scale on offer in `units`."""
+    ratio = denom * TO_MM[units]
+    for name in scale_presets(units):
+        if math.isclose(_PRESET_RATIOS[name], ratio, rel_tol=1e-9):
+            return name
+    if ratio >= 1:
+        return f"1:{ratio:g}"
+    return f"{1 / ratio:g}:1"

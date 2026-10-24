@@ -802,7 +802,7 @@ class LayoutView:
             sx, sy = self.paper_to_screen(detail.x + 1.5, detail.y + 1.5)
             painter.setPen(QPen(QColor(90, 95, 105)))
             painter.setFont(QFont("sans", max(int(2.6 * self.px_per_mm), 7)))
-            label = detail.scale_text()
+            label = detail.scale_text(self.vp.scene.units)
             if detail.locked:
                 label += "  [locked]"
             painter.drawText(int(sx), int(sy) - 2, label)

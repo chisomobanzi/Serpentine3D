@@ -7,9 +7,10 @@ import numpy as np
 from ..core import clipping
 from ..core import geometry as g
 from ..core.layout import (
-    PAPER_SIZES, DetailView, Layout, LinearDim, TextNote, parse_scale,
-    unique_layout_name,
+    PAPER_SIZES, DetailView, Layout, LinearDim, TextNote, format_scale,
+    parse_scale, unique_layout_name,
 )
+from ..utils.units import TO_MM
 # a detail view named "front" should look where the front view looks
 from ..ui.camera import STANDARD_VIEWS as _VIEW_ANGLES
 from .base import (
@@ -163,7 +164,9 @@ def cmd_detail(ctx):
         return
         yield  # pragma: no cover
     owner = _window(ctx) or ctx
-    view, denom = getattr(owner, "_detail_placement_settings", ("Top", 100.0))
+    units = ctx.scene.units
+    # remembered as the ratio it was, which is the same in any units
+    view, ratio = getattr(owner, "_detail_placement_settings", ("Top", 100.0))
     bounds = ctx.scene.bbox()
     target = [0.0, 0.0, 0.0]
     if bounds is not None:
@@ -172,7 +175,8 @@ def cmd_detail(ctx):
     # Keep one identity throughout placement, for the detail rendering cache.
     detail = DetailView(azimuth=az, elevation=el, target=target,
                         perspective=(view == "Perspective"),
-                        scale_denom=float(denom), display_mode="wireframe")
+                        scale_denom=float(ratio) / TO_MM[units],
+                        display_mode="wireframe")
     if bounds is not None:
         import math
         radius = math.dist(bounds[0], bounds[1]) / 2 or 10.0
@@ -192,7 +196,7 @@ def cmd_detail(ctx):
     while True:
         stage = ("First corner of detail (on the paper)" if c1 is None
                  else "Opposite corner")
-        setting = "Fit model" if fit_model else detail.scale_text()
+        setting = "Fit model" if fit_model else detail.scale_text(units)
         value = yield PointReq(
             f"{stage} · {view} · {setting}",
             extra_options=("View", "Scale", "Fit"),
@@ -206,11 +210,11 @@ def cmd_detail(ctx):
             detail.perspective = view == "Perspective"
         elif isinstance(value, str) and value == "Scale":
             scale_text = yield TextReq("Scale (e.g. 1:10, 1:50)",
-                                       default=detail.scale_text())
-            denom = parse_scale(scale_text)
+                                       default=detail.scale_text(units))
+            denom = parse_scale(scale_text, units)
             if denom is None:
                 ctx.echo(f"Could not parse scale '{scale_text}' — keeping "
-                         f"{detail.scale_text()}.")
+                         f"{detail.scale_text(units)}.")
             else:
                 detail.scale_denom = float(denom)
                 fit_model = False
@@ -230,12 +234,13 @@ def cmd_detail(ctx):
     _frame_to(c2)
     detail.display_mode = "hidden"
     lay.details.append(detail)
-    owner._detail_placement_settings = (view, detail.scale_denom)
+    owner._detail_placement_settings = (view,
+                                        detail.scale_denom * TO_MM[units])
     lv = ctx.viewport.layout_view
     lv.selected = [("detail", detail)]
     lv.corners = []
     ctx.scene.notify("layouts")
-    ctx.echo(f"Detail created: {view} at {detail.scale_text()} "
+    ctx.echo(f"Detail created: {view} at {detail.scale_text(units)} "
              f"({w:g}x{h:g}mm). Edit it in Properties or double-click to enter.")
 
 
@@ -246,15 +251,16 @@ def cmd_detailscale(ctx):
         ctx.echo("Enter a detail first (double-click it).")
         return
         yield  # pragma: no cover
+    units = ctx.scene.units
     text = yield TextReq("New scale (e.g. 1:20)",
-                         default=detail.scale_text())
-    denom = parse_scale(text)
+                         default=detail.scale_text(units))
+    denom = parse_scale(text, units)
     if denom is None:
         ctx.echo(f"Could not parse '{text}'.")
         return
     detail.scale_denom = float(denom)
     ctx.scene.notify()
-    ctx.echo(f"Detail scale set to {detail.scale_text()}.")
+    ctx.echo(f"Detail scale set to {detail.scale_text(units)}.")
 
 
 @command("detailmode")
@@ -483,7 +489,8 @@ def cmd_dim(ctx):
     ctx.scene.notify()
     measured = length * scale_denom
     ctx.echo(f"Dimension placed: {measured:g}"
-             + (f" (anchored to detail at {detail.scale_text()})"
+             + (f" (anchored to detail at "
+                f"{detail.scale_text(ctx.scene.units)})"
                 if dim.detail_id else " mm on paper"))
 
 @command("leader", space="paper")
@@ -884,12 +891,13 @@ def cmd_scalebar(ctx):
         return
         yield  # pragma: no cover
     pos = yield PointReq("Scale bar position")
+    units = ctx.scene.units
     detail = lay.detail_at(pos[0], pos[1])
     denom = detail.scale_denom if detail and not detail.perspective else (
-        lay.details[0].scale_denom if lay.details else 10.0)
+        lay.details[0].scale_denom if lay.details else 10.0 / TO_MM[units])
     lay.scale_bars.append([pos[0], pos[1], denom])
     ctx.scene.notify()
-    ctx.echo(f"Scale bar placed (1:{denom:g}).")
+    ctx.echo(f"Scale bar placed ({format_scale(denom, units)}).")
 
 
 @command("detailsection")

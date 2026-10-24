@@ -27,6 +27,21 @@
 
 ### Fixed
 
+- **A detail's scale is real size in any units (#102).** A detail took
+  the model units one millimetre of paper shows for its ratio, which it
+  is only in millimetres. In an inch document "1:4" showed four inches to
+  the millimetre, 1:101.6, so an 18" part plotted 4.5 mm wide instead of
+  114.3 mm. A scale is now a ratio of real lengths wherever it is typed,
+  picked or printed. Inch and feet documents are also offered
+  architectural and engineering scales by name, from 1" = 1'-0" to
+  1/16" = 1'-0" and 1" = 10' to 1" = 100', and `detailscale` and
+  Properties take them typed. A sheet drawn before plots as it did;
+  outside millimetres its label now says the scale it always plotted at,
+  so an inch detail saved as "1:4" reads 1:101.6 until it is set again.
+  Changing the document's units keeps every detail, dimension and scale
+  bar at its scale, and one undo puts the units, the model and the sheets
+  back together; a change of units without a rescale could not be undone
+  at all. Reported by DarkBiscuits.
 - **A clipping plane cuts a detail as well (#94).** A detail is a view of
   the model, and a section is what most wants putting on a sheet, but
   every detail drew the model whole, whatever the clipping planes said.

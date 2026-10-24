@@ -30,7 +30,7 @@ side by side. Rhino makes you leave model space to look at a sheet.
 |---|---|
 | `layout` | create/list/rename/delete sheets (A4–A0, Letter, Tabloid) |
 | `detail` | drag a new detail view onto the sheet |
-| `detailscale` | set 1:N (accepts `1:50`, `2:1`, feet-inch scales) |
+| `detailscale` | set the scale (accepts `1:50`, `2:1`, `1/4" = 1'-0"`, `1" = 20'`) |
 | `detailmode` | wireframe / shaded / hidden / technical linework |
 | `detaillock` | freeze a detail's camera |
 | `detailsection` | live section cut with hatching |
@@ -46,6 +46,12 @@ The scale stays fixed as you resize the frame. Choose **Fit** to fit the model
 automatically as the rectangle changes; choose **Scale** to return to a fixed
 scale. Escape cancels placement. The finished detail stays selected so you can
 adjust its view and scale in **Properties**.
+
+A scale is a ratio of real lengths, so 1:4 is a quarter of real size in any
+units: an 18" part draws 114.3 mm (4 1/2") wide. In inch and feet documents
+the scale list also offers architectural and engineering scales by name, such
+as `1/4" = 1'-0"` and `1" = 20'`. Changing the document's units keeps every
+detail at its scale.
 
 Double-click a detail to *enter* it (pan/zoom acts on the model);
 click outside to leave. Selected details show corner grips for

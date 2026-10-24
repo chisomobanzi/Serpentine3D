@@ -86,7 +86,8 @@ def _paint_layout(painter: QPainter, window, layout, k: float):
             font.setPixelSize(int(2.6 * k))
             painter.setFont(font)
             lx, ly = pt(detail.x + 1.5, detail.y + 1.5)
-            painter.drawText(int(lx), int(ly), detail.scale_text())
+            painter.drawText(int(lx), int(ly),
+                             detail.scale_text(window.scene.units))
 
     _paint_paper_objects(painter, layout, k, pt)
 
