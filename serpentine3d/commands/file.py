@@ -59,9 +59,11 @@ def cmd_open(ctx):
     if not os.path.exists(path):
         ctx.echo(f"File not found: {path}")
         return
-    fileio.import_file(ctx.scene, path, replace=True)
+    notes = []
+    fileio.import_file(ctx.scene, path, replace=True, notes=notes)
     ctx.current_path = path if path.endswith(".serp") else None
-    ctx.echo(f"Opened {path}: {len(ctx.scene.all())} object(s).")
+    ctx.echo(f"Opened {path}: {len(ctx.scene.all())} object(s)"
+             + "".join(f", {note}" for note in notes) + ".")
     if ctx.viewport:
         ctx.viewport.zoom_extents()
 
@@ -78,8 +80,10 @@ def cmd_import(ctx):
     if not os.path.exists(path):
         ctx.echo(f"File not found: {path}")
         return
-    n = fileio.import_file(ctx.scene, path)
-    ctx.echo(f"Imported {n} object(s) from {os.path.basename(path)}.")
+    notes = []
+    n = fileio.import_file(ctx.scene, path, notes=notes)
+    ctx.echo(f"Imported {n} object(s) from {os.path.basename(path)}"
+             + "".join(f", {note}" for note in notes) + ".")
     # Fit the view for the person who asked; a script or an assistant
     # driving the command headless leaves the modeller's camera alone.
     if ctx.viewport and has_text_editor(ctx):

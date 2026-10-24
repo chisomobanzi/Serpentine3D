@@ -41,6 +41,30 @@ def convert(value: float, from_units: str, to_units: str) -> float:
     return value * TO_MM[from_units] / TO_MM[to_units]
 
 
+def converted_note(source: str, units: str) -> str:
+    """What an import says when the file's unit was not the drawing's.
+
+    `source` is one of UNITS or, for a unit only the file knows, the file's
+    own name for it ("yards")."""
+    plain = {**UNIT_LABELS, "ft": "feet"}
+    return f"converted from {plain.get(source, source)} to {plain[units]}"
+
+
+def rescale(shape, factor: float):
+    """`shape` scaled about the origin, the way a unit conversion is.
+
+    A promise of geometry stays a promise: what a file keeps out of sight
+    is converted when something asks, and scaled then."""
+    from ..core import geometry
+    from ..core.deferred import DeferredShape
+    if isinstance(shape, DeferredShape):
+        return DeferredShape(
+            lambda d=shape: [geometry.scale(s, (0, 0, 0), factor)
+                             for s in d.shapes()],
+            kind=shape.kind)
+    return geometry.scale(shape, (0, 0, 0), factor)
+
+
 def parse_length(text: str, doc_units: str = "mm") -> float | None:
     """Parse a typed length into document units. None if unparseable."""
     text = text.strip()

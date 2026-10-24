@@ -546,14 +546,15 @@ class SerpApi:
         if not os.path.exists(path):
             raise ApiError(f"File not found: {path}")
         self.history.checkpoint("import")
+        notes = []
         try:
-            n = fileio.import_file(self.scene, path)
+            n = fileio.import_file(self.scene, path, notes=notes)
         except Exception as exc:
             self.history.discard_checkpoint()
             raise ApiError(f"Import failed: {exc}") from exc
         if zoom_extents:
             self.viewport.zoom_extents()
-        return {"imported": n}
+        return {"imported": n, **({"notes": notes} if notes else {})}
 
     def export_file(self, path: str, selected_only: bool = False) -> dict:
         path = os.path.abspath(os.path.expanduser(path))
