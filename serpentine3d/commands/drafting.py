@@ -11,7 +11,7 @@ from ..core.layout import (
     hatch_patterns_of, parse_scale, pattern_label, pattern_named,
     unique_layout_name,
 )
-from ..utils.units import TO_MM
+from ..utils.units import TO_MM, format_paper_size, paper_units
 # a detail view named "front" should look where the front view looks
 from ..ui.camera import STANDARD_VIEWS as _VIEW_ANGLES
 from .base import (
@@ -61,7 +61,8 @@ def cmd_layout(ctx):
             ctx.echo("No layouts. Use 'layout' > New to create one.")
         else:
             ctx.echo("Layouts: " + ", ".join(
-                f"{lay.name} ({lay.paper_w:g}x{lay.paper_h:g}mm, "
+                f"{lay.name} ("
+                f"{format_paper_size(lay.paper_w, lay.paper_h, scene.units)}, "
                 f"{len(lay.details)} details)" for lay in scene.layouts))
         return
 
@@ -71,11 +72,19 @@ def cmd_layout(ctx):
         size = yield OptionReq(
             "Paper size", options=list(PAPER_SIZES) + ["Custom"],
             default="A3")
-        if size == "Custom":
+        if size == "Custom" and paper_units(scene.units) == "mm":
             w = yield NumberReq("Paper width (mm)", default=420.0,
                                 minimum=10)
             h = yield NumberReq("Paper height (mm)", default=297.0,
                                 minimum=10)
+        elif size == "Custom":
+            # in the units the sheet is read in, from Tabloid
+            per = TO_MM["in"]
+            w = yield NumberReq("Paper width (in)", default=17.0,
+                                minimum=10 / per)
+            h = yield NumberReq("Paper height (in)", default=11.0,
+                                minimum=10 / per)
+            w, h = w * per, h * per
         else:
             orientation = yield OptionReq(
                 "Orientation", options=["Landscape", "Portrait"],
@@ -88,7 +97,8 @@ def cmd_layout(ctx):
         scene.notify()
         if _window(ctx) is not None:
             _window(ctx).switch_space(lay.id)
-        ctx.echo(f"Created layout '{name}' ({w:g}x{h:g}mm). "
+        ctx.echo(f"Created layout '{name}' "
+                 f"({format_paper_size(w, h, scene.units)}). "
                  "Use 'detail' to place views of the model.")
         return
 
@@ -471,13 +481,14 @@ def cmd_dim(ctx):
         return
     n = np.array([-d[1], d[0]]) / length
     offset = float(np.dot(np.array(p3[:2]) - a, n))
-    # dimensions over a detail read in model units at the detail's scale
+    # dimensions over a detail read in model units at the detail's scale,
+    # and ones on bare paper read the paper
     mid = (a + b) / 2
     detail = lay.detail_at(float(mid[0]), float(mid[1]))
-    scale_denom = detail.scale_denom if (detail and
-                                         not detail.perspective) else 1.0
+    scale_denom, on_paper = _dim_scale_at(lay, float(mid[0]), float(mid[1]))
     dim = LinearDim(x1=p1[0], y1=p1[1], x2=p2[0], y2=p2[1],
-                    offset=offset, scale_denom=scale_denom)
+                    offset=offset, scale_denom=scale_denom,
+                    measures_paper=on_paper)
     # anchor to the detail: the dim follows detail pan/zoom/rescale
     if detail is not None and not detail.perspective \
             and detail.contains(p1[0], p1[1]) \
@@ -488,11 +499,14 @@ def cmd_dim(ctx):
         dim.m2 = detail_unproject(detail, p2[0], p2[1])
     lay.dims.append(dim)
     ctx.scene.notify()
-    measured = length * scale_denom
-    ctx.echo(f"Dimension placed: {measured:g}"
-             + (f" (anchored to detail at "
-                f"{detail.scale_text(ctx.scene.units)})"
-                if dim.detail_id else " mm on paper"))
+    if on_paper:
+        ctx.echo(f"Dimension placed: {ctx.scene.format_paper_length(length)}"
+                 " on paper")
+    else:
+        ctx.echo(f"Dimension placed: "
+                 f"{ctx.scene.format_length(length * scale_denom)} "
+                 f"({'anchored to' if dim.detail_id else 'through'} the detail "
+                 f"at {detail.scale_text(ctx.scene.units)})")
 
 @command("leader", space="paper")
 def cmd_leader(ctx):
@@ -966,9 +980,13 @@ def _round_spacing(size: float) -> float:
 
 
 def _dim_scale_at(lay, x, y):
+    """The scale a dimension placed at paper (x, y) measures at, and whether
+    it measures the paper: it does on bare paper, and over a perspective
+    detail, which has no scale to read the model at."""
     detail = lay.detail_at(x, y)
-    return (detail.scale_denom if detail and not detail.perspective
-            else 1.0)
+    if detail is None or detail.perspective:
+        return 1.0, True
+    return detail.scale_denom, False
 
 
 @command("dimradius", aliases=("dimr",), space="paper")
@@ -981,10 +999,10 @@ def cmd_dimradius(ctx):
     from ..core.layout import RadialDim
     center = yield PointReq("Circle centre (on the paper)")
     edge = yield PointReq("Point on the circle", rubber_from=center)
+    scale_denom, on_paper = _dim_scale_at(lay, center[0], center[1])
     lay.rdims.append(RadialDim(
         cx=center[0], cy=center[1], px=edge[0], py=edge[1],
-        diameter=False,
-        scale_denom=_dim_scale_at(lay, center[0], center[1])))
+        diameter=False, scale_denom=scale_denom, measures_paper=on_paper))
     ctx.scene.notify()
     ctx.echo("Radius dimension placed.")
 
@@ -999,9 +1017,10 @@ def cmd_dimdiameter(ctx):
     from ..core.layout import RadialDim
     center = yield PointReq("Circle centre (on the paper)")
     edge = yield PointReq("Point on the circle", rubber_from=center)
+    scale_denom, on_paper = _dim_scale_at(lay, center[0], center[1])
     lay.rdims.append(RadialDim(
         cx=center[0], cy=center[1], px=edge[0], py=edge[1], diameter=True,
-        scale_denom=_dim_scale_at(lay, center[0], center[1])))
+        scale_denom=scale_denom, measures_paper=on_paper))
     ctx.scene.notify()
     ctx.echo("Diameter dimension placed.")
 

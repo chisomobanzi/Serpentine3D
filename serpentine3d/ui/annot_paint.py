@@ -10,7 +10,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QPointF
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QTransform
 
-from ..core.layout import (MAX_PAPER_SEGMENTS, annotation_style,
+from ..core.layout import (MAX_PAPER_SEGMENTS, annotation_style, measured_text,
                            note_text_height, resolve_associative)
 
 INK = QColor(25, 25, 30)
@@ -167,9 +167,7 @@ def draw_lin_dim(painter, to_dev, k, dim, scene=None):
     _line(painter, to_dev, ao, bo)
     _arrow(painter, to_dev, ao, d, st["arrow_size"])
     _arrow(painter, to_dev, bo, -d, st["arrow_size"])
-    measured = length * dim.scale_denom
-    text = dim.text or (scene.format_length(measured) if scene
-                        else f"{measured:g}")
+    text = dim.text or measured_text(dim, length, scene)
     mid = (a + b) / 2 + n * (dim.offset + 2.2)
     painter.setFont(_font(k, st["text_height"]))
     tx, ty = to_dev(mid[0], mid[1])
@@ -190,10 +188,9 @@ def draw_radial_dim(painter, to_dev, k, dim, scene=None):
     _arrow(painter, to_dev, p, -d)
     if dim.diameter:
         _arrow(painter, to_dev, start, d)
-    measured = r * dim.scale_denom * (2 if dim.diameter else 1)
     prefix = "Ø" if dim.diameter else "R"
-    text = dim.text or (prefix + (scene.format_length(measured) if scene
-                                  else f"{measured:g}"))
+    text = dim.text or prefix + measured_text(
+        dim, r * (2 if dim.diameter else 1), scene)
     label = p + d * 5
     painter.setFont(_font(k, 3.2))
     tx, ty = to_dev(label[0], label[1])

@@ -14,6 +14,7 @@ from PySide6.QtGui import (
 )
 
 from ..core import linetype as _lt
+from ..core.layout import measured_text
 
 
 def export_layout_pdf(window, layout, path: str):
@@ -247,9 +248,7 @@ def _paint_dim(painter, dim, layout, k, pt, scene=None):
         line(tip, tip + w + perp)
         line(tip, tip + w - perp)
     mid = (a + b) / 2 + n * (dim.offset + 2.0)
-    measured = length * dim.scale_denom
-    text = dim.text or (scene.format_length(measured) if scene
-                        else f"{measured:g}")
+    text = dim.text or measured_text(dim, length, scene)
     font = QFont("sans")
     font.setPixelSize(int(3.2 * k))
     painter.setFont(font)

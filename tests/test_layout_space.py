@@ -280,13 +280,17 @@ def test_the_readout_follows_the_cursor_on_the_paper(sheet):
     assert abs(ro.x() - sx) < 40 and abs(ro.y() - sy) < 40
 
 
-def test_a_paper_leg_is_measured_in_millimetres(sheet):
-    """Paper is millimetres whatever the model is drawn in."""
+@pytest.mark.parametrize("units, reads", [
+    ("mm", "50 mm"), ("m", "50 mm"), ("in", '1.969"'), ("ft", '1.969"')])
+def test_a_paper_leg_is_measured_in_the_sheets_units(sheet, units, reads):
+    """Paper is not the model: millimetres in a metric document whatever it
+    is drawn in, and inches in an inch or a feet one, as Rhino's templates
+    set their layouts."""
     w, _, _ = sheet
-    w.scene.units = "ft"
+    w.scene.units = units
     w.viewport.point_space = "paper"
     _drag(w, (40.0, 50.0, 0.0), (90.0, 50.0, 0.0))
-    assert w.viewport._draw_readout.text() == "50 mm"
+    assert w.viewport._draw_readout.text() == reads
 
 
 def test_a_leg_inside_a_detail_is_measured_in_the_model(sheet):

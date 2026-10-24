@@ -1706,10 +1706,10 @@ class Viewport(QOpenGLWidget):
 
     def _readout_length(self, length: float) -> str:
         """In the units it was drawn in: the model's through a detail or in the
-        model window, millimetres on the paper itself."""
+        model window, the sheet's on the paper itself."""
         if self.space == "model" or self._drawing_through() is not None:
             return self.scene.format_length(length)
-        return _units.format_length(length, "mm")
+        return self.scene.format_paper_length(length)
 
     def _update_draw_readout(self):
         """Show how long the leg under the cursor is while a command is
@@ -1740,8 +1740,11 @@ class Viewport(QOpenGLWidget):
             # at is where they belong — there is no band to hang them off.
             cx, cy = self.layout_view.paper_to_screen(ghost.x + ghost.w,
                                                       ghost.y + ghost.h)
-            text = (f"{ghost.w:.1f} × {ghost.h:.1f} mm"
-                    f" · {ghost.scale_text(self.scene.units)}")
+            size = (f"{ghost.w:.1f} × {ghost.h:.1f} mm"
+                    if _units.paper_units(self.scene.units) == "mm"
+                    else _units.format_paper_size(ghost.w, ghost.h,
+                                                  self.scene.units))
+            text = f"{size} · {ghost.scale_text(self.scene.units)}"
         elif frame is not None:
             # Anything else dragged out as a frame, for the same reason: two
             # sides at the corner they meet at, rather than one number about a

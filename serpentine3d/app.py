@@ -2542,6 +2542,7 @@ class MainWindow(QMainWindow):
         """Create a new paper-space drafting sheet and switch to it — the '+'
         button's action, i.e. 'layout' > New in one click."""
         from .core.layout import PAPER_SIZES, Layout
+        from .utils.units import format_paper_size
         w, h = PAPER_SIZES.get(paper, PAPER_SIZES["A3"])
         if not landscape:
             w, h = h, w
@@ -2551,7 +2552,8 @@ class MainWindow(QMainWindow):
         self.scene.notify()
         self.switch_space(lay.id)
         self.command_line.echo(
-            f"Created sheet '{lay.name}' ({w:g}x{h:g}mm). "
+            f"Created sheet '{lay.name}' "
+            f"({format_paper_size(w, h, self.scene.units)}). "
             "Use 'detail' to place model views.")
         return lay
 
