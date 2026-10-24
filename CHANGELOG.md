@@ -136,6 +136,18 @@
   grid writes no depth, so it now stretches only the far plane, and the
   near plane is measured against the drawing.
 
+- **A command that finishes before its inputs run out says so (#103).**
+  The API's `command` (and so MCP's `serp_command`) and a script's
+  `doc.run` raised an error for too few inputs but dropped spare ones
+  without a word. With a layout active, `exportpdf` does not ask which
+  layout, so `["Seat blank", "C:/work/seat.pdf"]` had the sheet name
+  answer the PDF path: the real path was ignored and the reply said it had
+  exported, to `Seat blank.pdf` in the working folder. Spare inputs are now
+  an error that names them, says which prompt each used input answered,
+  and says what the command did, since its result stands. The MCP tool's
+  own example passed `extrude` a cap answer it never asks for, and no
+  longer does.
+
 - **A model keeps its real size across STEP, Rhino, DXF and .serp (#101).**
   The drawing's units were ignored by most exchange. STEP was written with
   the drawing's numbers and a millimetre label, so a 1 in cube from an inch
