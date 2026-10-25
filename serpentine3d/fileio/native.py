@@ -225,13 +225,43 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
         doc["requires"] = "0.12.2"
     # A release that knows only Lines, Cross and Solid refuses a model
     # hatch drawn with any other pattern, and the whole file with it
-    # (#92). A layer naming one is only drawn with lines there.
+    # (#92). Other hatching it opens and keeps only as far as it knows it,
+    # so a save there loses the rest for good, and that asks too.
     from ..core.hatch_patterns import is_legacy
-    if any(isinstance(shape, HatchShape) and not is_legacy(shape.pattern)
-           for shape in new_shapes):
+    if (any(isinstance(shape, HatchShape) and not is_legacy(shape.pattern)
+            for shape in new_shapes)
+            or doc["hatch_patterns"] or _hatching_0121_loses(scene)):
         doc["version"] = 8
         doc["requires"] = "0.12.2"
     _write_container(doc, path, thumbnail, blobs)
+
+
+def _hatching_0121_loses(scene) -> bool:
+    """Whether 0.12.1 would open this drawing and let some of its hatching
+    go without a word: a hatch's own colour or background, a cut's
+    background (#91), or a cut in any pattern but none, Lines, Cross and
+    Solid, which it fills with lines. The patterns a drawing carries go
+    the same way, and are asked about where they are written."""
+    from ..core.hatch_patterns import is_legacy
+    from ..core.layers import HATCH_BACKGROUND_NONE
+
+    def kept(pattern) -> bool:
+        name = str(pattern or "").strip().lower()
+        return name in ("", "none") or is_legacy(name)
+
+    for layer in scene.layers.all():
+        if (layer.hatch_background != HATCH_BACKGROUND_NONE
+                or not kept(layer.hatch)):
+            return True
+    for obj in scene.all():
+        if any((obj.hatch_style or {}).values()):
+            return True
+        fill = obj.section_fill
+        if fill and (fill.get("background", HATCH_BACKGROUND_NONE)
+                     != HATCH_BACKGROUND_NONE
+                     or not kept(fill.get("pattern"))):
+            return True
+    return False
 
 
 def _carries_an_origin(shape) -> bool:

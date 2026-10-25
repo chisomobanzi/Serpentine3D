@@ -106,6 +106,15 @@
 
 ### Fixed
 
+- **A drawing whose hatching 0.12.1 would lose says it needs 0.12.2.**
+  0.12.1 opens a newer drawing and keeps only what it knows of its
+  hatching. A hatch's own colour or background, a cut's background, a cut
+  in any pattern but Lines, Cross or Solid, and the patterns a drawing
+  carries went without a word, and a save from there lost them for good.
+  Such a drawing is now written as file version 8 and names the release
+  that keeps it, so 0.12.1 refuses it by name. Hatching it can keep is
+  written exactly as before.
+
 - **A section on a sheet keeps its corners.** A detail traced each face a
   cut leaves at points spaced evenly round its loops, so every corner was
   cut off, and the cut line and the hatching drew the chamfer, on the
