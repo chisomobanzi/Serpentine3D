@@ -87,11 +87,14 @@ document's units. One drawn on bare paper measures the paper, in the units
 the sheet is read in: millimetres in a metric document, inches in an inch or
 feet document, as Rhino's templates set their layouts. Points and lengths
 typed on bare paper are in those units too, so `2,1` on an inch sheet is two
-inches across and one up, and `50mm` or `1in` still mean what they say. Text
-height, print widths and hatch spacing stay in millimetres in any document.
+inches across and one up, and `50mm` or `1in` still mean what they say. So
+are text heights and arrow sizes, as CAD letters a drawing in its own units.
+Print widths and hatch spacing stay in millimetres in any document.
 
 **Styles**: `dimstyle` creates named text/arrow sizes shared by the
-document (`Standard`, `Small`, `Heading` are built in).
+document (`Standard`, `Small`, `Heading` are built in). In a metric document
+they letter at 3.2, 2.2 and 6 mm, and in an inch or feet one at 1/8", 0.09"
+and 1/4". Lettering keeps its sizes when the document's units change.
 
 ## Text and lettering
 
@@ -104,7 +107,8 @@ right alignment are available there without opening another window. Text edits
 support Undo and Redo.
 
 Letter height measures capital letters: model lettering uses the document's
-units, and layout notes use paper millimetres. Each line aligns to the picked
+units, and layout notes use the units the sheet is read in, inches in an inch
+or feet document and millimetres in a metric one. Each line aligns to the picked
 baseline origin. Font metrics determine the spacing between lines.
 
 Keep model lettering as **Editable text** to change its words and formatting

@@ -201,6 +201,9 @@ class Scene:
         self.units: str = "mm"          # document units (utils/units.py)
         self.block_defs: dict = {}      # id -> {"name", "shapes": [TopoDS]}
         self.annot_styles: dict = {}    # name -> text/dim style overrides
+        # the built-in styles the sheets are lettered in, "metric" or
+        # "inch"; None for the ones the units give (layout.style_set)
+        self.annot_style_set: str | None = None
         # name -> HatchPattern, the patterns loaded from .pat files (#92)
         self.hatch_patterns: dict = {}
         # the names the last load gave, a fresh list each time; not saved
@@ -641,6 +644,7 @@ class Scene:
         self.sheet_groups = []
         self.block_defs = {}
         self.annot_styles = {}
+        self.annot_style_set = None
         self.hatch_patterns = {}
         self.image_planes = []
         self.history_records = []
@@ -680,6 +684,7 @@ class Scene:
             "sheet_groups": copy.deepcopy(self.sheet_groups),
             "block_defs": {k: dict(v) for k, v in self.block_defs.items()},
             "annot_styles": {k: dict(v) for k, v in self.annot_styles.items()},
+            "annot_style_set": self.annot_style_set,
             "hatch_patterns": dict(self.hatch_patterns),
             "image_planes": copy.deepcopy(self.image_planes),
             "history_records": copy.deepcopy(self.history_records),
@@ -704,6 +709,7 @@ class Scene:
                            snap.get("block_defs", {}).items()}
         self.annot_styles = {k: dict(v) for k, v in
                              snap.get("annot_styles", {}).items()}
+        self.annot_style_set = snap.get("annot_style_set")
         self.hatch_patterns = dict(snap.get("hatch_patterns", {}))
         if not any(obj.kind == "picture" for obj in self.all()):
             self.image_planes = copy.deepcopy(snap.get("image_planes", []))

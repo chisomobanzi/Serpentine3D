@@ -43,15 +43,15 @@ KEYBOARD_ONLY = {
         "the size of the sheet, which is not in the model at all",
     ("layout", "Paper height (in)"):
         "the size of the sheet, which is not in the model at all",
-    ("text", "Text height (mm)"):
+    ("text", "Text height"):
         "annotation height on the printed sheet, not model space",
     ("hatch", "Line spacing"):
         "how dense the filling is over an area that is already drawn, "
         "with nothing on screen for a drag to measure it against; on a "
         "sheet it is paper millimetres besides",
-    ("dimstyle", "Text height (mm)"):
+    ("dimstyle", "Text height"):
         "a style setting with no geometry on screen to drag against",
-    ("dimstyle", "Arrow size (mm)"):
+    ("dimstyle", "Arrow size"):
         "a style setting with no geometry on screen to drag against",
     ("layer", "Edge width on screen (pixels)"):
         "a width in screen pixels, which has no length in the model",

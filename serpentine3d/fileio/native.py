@@ -85,7 +85,7 @@ def read_thumbnail(path: str) -> bytes | None:
 
 
 def save_scene(scene, path: str, thumbnail: bytes | None = None):
-    from ..core.layout import layouts_to_json, sheet_groups_to_json
+    from ..core.layout import layouts_to_json, sheet_groups_to_json, style_set
     clouds = [o for o in scene.all() if o.kind == "pointcloud"]
     trajectories = list(getattr(scene, "trajectories", None) or [])
     session = getattr(scene, "session", None) or None
@@ -114,6 +114,8 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
         "layouts": layouts_to_json(scene.layouts),
         "sheet_groups": sheet_groups_to_json(scene.sheet_groups),
         "annot_styles": {k: dict(v) for k, v in scene.annot_styles.items()},
+        # which built-in styles its lettering is in, so it keeps their sizes
+        "annot_style_set": style_set(scene),
         "hatch_patterns": [p.to_dict() for p in scene.hatch_patterns.values()],
         "history_records": scene.history_records,
         "layers": [
@@ -557,11 +559,17 @@ def _load_doc(scene, doc: dict, blobs=None):
             "shapes": [geometry.shape_from_bytes(base64.b64decode(s))
                        for s in bd["shapes"]],
         }
-    from ..core.layout import layouts_from_json, sheet_groups_from_json
+    from ..core.layout import (layouts_from_json, lettered_in_builtin_styles,
+                               sheet_groups_from_json)
     scene.layouts = layouts_from_json(doc.get("layouts", []))
     scene.sheet_groups = sheet_groups_from_json(doc.get("sheet_groups", []))
     scene.annot_styles = {k: dict(v) for k, v in
                           doc.get("annot_styles", {}).items()}
+    # What is lettered keeps the sizes it was lettered at: in the built-in
+    # styles the file names, or, from a release before inch styles, the
+    # metric ones. With nothing lettered, the units choose (style_set).
+    scene.annot_style_set = (doc.get("annot_style_set", "metric")
+                             if lettered_in_builtin_styles(scene) else None)
     from ..core.hatch_patterns import HatchPattern
     scene.hatch_patterns = {}
     for data in doc.get("hatch_patterns", []):

@@ -7,16 +7,16 @@ import numpy as np
 from ..core import clipping
 from ..core import geometry as g
 from ..core.layout import (
-    PAPER_SIZES, DetailView, Layout, LinearDim, TextNote, format_scale,
-    hatch_patterns_of, parse_scale, pattern_label, pattern_named,
-    unique_layout_name,
+    PAPER_SIZES, DetailView, Layout, LinearDim, TextNote, annotation_style,
+    default_note_height, format_scale, hatch_patterns_of, parse_scale,
+    pattern_label, pattern_named, unique_layout_name,
 )
 from ..utils.units import TO_MM, format_paper_size, paper_units
 # a detail view named "front" should look where the front view looks
 from ..ui.camera import STANDARD_VIEWS as _VIEW_ANGLES
 from .base import (
-    FileReq, FormField, FormReq, NumberReq, OptionReq, PointReq, SelectReq,
-    TextReq, TextEditorReq, command, has_text_editor,
+    FileReq, FormField, FormReq, LengthReq, NumberReq, OptionReq, PointReq,
+    SelectReq, TextReq, TextEditorReq, command, has_text_editor,
 )
 from .regions import coplanar_curves, pick_regions
 
@@ -444,15 +444,18 @@ def cmd_text(ctx):
     pos = yield PointReq("Text position (baseline anchor)")
     if has_text_editor(ctx) or getattr(ctx, "replay_text_inline", False):
         answer = yield TextEditorReq(
-            "Text", units="mm", anchor=pos, paper_layout=lay)
+            "Text", units=paper_units(ctx.scene.units), anchor=pos,
+            paper_layout=lay,
+            values={"height": default_note_height(ctx.scene)})
         if isinstance(answer, dict):
             ctx.echo("Note placed.")
             return
     content = yield TextReq(r"Text (\n for a new line)")
     content = content.replace("\\n", "\n")
-    height = yield NumberReq("Text height (mm)", default=4.0, minimum=0.5,
-                             choices={"Style": ["None", "Standard", "Small",
-                                                "Heading"]})
+    height = yield LengthReq(
+        "Text height", paper=True, default=default_note_height(ctx.scene),
+        minimum=0.5, choices={"Style": ["None", "Standard", "Small",
+                                        "Heading"]})
     style = ctx.opt("Style", "None")
     lay.notes.append(TextNote(x=pos[0], y=pos[1], text=content,
                               height=float(height),
@@ -1233,12 +1236,11 @@ def cmd_dimstyle(ctx):
     ctx.echo("Styles: " + ", ".join(known))
     name = yield TextReq("Style name (new or existing)", default="Standard")
     name = name.strip() or "Standard"
-    from ..ui.annot_paint import style_of
-    cur = style_of(ctx.scene, name)
-    th = yield NumberReq("Text height (mm)", default=cur["text_height"],
-                         minimum=0.5)
-    ar = yield NumberReq("Arrow size (mm)", default=cur["arrow_size"],
-                         minimum=0.2)
+    cur = annotation_style(ctx.scene, name)
+    th = yield LengthReq("Text height", paper=True,
+                         default=cur["text_height"], minimum=0.5)
+    ar = yield LengthReq("Arrow size", paper=True,
+                         default=cur["arrow_size"], minimum=0.2)
     ctx.scene.annot_styles[name] = {"text_height": float(th),
                                     "arrow_size": float(ar),
                                     "dim_offset": cur["dim_offset"]}
@@ -1311,8 +1313,9 @@ def cmd_sheetindex(ctx):
     for i, l in enumerate(ctx.scene.layouts, start=1):
         title = l.title_block.get("fields", {}).get("title", "")
         lines.append(f"{i:>2}  {l.name}" + (f" — {title}" if title else ""))
+    height = annotation_style(ctx.scene, "Standard")["text_height"]
     lay.notes.append(TextNote(x=pos[0], y=pos[1], text="\n".join(lines),
-                              height=3.2))
+                              height=height))
     ctx.scene.notify()
     ctx.echo(f"Sheet index placed ({len(ctx.scene.layouts)} sheets).")
 

@@ -15,7 +15,7 @@ import re
 import uuid
 from dataclasses import dataclass, field, fields, replace
 
-from ..utils.units import TO_MM, parse_length
+from ..utils.units import TO_MM, paper_units, parse_length
 
 # landscape (width, height) in mm
 PAPER_SIZES = {
@@ -512,12 +512,62 @@ DEFAULT_STYLES = {
     "Heading":  {"text_height": 6.0, "arrow_size": 2.2, "dim_offset": 8.0},
 }
 
+# A sheet read in inches is lettered from round inches near the metric
+# sizes, 1/8" text for Standard, though they are kept in millimetres too.
+INCH_STYLES = {
+    name: {key: inches * TO_MM["in"] for key, inches in sizes.items()}
+    for name, sizes in {
+        "Standard": {"text_height": 0.125, "arrow_size": 0.09,
+                     "dim_offset": 0.3},
+        "Small":    {"text_height": 0.09, "arrow_size": 0.06,
+                     "dim_offset": 0.2},
+        "Heading":  {"text_height": 0.25, "arrow_size": 0.09,
+                     "dim_offset": 0.3},
+    }.items()
+}
+
+# What a new note is lettered at when nothing else says, in either set.
+NOTE_HEIGHTS = {"metric": 4.0, "inch": 0.15 * TO_MM["in"]}
+
+
+def style_set(scene) -> str:
+    """The built-in styles `scene` is lettered in, "metric" or "inch".
+
+    They are the ones for the units its sheets are read in, unless what is
+    lettered already was lettered in the others (`Scene.annot_style_set`):
+    lettering keeps its sizes when the units change, and a drawing written
+    before inch documents had inch styles stays metric."""
+    chosen = getattr(scene, "annot_style_set", None)
+    if chosen in ("metric", "inch"):
+        return chosen
+    units = paper_units(getattr(scene, "units", "mm"))
+    return "inch" if units == "in" else "metric"
+
+
+def builtin_styles(scene) -> dict:
+    """Standard, Small and Heading as `scene` letters them."""
+    return INCH_STYLES if style_set(scene) == "inch" else DEFAULT_STYLES
+
+
+def default_note_height(scene) -> float:
+    """A new note's cap height, in millimetres."""
+    return NOTE_HEIGHTS[style_set(scene)]
+
+
+def lettered_in_builtin_styles(scene) -> bool:
+    """Whether anything on a sheet takes its size from a built-in style:
+    every linear dimension, an unstyled one from Standard, and any styled
+    note. Radial and angular dimensions are lettered at their own size."""
+    return any(lay.dims or any(note.style for note in lay.notes)
+               for lay in getattr(scene, "layouts", ()))
+
 
 def annotation_style(scene, name: str) -> dict:
     """Named annotation style merged over the Standard defaults."""
-    props = dict(DEFAULT_STYLES["Standard"])
+    builtin = builtin_styles(scene)
+    props = dict(builtin["Standard"])
     if name:
-        props.update(DEFAULT_STYLES.get(name, {}))
+        props.update(builtin.get(name, {}))
         if scene is not None:
             props.update(getattr(scene, "annot_styles", {}).get(name, {}))
     return props

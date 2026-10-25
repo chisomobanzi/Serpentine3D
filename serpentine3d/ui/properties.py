@@ -2162,16 +2162,42 @@ class PropertiesPanel(QWidget):
             family = default_typography()["font_family"]
         self.text_font_family.setCurrentFont(QFont(family))
         self._populate_text_styles(family, source.font_style)
-        height = source.height
-        if isinstance(editable, TextNote) and editable.style:
-            from .annot_paint import style_of
-            height = style_of(self.scene, editable.style)["text_height"]
-        self.text_height.setSuffix(
-            " mm" if isinstance(editable, TextNote)
-            else " " + self.scene.units)
-        self.text_height.setValue(float(height))
+        unit, per = self._text_height_units(editable)
+        self.text_height.setSuffix(" " + unit)
+        # a step of one inch would take 1/8" text to 1 1/8"
+        self.text_height.setSingleStep(0.01 if unit == "in" else 1.0)
+        self.text_height.setValue(self._text_height_of(editable) / per)
         index = self.text_alignment.findData(source.alignment)
         self.text_alignment.setCurrentIndex(max(0, index))
+
+    def _text_height_units(self, editable) -> tuple[str, float]:
+        """The units the cap height box reads, and the millimetres in one
+        of them for a note, which is kept in millimetres but read in the
+        sheet's units; model lettering is in the document's."""
+        if isinstance(editable, TextNote):
+            unit = paper_units(self.scene.units)
+            return unit, TO_MM[unit]
+        return self.scene.units, 1.0
+
+    def _text_height_of(self, editable) -> float:
+        """The cap height `editable` is drawn at, a named style's if any."""
+        if isinstance(editable, TextNote):
+            from ..core.layout import note_text_height
+            return note_text_height(editable, self.scene)
+        return float(editable.shape.height)
+
+    def _typed_text_height(self, editable) -> float:
+        """The box's cap height, kept in the units the text is kept in.
+
+        The box rounds what it shows, a 3.2 mm note reading 0.126" on an
+        inch sheet, so while it still shows the height the text has, that
+        height is kept exactly rather than 0.126" of it."""
+        _unit, per = self._text_height_units(editable)
+        current = self._text_height_of(editable)
+        shown = round(current / per, self.text_height.decimals())
+        if abs(self.text_height.value() - shown) < 1e-9:
+            return current
+        return self.text_height.value() * per
 
     def _populate_text_styles(self, family, preferred=""):
         blocker = QSignalBlocker(self.text_font_style)
@@ -2599,7 +2625,7 @@ class PropertiesPanel(QWidget):
         values = dict(
             font_family=self.text_font_family.currentFont().family(),
             font_style=self.text_font_style.currentText(),
-            height=self.text_height.value(),
+            height=self._typed_text_height(obj),
             alignment=self.text_alignment.currentData(),
         )
         source = obj if isinstance(obj, TextNote) else obj.shape

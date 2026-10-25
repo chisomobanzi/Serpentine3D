@@ -668,6 +668,12 @@ def cmd_units(ctx):
     # model and the sheets. Taken after the units had changed, undo left the
     # new units on the old model; and without a rescale there was none.
     ctx.history.checkpoint("units")
+    # What is lettered keeps its sizes, in the built-in styles it was
+    # lettered in; a drawing with nothing lettered takes the new units' set.
+    from ..core.layout import lettered_in_builtin_styles, style_set
+    ctx.scene.annot_style_set = (style_set(ctx.scene)
+                                 if lettered_in_builtin_styles(ctx.scene)
+                                 else None)
     ctx.scene.units = choice
     if rescale == "Yes":
         for o in ctx.scene.all():

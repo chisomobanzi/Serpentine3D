@@ -84,9 +84,18 @@
   and DXF, the length beside the cursor, the gumball, Properties, sheet
   sizes and whatever is typed there, where `50mm` and `1in` still mean
   what they say. A dimension over a detail reads the model, as before, and
-  text height, print widths and hatch spacing stay in millimetres. A sheet
-  is still kept in millimetres, so a drawing opens and plots as it did,
-  and its dimensions on bare paper read in the sheet's units too.
+  print widths and hatch spacing stay in millimetres. A sheet is still kept
+  in millimetres, so a drawing opens and plots as it did, and its
+  dimensions on bare paper read in the sheet's units too.
+- **Text on a sheet is sized in the sheet's units.** In an inch or feet
+  document a note's cap height, in Properties and at the `text` prompt, and
+  a style's text and arrow sizes at `dimstyle` read and were typed in
+  millimetres, so 1/8" text had to be typed as 3.175. They now read and are
+  typed in inches there, as CAD letters a drawing in its own units, and
+  `5mm` or `1/8"` still mean what they say. An inch drawing's built-in
+  styles letter at round inches: Standard 1/8", Small 0.09" and Heading
+  1/4", in place of 3.2, 2.2 and 6 mm. A drawing lettered before keeps the
+  sizes it was lettered at, and so does one whose units change.
 - **A solid measures its true volume, whatever its faces are made of
   (#104).** A bow limb from Rhino, a valid solid of 18 NURBS faces, read
   0.8% light, while its area and a fine mesh of it were right. The exact

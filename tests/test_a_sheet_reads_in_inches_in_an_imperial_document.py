@@ -11,9 +11,9 @@ A sheet now works in the units Rhino's templates give their layouts: inches
 in an inch or a feet document, millimetres in a metric one. It is still kept
 in millimetres, so a drawing opens and plots as it did; what changes is what
 a length on it reads as and what a typed one means. A dimension over a
-detail reads the model, in the model's units, as before. Print widths, hatch
-spacing and the size of text and arrows stay in millimetres in any document:
-they are the pen and the type, not lengths on the drawing.
+detail reads the model, in the model's units, as before. Print widths and
+hatch spacing stay in millimetres in any document; text and arrows are sized
+in the sheet's units (test_text_on_an_inch_sheet_is_sized_in_inches.py).
 """
 
 from __future__ import annotations

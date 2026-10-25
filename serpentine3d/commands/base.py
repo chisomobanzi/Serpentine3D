@@ -102,7 +102,12 @@ class NumberReq(Req):
 
 @dataclass
 class LengthReq(NumberReq):
-    """A length in document units — accepts 3'6", 30cm, 1.5in, etc."""
+    """A length in document units — accepts 3'6", 30cm, 1.5in, etc.
+
+    `paper` makes it a size on paper, a text height or an arrow, wherever
+    it is asked: kept in millimetres, like its default, but shown and typed
+    in the units the sheet is read in."""
+    paper: bool = False
 
 
 @dataclass
@@ -518,6 +523,16 @@ class CommandContext:
             return unit, TO_MM[unit]
         return self.scene.units, 1.0
 
+    def length_units(self, req: LengthReq) -> tuple[str, float]:
+        """The units `req` is typed in, and how many of the units it is kept
+        in make one of them: the sheet's for a size on paper, wherever it is
+        asked, and otherwise the document's, even asked from bare paper,
+        since what such a length measures is in the model."""
+        if req.paper:
+            unit = paper_units(self.scene.units)
+            return unit, TO_MM[unit]
+        return self.scene.units, 1.0
+
     def from_typed(self, value: float) -> float:
         """A number typed here as a length, in the units it is kept in."""
         return value * self.typed_units()[1]
@@ -678,14 +693,16 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
     if isinstance(req, LengthReq):
         if not text and req.default is not None:
             return True, req.default
-        from ..utils.units import parse_length
-        units, per = ctx.typed_units()
+        from ..utils.units import format_paper_length, parse_length
+        units, per = ctx.length_units(req)
         v = parse_length(text, units)
         if v is None:
             return False, "Expected a length (e.g. 250, 3'6\", 30cm)"
         v *= per
         if req.minimum is not None and v < req.minimum:
-            return False, f"Value must be >= {req.minimum}"
+            least = (format_paper_length(req.minimum, ctx.scene.units)
+                     if req.paper else req.minimum)
+            return False, f"Value must be >= {least}"
         return True, v
     if isinstance(req, NumberReq):
         if not text and req.default is not None:
@@ -726,8 +743,14 @@ def parse_value(req: Req, text: str, ctx: CommandContext):
     return False, "Unsupported input"
 
 
-def format_prompt(req: Req) -> str:
+def format_prompt(req: Req, ctx: CommandContext | None = None) -> str:
     p = req.prompt
+    # A size on paper says the units it is typed in, which the sheet's
+    # units decide, so the prompt itself can't: "Text height (in)".
+    paper = isinstance(req, LengthReq) and req.paper and ctx is not None
+    if paper:
+        unit, per = ctx.length_units(req)
+        p += f" ({unit})"
     if isinstance(req, OptionReq) and req.options:
         p += f" ({'/'.join(req.options)})"
     extras = getattr(req, "extra_options", ())
@@ -735,7 +758,10 @@ def format_prompt(req: Req) -> str:
         p += f" ({'/'.join(extras)})"
     default = getattr(req, "default", None)
     if default is not None:
-        if isinstance(default, tuple):
+        if paper:
+            # in those units; Enter still keeps the default exactly
+            p += f" <{round(default / per, 4)}>"
+        elif isinstance(default, tuple):
             p += f" <{','.join(str(round(c, 4)) for c in default)}>"
         else:
             p += f" <{default}>"
@@ -1367,7 +1393,7 @@ class CommandProcessor:
     def prompt_text(self) -> str:
         if self.request is None:
             return "Command"
-        base = format_prompt(self.request)
+        base = format_prompt(self.request, self.ctx)
         if isinstance(self.request, SelectReq):
             n = len(self._select_buffer)
             if n:
