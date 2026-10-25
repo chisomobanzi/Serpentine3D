@@ -291,6 +291,9 @@ class CodexProcess:
         replies = [item["message"]["result"] for item in self.log()
                    if item["kind"] == "server" and "loginId" in item["message"].get("result", {})]
         assert replies, "Codex must start a browser login before it can complete"
+        # Serpentine drops a completion for an attempt whose page it hasn't opened yet.
+        assert len(self.browser_urls) == len(self.requests("account/login/start")), \
+            "Wait for the sign-in page to open before completing the login"
         self.emit({"method": "account/login/completed", "params": {
             "loginId": login_id or replies[-1]["loginId"], "success": success, "error": error}})
 
@@ -625,6 +628,7 @@ def test_cancelled_or_failed_login_never_persists_a_connection_and_can_retry(win
     retry.click()
     _wait(lambda: len(codex.requests("account/login/start")) == 2,
           "Retry must start a fresh managed login attempt")
+    _wait(lambda: len(codex.browser_urls) == 2, "Retry must open the sign-in page again")
     codex.complete_login()
     _wait(lambda: _models(panel) is not None, "Retry must make authenticated models available")
     _connect(window, panel, codex)
