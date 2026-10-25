@@ -116,6 +116,8 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
         "annot_styles": {k: dict(v) for k, v in scene.annot_styles.items()},
         # which built-in styles its lettering is in, so it keeps their sizes
         "annot_style_set": style_set(scene),
+        # whether its text heights are capital heights, or font sizes
+        "text_height_measures": scene.text_height_measures,
         "hatch_patterns": [p.to_dict() for p in scene.hatch_patterns.values()],
         "history_records": scene.history_records,
         "layers": [
@@ -559,7 +561,8 @@ def _load_doc(scene, doc: dict, blobs=None):
             "shapes": [geometry.shape_from_bytes(base64.b64decode(s))
                        for s in bd["shapes"]],
         }
-    from ..core.layout import (layouts_from_json, lettered_in_builtin_styles,
+    from ..core.layout import (layouts_from_json, lettered_by_font_size,
+                               lettered_in_builtin_styles,
                                sheet_groups_from_json)
     scene.layouts = layouts_from_json(doc.get("layouts", []))
     scene.sheet_groups = sheet_groups_from_json(doc.get("sheet_groups", []))
@@ -570,6 +573,12 @@ def _load_doc(scene, doc: dict, blobs=None):
     # metric ones. With nothing lettered, the units choose (style_set).
     scene.annot_style_set = (doc.get("annot_style_set", "metric")
                              if lettered_in_builtin_styles(scene) else None)
+    # A drawing from before text heights were capital heights prints as it
+    # did, its heights font sizes; one with nothing lettered by them has
+    # nothing to keep (layout.letters_capitals).
+    scene.text_height_measures = doc.get(
+        "text_height_measures",
+        "em" if lettered_by_font_size(scene) else "capitals")
     from ..core.hatch_patterns import HatchPattern
     scene.hatch_patterns = {}
     for data in doc.get("hatch_patterns", []):

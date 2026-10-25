@@ -580,6 +580,34 @@ def note_text_height(note, scene=None) -> float:
     return float(note.height)
 
 
+def letters_capitals(scene) -> bool:
+    """Whether a text height on `scene`'s sheets is the height of its
+    capitals, as drafting measures it. In a drawing saved before it was,
+    dimensions, leaders and notes not made in the on-screen editor gave
+    their height to the font as its size, which printed their capitals
+    about 0.71 of it, and they go on printing as they did
+    (`Scene.text_height_measures`). Without a drawing, as in a new one."""
+    return getattr(scene, "text_height_measures", "capitals") == "capitals"
+
+
+def font_size(height: float, scene=None) -> float:
+    """The font size, in paper millimetres, that sheet text `height` high
+    is lettered in."""
+    if not letters_capitals(scene):
+        return height
+    from .text import cap_height_ratio
+    return height / cap_height_ratio()
+
+
+def lettered_by_font_size(scene) -> bool:
+    """Whether anything on a sheet would print otherwise if its height were
+    the capitals' (`letters_capitals`): any dimension or leader, and a note
+    not made in the on-screen editor, which letters its own by them."""
+    return any(lay.dims or lay.rdims or lay.adims or lay.leaders
+               or any(not note.font_family for note in lay.notes)
+               for lay in getattr(scene, "layouts", ()))
+
+
 def _on_axis(v, tol: float = 5e-3):
     """`v` with components a whisker from 0 or ±1 rounded to them."""
     import numpy as np
@@ -679,17 +707,8 @@ def annotation_at(layout, px: float, py: float, tol: float = 2.0,
     Kinds: note, leader, dim, rdim, adim, hatch (dims before hatches so
     outlines don't shadow them)."""
     for note in reversed(layout.notes):
-        if note.font_family:
-            x0, y0, x1, y1 = annotation_bounds("note", note, scene)
-            if x0 - tol <= px <= x1 + tol and y0 - tol <= py <= y1 + tol:
-                return ("note", note)
-            continue
-        height = note_text_height(note, scene)
-        w = max(len(line) for line in (note.text or " ").split("\n")) \
-            * height * 0.62
-        h = height * (1 + (note.text or "").count("\n") * 1.6)
-        if note.x - tol <= px <= note.x + w + tol \
-                and note.y - tol <= py <= note.y + h + tol:
+        x0, y0, x1, y1 = annotation_bounds("note", note, scene)
+        if x0 - tol <= px <= x1 + tol and y0 - tol <= py <= y1 + tol:
             return ("note", note)
     for dim in reversed(layout.dims):
         import numpy as np
@@ -1092,7 +1111,7 @@ def annotation_bounds(kind: str, obj, scene=None) -> tuple:
             return (obj.x + rect.left(), obj.y - rect.bottom(),
                     obj.x + rect.right(), obj.y - rect.top())
         lines = (obj.text or " ").split("\n")
-        w = max(len(line) for line in lines) * height * 0.62
+        w = max(len(line) for line in lines) * font_size(height, scene) * 0.62
         return (obj.x, obj.y - (len(lines) - 1) * height * 1.6,
                 obj.x + w, obj.y + height)
     if kind == "dim":

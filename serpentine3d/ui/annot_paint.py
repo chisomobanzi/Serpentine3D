@@ -8,10 +8,12 @@ import math
 
 import numpy as np
 from PySide6.QtCore import Qt, QPointF
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QTransform
+from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QPainter, QPen,
+                           QPolygonF, QTransform)
 
-from ..core.layout import (MAX_PAPER_SEGMENTS, annotation_style, measured_text,
-                           note_text_height, resolve_associative)
+from ..core.layout import (MAX_PAPER_SEGMENTS, annotation_style, font_size,
+                           letters_capitals, measured_text, note_text_height,
+                           resolve_associative)
 
 INK = QColor(25, 25, 30)
 DIM_INK = QColor(45, 70, 130)
@@ -28,9 +30,18 @@ def style_of(scene, name: str) -> dict:
 
 
 def _font(k: float, height_mm: float) -> QFont:
+    """A font `height_mm` big. That is its size, its em: its capitals are
+    about 0.71 of it. The sheet's own text, the title block and the like,
+    is sized this way; lettering given a height uses `_lettering`."""
     f = QFont("sans")
     f.setPixelSize(max(int(height_mm * k), 4))
     return f
+
+
+def _lettering(k: float, height_mm: float, scene) -> QFont:
+    """The font for sheet text `height_mm` high, as `scene` measures it
+    (layout.letters_capitals)."""
+    return _font(k, font_size(height_mm, scene))
 
 
 def _line(painter, to_dev, a, b):
@@ -62,13 +73,13 @@ def draw_note(painter, to_dev, k, note, scene=None):
         painter.fillPath(QTransform().translate(x, y).scale(k, k).map(path), INK)
         return
     painter.setPen(QPen(INK))
-    painter.setFont(_font(k, height))
+    painter.setFont(_lettering(k, height, scene))
     for i, line in enumerate((note.text or "").split("\n")):
         x, y = to_dev(note.x, note.y - i * height * 1.6)
         painter.drawText(int(x), int(y), line)
 
 
-def draw_leader(painter, to_dev, k, leader):
+def draw_leader(painter, to_dev, k, leader, scene=None):
     pts = leader.points
     if len(pts) < 2:
         return
@@ -77,7 +88,7 @@ def draw_leader(painter, to_dev, k, leader):
         _line(painter, to_dev, a, b)
     _arrow(painter, to_dev, pts[0],
            (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]))
-    painter.setFont(_font(k, leader.height))
+    painter.setFont(_lettering(k, leader.height, scene))
     tx, ty = to_dev(pts[-1][0] + 1.5, pts[-1][1])
     painter.drawText(int(tx), int(ty), leader.text)
 
@@ -169,9 +180,15 @@ def draw_lin_dim(painter, to_dev, k, dim, scene=None):
     _arrow(painter, to_dev, bo, -d, st["arrow_size"])
     text = dim.text or measured_text(dim, length, scene)
     mid = (a + b) / 2 + n * (dim.offset + 2.2)
-    painter.setFont(_font(k, st["text_height"]))
+    font = _lettering(k, st["text_height"], scene)
+    painter.setFont(font)
     tx, ty = to_dev(mid[0], mid[1])
-    painter.drawText(int(tx) - len(text) * int(k), int(ty), text)
+    if letters_capitals(scene):
+        # centred on the dimension line, however long the text runs
+        shift = round(QFontMetricsF(font).horizontalAdvance(text) / 2)
+    else:
+        shift = len(text) * int(k)      # where a drawing from before had it
+    painter.drawText(int(tx) - shift, int(ty), text)
 
 
 def draw_radial_dim(painter, to_dev, k, dim, scene=None):
@@ -192,12 +209,12 @@ def draw_radial_dim(painter, to_dev, k, dim, scene=None):
     text = dim.text or prefix + measured_text(
         dim, r * (2 if dim.diameter else 1), scene)
     label = p + d * 5
-    painter.setFont(_font(k, 3.2))
+    painter.setFont(_lettering(k, 3.2, scene))
     tx, ty = to_dev(label[0], label[1])
     painter.drawText(int(tx), int(ty), text)
 
 
-def draw_angular_dim(painter, to_dev, k, dim):
+def draw_angular_dim(painter, to_dev, k, dim, scene=None):
     v = np.array([dim.vx, dim.vy])
     a1 = math.atan2(dim.y1 - dim.vy, dim.x1 - dim.vx)
     a2 = math.atan2(dim.y2 - dim.vy, dim.x2 - dim.vx)
@@ -219,7 +236,7 @@ def draw_angular_dim(painter, to_dev, k, dim):
         prev = pt
     mid_ang = a1 + sweep / 2
     label = v + np.array([math.cos(mid_ang), math.sin(mid_ang)]) * (r + 3)
-    painter.setFont(_font(k, 3.2))
+    painter.setFont(_lettering(k, 3.2, scene))
     tx, ty = to_dev(label[0], label[1])
     painter.drawText(int(tx), int(ty), f"{math.degrees(sweep):.1f}°")
 
@@ -351,13 +368,13 @@ def draw_all(painter, to_dev, k, layout, scene=None, sheet_index=1,
     for note in layout.notes:
         draw_note(painter, to_dev, k, note, scene)
     for leader in layout.leaders:
-        draw_leader(painter, to_dev, k, leader)
+        draw_leader(painter, to_dev, k, leader, scene)
     for dim in layout.dims:
         draw_lin_dim(painter, to_dev, k, dim, scene)
     for dim in layout.rdims:
         draw_radial_dim(painter, to_dev, k, dim, scene)
     for dim in layout.adims:
-        draw_angular_dim(painter, to_dev, k, dim)
+        draw_angular_dim(painter, to_dev, k, dim, scene)
     draw_title_block(painter, to_dev, k, layout, sheet_index, sheet_count,
                      scene)
     draw_revision_table(painter, to_dev, k, layout)

@@ -96,6 +96,17 @@
   styles letter at round inches: Standard 1/8", Small 0.09" and Heading
   1/4", in place of 3.2, 2.2 and 6 mm. A drawing lettered before keeps the
   sizes it was lettered at, and so does one whose units change.
+- **Text on a sheet prints as tall as its height.** Drafting measures a
+  text height as the height of the capitals, and a note made in the
+  on-screen editor was drawn that way. Dimension and leader text and a note
+  placed at the `text` prompt gave their height to the font as its size,
+  which also holds room for the tails of g and p and for accents, so their
+  capitals printed about 0.71 of it: 1/8" Standard text came out 0.09",
+  and two notes the same height disagreed. They all print capitals at
+  their height now, and a dimension's text sits centred on its line. A
+  drawing saved before goes on printing as it did, as text 40% larger
+  could crowd what is around it, and the title block, scale bar and
+  revision table keep their sizes in any drawing.
 - **A solid measures its true volume, whatever its faces are made of
   (#104).** A bow limb from Rhino, a valid solid of 18 NURBS faces, read
   0.8% light, while its area and a fine mesh of it were right. The exact

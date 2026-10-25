@@ -106,10 +106,14 @@ field in Properties. Font family and style, letter height and left, centre or
 right alignment are available there without opening another window. Text edits
 support Undo and Redo.
 
-Letter height measures capital letters: model lettering uses the document's
-units, and layout notes use the units the sheet is read in, inches in an inch
-or feet document and millimetres in a metric one. Each line aligns to the picked
-baseline origin. Font metrics determine the spacing between lines.
+Letter height measures capital letters, as drafting standards do: model
+lettering uses the document's units, and layout notes use the units the sheet
+is read in, inches in an inch or feet document and millimetres in a metric one.
+The same goes for dimension and leader text, so 1/8" Standard text prints
+capitals 1/8" tall. A drawing saved before this release measured a dimension's,
+a leader's and a plain note's height as the font's size, which prints capitals
+about 0.71 of it, and it goes on printing as it did. Each line aligns to the
+picked baseline origin. Font metrics determine the spacing between lines.
 
 Keep model lettering as **Editable text** to change its words and formatting
 later. Place it on the active CPlane, a selected planar face or a plane facing

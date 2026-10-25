@@ -2,7 +2,25 @@
 
 from __future__ import annotations
 
+import functools
+
 from .text_object import TextShape
+
+
+@functools.cache
+def cap_height_ratio(font_family: str = "sans") -> float:
+    """A font's capital height for each unit of its size, its em: 0.714 for
+    Noto Sans. The size has room for ascenders, descenders and accents too,
+    so text whose capitals are `h` tall is set in a font `h / ratio` big."""
+    from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
+
+    if QGuiApplication.instance() is None:      # headless/scripting use
+        import os
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        cap_height_ratio._app = QGuiApplication([])
+    font = QFont(font_family)
+    font.setPixelSize(2048)
+    return QFontMetricsF(font).capHeight() / 2048
 
 
 def text_path(text: str, height: float, font_family: str = "sans",

@@ -204,6 +204,10 @@ class Scene:
         # the built-in styles the sheets are lettered in, "metric" or
         # "inch"; None for the ones the units give (layout.style_set)
         self.annot_style_set: str | None = None
+        # what a text height on a sheet measures: "capitals", as drafting
+        # measures it, or "em", the font's size, in a drawing saved before
+        # that (layout.letters_capitals)
+        self.text_height_measures: str = "capitals"
         # name -> HatchPattern, the patterns loaded from .pat files (#92)
         self.hatch_patterns: dict = {}
         # the names the last load gave, a fresh list each time; not saved
@@ -645,6 +649,7 @@ class Scene:
         self.block_defs = {}
         self.annot_styles = {}
         self.annot_style_set = None
+        self.text_height_measures = "capitals"
         self.hatch_patterns = {}
         self.image_planes = []
         self.history_records = []
@@ -685,6 +690,7 @@ class Scene:
             "block_defs": {k: dict(v) for k, v in self.block_defs.items()},
             "annot_styles": {k: dict(v) for k, v in self.annot_styles.items()},
             "annot_style_set": self.annot_style_set,
+            "text_height_measures": self.text_height_measures,
             "hatch_patterns": dict(self.hatch_patterns),
             "image_planes": copy.deepcopy(self.image_planes),
             "history_records": copy.deepcopy(self.history_records),
@@ -710,6 +716,8 @@ class Scene:
         self.annot_styles = {k: dict(v) for k, v in
                              snap.get("annot_styles", {}).items()}
         self.annot_style_set = snap.get("annot_style_set")
+        self.text_height_measures = snap.get("text_height_measures",
+                                             "capitals")
         self.hatch_patterns = dict(snap.get("hatch_patterns", {}))
         if not any(obj.kind == "picture" for obj in self.all()):
             self.image_planes = copy.deepcopy(snap.get("image_planes", []))
