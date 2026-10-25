@@ -76,8 +76,11 @@ def test_a_section_fill_of_its_own():
 
 
 def test_a_section_fill_is_kept_tidy():
-    assert section_fill_dict("Herringbone", 200.0, 0.0, "tartan") == {
-        "pattern": "lines", "angle": 20.0, "spacing": 0.2, "color": "ink"}
+    assert section_fill_dict("", 200.0, 0.0, "tartan") == {
+        "pattern": "lines", "angle": 20.0, "spacing": 0.2, "color": "ink",
+        "cut_line_width": 0.5, "cut_line_color": "ink",
+        "background": "object"}
+    assert section_fill_dict("Herringbone")["pattern"] == "Herringbone"
 
 
 def test_a_copy_keeps_what_the_original_overrode():

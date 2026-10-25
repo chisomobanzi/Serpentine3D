@@ -103,9 +103,11 @@ def _holed(pattern="lines"):
                  pattern=pattern, angle=0.0, spacing=2.0)
 
 
-def test_the_hole_gets_a_line_round_it_like_any_other_edge():
-    assert len(_draw(_holed()).polygons) == 2, \
-        "the bore has no outline, so it reads as part of the wall"
+def test_a_hatch_draws_no_line_round_itself_or_its_hole():
+    """A hatch is its fill, as in Rhino and AutoCAD (#92): the edges of
+    the wall and of the bore are the linework the hatch was made from,
+    drawn once, by that linework."""
+    assert _draw(_holed()).polygons == []
 
 
 def _through_the_bore(seg):
@@ -137,7 +139,8 @@ def test_a_solid_hatch_fills_the_wall_and_not_the_bore():
         "the bore filled in, so the section reads as a solid bar"
 
 
-def test_a_hatch_with_no_holes_is_drawn_the_way_it_always_was():
+def test_a_hatch_with_no_holes_is_drawn_as_its_lines():
     plain = Hatch(points=[list(p) for p in SQUARE[:-1]], pattern="lines",
                   angle=0.0, spacing=2.0)
-    assert len(_draw(plain).polygons) == 1
+    rec = _draw(plain)
+    assert rec.polygons == [] and rec.lines

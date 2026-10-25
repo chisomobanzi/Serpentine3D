@@ -57,9 +57,14 @@ def test_a_line_pattern_comes_in_at_its_angle_and_spacing(imported):
 
     (h,) = imported(build)
 
-    assert h.shape.pattern == "lines"
-    assert h.shape.angle == pytest.approx(75.0), "ANSI31 is 45 degrees, turned 30"
+    # ANSI31 itself now, not lines that look like it (#92): its own
+    # 45 degrees turned the file's 30, its rows 3.175 apart scaled twice
+    assert h.shape.pattern == "ANSI31"
+    assert h.shape.angle == pytest.approx(30.0)
     assert h.shape.spacing == pytest.approx(3.175 * 2)
+    for a, b in h.shape.pattern_segments():
+        angle = math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])) % 180
+        assert angle == pytest.approx(75.0)
     assert g.surface_area(h.shape) == pytest.approx(100 - HOLE_AREA, rel=1e-3)
 
 
@@ -87,7 +92,7 @@ def test_a_solid_fill_comes_in_solid(imported):
     assert h.shape.pattern == "solid"
 
 
-def test_two_directions_at_right_angles_come_in_as_a_cross(imported):
+def test_two_directions_at_right_angles_come_in_as_themselves(imported):
     def build(m):
         h = m.add_hatch()
         h.set_pattern_fill("ANSI37", scale=1.0)
@@ -95,8 +100,9 @@ def test_two_directions_at_right_angles_come_in_as_a_cross(imported):
 
     (h,) = imported(build)
 
-    assert h.shape.pattern == "cross"
+    assert h.shape.pattern == "ANSI37"
     assert h.shape.spacing == pytest.approx(3.175)
+    assert len(h.shape.definition.lines) == 2
 
 
 def test_separate_islands_become_separate_hatches(imported):

@@ -76,7 +76,7 @@ def test_picking_a_detail_shows_its_scale(sheet):
     _pick(w, det)
     combo = _scale_combo(panel)
     assert combo is not None, "no scale control on the panel for a detail"
-    assert combo.currentText() == det.scale_text() == "1:2"
+    assert combo.currentText() == det.scale_text("mm") == "1:2"
 
 
 def test_the_scales_an_architect_draws_at_are_on_offer_in_order(sheet):
@@ -105,7 +105,7 @@ def test_choosing_a_preset_rescales_the_detail(sheet):
     assert combo is not None, "no scale control on the panel for a detail"
     combo.setCurrentText("1:100")
     assert det.scale_denom == pytest.approx(100.0)
-    assert det.scale_text() == "1:100"
+    assert det.scale_text("mm") == "1:100"
 
 
 def test_typing_a_scale_rescales_the_detail(sheet):
@@ -116,7 +116,7 @@ def test_typing_a_scale_rescales_the_detail(sheet):
     assert combo is not None, "no scale control on the panel for a detail"
     _type(combo, "1:75")
     assert det.scale_denom == pytest.approx(75.0)
-    assert det.scale_text() == "1:75"
+    assert det.scale_text("mm") == "1:75"
 
 
 def test_a_scale_that_is_not_one_is_refused(sheet):
@@ -142,7 +142,7 @@ def test_rescaling_is_one_undo(sheet):
     w.history.undo()
     back = w.scene.layouts[0].details[0]
     assert back.scale_denom == pytest.approx(2.0)
-    assert back.scale_text() == "1:2"
+    assert back.scale_text("mm") == "1:2"
 
 
 # ------------------------------------------------------- moving between them
@@ -157,7 +157,7 @@ def test_picking_another_detail_shows_that_ones_scale(sheet):
     assert combo is not None, "no scale control on the panel for a detail"
     assert combo.currentText() == "1:2"
     _pick(w, second)
-    assert combo.currentText() == second.scale_text() == "1:5"
+    assert combo.currentText() == second.scale_text("mm") == "1:5"
     assert first.scale_denom == pytest.approx(2.0), "and nothing was changed"
 
 

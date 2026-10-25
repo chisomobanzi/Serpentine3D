@@ -15,6 +15,54 @@ import math
 import numpy as np
 
 
+# Where the viewport starts uploading a mesh relative to an anchor near
+# it rather than in the world's own numbers. Folding an anchor into a
+# matrix costs nothing, so this is set low and generously: at 4096 units
+# float32 still steps well under a micron, and anchoring earlier than it
+# has to loses nothing at all.
+ANCHOR_NEAR = 4096.0
+
+# How many points are rebased at a time. The subtraction needs float64 to
+# be worth doing, and a scan does not fit in memory twice.
+_CHUNK = 1 << 20
+
+
+def origin_for(points) -> np.ndarray | None:
+    """Where this far-out data should keep its coordinates relative to, or
+    None for data near enough home to hold its own.
+
+    The middle of the bounding box rather than the mean, which would lean
+    towards whichever end of a scan was sampled hardest.
+    """
+    if not len(points):
+        return None
+    return origin_between(np.asarray(points.min(axis=0), np.float64),
+                          np.asarray(points.max(axis=0), np.float64))
+
+
+def origin_between(lo, hi) -> np.ndarray | None:
+    """origin_for, from the corners of the data's bounding box."""
+    if lo is None:
+        return None
+    if max(np.abs(lo).max(), np.abs(hi).max()) <= ANCHOR_NEAR:
+        return None
+    return (lo + hi) * 0.5
+
+
+def offsets_from(points, origin) -> np.ndarray:
+    """`points` as float32 offsets from `origin`, a chunk at a time.
+
+    float32 holds an offset of a few hundred units to a fraction of a
+    micron, so this is what a file or a buffer stores for data whose
+    absolute coordinates it could not hold at all.
+    """
+    out = np.empty((len(points), 3), np.float32)
+    for i in range(0, len(points), _CHUNK):
+        block = points[i:i + _CHUNK]
+        out[i:i + len(block)] = np.asarray(block, np.float64) - origin
+    return out
+
+
 def normalize(v: np.ndarray) -> np.ndarray:
     n = np.linalg.norm(v)
     return v / n if n > 1e-12 else v

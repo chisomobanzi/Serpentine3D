@@ -1,6 +1,6 @@
 [project]
 name = "serpentine3d"
-version = "0.11.0"
+version = "0.12.1"
 description = "Open-source NURBS surface modeller for Linux with MCP integration"
 readme = "README.md"
 license = { text = "MIT" }
@@ -25,7 +25,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+# xdist: the tests are independent, so they can run side by side
+# (CONTRIBUTING says how many at once).
+dev = ["pytest>=8.0", "pytest-xdist>=3.5"]
 docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 
 [project.urls]

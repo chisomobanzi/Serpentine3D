@@ -8,6 +8,8 @@ import os
 import sys
 import time
 import traceback
+from contextlib import contextmanager
+from typing import NamedTuple
 
 import numpy as np
 import shiboken6
@@ -17,6 +19,7 @@ from PySide6.QtGui import QCursor, QOpenGLContext
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from ..core import clipping as _clipping
 from ..core import linetype as _lt
 from ..core import spatial
 from ..utils import config as _cfg
@@ -25,7 +28,9 @@ from ..utils import units as _units
 # module (and the kernel behind it); re-exported here for old callers.
 from ..utils.glsetup import set_default_gl_format  # noqa: F401
 from . import section_caps as _caps
-from ..utils.math3d import (normalize, ray_line_parameter, ray_plane, ray_plane_any, ray_triangle_hits)
+from ..utils.math3d import (ANCHOR_NEAR, normalize,
+                            ray_line_parameter, ray_plane, ray_plane_any,
+                            ray_triangle_hits)
 from . import gpu_share, theme
 from .camera import (
     STANDARD_VIEWS,
@@ -42,6 +47,45 @@ PICK_RADIUS_PX = 7.0
 # How nearly a face's plane must run along the sight line before a click
 # that misses it may try its edges instead: the sine of about six degrees.
 EDGE_ON_SLANT = 0.1
+
+
+def same_place_tolerance(depth: float) -> float:
+    """How near two hits have to be to count as the same place.
+
+    The document's own tolerance, since that is what "the same point"
+    means everywhere else in the program, and a hair of the distance
+    besides: a model far from the origin is measured in numbers with
+    fewer decimals to spare.
+
+    Never as wide as half the nudge that puts a curve in front of the face
+    it lies on, a thousandth of the distance: up close, a drawing in metres
+    seen from a step back, the document tolerance outgrew it and a click
+    on a curve asked about the face behind.
+    """
+    from ..core import tolerance
+    depth = abs(float(depth))
+    return max(min(tolerance.tol(), depth * 5e-4), depth * 1e-6)
+
+
+def ids_in_the_same_place(hits) -> list[str]:
+    """The ids at the front of `hits` that are all in the same place.
+
+    `hits` is what pick_hits gives back, nearest first. More than one of
+    them means a click cannot say which was meant: they are not one in
+    front of the other, they are in the same spot, and no camera angle
+    will separate them. One of them means the click has its answer.
+
+    A curve lying on a face is not this: the pick puts a curve a little
+    in front of what it lies on so that it can be taken at all, and that
+    nudge is bigger than this tolerance. It is an answer, not a question.
+    """
+    if not hits:
+        return []
+    first = hits[0][0]
+    tol = same_place_tolerance(first)
+    return [obj_id for depth, obj_id in hits if depth - first <= tol]
+
+
 # How long the left button has to sit still before the objects under it are
 # offered as a list instead of picked. Long enough that no ordinary click
 # ever reaches it, short enough that you do not wonder whether it is coming.
@@ -438,9 +482,15 @@ def _compile(vert_src: str, frag_src: str) -> int:
 def _dashed_edge_segments(mesh, pattern, scale):
     """Rebuild the object's edge segments as dash segments: regroup the
     flattened GL_LINES back into per-edge polylines (via edge_of_segment) and
-    run each through the linetype dasher."""
+    run each through the linetype dasher.
+
+    In the mesh's own coordinates, in and out, because that is what the
+    buffers take: a dash pattern is measured along a polyline and does
+    not care where the polyline is, and handing back the world's numbers
+    here would put a far object twice as far away as it is.
+    """
     from ..core.linetype import dash_polyline
-    segs = mesh.edge_segments
+    segs = mesh.local_edges
     eos = getattr(mesh, "edge_of_segment", None)
     if eos is None or not len(segs):
         return segs
@@ -452,7 +502,7 @@ def _dashed_edge_segments(mesh, pattern, scale):
         out.extend(dash_polyline(poly, pattern, scale))
     if not out:
         return np.zeros((0, 2, 3), np.float32)
-    return np.asarray(out, np.float32)
+    return np.ascontiguousarray(out, np.float32)
 
 
 # Vertex attribute layouts, as (location, floats, stride, byte offset).
@@ -520,11 +570,23 @@ def _thick_arrays(segments):
 # None and every object shares the frame's one float32 matrix, which is
 # what keeps _set_mvp's one-upload-per-frame behaviour on the scenes
 # that never had the problem.
-ANCHOR_NEAR = 4096.0            # float32 grid out here: half a micron
+#
+# A mesh that keeps its coordinates as offsets (core/tessellate.py) has
+# already done the subtracting, so its anchor is simply where it sits and
+# the offsets go to the card untouched. ANCHOR_NEAR is what is left for
+# the meshes near home that hold the world's own numbers.
 
 
 def mesh_anchor(mesh):
-    """Where a mesh's data is uploaded relative to, or None near home."""
+    """Where a mesh's data is uploaded relative to, or None near home.
+
+    A mesh that keeps its coordinates as offsets has already answered
+    this: it is where it sits, and the offsets are what goes to the card
+    as they are. One that holds the world's own numbers, which is every
+    mesh near home, is uploaded as it always was.
+    """
+    if getattr(mesh, "far", False):
+        return np.asarray(mesh.origin, float)
     b = mesh.bounds()
     if b is None:
         return None
@@ -554,9 +616,36 @@ def rebased(pts, anchor):
     return (np.asarray(pts, np.float64) - anchor).astype(np.float32)
 
 
+def uploadable(mesh, local, anchor):
+    """Some of a mesh's own coordinates, ready for its buffers: a far
+    mesh's offsets go as they are, a near one's are rebased like the rest."""
+    if mesh.far:
+        return np.ascontiguousarray(local, np.float32)
+    return rebased(local, anchor)
+
+
 # The display modes that fill faces solidly, and so close a cut solid with
 # a cap. Wireframe has no faces to close, and ghosted ones are see-through.
 CAP_MODES = ("shaded", "zebra", "curvature", "draft", "rendered")
+
+
+class DrawTarget(NamedTuple):
+    """The picture the model is being drawn into, which is the pane unless
+    it is a detail (#94): on a sheet, or rasterised for a PDF.
+
+    `width` and `height` are in the pixels a line's width is given in, and
+    `ratio` is how many of the picture's own pixels make one of those. A
+    detail says how many of those pixels a millimetre of the sheet takes,
+    `px_per_mm`, and one with a scale (a parallel view) its `scale_denom`,
+    how many model units a millimetre of the sheet holds. `view` is the
+    detail's id, which is what a clipping plane knows it by
+    (core/clipping.py)."""
+    width: float
+    height: float
+    ratio: float
+    scale_denom: float | None = None
+    px_per_mm: float | None = None
+    view: str | None = None
 
 
 class _CapQuad:
@@ -595,18 +684,28 @@ def anchored(matrix, anchor):
     return m.astype(np.float32)
 
 
-def clip_plane_frames(objects):
+def clip_plane_frames(objects, view: str | None = None):
     """Where each clipping plane sits and which way it faces.
 
-    One `(origin, normal, enabled)` per clipping plane, the origin at the
+    One `(origin, normal, cuts)` per clipping plane, the origin at the
     middle of its rectangle and the normal pointing at the half of the model
     it takes away. Paused planes come back too, marked paused: pausing one is
     what you do while you are still deciding which way round it goes, so that
-    is the moment you most want to see the answer.
+    is the moment you most want to see the answer. Asked about one `view`,
+    a plane switched off in it comes back the way a paused one does
+    (core/clipping.py).
 
     A plane the geometry cannot be read from is skipped rather than guessed
     at. This runs inside the paint.
     """
+    return [(o, n, _clipping.cuts(setting, view))
+            for setting, o, n in _plane_frames(objects)]
+
+
+def _plane_frames(objects) -> list:
+    """`(clip_plane setting, origin, normal)` for each clipping plane whose
+    geometry can be read: the part of a frame that costs a trip into
+    OpenCASCADE, and is the same whichever view asks."""
     from ..core import geometry as g
     frames = []
     for obj in objects:
@@ -624,8 +723,7 @@ def clip_plane_frames(objects):
             o = np.asarray(g.centroid(obj.shape), float)
         except Exception:                                  # noqa: BLE001
             continue
-        frames.append((tuple(o), tuple(n),
-                       bool(obj.clip_plane.get("enabled"))))
+        frames.append((obj.clip_plane, tuple(o), tuple(n)))
     return frames
 
 
@@ -768,9 +866,11 @@ def cloud_vertex_data(mesh, anchor) -> np.ndarray:
     """The interleaved bytes a point cloud uploads: (N, 16) uint8 rows of
     rebased float32 xyz, rgb, pad. White where the cloud brought no
     colour, and the draw mixes the object's colour in instead."""
-    n = len(mesh.vertices)
+    n = len(mesh.local)
     rows = np.empty((n, CLOUD_STRIDE), np.uint8)
-    xyz = np.ascontiguousarray(rebased(mesh.vertices, anchor), np.float32)
+    xyz = np.ascontiguousarray(
+        mesh.local if mesh.far else rebased(mesh.vertices, anchor),
+        np.float32)
     rows[:, :12] = xyz.view(np.uint8).reshape(n, 12)
     colors = mesh.cloud_colors
     if colors is None:
@@ -844,25 +944,30 @@ class _MeshBuffers:
         if mesh.is_cloud:
             self.cloud_vbo = self._upload(GL.GL_ARRAY_BUFFER,
                                           cloud_vertex_data(mesh, self.anchor))
-            self.cloud_count = len(mesh.vertices)
+            self.cloud_count = len(mesh.local)
             self.cloud_levels = mesh.cloud_levels
             self.cloud_colored = mesh.cloud_colors is not None
         if mesh.has_faces:
             curv = mesh.curvature
-            if len(curv) != len(mesh.vertices):
-                curv = np.zeros(len(mesh.vertices), np.float32)
-            inter = np.hstack([rebased(mesh.vertices, self.anchor),
+            if len(curv) != len(mesh.local):
+                curv = np.zeros(len(mesh.local), np.float32)
+            # A far mesh's offsets are already what the card wants, so
+            # they go up as they are: no float64 copy of a survey made
+            # just to subtract from it again.
+            inter = np.hstack([mesh.local if mesh.far
+                               else rebased(mesh.vertices, self.anchor),
                                np.asarray(mesh.normals, np.float32),
                                np.asarray(curv, np.float32)[:, None]])
             self.tri_vbo = self._upload(GL.GL_ARRAY_BUFFER, inter)
             idx = mesh.triangles.astype(np.uint32)
             self.tri_ebo = self._upload(GL.GL_ELEMENT_ARRAY_BUFFER, idx)
             self.tri_count = idx.size
-        edge_segments = mesh.edge_segments
+        edge_segments = mesh.local_edges
         if dash and dash[0]:                          # (pattern, scale)
             edge_segments = _dashed_edge_segments(mesh, dash[0], dash[1])
         if len(edge_segments):
-            rel = rebased(edge_segments, self.anchor)
+            rel = (np.ascontiguousarray(edge_segments, np.float32)
+                   if mesh.far else rebased(edge_segments, self.anchor))
             self.line_vbo = self._upload(GL.GL_ARRAY_BUFFER,
                                          rel.reshape(-1, 3))
             self.line_count = rel.size // 3
@@ -870,8 +975,10 @@ class _MeshBuffers:
             self.thick_vbo = self._upload(GL.GL_ARRAY_BUFFER, flat)
             self.thick_ebo = self._upload(GL.GL_ELEMENT_ARRAY_BUFFER, idx)
             self.thick_count = len(idx)
-        if len(mesh.iso_segments):
-            pts = rebased(mesh.iso_segments, self.anchor).reshape(-1, 3)
+        if len(mesh.local_isos):
+            pts = (np.ascontiguousarray(mesh.local_isos, np.float32)
+                   if mesh.far
+                   else rebased(mesh.local_isos, self.anchor)).reshape(-1, 3)
             self.iso_vbo = self._upload(GL.GL_ARRAY_BUFFER, pts)
             self.iso_count = len(pts)
 
@@ -1112,6 +1219,12 @@ class Viewport(QOpenGLWidget):
         self._own_cplane = False            # until `cplane` says otherwise
         from .layout_view import LayoutView
         self.space = "model"                # "model" | layout id
+        self._target: DrawTarget | None = None   # a detail being drawn
+        # Which pane this is, to a clipping plane switched off in some
+        # views (core/clipping.py). Named for the view the pane was made
+        # for, and kept when it is turned to another: the window names
+        # its Top, Front and Right panes, and the first pane is this.
+        self.view_key = "perspective"
         self.layout_view = LayoutView(self)
         from .gumball import Gumball
         self.gumball = Gumball(self)
@@ -1216,6 +1329,7 @@ class Viewport(QOpenGLWidget):
         self._point_prog = 0
         self._count_prog = self._cap_prog = 0     # section caps
         self._cap_quad = None
+        self._cut_lines = _caps.CutLines()       # the line round each cap
         # Point clouds: how big a point is on screen and how many the frame
         # may hold before the finer levels are dropped (display settings).
         self.point_size = float(config.get("display", "point_size",
@@ -1408,6 +1522,8 @@ class Viewport(QOpenGLWidget):
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
         GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glDepthFunc(GL.GL_LESS)          # a parallel view changes both
+        GL.glDisable(GL.GL_DEPTH_CLAMP)     # for its overlays, below
         GL.glClearColor(*theme.VIEWPORT_BG_BOTTOM, 1.0)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
 
@@ -1457,10 +1573,25 @@ class Viewport(QOpenGLWidget):
         # in, and each overlay rebases what it uploads to match, so the
         # gumball and the rubber band hold as still as the meshes do.
         mvp = anchored(mvp64, self._frame_anchor)
+        # A parallel view's slab wraps the drawing alone (Camera.clip_planes),
+        # so the grid, a rubber band on a construction plane back at the
+        # world's origin or a ghost behind the model can fall outside it.
+        # Clamping depth keeps them, at the front or the back of the slab,
+        # where clipping would cut them away. What is drawn after the model
+        # compares with LEQUAL, so a ghost clamped to the back still shows
+        # wherever nothing stands in front of it.
+        parallel = self.camera.projection == "parallel"
+        if parallel:
+            GL.glEnable(GL.GL_DEPTH_CLAMP)
 
         if self.display_mode == "technical":
             self._paint_technical(w, h)
+            if parallel:
+                GL.glDepthFunc(GL.GL_LEQUAL)
             self._draw_pending(mvp)
+            if parallel:
+                GL.glDepthFunc(GL.GL_LESS)
+                GL.glDisable(GL.GL_DEPTH_CLAMP)
             self._draw_selection_box(w, h)
             return
 
@@ -1468,6 +1599,8 @@ class Viewport(QOpenGLWidget):
             self._draw_grid(mvp64)
         self._sync_gpu()
         self._draw_objects(mvp64, view)
+        if parallel:
+            GL.glDepthFunc(GL.GL_LEQUAL)
         self._draw_image_planes(mvp)
         self._draw_pending(mvp)
         self._draw_control_points(mvp)
@@ -1475,6 +1608,9 @@ class Viewport(QOpenGLWidget):
         self._draw_direction_arrows(mvp)
         self._draw_clip_normals(mvp)
         self.gumball.paint(mvp)
+        if parallel:
+            GL.glDepthFunc(GL.GL_LESS)
+            GL.glDisable(GL.GL_DEPTH_CLAMP)
         self._draw_axis_triad(view, w, h)
         self._draw_frame_guides(w, h)
         self._draw_selection_box(w, h)
@@ -1570,10 +1706,10 @@ class Viewport(QOpenGLWidget):
 
     def _readout_length(self, length: float) -> str:
         """In the units it was drawn in: the model's through a detail or in the
-        model window, millimetres on the paper itself."""
+        model window, the sheet's on the paper itself."""
         if self.space == "model" or self._drawing_through() is not None:
             return self.scene.format_length(length)
-        return _units.format_length(length, "mm")
+        return self.scene.format_paper_length(length)
 
     def _update_draw_readout(self):
         """Show how long the leg under the cursor is while a command is
@@ -1604,8 +1740,11 @@ class Viewport(QOpenGLWidget):
             # at is where they belong — there is no band to hang them off.
             cx, cy = self.layout_view.paper_to_screen(ghost.x + ghost.w,
                                                       ghost.y + ghost.h)
-            text = (f"{ghost.w:.1f} × {ghost.h:.1f} mm"
-                    f" · {ghost.scale_text()}")
+            size = (f"{ghost.w:.1f} × {ghost.h:.1f} mm"
+                    if _units.paper_units(self.scene.units) == "mm"
+                    else _units.format_paper_size(ghost.w, ghost.h,
+                                                  self.scene.units))
+            text = f"{size} · {ghost.scale_text(self.scene.units)}"
         elif frame is not None:
             # Anything else dragged out as a frame, for the same reason: two
             # sides at the corner they meet at, rather than one number about a
@@ -1965,12 +2104,15 @@ class Viewport(QOpenGLWidget):
         if not self.cplane.is_world_xy():
             mvp = mvp @ self.cplane.basis_matrix()
         mvp = mvp.astype(np.float32)
-        GL.glDepthMask(False)
+        # Drawn first, on a cleared buffer, and writing no depth, so testing
+        # depth could only ever turn it away, as it did a grid clamped to
+        # the back of a parallel view's slab (see _paint_frame).
+        GL.glDisable(GL.GL_DEPTH_TEST)
         self._draw_lines(self._grid["minor"], mvp, theme.GRID_MINOR)
         self._draw_lines(self._grid["major"], mvp, theme.GRID_MAJOR)
         self._draw_lines(self._grid["axis_x"], mvp, theme.GRID_AXIS_X)
         self._draw_lines(self._grid["axis_y"], mvp, theme.GRID_AXIS_Y)
-        GL.glDepthMask(True)
+        GL.glEnable(GL.GL_DEPTH_TEST)
 
     def set_cplane(self, cplane):
         self.cplane = cplane
@@ -2162,7 +2304,7 @@ class Viewport(QOpenGLWidget):
         and one would simply be discarded.
         """
         if (len(mesh.triangles) < spatial.MIN_PRIMITIVES
-                and len(mesh.edge_segments) < spatial.MIN_PRIMITIVES):
+                and len(mesh.local_edges) < spatial.MIN_PRIMITIVES):
             return                         # most of a drawing, and never worth
 
         def work():
@@ -2239,13 +2381,17 @@ class Viewport(QOpenGLWidget):
         loop over every visible object, which at cave-file scale is too dear
         to pay per frame. The grid rides along because it is drawn with the
         same projection — a far plane snug around a small model would
-        otherwise crop the grid it sits on.
+        otherwise crop the grid it sits on. It stretches only the far
+        plane, though: the near plane is set by the drawing alone
+        (`drawing_bounds`), or a grid at the world's origin would clip a
+        georeferenced model away as soon as it was zoomed in on.
         """
         key = (self.scene.revision, self._grid_params, self.grid_visible)
         if self._cam_bounds_key == key:
             return
         self._cam_bounds_key = key
         box = self.scene.bbox()
+        self.camera.drawing_bounds = box
         if self.grid_visible:
             extent = float(self._grid_params[0])
             grid = ((-extent, -extent, 0.0), (extent, extent, 0.0))
@@ -2279,8 +2425,12 @@ class Viewport(QOpenGLWidget):
     def _draw_objects(self, mvp, view, mode_override=None,
                       light_background=False, hidden_layers=()):
         """Draw the scene. `hidden_layers` are left out on top of what is
-        hidden anyway, with what is under them: a detail's own (#38)."""
-        clips = self._clip_vectors() if self.space == "model" else []
+        hidden anyway, with what is under them: a detail's own (#38).
+
+        Cut by the clipping planes wherever it is drawn: a detail on a
+        sheet is a view of the model too, and a section is the thing most
+        worth putting on a sheet (#94)."""
+        clips = self._clip_vectors()
         try:
             self._draw_objects_with_clips(mvp, view, clips, mode_override,
                                           light_background, hidden_layers)
@@ -2289,6 +2439,56 @@ class Viewport(QOpenGLWidget):
             # after a failed upload makes its shaders' unwritten distances
             # undefined, so release them even when an object cannot draw.
             self._end_clips(clips)
+
+    @contextmanager
+    def _into_detail(self, width: float, height: float, ratio: float,
+                     scale_denom: float | None = None,
+                     px_per_mm: float | None = None,
+                     view: str | None = None):
+        """Draw the model into a detail's picture rather than the pane.
+
+        Whatever is measured in pixels while the model draws, a wide
+        line's width and a cap's hatch, is measured against the picture
+        being made, and a detail's is its own rectangle, or the raster a
+        PDF makes of it, never the pane it sits in. See DrawTarget.
+        """
+        old = self._target
+        self._target = DrawTarget(float(width), float(height), float(ratio),
+                                  scale_denom, px_per_mm, view)
+        try:
+            yield
+        finally:
+            self._target = old
+
+    def _draw_target(self) -> DrawTarget:
+        """The picture being drawn into: a detail's, or the pane."""
+        if self._target is not None:
+            return self._target
+        return DrawTarget(float(self.width()), float(self.height()),
+                          self.devicePixelRatioF())
+
+    def _target_size(self) -> tuple[float, float]:
+        """The picture's width and height, in the pixels a line's width is
+        given in. _draw_target without the pixel ratio, which is a call
+        into Qt, since every wide line asks this."""
+        if self._target is not None:
+            return self._target.width, self._target.height
+        return float(self.width()), float(self.height())
+
+    def _cap_period(self, spacing_mm: float, ppu: float):
+        """How far apart a cap's hatch lines fall, in model units, or None
+        for no lines.
+
+        A detail with a scale hatches its cut at the hatch's own spacing on
+        the sheet, the way a hidden-line detail does and the way it prints.
+        Anywhere else the spacing keeps to the screen, which is what a
+        model view zooming in and out needs (section_caps.hatch_period).
+        """
+        scale = self._draw_target().scale_denom
+        if scale:
+            return float(spacing_mm) * float(scale) if spacing_mm > 0 \
+                else None
+        return _caps.hatch_period(spacing_mm, ppu)
 
     def _draw_objects_with_clips(self, mvp, view, clips, mode_override=None,
                                 light_background=False, hidden_layers=()):
@@ -2481,8 +2681,8 @@ class Viewport(QOpenGLWidget):
             if subs and len(obj.mesh.edge_of_segment):
                 mask = np.isin(obj.mesh.edge_of_segment, subs)
                 if mask.any():
-                    segs = rebased(obj.mesh.edge_segments[mask],
-                                   gpu.anchor)
+                    segs = uploadable(obj.mesh, obj.mesh.local_edges[mask],
+                                      gpu.anchor)
                     # Gold over a dark halo, the control-point markers'
                     # trick, through the screen-space quad shader: a
                     # width glLineWidth cannot cap to a hairline.
@@ -2500,8 +2700,9 @@ class Viewport(QOpenGLWidget):
                 mask = np.isin(obj.mesh.face_of_triangle, fsubs)
                 if mask.any():
                     tris = obj.mesh.triangles[mask]
-                    pts = obj.mesh.vertices[tris.ravel()]
-                    self._preview.update(rebased(pts, gpu.anchor))
+                    pts = uploadable(obj.mesh, obj.mesh.local[tris.ravel()],
+                                     gpu.anchor)
+                    self._preview.update(pts)
                     self._set_line_uniforms(omvp,
                                             (*theme.SELECTION_COLOR, 0.45))
                     GL.glBindVertexArray(self._preview.vao)
@@ -2528,9 +2729,11 @@ class Viewport(QOpenGLWidget):
                                          anchor=gpu.anchor)
         self._line_width(1.0)
         if clips and mode in CAP_MODES:
-            self._draw_section_caps(mvp, clips, objects, locked_layers, mode)
+            self._draw_section_caps(mvp, view, clips, objects, locked_layers,
+                                    mode)
 
-    def _draw_section_caps(self, mvp, clips, objects, locked_layers, mode):
+    def _draw_section_caps(self, mvp, view, clips, objects, locked_layers,
+                           mode):
         """Close every solid a live clipping plane cuts with a cap, in its
         section's fill (see ui/section_caps.py for how).
 
@@ -2547,13 +2750,16 @@ class Viewport(QOpenGLWidget):
                     and obj.mesh_ready and obj.mesh.bounds() is not None):
                 solids.append((obj, gpu))
         if not planes or not solids:
+            self._cut_lines.end_frame()
             return
         boxes = [obj.mesh.bounds() for obj, _gpu in solids]
         lows = np.array([b[0] for b in boxes], float)
         highs = np.array([b[1] for b in boxes], float)
-        ratio = self.devicePixelRatioF()
-        width, height = self.width() * ratio, self.height() * ratio
-        right, _up = self.camera.right_up()
+        # Measured in the picture being made, along its own right: a
+        # detail's, not the pane's or the model camera's.
+        target = self._draw_target()
+        width, height = target.width * target.ratio, target.height * target.ratio
+        right = np.asarray(view, float)[0, :3]
         GL.glEnable(GL.GL_STENCIL_TEST)
         try:
             for i, plane in enumerate(planes):
@@ -2569,8 +2775,10 @@ class Viewport(QOpenGLWidget):
                     np.asarray(corner, float) - np.asarray(plane.origin)))
                     for obj, _gpu in cut for corner in obj.mesh.bounds())
                 by_id = {obj.id: (obj, gpu) for obj, gpu in cut}
+                fills = {obj.id: self.scene.section_fill_of(obj)
+                         for obj, _gpu in cut}
                 looks = [(obj.id, _caps.cap_style(
-                    self.scene.section_fill_of(obj),
+                    fills[obj.id],
                     self._cap_color(obj, locked_layers, mode)))
                     for obj, _gpu in cut]
                 for style, ids in _caps.group_by_style(looks):
@@ -2578,8 +2786,12 @@ class Viewport(QOpenGLWidget):
                         mvp, plane, [by_id[oid][1] for oid in ids])
                     self._lay_cap(mvp, plane, others, style, ppu,
                                   reach * 1.5 + 1.0)
+                self._draw_cut_lines(mvp, plane, others,
+                                     [(obj, fills[obj.id]) for obj, _ in cut])
         finally:
+            self._cut_lines.end_frame()
             GL.glDisable(GL.GL_STENCIL_TEST)
+            GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
             GL.glColorMask(True, True, True, True)
             GL.glDepthMask(True)
             GL.glEnable(GL.GL_DEPTH_TEST)
@@ -2631,10 +2843,13 @@ class Viewport(QOpenGLWidget):
 
     def _lay_cap(self, mvp, plane, others, style, ppu, extent):
         """The sheet over the plane where the stencil says solid, cut by
-        every other plane, hidden by anything nearer."""
+        every other plane, hidden by anything nearer. Set back a touch, the
+        way a face is, so its cut line lies on it the way an edge does."""
         GL.glColorMask(True, True, True, True)
         GL.glDepthMask(True)
         GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
+        GL.glPolygonOffset(1.0, 1.0)
         GL.glStencilFunc(GL.GL_NOTEQUAL, 0, 0xFF)
         GL.glStencilOp(GL.GL_KEEP, GL.GL_KEEP, GL.GL_KEEP)
         for k in range(_caps.MAX_PLANES):
@@ -2652,14 +2867,68 @@ class Viewport(QOpenGLWidget):
             GL.glUniform4fv(self._uloc(prog, "uClips"), len(others),
                             np.asarray(anchored_clips(others, origin),
                                        np.float32))
-        period = _caps.hatch_period(style.spacing_mm, ppu)
+        period = self._cap_period(style.spacing_mm, ppu)
         pattern = style.pattern if period else _caps.PLAIN
         GL.glUniform1i(self._uloc(prog, "uPattern"), pattern)
         GL.glUniform1f(self._uloc(prog, "uPeriod"), period or 1.0)
         GL.glUniform1f(self._uloc(prog, "uAngle"), style.angle)
         GL.glUniform3f(self._uloc(prog, "uFill"), *style.fill)
         GL.glUniform4f(self._uloc(prog, "uLine"), *style.line)
+        if pattern == _caps.FAMILIES:
+            fam_a, fam_b, dashes = _caps.family_uniforms(style.families)
+            GL.glUniform1i(self._uloc(prog, "uFamilyCount"),
+                           len(style.families))
+            GL.glUniform4fv(self._uloc(prog, "uFamA"), _caps.MAX_FAMILIES,
+                            fam_a)
+            GL.glUniform4fv(self._uloc(prog, "uFamB"), _caps.MAX_FAMILIES,
+                            fam_b)
+            GL.glUniform1fv(self._uloc(prog, "uDash"), len(dashes), dashes)
         self._cap_quad.draw(extent)
+        GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
+
+    def _draw_cut_lines(self, mvp, plane, others, cut):
+        """The line round every cap one plane lays, where the plane meets
+        each solid's faces, in the width and colour the solid's section
+        says (#82). `cut` is (object, section fill) for every solid the
+        plane passes through.
+
+        Not on the stencil: half the line's width lies outside the cap.
+        Cut by every other plane, as the cap is, but not by this one: the
+        line lies on it, and would come and go with the rounding. Drawn a
+        hair nearer than it is, so an edge or an isocurve that happens to
+        lie on the plane too goes under it rather than through it in
+        dashes. About the plane's origin, as the cap is, so a model far
+        from the world's origin still draws in small float32 numbers. In a
+        detail, at its print width on the sheet (#94).
+        """
+        groups: dict = {}
+        px_per_mm = self._draw_target().px_per_mm
+        for obj, fill in cut:
+            style = _caps.cut_line_style(fill, px_per_mm)
+            if style is None:
+                continue
+            segs = self._cut_lines.segments(obj.id, obj.mesh, plane)
+            if len(segs):
+                groups.setdefault(style, []).append(segs)
+        if not groups:
+            return
+        origin = np.asarray(plane.origin, float)
+        GL.glDisable(GL.GL_STENCIL_TEST)
+        GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)      # the wide line's quads
+        GL.glPolygonOffset(0.0, -2.0)
+        try:
+            for k in range(_caps.MAX_PLANES):
+                (GL.glEnable if k < len(others) else GL.glDisable)(
+                    GL.GL_CLIP_DISTANCE0 + k)
+            self._set_clip_uniforms(self._thick_prog,
+                                    anchored_clips(others, origin))
+            for (color, width), parts in groups.items():
+                self._draw_thick_segments(
+                    (np.concatenate(parts) - origin).astype(np.float32),
+                    anchored(mvp, origin), color, width)
+        finally:
+            GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
+            GL.glEnable(GL.GL_STENCIL_TEST)
 
     def _draw_point_markers(self, mvp, points, color, selected: bool,
                             anchor=None):
@@ -2806,7 +3075,7 @@ class Viewport(QOpenGLWidget):
         self._use(prog)
         self._set_mvp(prog, np.asarray(mvp, np.float32))
         self._set_uniform(prog, "uViewport", GL.glUniform2f,
-                          float(self.width()), float(self.height()))
+                          *self._target_size())
         self._set_uniform(prog, "uWidthPx", GL.glUniform1f, float(width))
         self._set_color4(prog, color)
         GL.glBindVertexArray(self._preview_thick.vao)
@@ -2829,7 +3098,7 @@ class Viewport(QOpenGLWidget):
         # this is the path llvmpipe takes for every wide line it draws.
         self._set_mvp(prog, np.asarray(mvp, np.float32))
         self._set_uniform(prog, "uViewport", GL.glUniform2f,
-                          float(self.width()), float(self.height()))
+                          *self._target_size())
         self._set_uniform(prog, "uWidthPx", GL.glUniform1f, float(width))
         self._set_color4(prog, color)
         GL.glBindVertexArray(gpu.thick_vao)
@@ -3257,14 +3526,23 @@ class Viewport(QOpenGLWidget):
         so there is nothing to tessellate: the sheet draws it the way it draws
         the details already on it.
         """
-        from ..core.layout import DetailView, TextNote
+        from ..core.layout import DetailView, Hatch, TextNote
         from ..core.picture import PictureShape
         had_picture = (self._ghost_picture is not None
                        or self.layout_view._ghost_picture is not None)
         self._ghost_picture = None
         self.layout_view._ghost_picture = None
-        had_note = self.layout_view._ghost_note is not None
+        had_note = (self.layout_view._ghost_note is not None
+                    or self.layout_view._ghost_hatch is not None)
         self.layout_view._ghost_note = None
+        self.layout_view._ghost_hatch = None
+        if isinstance(shape, Hatch):
+            # a sheet's hatch, about to be placed: drawn the way it will be
+            self.layout_view.set_ghost_detail(None)
+            self.layout_view._ghost_hatch = shape
+            self._ghost = None
+            self.update()
+            return
         if isinstance(shape, TextNote):
             self.layout_view.set_ghost_detail(None)
             self.layout_view._ghost_note = shape
@@ -3294,6 +3572,11 @@ class Viewport(QOpenGLWidget):
                 self._ghost = None
                 self.update()
             return
+        # A solid hatch about to be placed is ghosted as a fill as strong
+        # as the lines of any other, not as a tint: it is what it will be.
+        from ..core.hatch import HatchGroup, HatchShape
+        self._ghost_solid = (isinstance(shape, (HatchShape, HatchGroup))
+                             and shape.solid)
         try:
             from ..core.tessellate import tessellate
             self._ghost = tessellate(shape)
@@ -3301,24 +3584,35 @@ class Viewport(QOpenGLWidget):
             self._ghost = None
         self.update()
 
-    def _clip_frames(self):
-        """Read native plane geometry once, shared by the cut and its arrow.
+    def _clip_frames(self, view: str | None = None):
+        """The clipping planes as `view` sees them, the one being drawn
+        unless another is named: see clip_plane_frames.
 
-        Layer visibility can change without a scene revision. Including it
-        keeps a hidden plane from continuing to cut, and avoids repeatedly
-        entering OpenCASCADE from every pane's repaint.
+        Native plane geometry is read once a revision, shared by the cut
+        and its arrow and by every view that asks; a sheet asks once for
+        each detail on it, every frame. Layer visibility can change
+        without a scene revision. Including it keeps a hidden plane from
+        continuing to cut, and avoids repeatedly entering OpenCASCADE from
+        every pane's repaint.
         """
         key = (self.scene.revision, self._visible_layers())
         cache = getattr(self, "_clip_frames_cache", None)
         if cache is None or cache[0] != key:
-            cache = (key, clip_plane_frames(self.scene.visible_objects()))
+            cache = (key, _plane_frames(self.scene.visible_objects()), {})
             self._clip_frames_cache = cache
-        return cache[1]
+        view = self._view_drawn() if view is None else view
+        frames = cache[2].get(view)
+        if frames is None:
+            frames = [(o, n, _clipping.cuts(setting, view))
+                      for setting, o, n in cache[1]]
+            cache[2][view] = frames
+        return frames
 
-    def _clip_vectors(self) -> list:
-        """vec4 clip equations from enabled clipping-plane objects.
-        Keeps the half-space behind each plane's normal."""
-        frames = self._clip_frames()
+    def _clip_vectors(self, view: str | None = None) -> list:
+        """vec4 clip equations from the planes that cut `view`, the one
+        being drawn unless another is named. Keeps the half-space behind
+        each plane's normal."""
+        frames = self._clip_frames(view)
         cache = getattr(self, "_clip_cache", None)
         if cache is not None and cache[0] is frames:
             return cache[1]
@@ -3329,6 +3623,23 @@ class Viewport(QOpenGLWidget):
                 if on][:4]
         self._clip_cache = (frames, vecs)
         return vecs
+
+    def _view_drawn(self) -> str:
+        """The view being drawn, to a clipping plane: the detail while one
+        is, this pane otherwise."""
+        target = self._target
+        if target is not None and target.view is not None:
+            return target.view
+        return self.view_key
+
+    def clip_view(self) -> str | None:
+        """The view a clipping plane is switched on or off in from this
+        pane: the pane's own in the model, the detail you are inside on a
+        sheet, and on bare paper none at all."""
+        if self.space == "model":
+            return self.view_key
+        detail = self.layout_view._entered()
+        return None if detail is None else detail.id
 
     def _set_clip_uniforms(self, prog, clips):
         self._use(prog)
@@ -3377,7 +3688,8 @@ class Viewport(QOpenGLWidget):
         if tris is not None:
             pts = rebased(tris, self._frame_anchor)
             self._preview.update(pts)
-            self._set_line_uniforms(mvp, (*gold, 0.22))
+            self._set_line_uniforms(mvp, (*gold, 0.85 if getattr(
+                self, "_ghost_solid", False) else 0.22))
             GL.glDepthMask(False)
             GL.glBindVertexArray(self._preview.vao)
             GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
@@ -3881,10 +4193,17 @@ class Viewport(QOpenGLWidget):
             self._sync_gpu()
             proj, view = self.layout_view.detail_matrices(detail, px_w, px_h)
             mvp64 = proj @ view
-            self._draw_objects(mvp64, view,
-                               mode_override=detail.display_mode,
-                               light_background=True,
-                               hidden_layers=detail.hidden_layers)
+            # A raster for the PDF, so its own pixels are what a line is
+            # measured in, and a sheet's millimetre is the detail's width
+            # in them over its width on the sheet.
+            with self._into_detail(px_w, px_h, 1.0,
+                                   None if detail.perspective
+                                   else detail.scale_denom,
+                                   px_w / max(detail.w, 1e-9), detail.id):
+                self._draw_objects(mvp64, view,
+                                   mode_override=detail.display_mode,
+                                   light_background=True,
+                                   hidden_layers=detail.hidden_layers)
             img = fbo.toImage()
             fbo.release()
             ratio = self.devicePixelRatioF()
@@ -4093,7 +4412,7 @@ class Viewport(QOpenGLWidget):
         drop = self._reject_boxes([b for _, b in boxed], x0, y0, x1, y1, w, h)
         return [obj for (obj, _), d in zip(boxed, drop) if not d]
 
-    def _near_primitives(self, index, x0, y0, x1, y1, w, h):
+    def _near_primitives(self, index, x0, y0, x1, y1, w, h, offset=None):
         """Which of an indexed mesh's primitives can reach a screen rect.
 
         Narrowing the drawing to the objects near the cursor does nothing
@@ -4107,8 +4426,13 @@ class Viewport(QOpenGLWidget):
         """
         if index is None:
             return None
-        drop = self._reject_extents(index.mins, index.maxs,
-                                    x0, y0, x1, y1, w, h)
+        # An index is built in the mesh's own coordinates; its boxes come
+        # out to the world here, and there are hundreds of them where
+        # there are millions of triangles.
+        mins, maxs = index.mins, index.maxs
+        if offset is not None and np.any(offset):
+            mins, maxs = mins + offset, maxs + offset
+        drop = self._reject_extents(mins, maxs, x0, y0, x1, y1, w, h)
         if not drop.any():
             return None
         return index.gather(~drop)
@@ -4120,15 +4444,29 @@ class Viewport(QOpenGLWidget):
         found at position 3 of a narrowed set is not triangle 3 of the mesh.
         """
         sub = self._near_primitives(mesh.triangle_index(),
-                                    x0, y0, x1, y1, w, h)
+                                    x0, y0, x1, y1, w, h, mesh.origin)
         return (mesh.triangles if sub is None else mesh.triangles[sub]), sub
 
     def _near_segments(self, mesh, x0, y0, x1, y1, w, h) -> tuple:
-        """(edge segments worth testing, where each sits in the mesh)."""
+        """(edge segments worth testing, where each sits in the mesh).
+
+        In the world's coordinates, like everything that is about to be
+        projected onto the screen. The narrowing happens in the mesh's
+        own, where its index is, and only what survives is moved out:
+        a handful of segments rather than a survey.
+        """
         sub = self._near_primitives(mesh.segment_index(),
-                                    x0, y0, x1, y1, w, h)
-        return ((mesh.edge_segments if sub is None
-                 else mesh.edge_segments[sub]), sub)
+                                    x0, y0, x1, y1, w, h, mesh.origin)
+        near = mesh.local_edges if sub is None else mesh.local_edges[sub]
+        return mesh.to_world(near), sub
+
+    def _near_segments_local(self, mesh, x0, y0, x1, y1, w, h) -> tuple:
+        """The same, left in the mesh's own coordinates for a caller that
+        works there (the pick moves the ray, not the mesh)."""
+        sub = self._near_primitives(mesh.segment_index(),
+                                    x0, y0, x1, y1, w, h, mesh.origin)
+        return ((mesh.local_edges if sub is None
+                 else mesh.local_edges[sub]), sub)
 
     def _selection_color(self, obj_id: str) -> tuple:
         """The gold to draw a selected object in: full, or dimmed while the
@@ -4213,11 +4551,18 @@ class Viewport(QOpenGLWidget):
             return None                 # a mesh, a cloud: no exact point
 
     def pick_objects(self, px: float, py: float) -> list[str]:
-        """Every object under the pixel, nearest first.
+        """Every object under the pixel, nearest first."""
+        return [obj_id for _depth, obj_id in self.pick_hits(px, py)]
+
+    def pick_hits(self, px: float, py: float) -> list[tuple[float, str]]:
+        """Every object under the pixel as (depth, id), nearest first.
 
         A click takes the first of these and always has. Holding the button
         still offers the whole list instead, so the thing behind the thing
-        in front is reachable without hiding half the scene first.
+        in front is reachable without hiding half the scene first. The
+        depths come out with it because two objects in the same place are
+        a different matter from one behind another, and only the numbers
+        tell them apart (see ids_in_the_same_place).
         """
         w, h = self.width(), self.height()
         eye = self._eye()
@@ -4247,10 +4592,15 @@ class Viewport(QOpenGLWidget):
             if shaded_faces:
                 tris, _ = self._near_triangles(mesh, px - r, py - r,
                                                px + r, py + r, w, h)
-                t = ray_triangle_hits(origin, direction,
-                                      mesh.vertices[tris[:, 0]].astype(float),
-                                      mesh.vertices[tris[:, 1]].astype(float),
-                                      mesh.vertices[tris[:, 2]].astype(float))
+                # The ray moves into the mesh's coordinates rather than
+                # the mesh into the world's: a ray is three numbers and a
+                # survey mesh is millions, and the distance along it,
+                # which is the answer, is the same either way.
+                here = origin - mesh.origin
+                t = ray_triangle_hits(here, direction,
+                                      mesh.local[tris[:, 0]].astype(float),
+                                      mesh.local[tris[:, 1]].astype(float),
+                                      mesh.local[tris[:, 2]].astype(float))
                 tmin = t.min() if len(t) else np.inf
                 if np.isfinite(tmin):
                     depth = tmin
@@ -4263,11 +4613,11 @@ class Viewport(QOpenGLWidget):
             # missed has no claim on the click, or the surface beside a
             # seam, or the box beside a floor, would take it by its edge.
             edges_on_show = not shaded_faces or (
-                not hit and seen_edge_on(mesh.vertices, tris, direction))
-            if len(mesh.edge_segments) and edges_on_show:
-                segs, _ = self._near_segments(mesh, px - r, py - r,
-                                              px + r, py + r, w, h)
-                pts = segs.reshape(-1, 3)
+                not hit and seen_edge_on(mesh.local, tris, direction))
+            if len(mesh.local_edges) and edges_on_show:
+                segs, _ = self._near_segments_local(mesh, px - r, py - r,
+                                                    px + r, py + r, w, h)
+                pts = mesh.to_world(segs.reshape(-1, 3))
                 scr = eye.project(pts, w, h)
                 a, b = scr[0::2], scr[1::2]
                 d2 = _point_segment_dist2(np.array([px, py]), a[:, :2],
@@ -4281,7 +4631,7 @@ class Viewport(QOpenGLWidget):
                         if seg_depth < depth:
                             depth = seg_depth
                         hit = True
-            if len(mesh.points):
+            if len(mesh.local_points):
                 scr = eye.project(mesh.points.astype(float), w, h)
                 d2 = ((scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2)
                 near = d2 < PICK_RADIUS_PX ** 2
@@ -4297,16 +4647,23 @@ class Viewport(QOpenGLWidget):
                 found.append((depth, obj.id))
         # by depth alone, so objects at the same distance keep scene order
         found.sort(key=lambda d: d[0])
-        return [obj_id for _, obj_id in found]
+        return found
 
     # How many of a cloud's points a click or a band projects: enough that
     # a wall of points has one under the cursor, few enough to be instant.
     PICK_CLOUD_SAMPLE = 200_000
 
     def _cloud_pick_points(self, mesh) -> np.ndarray:
-        n = len(mesh.vertices)
+        """An even sample of a cloud, in the world's coordinates.
+
+        Thinned first and moved out afterwards: a scan is held as offsets
+        from where it stands, and building the whole of it in doubles to
+        take every two-hundredth point would be the expensive half of a
+        click.
+        """
+        n = len(mesh.local)
         stride = max(1, n // self.PICK_CLOUD_SAMPLE)
-        return mesh.vertices[::stride].astype(float)
+        return mesh.to_world(mesh.local[::stride]).astype(float)
 
     def _nearest_cloud_point(self, mesh, eye, px, py, w, h):
         """Depth of the cloud point nearest the cursor within the pick
@@ -4340,7 +4697,7 @@ class Viewport(QOpenGLWidget):
         found = []
         for obj in near_cursor:
             mesh = obj.mesh
-            if not len(mesh.edge_segments):
+            if not len(mesh.local_edges):
                 continue
             segs, sub = self._near_segments(mesh, px - r, py - r,
                                             px + r, py + r, w, h)
@@ -4779,17 +5136,23 @@ class Viewport(QOpenGLWidget):
         if not self.point_mode:
             self._hold_timer.start()
 
-    def _offer_the_stack(self):
+    def _offer_the_stack(self, ids=None, pos=None, mods=None):
         """Open the object chooser, if there is anything to choose between.
 
         One object under the cursor is not a choice, so nothing happens and
         the release picks it the way it always did. That is what keeps a
         slow, deliberate click on a single object identical to a quick one.
+
+        The hold and Alt ask it about everything under the cursor. A plain
+        click asks it about what is in the same place, and hands that list
+        in rather than letting this one read the ray again.
         """
-        pos, mods = self._press_pos, self._hold_mods
+        if pos is None:
+            pos, mods = self._press_pos, self._hold_mods
         if pos is None or self._box_active or self.point_mode:
             return
-        ids = self.pick_objects(pos.x(), pos.y())
+        if ids is None:
+            ids = self.pick_objects(pos.x(), pos.y())
         if len(ids) < 2:
             return
         from .object_chooser import ObjectChooser, chooser_rows
@@ -4808,6 +5171,20 @@ class Viewport(QOpenGLWidget):
         # Down and to the right of the cursor, so that letting the button up
         # without moving lands in the gap rather than on the first row.
         menu.popup(self.mapToGlobal(pos.toPoint()) + QPoint(13, 11))
+
+    def _choices_in_the_same_place(self, hits) -> list[str]:
+        """The ids a plain click has to ask about, or an empty list.
+
+        Objects in the same place that all come to the same selection are
+        not a choice: a group answers for its members, so both rows would
+        do the same thing and the click may as well do it.
+        """
+        together = ids_in_the_same_place(hits)
+        if len(together) < 2:
+            return []
+        answers = {tuple(sorted(self.scene.expand_group_ids([i])))
+                   for i in together}
+        return together if len(answers) > 1 else []
 
     def _chooser_closed(self):
         self._chooser = None
@@ -5054,10 +5431,17 @@ class Viewport(QOpenGLWidget):
                     self.selection.toggle_subobject(*hit)
                     self.update()
                 return
-            picked = self.pick_object(pos.x(), pos.y())
-            if picked:
+            hits = self.pick_hits(pos.x(), pos.y())
+            together = self._choices_in_the_same_place(hits)
+            if together:
+                # Nothing a camera angle can separate, so the click cannot
+                # mean one of them rather than the other: ask, the way Alt
+                # and the hold do, without having to know about either.
+                self._offer_the_stack(together, pos, mods)
+                return
+            if hits:
                 self.last_click_px = (pos.x(), pos.y())
-                self.objectClicked.emit(picked, ev.modifiers())
+                self.objectClicked.emit(hits[0][1], ev.modifiers())
             else:
                 self.emptyClicked.emit(ev.modifiers())
 
@@ -5071,7 +5455,7 @@ class Viewport(QOpenGLWidget):
                       and self.selection.filter_allows(obj.kind)]
         for obj in self._pick_candidates(selectable, *rect, w, h):
             mesh = obj.mesh
-            if len(mesh.edge_segments):
+            if len(mesh.local_edges):
                 segs = mesh.edge_segments
                 if crossing:
                     # a crossing box asks whether *any* point falls inside,
@@ -5207,7 +5591,7 @@ class Viewport(QOpenGLWidget):
         caught = []
         for obj in self._pick_candidates(selectable, *rect, w, h):
             mesh = obj.mesh
-            if len(mesh.edge_of_segment) and len(mesh.edge_segments):
+            if len(mesh.edge_of_segment) and len(mesh.local_edges):
                 # only the segments whose chunk can reach the rect are
                 # projected; a chunk thrown out is outside it, which is an
                 # answer in itself for a window

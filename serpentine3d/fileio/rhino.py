@@ -2,7 +2,8 @@
 
 Import: NURBS curves are converted exactly (poles/weights/knots); breps,
 extrusions and NURBS surfaces come in as untrimmed NURBS faces; meshes are
-sewn into shells. Layers (names/colors) are preserved both ways.
+sewn into shells. Layers (names/colors) and each object's Attribute User
+Text are preserved both ways.
 
 Export: curves as exact NURBS; surfaces and solids as meshes (render
 meshes — Rhino re-imports them fine; exact BREP export goes via STEP).
@@ -18,7 +19,7 @@ import numpy as np
 import rhino3dm as r3
 from OCP.GeomAPI import GeomAPI_ProjectPointOnSurf
 
-from ..core import geometry, occ
+from ..core import geometry, occ, user_text
 from ..core.deferred import DeferredShape
 from ..core.layers import PATH_SEPARATOR
 from ..core.occ import (
@@ -27,10 +28,12 @@ from ..core.occ import (
     gp_Pnt,
 )
 from ..core.tessellate import tessellate
+from ..utils.units import TO_MM, converted_note, rescale
 from .obj import _shell_from_triangles
 from .progress import Cancelled, Progress
 # Safe to import at module level: the parallel importer only reaches back
 # into this module from inside its functions.
+from .rhino_hatch import read_hatch_patterns
 from .rhino_parallel import (MIN_PARALLEL_BYTES, _spawn_executable,
                              import_3dm_parallel, worker_count)
 
@@ -42,6 +45,11 @@ _COLOR_FROM_PARENT = int(r3.ObjectColorSource.ColorFromParent)
 _MATERIAL_FROM_OBJECT = int(r3.ObjectMaterialSource.MaterialFromObject)
 # Rhino's shine is 0..255, where 255 is a mirror.
 MAX_SHINE = 255.0
+# Our document units by the name of Rhino's unit system, both ways.
+_OUR_UNITS = {"Millimeters": "mm", "Centimeters": "cm", "Meters": "m",
+              "Inches": "in", "Feet": "ft"}
+_RHINO_UNITS = {ours: getattr(r3.UnitSystem, theirs)
+                for theirs, ours in _OUR_UNITS.items()}
 
 
 # ------------------------------------------------------------------ knots
@@ -1367,7 +1375,22 @@ def object_appearance(attrs, layers: dict, materials: dict,
             "layer_locked": layer.get("locked", False),
             "layer_print_width": layer.get("print_width", 0.0),
             "color": color, "material": _shading(material),
-            "visible": visible}
+            "visible": visible,
+            # the object's own; a piece of a block is given its block's
+            # as well by instance_to_objects
+            "user_text": user_text_of(attrs)}
+
+
+def user_text_of(attrs) -> dict:
+    """An object's Attribute User Text as {key: value}, in the file's order.
+
+    Read off the attributes, which is where Rhino's Properties panel keeps
+    it; the geometry can carry text of its own, which almost nobody sets.
+    """
+    try:
+        return dict(attrs.GetUserStrings())
+    except Exception:                                           # noqa: BLE001
+        return {}
 
 
 def _shading(material: dict | None) -> dict | None:
@@ -1418,13 +1441,17 @@ def _xform_matrix(xform):
 
 
 def flatten_instance(geo, blocks: dict, depth: int = 0) -> list:
-    """An instance as [(member geometry, member attributes, 4x4)].
+    """An instance as [(member geometry, member attributes, 4x4, text)].
 
     Serpentine3D has no block object of its own, so an instance comes in as
     its content moved into place — the same trade Rhino's Explode makes. A
     definition can hold instances of other definitions, and each level's
     transform applies to everything below it, so this walks down composing
     them.
+
+    `text` is the user text of the instances inside this one that the
+    member sits in, outermost first, which the member's own attributes
+    cannot say; None when it sits in none or they carry none.
     """
     if depth >= MAX_BLOCK_DEPTH:
         return []
@@ -1433,11 +1460,13 @@ def flatten_instance(geo, blocks: dict, depth: int = 0) -> list:
     out = []
     for member_geo, member_attrs in definition.get("members", ()):
         if isinstance(member_geo, r3.InstanceReference):
-            for inner_geo, inner_attrs, inner in flatten_instance(
+            nested = user_text_of(member_attrs)
+            for inner_geo, inner_attrs, inner, text in flatten_instance(
                     member_geo, blocks, depth + 1):
-                out.append((inner_geo, inner_attrs, here @ inner))
+                out.append((inner_geo, inner_attrs, here @ inner,
+                            user_text.merged(nested, text)))
         else:
-            out.append((member_geo, member_attrs, here))
+            out.append((member_geo, member_attrs, here, None))
     return out
 
 
@@ -1471,13 +1500,20 @@ def _part_name(instance_name: str, member_attrs, index: int,
 def instance_to_objects(geo, instance_name: str, instance_meta: dict,
                         blocks: dict, layers: dict, materials: dict,
                         report=None) -> list:
-    """One placed block as the [(name, shape, meta)] it brings with it."""
+    """One placed block as the [(name, shape, meta)] it brings with it.
+
+    A piece keeps its own user text, as Rhino's Explode leaves it, and
+    takes any key it lacks from the blocks it sits in: a door's room is
+    said once, on the door, and is no less true of its handle.
+    """
     step = report or Progress()
     parts = flatten_instance(geo, blocks)
     out = []
-    for index, (member_geo, member_attrs, matrix) in enumerate(parts):
+    for index, (member_geo, member_attrs, matrix, text) in enumerate(parts):
         meta = object_appearance(member_attrs, layers, materials,
                                  parent=instance_meta)
+        meta["user_text"] = user_text.merged(
+            instance_meta.get("user_text"), text, meta["user_text"]) or {}
         name = _part_name(instance_name, member_attrs, index, len(parts))
         for shape in object_to_shapes(member_geo, step):
             if shape is None or shape.IsNull():
@@ -1492,15 +1528,24 @@ def instance_to_objects(geo, instance_name: str, instance_meta: dict,
     return out
 
 
-def object_to_shapes(geo, report=None) -> list:
+# The hatch pattern table of the file being read, by pattern index, for the
+# hatches in it; set where a file is opened (see rhino_hatch).
+_HATCH_PATTERNS: dict = {}
+
+
+def object_to_shapes(geo, report=None, patterns=None) -> list:
     """The shapes one .3dm object converts to, by geometry type.
 
     Split out of the import loop so the parallel importer converts objects by
     exactly the same rules — the two paths disagreeing would be worse than
-    either being wrong.
+    either being wrong. `patterns` is the file's hatch pattern table, the
+    one being read if not given.
     """
     step = report or Progress()
     shapes = []
+    if isinstance(geo, r3.Hatch):
+        return hatch_to_shapes(geo, _HATCH_PATTERNS if patterns is None
+                               else patterns)
     if isinstance(geo, r3.Point):
         # A point is an object in Rhino and an object here, so it has to
         # convert to something. With no branch at all it converted to
@@ -1533,6 +1578,51 @@ def object_to_shapes(geo, report=None) -> list:
         shape = _r3_mesh_to_shape(geo, report=step)
         shapes = [shape] if shape is not None else []
     return shapes
+
+
+def hatch_to_shapes(geo, patterns: dict) -> list:
+    """A Rhino hatch as hatch objects, drawn with the lines Rhino draws it
+    with (#92): one for each piece of region its boundary makes.
+
+    The region is the hatch's own Brep form, holes and all. Rhino lays the
+    pattern in the hatch's plane with its origin at the base point, turned
+    by the hatch's rotation and scaled by its scale, which is the frame a
+    hatch here draws its pattern in. A pattern that draws like one of the
+    app's own is that one; any other comes in under its own name.
+    """
+    import math
+    from ..core.hatch import HatchShape
+    from ..core.hatch_patterns import import_name
+    brep = r3.Brep.TryConvertBrep(geo)
+    if brep is None:
+        return []
+    faces = []
+    for shape in _import_brep(brep):
+        if hasattr(shape, "ShapeType"):
+            faces.extend(geometry.faces_of(shape))
+    pattern = patterns.get(geo.PatternIndex)
+    plane = geo.Plane
+    frame = np.eye(4)
+    frame[:3, 0] = (plane.XAxis.X, plane.XAxis.Y, plane.XAxis.Z)
+    frame[:3, 1] = (plane.YAxis.X, plane.YAxis.Y, plane.YAxis.Z)
+    frame[:3, 2] = (plane.ZAxis.X, plane.ZAxis.Y, plane.ZAxis.Z)
+    base = geo.BasePoint
+    frame[:3, 3] = (base.X, base.Y, base.Z)
+    scale = float(geo.PatternScale) or 1.0
+    angle = math.degrees(float(geo.PatternRotation))
+    if pattern is None:
+        name, definition, spacing = "lines", None, scale
+    else:
+        name, definition = import_name(pattern, "3dm")
+        spacing = 1.0 if pattern.solid else scale * pattern.row_spacing
+    out = []
+    for face in faces:
+        try:
+            out.append(HatchShape._from_parts(face, name, angle, spacing,
+                                              frame, definition))
+        except geometry.GeometryError:
+            continue
+    return out
 
 
 # --------------------------------------------------- what to put off doing
@@ -1570,6 +1660,8 @@ def file_kind(geo) -> str:
         return "mesh"
     if isinstance(geo, r3.Point):
         return "point"
+    if isinstance(geo, r3.Hatch):
+        return "hatch"
     return "curve"
 
 
@@ -1615,21 +1707,53 @@ class PendingFile:
 def _deferred_from_file(pending: PendingFile, index: int, kind: str):
     def build():
         geo = pending.geometry(index)
-        return [] if geo is None else object_to_shapes(geo)
+        if geo is None:
+            return []
+        patterns = (read_hatch_patterns(pending.path)
+                    if isinstance(geo, r3.Hatch) else None)
+        return object_to_shapes(geo, patterns=patterns)
 
     return DeferredShape(build, kind=kind)
 
 
-def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
-    """Returns [(name, shape, {layer, color})].
+def in_units(items: list, file_units: str | None, units: str,
+              notes: list | None = None) -> list:
+    """Importer `items` with their shapes scaled from the file's unit system,
+    named as rhino3dm names it, into the drawing's `units`.
+
+    A file with no unit, or one only Rhino knows how big (custom), is
+    taken to be in the drawing's own.
+    """
+    if file_units in (None, "None", "Unset", "CustomUnits"):
+        return items
+    system = getattr(r3.UnitSystem, file_units)
+    factor = (r3.UnitSystem.UnitScale(system, r3.UnitSystem.Millimeters)
+              / TO_MM[units])
+    if not np.isfinite(factor) or factor <= 0 or np.isclose(factor, 1.0,
+                                                           rtol=1e-12):
+        return items
+    if notes is not None:
+        notes.append(converted_note(_OUR_UNITS.get(file_units,
+                                                   file_units.lower()),
+                                    units))
+    return [(name, rescale(shape, factor), meta)
+            for name, shape, meta in items]
+
+
+def import_3dm(path: str, progress=None, units: str = "mm",
+               notes: list | None = None) -> list[tuple[str, object, dict]]:
+    """Returns [(name, shape, {layer, color})], scaled into `units`.
 
     A shape is either geometry or, for an object the file keeps out of
     sight, a `DeferredShape` that will convert it if anything asks.
+    The file's own unit system decides its size: an inch drawing came into
+    a millimetre one 25.4 times too small (#101).
     """
     report = progress or Progress()
     if _worth_parallelising(path):
         try:
-            return import_3dm_parallel(path, report)
+            return import_3dm_parallel(path, report, units=units,
+                                       notes=notes)
         except Cancelled:
             raise
         except Exception as exc:                                # noqa: BLE001
@@ -1642,6 +1766,8 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
     model = r3.File3dm.Read(path)
     if model is None:
         raise IOError(f"Could not read 3dm file: {path}")
+    global _HATCH_PATTERNS
+    _HATCH_PATTERNS = patterns = read_hatch_patterns(path)
 
     layers = read_layers(model)
     materials = read_materials(model)
@@ -1678,7 +1804,8 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
             counter += 1
             name = attrs.Name or f"3dm object {counter:02d}"
             out.append((name, DeferredShape(
-                lambda g=geo: object_to_shapes(g), kind=file_kind(geo)), meta))
+                lambda g=geo, p=patterns: object_to_shapes(g, patterns=p),
+                kind=file_kind(geo)), meta))
             continue
         for shape in object_to_shapes(geo, step):
             if shape is None or shape.IsNull():
@@ -1686,7 +1813,7 @@ def import_3dm(path: str, progress=None) -> list[tuple[str, object, dict]]:
             counter += 1
             name = attrs.Name or f"3dm object {counter:02d}"
             out.append((name, shape, meta))
-    return out
+    return in_units(out, model.Settings.ModelUnitSystem.name, units, notes)
 
 
 # ------------------------------------------------------------------- export
@@ -1733,6 +1860,8 @@ def _parents_first(layers) -> list:
 def export_3dm(scene, path: str, only_ids: list | None = None,
                version: int = 8):
     model = r3.File3dm()
+    # A new file says millimetres whatever it holds.
+    model.Settings.ModelUnitSystem = _RHINO_UNITS[scene.units]
     layer_index = {}
     layer_guid = {}
     for layer in _parents_first(scene.layers):
@@ -1779,11 +1908,13 @@ def export_3dm(scene, path: str, only_ids: list | None = None,
             attrs.MaterialIndex = _write_material(model, materials,
                                                   obj.material)
             attrs.MaterialSource = r3.ObjectMaterialSource.MaterialFromObject
+        for key, value in (obj.user_text or {}).items():
+            attrs.SetUserString(key, value)
         # rhino3dm cannot write a hatch, so a line hatch leaves as the
         # curves it is drawn with rather than as a mesh with no faces,
         # which is nothing; a solid one leaves as its filled mesh (#33)
         if obj.kind == "curve" or (obj.kind == "hatch"
-                                   and obj.shape.pattern != "solid"):
+                                   and not obj.shape.solid):
             exported = False
             for edge in geometry.edges_of(obj.shape):
                 nc = _shape_to_r3_curve(edge)

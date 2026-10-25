@@ -171,8 +171,8 @@ class MeshShape:
             return np.zeros((0, 2, 3), np.float32)
         keep.sort()                              # the order the loop produced
         kept = key_sorted[keep]                  # unpacked only for the few
-        return points[np.column_stack(divmod(kept, len(points)))] \
-            .astype(np.float32)
+        pairs = np.column_stack(divmod(kept, len(points)))
+        return np.asarray(points[pairs], float)
 
 
 def merge(meshes) -> MeshShape:
@@ -356,7 +356,7 @@ def mesh_to_display(mesh: MeshShape):
         else:
             normals = np.zeros((len(verts), 3), np.float32)
 
-        dm.vertices = verts.astype(np.float32)
+        dm.vertices = verts
         dm.triangles = tris.astype(np.uint32)
         dm.normals = normals
         dm.face_of_triangle = np.zeros(len(tris), np.int32)

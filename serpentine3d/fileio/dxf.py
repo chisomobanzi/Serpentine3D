@@ -10,10 +10,17 @@ from __future__ import annotations
 import math
 
 import ezdxf
+from ezdxf import units as ezdxf_units
 import numpy as np
 
 from ..core import geometry, linetype
+from ..core.layout import measured_text
 from ..core.tessellate import tessellate
+
+
+# $INSUNITS by document unit.
+_INSUNITS = {"mm": ezdxf_units.MM, "cm": ezdxf_units.CM, "m": ezdxf_units.M,
+             "in": ezdxf_units.IN, "ft": ezdxf_units.FT}
 
 
 def _true_color(rgb) -> int:
@@ -22,7 +29,8 @@ def _true_color(rgb) -> int:
 
 
 def export_dxf(scene, path: str, only_ids: list | None = None):
-    doc = ezdxf.new("R2010")
+    # Told, or ezdxf labels the drawing metres whatever it holds (#101).
+    doc = ezdxf.new("R2010", units=_INSUNITS[scene.units])
     msp = doc.modelspace()
     for layer in scene.layers.all():
         if layer.name == "Default":
@@ -89,23 +97,70 @@ def _write_hatch(msp, hatch, attribs):
     for i, ring in enumerate(rings):
         out.paths.add_polyline_path(ring, is_closed=True,
                                     flags=1 if i == 0 else 0)
-    if hatch.pattern == "solid":
+    if hatch.solid:
         out.set_solid_fill()
         return
     a = math.radians(hatch.angle)
     d = math.cos(a) * frame[:3, 0] + math.sin(a) * frame[:3, 1]
     d_ocs = ocs.from_wcs(tuple(d))
     base = math.degrees(math.atan2(d_ocs.y, d_ocs.x))
+    if hatch.definition is not None:
+        centre = ocs.from_wcs(tuple(frame[:3, 3]))
+        definition = _dxf_definition(hatch.definition, base, hatch.spacing,
+                                     (centre.x, centre.y))
+        scale = hatch.spacing / hatch.definition.row_spacing
+        name = hatch.pattern
+    else:
+        # Lines and Cross lie centred on the region rather than through
+        # its origin, so each family is written through one of the lines
+        # it draws: the file then draws them where they are drawn here.
+        def line(turn):
+            local = [np.asarray(r) @ np.array(
+                [[math.cos(turn), -math.sin(turn)],
+                 [math.sin(turn), math.cos(turn)]]) for r in rings2d]
+            y0 = min(float(r[:, 1].min()) for r in local)
+            on = (y0 + hatch.spacing / 2) * np.array(
+                [-math.sin(turn), math.cos(turn)])
+            point = ocs.from_wcs(tuple(
+                (frame @ np.array([on[0], on[1], 0.0, 1.0]))[:3]))
+            deg = base + math.degrees(turn - a)
+            r = math.radians(deg)
+            return [deg, (point.x, point.y),
+                    (-math.sin(r) * hatch.spacing,
+                     math.cos(r) * hatch.spacing), []]
 
-    def line(deg):
-        r = math.radians(deg)
-        return [deg, (0.0, 0.0), (-math.sin(r) * hatch.spacing,
-                                  math.cos(r) * hatch.spacing), []]
+        rings2d = _rings(hatch.region, frame)
+        definition = [line(a)] + ([line(a + math.pi / 2)]
+                                  if hatch.pattern == "cross" else [])
+        scale, name = 1.0, f"SERP_{hatch.pattern.upper()}"
+    out.set_pattern_fill(name, angle=0.0, scale=1.0, pattern_type=2,
+                         definition=definition)
+    # The lines are written turned and scaled already, as a DXF has them;
+    # the angle and scale are what AutoCAD's own dialog shows for them.
+    out.dxf.pattern_angle = base % 360.0
+    out.dxf.pattern_scale = scale
 
-    definition = [line(base)] + ([line(base + 90.0)]
-                                 if hatch.pattern == "cross" else [])
-    out.set_pattern_fill(f"SERP_{hatch.pattern.upper()}", angle=0.0,
-                         scale=1.0, pattern_type=2, definition=definition)
+
+def _dxf_definition(pattern, turn: float, spacing: float, origin) -> list:
+    """A pattern from a .pat file as a DXF HATCH spells its lines, drawn
+    turned `turn` degrees and at `spacing` about `origin`: a DXF pattern
+    is written already turned and scaled, its offsets in the hatch's own
+    plane rather than along each line as a .pat file has them (#92)."""
+    scale = spacing / pattern.row_spacing
+    t = math.radians(turn)
+    out = []
+    for ln in pattern.lines:
+        ox, oy = ln.origin[0] * scale, ln.origin[1] * scale
+        phi = math.radians(ln.angle + turn)
+        dx, dy = ln.offset[0] * scale, ln.offset[1] * scale
+        out.append([
+            ln.angle + turn,
+            (origin[0] + ox * math.cos(t) - oy * math.sin(t),
+             origin[1] + ox * math.sin(t) + oy * math.cos(t)),
+            (dx * math.cos(phi) - dy * math.sin(phi),
+             dx * math.sin(phi) + dy * math.cos(phi)),
+            [d * scale for d in ln.dashes]])
+    return out
 
 
 def _is_straight(pts, tol=1e-7) -> bool:
@@ -221,21 +276,28 @@ def import_dxf(scene, path: str) -> int:
             continue
         for part in (shape if isinstance(shape, list)
                      else [] if shape is None else [shape]):
+            from . import adopt_hatch_pattern
+            adopt_hatch_pattern(scene, part)
             scene.add(part, layer_id=layer_for(e))
             n += 1
     return n
 
 
 def _hatches_from(entity) -> list:
-    """A DXF HATCH as hatch objects, one for each island it fills (#33).
+    """A DXF HATCH as hatch objects, one for each island it fills (#33),
+    drawn with the lines AutoCAD draws it with (#92).
 
     The boundary paths come back from ezdxf as lines and Bezier spans in
     world coordinates, arcs and ellipses already as Beziers, and are built
-    as exact edges; nesting decides which loops are holes. The pattern is
-    written out line by line, each with its angle in the entity's own plane
-    and the offset to the next line: the spacing is that offset measured
-    square to the line, and two directions at right angles are a cross.
-    Dashes are not drawn, so a dashed pattern comes in as its lines.
+    as exact edges; nesting decides which loops are holes.
+
+    A DXF writes its pattern already turned by the hatch's angle and scaled
+    by its scale, every line through a point and stepping by an offset in
+    the entity's own plane. Those lines are taken back to the pattern they
+    were made from, and the hatch draws that pattern at the same angle and
+    scale about the plane's origin, which lays every line where the file
+    has it. A file that names its pattern without writing it out gets the
+    one ezdxf knows by that name, as AutoCAD would.
     """
     from ezdxf import path as dxfpath
     from ezdxf.math import OCS
@@ -248,23 +310,28 @@ def _hatches_from(entity) -> list:
     if not wires:
         return []
     regions = geometry.planar_regions(wires)
-    pattern, angle, spacing = _dxf_pattern(entity)
     ocs = OCS(entity.dxf.extrusion)
-    ux, uy = np.asarray(tuple(ocs.ux), float), np.asarray(tuple(ocs.uy), float)
+    frame = np.eye(4)
+    frame[:3, 0] = tuple(ocs.ux)
+    frame[:3, 1] = tuple(ocs.uy)
+    frame[:3, 2] = tuple(ocs.uz)
+    name, angle, spacing, definition, at = _dxf_pattern(entity)
+    frame[:3, 3] = tuple(ocs.to_wcs((at[0], at[1], _elevation(entity))))
     out = []
     for region in regions:
         try:
-            hatch = HatchShape(region, pattern, angle=angle, spacing=spacing,
-                               xdir=tuple(ux))
-            # The angle turns from the plane's x towards its y. Where the
-            # region's own normal faces the other way its y does too, and
-            # the same pattern is the angle the other way round.
-            if float(np.dot(hatch.frame[:3, 1], uy)) < 0:
-                hatch = hatch.edited(angle=-angle)
+            out.append(HatchShape._from_parts(region, name, angle, spacing,
+                                              frame, definition))
         except geometry.GeometryError:
             continue
-        out.append(hatch)
     return out
+
+
+def _elevation(entity) -> float:
+    try:
+        return float(entity.dxf.elevation[2])
+    except (AttributeError, IndexError, TypeError):
+        return 0.0
 
 
 def _wire_from_path(path):
@@ -304,27 +371,56 @@ def _wire_from_path(path):
 
 
 def _dxf_pattern(entity) -> tuple:
-    """(pattern, angle in degrees, spacing) of a HATCH entity."""
-    if entity.dxf.solid_fill:
-        return "solid", 0.0, 1.0
+    """(name, angle in degrees, spacing, definition, origin) for a HATCH
+    entity: the pattern it was made from, the angle and spacing that make
+    it again exactly as it is written, and the point in the entity's plane
+    it is laid from, the first of its lines' base points."""
+    from ..core.hatch_patterns import HatchPattern, PatternLine, import_name
+    if entity.dxf.solid_fill or getattr(entity, "gradient", None):
+        return "solid", 0.0, 1.0, None, (0.0, 0.0)
+    name = str(entity.dxf.pattern_name or "").strip() or "pattern"
+    turn = float(entity.dxf.pattern_angle or 0.0)
+    scale = float(entity.dxf.pattern_scale or 1.0) or 1.0
     lines = list(entity.pattern.lines) if entity.pattern else []
     if not lines:
-        return "lines", 45.0, 3.175 * float(entity.dxf.pattern_scale or 1.0)
-    first = lines[0]
-    a = math.radians(float(first.angle))
-    ox, oy = float(first.offset[0]), float(first.offset[1])
-    spacing = abs(-ox * math.sin(a) + oy * math.cos(a))
-    if spacing < 1e-12:
-        spacing = math.hypot(ox, oy) or 1.0
-    directions = {round(float(ln.angle) % 180.0, 6) for ln in lines}
-    cross = any(abs(abs(d - e) - 90.0) < 1e-3 for d in directions
-                for e in directions)
-    return ("cross" if cross else "lines"), float(first.angle), spacing
+        try:
+            entity.set_pattern_fill(name, angle=turn, scale=scale)
+            lines = list(entity.pattern.lines) if entity.pattern else []
+        except Exception:                                   # noqa: BLE001
+            lines = []
+    if not lines:
+        return "lines", 45.0, 3.175 * scale, None, (0.0, 0.0)
+    at = (float(lines[0].base_point[0]), float(lines[0].base_point[1]))
+    if name.upper() in ("SERP_LINES", "SERP_CROSS"):
+        # this app's own, written centred on the region as it draws them
+        first = lines[0]
+        phi = math.radians(float(first.angle))
+        spacing = abs(-float(first.offset[0]) * math.sin(phi)
+                      + float(first.offset[1]) * math.cos(phi))
+        return (name[5:].lower(), float(first.angle), spacing or 1.0, None,
+                at)
+    t = math.radians(turn)
+    families = []
+    for ln in lines:
+        phi = math.radians(float(ln.angle))
+        bx = float(ln.base_point[0]) - at[0]
+        by = float(ln.base_point[1]) - at[1]
+        ox, oy = float(ln.offset[0]), float(ln.offset[1])
+        families.append(PatternLine(
+            float(ln.angle) - turn,
+            ((bx * math.cos(t) + by * math.sin(t)) / scale,
+             (-bx * math.sin(t) + by * math.cos(t)) / scale),
+            ((ox * math.cos(phi) + oy * math.sin(phi)) / scale,
+             (-ox * math.sin(phi) + oy * math.cos(phi)) / scale),
+            tuple(float(d) / scale for d in ln.dash_length_items)))
+    pattern = HatchPattern(name, "", tuple(families))
+    name, definition = import_name(pattern, "dxf")
+    return name, turn, scale * pattern.row_spacing, definition, at
 
 
 def export_layout_dxf(window, layout, path: str):
     """The composed sheet as 2D DXF at paper-mm coordinates."""
-    doc = ezdxf.new("R2010")
+    doc = ezdxf.new("R2010", units=ezdxf_units.MM)
     msp = doc.modelspace()
     doc.layers.add("VISIBLE")
     doc.layers.add("HIDDEN")
@@ -400,8 +496,7 @@ def export_layout_dxf(window, layout, path: str):
         for p, q in ((a, ao), (b, bo), (ao, bo)):
             msp.add_line((p[0], p[1]), (q[0], q[1]),
                          dxfattribs={"layer": "ANNOT"})
-        measured = length * dim.scale_denom
-        text = dim.text or window.scene.format_length(measured)
+        text = dim.text or measured_text(dim, length, window.scene)
         mid = (a + b) / 2 + nvec * (dim.offset + 2)
         msp.add_text(text, height=3.2, dxfattribs={
             "layer": "ANNOT"}).set_placement((mid[0], mid[1]))

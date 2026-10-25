@@ -32,6 +32,17 @@ def _isolated_config(tmp_path_factory):
         tmp_path_factory.mktemp("settings") / "settings.json")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_fillet_options():
+    """Fillet remembers its radius and Trim for as long as the program
+    runs; a test is a fresh program, not the one before it."""
+    from serpentine3d.commands import edit
+    was = dict(edit._FILLET_STICKY)
+    yield
+    edit._FILLET_STICKY.clear()
+    edit._FILLET_STICKY.update(was)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolated_session_data(tmp_path_factory):
     """Journals and autosaves of the suite's own, thrown away after.
@@ -54,7 +65,27 @@ def _qapp():
     """A full QApplication before anything creates a QGuiApplication
     (core/text.py would otherwise block widget construction later)."""
     from PySide6.QtWidgets import QApplication
-    yield QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
+    _deploy_fonts()
+    yield app
+
+
+def _deploy_fonts():
+    """The offscreen platform loads no system fonts on Windows: the font
+    database comes up empty and every family query misses — the monospace
+    kind line resolves to a proportional face and the scripted-text tests
+    get no glyph outlines at all. Qt asks shipped apps to deploy fonts;
+    the test's app deploys this machine's own fixed-pitch ones."""
+    from PySide6.QtGui import QFontDatabase
+    if QFontDatabase.families():
+        return
+    import os
+    fonts_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"),
+                             "Fonts")
+    for name in ("consola.ttf", "consolab.ttf", "cour.ttf"):
+        path = os.path.join(fonts_dir, name)
+        if os.path.exists(path):
+            QFontDatabase.addApplicationFont(path)
 from serpentine3d.commands.base import CommandContext, CommandProcessor
 from serpentine3d.core.history import History
 from serpentine3d.core.scene import Scene

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ..utils.math3d import offsets_from, origin_between
 from . import occ, geometry
 from .occ import (
     BRepMesh_IncrementalMesh, TopExp_Explorer, TopLoc_Location,
@@ -16,6 +17,21 @@ from .spatial import build_index
 
 _UNINDEXED = object()
 
+_LOCALS = ("local", "local_edges", "local_isos", "local_points")
+
+
+def _extent(*arrays) -> tuple:
+    """(lo, hi) over every point in `arrays`, without joining them."""
+    lows, highs = [], []
+    for a in arrays:
+        if len(a):
+            flat = a.reshape(-1, 3)
+            lows.append(np.asarray(flat.min(axis=0), np.float64))
+            highs.append(np.asarray(flat.max(axis=0), np.float64))
+    if not lows:
+        return None, None
+    return np.min(lows, axis=0), np.max(highs, axis=0)
+
 # Serial numbers for display meshes; see DisplayMesh.uid. next() on a count
 # is a single bytecode, so the tessellation workers can share one.
 _uids = itertools.count(1)
@@ -23,18 +39,34 @@ _uids = itertools.count(1)
 
 @dataclass
 class DisplayMesh:
-    """GPU-ready geometry for one scene object."""
-    vertices: np.ndarray = field(
+    """GPU-ready geometry for one scene object.
+
+    Coordinates are kept as float32 offsets from `origin`, the point this
+    mesh sits at. Four bytes hold a offset of a few hundred units to a
+    fraction of a micron, so a survey mesh is drawn as exactly as one at
+    home and costs no more memory than it: a million vertices are 12MB
+    either way, where keeping doubles for the far one made it 24.
+
+    The arrays a caller sees, `vertices` and the rest, are the world's own
+    coordinates, worked out on the way out. Anything asking for them by
+    the frame or by the click asks `local` and `origin` instead and does
+    its arithmetic there, where the numbers are small: the viewport
+    uploads offsets and folds the origin into the matrix, and a pick
+    moves the ray rather than the mesh.
+    """
+    origin: np.ndarray = field(
+        default_factory=lambda: np.zeros(3), compare=False)
+    local: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 3), np.float32))
     normals: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 3), np.float32))
     triangles: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 3), np.uint32))
     # edge polylines flattened to GL_LINES segment pairs: (K, 2, 3)
-    edge_segments: np.ndarray = field(
+    local_edges: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 2, 3), np.float32))
     # isoparametric curves on curved faces (display only, not pickable)
-    iso_segments: np.ndarray = field(
+    local_isos: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 2, 3), np.float32))
     # signed mean curvature per vertex (for curvature analysis display)
     curvature: np.ndarray = field(
@@ -45,7 +77,7 @@ class DisplayMesh:
     face_of_triangle: np.ndarray = field(
         default_factory=lambda: np.zeros(0, np.int32))
     # free-standing point objects (vertex shapes): (N, 3)
-    points: np.ndarray = field(
+    local_points: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 3), np.float32))
     # A point cloud (core/pointcloud.py) shows as vertices with no faces:
     # the same bounds, culling and box-picking as everything else, and a
@@ -66,11 +98,89 @@ class DisplayMesh:
     # comparison, since two meshes of the same geometry are still equal.
     uid: int = field(default_factory=lambda: next(_uids),
                      repr=False, compare=False)
+    _far: bool = field(default=False, repr=False, compare=False)
     _bounds: tuple | None = field(default=None, repr=False, compare=False)
     # spatial indexes for picking, built on first click and kept: None means
     # "not looked at yet", _UNINDEXED means "looked at, not worth indexing"
     _tri_index: object = field(default=None, repr=False, compare=False)
     _seg_index: object = field(default=None, repr=False, compare=False)
+
+    # -- the world's coordinates, and this mesh's own ---------------------
+
+    def to_world(self, local) -> np.ndarray:
+        """Offsets from this mesh's origin, as world coordinates."""
+        if not self.far:
+            return np.asarray(local)
+        return np.asarray(local, np.float64) + self.origin
+
+    def place(self, *, vertices=None, edge_segments=None, iso_segments=None,
+              points=None) -> None:
+        """Store world coordinates, deciding once where the mesh sits.
+
+        The origin is chosen from everything the mesh holds, what it is
+        given here and what it was given before, so faces at home and a
+        stray point far out share one origin rather than the faces being
+        measured from where the point is.
+        """
+        given = {name: np.asarray(pts) for name, pts in (
+            ("local", vertices), ("local_edges", edge_segments),
+            ("local_isos", iso_segments), ("local_points", points))
+            if pts is not None}
+        if not self.far:
+            held = {name: getattr(self, name) for name in _LOCALS
+                    if name not in given and len(getattr(self, name))}
+            found = origin_between(*_extent(
+                *given.values(), *held.values()))
+            if found is not None:
+                self.origin = found
+                self._far = True
+                given.update(held)
+                self._bounds = self._tri_index = self._seg_index = None
+        for name, pts in given.items():
+            setattr(self, name, self._offsets(pts))
+
+    def _offsets(self, pts) -> np.ndarray:
+        if not len(pts) or not self.far:
+            return np.ascontiguousarray(pts, np.float32)
+        flat = offsets_from(pts.reshape(-1, 3), self.origin)
+        return flat.reshape(pts.shape)
+
+    @property
+    def far(self) -> bool:
+        """Whether this mesh keeps its coordinates relative to an origin."""
+        return self._far
+
+    @property
+    def vertices(self) -> np.ndarray:
+        return self.to_world(self.local)
+
+    @vertices.setter
+    def vertices(self, points):
+        self.place(vertices=points)
+
+    @property
+    def edge_segments(self) -> np.ndarray:
+        return self.to_world(self.local_edges)
+
+    @edge_segments.setter
+    def edge_segments(self, points):
+        self.place(edge_segments=points)
+
+    @property
+    def iso_segments(self) -> np.ndarray:
+        return self.to_world(self.local_isos)
+
+    @iso_segments.setter
+    def iso_segments(self, points):
+        self.place(iso_segments=points)
+
+    @property
+    def points(self) -> np.ndarray:
+        return self.to_world(self.local_points)
+
+    @points.setter
+    def points(self, points):
+        self.place(points=points)
 
     @property
     def has_faces(self) -> bool:
@@ -80,17 +190,20 @@ class DisplayMesh:
         """Spatial index over the triangles, or None to test them all.
 
         Built lazily: a mesh only pays for this if it is ever picked in,
-        and most objects in a drawing never are.
+        and most objects in a drawing never are. In the mesh's own
+        coordinates, like everything else about picking: a ray is three
+        numbers and a mesh is millions, so the ray is the one that moves.
         """
         if self._tri_index is None:
-            self._tri_index = (build_index(self.vertices[self.triangles])
+            self._tri_index = (build_index(self.local[self.triangles])
                                or _UNINDEXED)
         return None if self._tri_index is _UNINDEXED else self._tri_index
 
     def segment_index(self):
-        """Spatial index over the edge segments, or None to test them all."""
+        """Spatial index over the edge segments, in the mesh's own
+        coordinates; see triangle_index."""
         if self._seg_index is None:
-            self._seg_index = build_index(self.edge_segments) or _UNINDEXED
+            self._seg_index = build_index(self.local_edges) or _UNINDEXED
         return None if self._seg_index is _UNINDEXED else self._seg_index
 
     def bounds(self) -> tuple | None:
@@ -99,17 +212,20 @@ class DisplayMesh:
         Reduced source by source rather than over one concatenation of them
         all: concatenating copies every vertex in the mesh to read six
         numbers off it, and on a scanned survey the vertices are the file.
+        Read off the offsets and moved out to the world at the end, so a
+        far mesh is not built in doubles just to be measured.
         """
         if self._bounds is None:
             los, his = [], []
-            for p in (self.vertices, self.edge_segments.reshape(-1, 3),
-                      self.points):
+            for p in (self.local, self.local_edges.reshape(-1, 3),
+                      self.local_points):
                 if len(p):
                     los.append(p.min(axis=0))
                     his.append(p.max(axis=0))
             if not los:
                 return None
-            self._bounds = (np.min(los, axis=0), np.max(his, axis=0))
+            self._bounds = (np.min(los, axis=0) + self.origin,
+                            np.max(his, axis=0) + self.origin)
         return self._bounds
 
 
@@ -152,7 +268,7 @@ def _face_mesh(face) -> tuple | None:
         curv = _vertex_curvature(face, tri, n, reversed_face)
     else:
         curv = np.zeros(n, np.float32)
-    return verts.astype(np.float32), normals, idx, curv
+    return verts, normals, idx, curv
 
 
 _CURVATURE = False      # latched on by the first curvature-mode viewport
@@ -208,7 +324,7 @@ def _edge_polyline(edge, deflection: float) -> np.ndarray | None:
         n = disc.NbPoints()
         if n < 2:
             return None
-        pts = np.empty((n, 3), np.float32)
+        pts = np.empty((n, 3), np.float64)
         for i in range(1, n + 1):
             p = disc.Value(i)
             pts[i - 1] = (p.X(), p.Y(), p.Z())
@@ -335,11 +451,25 @@ def _face_isocurves(face) -> list[np.ndarray]:
                     run.append((p.X(), p.Y(), p.Z()))
                 else:
                     if len(run) >= 2:
-                        polylines.append(np.asarray(run, np.float32))
+                        polylines.append(np.asarray(run, float))
                     run = []
             if len(run) >= 2:
-                polylines.append(np.asarray(run, np.float32))
+                polylines.append(np.asarray(run, float))
     return polylines
+
+
+def _hatch_outline(shape):
+    """The edges round a hatch's region, which are not drawn: a hatch is
+    its fill, as in Rhino and AutoCAD, and its boundary is whatever curves
+    were drawn round it (#92). None for anything that is not a hatch."""
+    from .hatch import HatchShape
+    if not isinstance(shape, HatchShape):
+        return None
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+    edges = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape.region, occ.EDGE, edges)
+    return edges
 
 
 def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
@@ -381,29 +511,29 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
 
     segments = []
     seg_edge_ids = []
+    outline = _hatch_outline(shape)
     for edge_index, edge in enumerate(geometry.edges_of(shape)):
+        if outline is not None and outline.Contains(edge):
+            continue
         pts = _edge_polyline(edge, deflection)
         if pts is not None and len(pts) >= 2:
             seg = np.stack([pts[:-1], pts[1:]], axis=1)
             segments.append(seg)
             seg_edge_ids.append(np.full(len(seg), edge_index, np.int32))
 
+    free_pts = geometry.free_points(shape)
     mesh = DisplayMesh()
+    mesh.place(
+        vertices=np.concatenate(all_verts) if all_verts else None,
+        edge_segments=np.concatenate(segments) if segments else None,
+        iso_segments=np.concatenate(isos) if isos else None,
+        points=np.asarray(free_pts, float) if free_pts else None)
     if all_verts:
-        mesh.vertices = np.concatenate(all_verts)
         mesh.normals = np.concatenate(all_norms)
         mesh.triangles = np.concatenate(all_tris)
         mesh.curvature = np.concatenate(all_curv).astype(np.float32)
         mesh.has_curvature = _CURVATURE
         mesh.face_of_triangle = np.concatenate(tri_face_ids)
     if segments:
-        mesh.edge_segments = np.concatenate(segments).astype(np.float32)
         mesh.edge_of_segment = np.concatenate(seg_edge_ids)
-    if isos:
-        mesh.iso_segments = np.concatenate(isos).astype(np.float32)
-
-    # free-standing points: vertex shapes and vertices dangling in compounds
-    free_pts = geometry.free_points(shape)
-    if free_pts:
-        mesh.points = np.asarray(free_pts, np.float32)
     return mesh

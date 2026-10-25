@@ -540,15 +540,18 @@ def _sheet_mesh(rows: int = 174, extent: float = 50.0):
     # the wireframe: every row line of the grid, as its own segments
     a = verts[i]
     segs = np.stack([a, verts[i + 1]], axis=1).astype(np.float32)
-    return tessellate_mod.DisplayMesh(
-        vertices=verts,
+    mesh = tessellate_mod.DisplayMesh(
         normals=np.tile(np.array([[0, 0, 1]], np.float32), (len(verts), 1)),
         triangles=tris,
-        edge_segments=segs,
         # sub-object maps: one topological edge per grid row, one face per
         # band of rows, so a wrong index shows up as a wrong answer
         edge_of_segment=(i // rows).astype(np.int32),
         face_of_triangle=np.tile(i // (rows * 8), 2).astype(np.int32))
+    # Coordinates go in through the mesh, which keeps them as offsets from
+    # where it sits (core/tessellate.py).
+    mesh.vertices = verts
+    mesh.edge_segments = segs
+    return mesh
 
 
 def _sheet_viewport():

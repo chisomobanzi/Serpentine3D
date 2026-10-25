@@ -153,6 +153,54 @@ defaults the field to empty, and `FORMAT_VERSION` did not have to move.
 0.7.3 was released on 2026-09-01: pushed, tagged, and published with the
 AppImage, the Windows `.exe` and the macOS `.dmg` all attached.
 
+### Far geometry, the rest of it, unreleased
+
+0.8.1 anchored the drawing and stopped far geometry swimming while the
+camera moved (below). What it could not do was give back digits the data
+no longer had, and the data arriving at it had been rounded on the way
+out of the kernel: `_face_mesh`, `_edge_polyline`, the isocurves and
+`mesh_to_display` all cast to float32, whose grid is 8mm at 100,000 units
+and 6cm at a million. A 4mm reveal on a surveyed building therefore held
+still and wrong, both faces on one grid node, and a 4mm box out there
+had no width at all. `display_coords` in `utils/math3d.py` now keeps
+coordinates past `ANCHOR_NEAR` in float64 as far as the upload, where the
+anchor has already made them small; inside it nothing changes, which is
+what keeps the cave scene's memory where it was.
+
+Jonas then reported scans reading as lines, which was the same fault one
+layer down: `PointCloudShape` held absolute float32, and at a UTM northing
+that grid is a quarter of a metre, so 2000 samples spread over half a
+metre came back as 98 distinct values along one axis. A cloud now keeps
+float32 offsets from a float64 `origin` picked when it is built and
+carried through moves, turns, subsets and copies; an E57 station takes
+that origin from its own pose, or from the first block of points when the
+georeferencing is in the coordinates rather than the pose. The `.serp`
+container writes the origin beside the (still float32) blob and the
+session record carries it through undo and paste, so the precision
+survives the file as well as the frame. `protocol/SERP-SESSION-RECORD.md`
+in the Mica repo needs the new optional `origin` noting.
+
+A sweep for the same mistake elsewhere found it on every other way out of
+a drawing: a mesh object in a `.serp` and any shape through undo or the
+clipboard (both now carry an origin, mesh blobs as `SMSH\x02`), OBJ at
+eight significant digits, 3MF at six, ASCII STL at seven, and `.glb` and
+`.usda` written absolute where both formats hold positions as float32
+and mean a far mesh to be placed by its node. On screen the rubber band,
+a command's preview, the gumball's handles and a detail view on a sheet
+were each casting to float32 before the anchor could subtract anything.
+Two formats cannot be fixed from here, since a Rhino mesh's vertices are
+float32 whatever is handed to them (`UseDoublePrecisionVertices`
+included) and so is a binary STL's float; those two exports now say which
+grid the model will land on and suggest STEP instead.
+
+Still open: in a scene holding both something at the world's origin and a
+survey model, `clip_planes` scales the near plane off the whole scene's
+reach, and zooming to a 4mm detail puts it in front of what you are
+looking at (near 0.38 at `distance` 0.01). Letting the near plane follow
+the zoom and taking the z-fighting in the distance is a trade against the
+depth-precision bound #5 asked for, so it is a decision rather than a
+fix: `test_camera_clipping.py` pins the ratio at 2e6.
+
 ### The click, released in 0.10.2
 
 Three separate faults, all reported as "selection feels slow" or "it

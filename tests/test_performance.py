@@ -69,10 +69,10 @@ def test_display_mesh_bounds_span_every_kind_of_geometry():
     silently stops being pickable along that axis.
     """
     from serpentine3d.core.tessellate import DisplayMesh
-    dm = DisplayMesh(
-        vertices=np.array([[0, 0, 0], [1, 1, 1]], np.float32),
-        edge_segments=np.array([[[-5, 0, 0], [0, 0, 0]]], np.float32),
-        points=np.array([[0, 9, 0]], np.float32))
+    dm = DisplayMesh()
+    dm.vertices = np.array([[0, 0, 0], [1, 1, 1]], np.float32)
+    dm.edge_segments = np.array([[[-5, 0, 0], [0, 0, 0]]], np.float32)
+    dm.points = np.array([[0, 9, 0]], np.float32)
     lo, hi = dm.bounds()
     assert np.allclose(lo, (-5, 0, 0))       # x from the edge segment
     assert np.allclose(hi, (1, 9, 1))        # y from the loose point

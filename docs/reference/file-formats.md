@@ -7,7 +7,7 @@ format is chosen by extension.
 |---|:---:|:---:|---|
 | `.serp` | ✓ | ✓ | Native: JSON scene + embedded binary BREP, thumbnail and metadata |
 | `.step` / `.stp` | ✓ | ✓ | Exact BREP exchange via OpenCASCADE |
-| `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps import as trimmed NURBS faces, export as meshes (use STEP for exact surfaces); layers with visibility/lock and hidden objects preserved; writes Rhino 5–8 |
+| `.3dm` | ✓ | ✓ | Rhino: exact NURBS curves both ways; breps import as trimmed NURBS faces, export as meshes (use STEP for exact surfaces); layers with visibility/lock, hidden objects and Attribute User Text preserved; writes Rhino 5–8 |
 | `.obj` | ✓ | ✓ | Tessellated mesh with `.mtl` colours |
 | `.fbx` | ✓ | ✓ | Autodesk FBX (**binary**) — tessellated meshes; imports/exports cleanly to Blender, Maya, Unreal, Unity |
 | `.stl` | ✓ | ✓ | 3D printing — watertight binary (or ASCII) STL for slicers, with draft→ultra mesh-quality presets on export |
@@ -21,12 +21,23 @@ format is chosen by extension.
 
 ## Notes
 
+- **Units.** A model keeps its real size across files. STEP is written in
+  the document's units and says so; `.3dm` and `.dxf` files say which
+  units they are in. On the way in, STEP, `.3dm`, `.skp`, `.e57` and a
+  `.serp` added to the scene are converted from their own units to the
+  document's, and Import says when it converted. DXF, OBJ and STL are read
+  at their numbers, as the document's units.
 - **E57 scans.** Choose File > Import or drag an `.e57` file into the window.
   Each scan becomes a separate named point cloud, positioned using its stored
   scan pose. E57 coordinates are in metres and are converted to the current
   model units. Invalid samples are omitted; 16-bit colours are converted to
   8-bit RGB for display. Save as `.serp` to retain the imported clouds. Embedded
   photographs, intensity and scanner-specific metadata are not imported.
+- **Georeferenced scans.** A station standing at survey or UTM coordinates
+  keeps its points relative to its own position, so they stay accurate to a
+  micron however far from the world's origin the scan sits, both on screen
+  and in the saved file. A PLY export of such a scan is written with double
+  coordinates; readers that only take single-precision PLY will round it.
 - **SketchUp files.** Choose File > Import or drag a `.skp` into the window;
   SketchUp itself is not needed, on any platform. Each group or component at
   the top of the model becomes an object for every separate body in it,
@@ -42,6 +53,12 @@ format is chosen by extension.
   does not yet read every file: some saved by SketchUp 2018 and 2019 and by
   very old versions fail, and say so. Export those from SketchUp as OBJ, FBX
   or DXF instead.
+- **Rhino user text.** An object's Attribute User Text arrives with it and
+  is written back out on export, in the file's order, and a `.serp` keeps
+  it too. Properties shows and edits it under **User text**. A placed block
+  comes in as its pieces, so each piece keeps its own keys and takes any it
+  lacks from the block that placed it; geometry user text and the
+  document's own user text are not read.
 - **Exact vs. mesh.** `.serp` and `.step` carry exact geometry both ways;
   `.3dm` is exact for curves but writes surfaces and solids as meshes — for
   an exact round trip through Rhino, export STEP and `import` it there.

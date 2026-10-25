@@ -243,6 +243,10 @@ _worker = _HlrWorker()
 
 def hlr_project_safe(shapes: list, origin, view_dir, x_dir,
                      include_hidden: bool = True) -> dict:
+    # A hatch is drawn as its fill, not round its edge, on a sheet as on
+    # screen (#92): its lines go in, its boundary does not.
+    from .hatch import HatchShape
+    shapes = [s.drawn() if isinstance(s, HatchShape) else s for s in shapes]
     return _worker.project(shapes, origin, view_dir, x_dir, include_hidden)
 
 

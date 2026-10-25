@@ -39,7 +39,7 @@ def export_obj(named_shapes: list, path: str):
             ])
             lines.append(f"usemtl {safe}_mat")
         for v in mesh.vertices:
-            lines.append(f"v {v[0]:.8g} {v[1]:.8g} {v[2]:.8g}")
+            lines.append(f"v {v[0]:.15g} {v[1]:.15g} {v[2]:.15g}")
         for n in mesh.normals:
             lines.append(f"vn {n[0]:.6g} {n[1]:.6g} {n[2]:.6g}")
         for t in mesh.triangles:

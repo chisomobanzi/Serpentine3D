@@ -97,7 +97,7 @@ def _model_xml(objects: list, unit: str) -> str:
                    f'name="{_attr(name)}"{pid}>')
         out.append('   <mesh>')
         out.append('    <vertices>')
-        out.extend(f'     <vertex x="{x:.6g}" y="{y:.6g}" z="{z:.6g}" />'
+        out.extend(f'     <vertex x="{x:.15g}" y="{y:.15g}" z="{z:.15g}" />'
                    for x, y, z in verts)
         out.append('    </vertices>')
         out.append('    <triangles>')

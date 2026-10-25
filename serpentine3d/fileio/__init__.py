@@ -142,7 +142,8 @@ def ensure_suffix(path: str, name_filter: str) -> str:
     return f"{path}.{suffix}"
 
 
-def import_file(scene, path: str, progress=None, *, replace: bool = False) -> int:
+def import_file(scene, path: str, progress=None, *, replace: bool = False,
+                notes: list | None = None) -> int:
     """Import any supported file into the scene. Returns object count added.
 
     A .serp is added to what is there, like every other format, unless
@@ -152,6 +153,9 @@ def import_file(scene, path: str, progress=None, *, replace: bool = False) -> in
     `progress` is called as `progress(fraction, message)` while the work runs;
     answering False cancels it, raising `Cancelled`. E57 and Rhino report as
     they read; other formats bracket the read.
+
+    A file that says what unit it is in arrives at its real size in the
+    scene's units; `notes`, when given, hears what was converted.
     """
     ext = os.path.splitext(path)[1].lower()
     report = Progress(progress,
@@ -161,19 +165,20 @@ def import_file(scene, path: str, progress=None, *, replace: bool = False) -> in
     # answer a change by reading the whole scene made a big import cost
     # objects squared — see Scene.batched.
     with scene.batched():
-        n = _import_file(scene, path, ext, report, replace)
+        n = _import_file(scene, path, ext, report, replace, notes)
     report.done()
     return n
 
 
-def _import_file(scene, path: str, ext: str, report, replace: bool = False) -> int:
+def _import_file(scene, path: str, ext: str, report, replace: bool = False,
+                 notes: list | None = None) -> int:
     if ext == ".serp":
         if not replace:
-            return native.merge_scene(scene, path)
+            return native.merge_scene(scene, path, notes)
         native.load_scene(scene, path)
         return len(scene.all())
     if ext in (".step", ".stp"):
-        shapes = step.import_step(path)
+        shapes = step.import_step(path, scene.units, notes)
         base = os.path.splitext(os.path.basename(path))[0]
         for i, shape in enumerate(shapes, 1):
             name = base if len(shapes) == 1 else f"{base} {i:02d}"
@@ -221,7 +226,8 @@ def _import_file(scene, path: str, ext: str, report, replace: bool = False) -> i
         return len(named)
     if ext == ".3dm":
         from . import rhino
-        items = rhino.import_3dm(path, progress=report.part(0.0, 0.95))
+        items = rhino.import_3dm(path, progress=report.part(0.0, 0.95),
+                                 units=scene.units, notes=notes)
         return _add_items(scene, items, report.part(0.95, 1.0))
     if ext == ".skp":
         from . import skp
@@ -243,6 +249,7 @@ def _add_items(scene, items: list, adding) -> int:
     layer_map = {}
     for done, (name, shape, meta) in enumerate(items, 1):
         layer_id = _layer_for(scene, meta, layer_map)
+        adopt_hatch_pattern(scene, shape)
         added = scene.add(shape, name=name, layer_id=layer_id)
         # An override only: leaving it None keeps the object following its
         # layer, the way it does in Rhino.
@@ -256,8 +263,26 @@ def _add_items(scene, items: list, adding) -> int:
             # what the file held together stays together: clicking one
             # selects them all, as the group command's own ids do
             added.group_id = meta["group"]
+        if meta.get("user_text"):
+            # each object its own copy: several share one meta
+            added.user_text = dict(meta["user_text"])
         adding.tick(done / count, f"Adding object {done} of {count}")
     return len(items)
+
+
+def adopt_hatch_pattern(scene, shape):
+    """Offer an imported hatch's pattern in the drawing from then on, as
+    Rhino's and AutoCAD's own lists would (#92). A pattern the drawing
+    already has by that name is left as the drawing has it; the hatch
+    carries its own either way, so it is drawn as the file drew it."""
+    from ..core.hatch import HatchShape
+    from ..core.hatch_patterns import is_builtin, lookup
+    definition = getattr(shape, "definition", None) \
+        if isinstance(shape, HatchShape) else None
+    if definition is None or is_builtin(definition.name):
+        return
+    if lookup(scene.hatch_patterns, definition.name) is None:
+        scene.hatch_patterns[definition.name] = definition
 
 
 def _layer_for(scene, meta: dict, made: dict) -> str | None:
@@ -352,10 +377,61 @@ def export_file(scene, path: str, only_ids: list | None = None,
                           stl_quality, rhino_version)
 
 
+# Formats whose own coordinates are single precision: a Rhino mesh's
+# vertices and a binary STL's floats are float32 however many digits we
+# hand them, so a model far from the world's origin lands on that grid
+# whatever this program does with it. Everything else carries doubles, or
+# (glTF) places a far mesh by its node instead. Saying so is the only
+# thing left to do for these two.
+_SINGLE_PRECISION = {".3dm": "Rhino mesh vertices",
+                     ".stl": "STL coordinates"}
+
+
+def _written_as_a_mesh(obj) -> bool:
+    """Whether this object leaves as mesh vertices rather than as curves.
+
+    A curve goes into a .3dm as a NURBS curve, in full precision, and
+    into an STL not at all; a line hatch leaves as the curves it is drawn
+    with. Only what is tessellated meets the format's float32, so only
+    that is worth warning about.
+    """
+    if obj.kind == "curve":
+        return False
+    if obj.kind == "hatch":
+        return bool(getattr(obj.shape, "solid", False))
+    return True
+
+
+def _precision_note(objs, ext) -> str | None:
+    """What a single-precision format will do to a far model, or None."""
+    import numpy as np
+
+    from ..utils.math3d import ANCHOR_NEAR
+    what = _SINGLE_PRECISION.get(ext)
+    if what is None:
+        return None
+    reach = 0.0
+    for o in objs:
+        if not _written_as_a_mesh(o):
+            continue
+        try:
+            mn, mx = o.bbox()
+        except Exception:                                  # noqa: BLE001
+            continue
+        reach = max(reach, max(abs(float(c)) for c in (*mn, *mx)))
+    if reach <= ANCHOR_NEAR:
+        return None
+    step = float(np.spacing(np.float32(reach)))
+    return (f"{what} are single precision: this model reaches "
+            f"{reach:,.0f} units from the origin, where they step "
+            f"{step:.3g} units. Move it near the origin, or export STEP, "
+            "to keep detail finer than that.")
+
+
 def _export_shapes(scene, path, ext, objs, only_ids, thumbnail, stl_quality,
                    rhino_version):
     if ext in (".step", ".stp"):
-        n = step.export_step([o.shape for o in objs], path)
+        n = step.export_step([o.shape for o in objs], path, scene.units)
         return (f"{n} mesh object(s) left out: STEP cannot carry them"
                 if n else None)
     if ext == ".obj":
@@ -365,13 +441,13 @@ def _export_shapes(scene, path, ext, objs, only_ids, thumbnail, stl_quality,
     if ext == ".fbx":
         from . import fbx
         fbx.export_fbx([(o.name, o.shape, scene.color_of(o))
-                        for o in objs], path)
+                        for o in objs], path, units=scene.units)
         return
     if ext == ".stl":
         from . import stl
         stl.export_stl([(o.name, o.shape) for o in objs], path,
                        quality=stl_quality)
-        return
+        return _precision_note(objs, ext)
     if ext == ".3mf":
         from . import threemf
         threemf.export_3mf(
@@ -382,7 +458,7 @@ def _export_shapes(scene, path, ext, objs, only_ids, thumbnail, stl_quality,
         from . import rhino
         rhino.export_3dm(scene, path, only_ids=only_ids,
                          version=rhino_version)
-        return
+        return _precision_note(objs, ext)
     if ext == ".dxf":
         from . import dxf as dxf_mod
         dxf_mod.export_dxf(scene, path, only_ids=only_ids)

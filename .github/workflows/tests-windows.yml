@@ -32,4 +32,4 @@ jobs:
           # Qt's offscreen platform uses its basic font database, which does
           # not discover Windows system fonts like the desktop platform does.
           QT_QPA_FONTDIR: C:/Windows/Fonts
-        run: uv run pytest tests/ -q --ignore=tests/e2e_dod.py
+        run: uv run pytest tests/ -q -n auto --ignore=tests/e2e_dod.py

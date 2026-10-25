@@ -1,16 +1,21 @@
 """Paper-space layouts: sheets, detail views, and annotations.
 
-Dimensions are millimetres of paper. A detail's scale is stored as the
-denominator N of 1:N — one millimetre of paper shows N model units
-(Serpentine3D treats one model unit as one millimetre for drafting).
+Dimensions are millimetres of paper. A detail keeps its scale as
+`scale_denom`, the model units one millimetre of paper shows. The scale it
+is written as is a ratio of real lengths, so the two differ by the
+document's units: 1:4 in an inch document is 4/25.4 inches to the paper
+millimetre (`format_scale`, `parse_scale`).
 """
 
 from __future__ import annotations
 
 import copy
 import math
+import re
 import uuid
 from dataclasses import dataclass, field, fields, replace
+
+from ..utils.units import TO_MM, paper_units, parse_length
 
 # landscape (width, height) in mm
 PAPER_SIZES = {
@@ -24,6 +29,26 @@ PAPER_SIZES = {
 }
 
 STANDARD_SCALES = [1, 2, 5, 10, 20, 50, 100, 200, 500]
+
+# The scales a detail is offered at, in the order they are offered. Metric
+# drawings and workshop drawings in inches give theirs as ratios; architects
+# and engineers in feet and inches name theirs by a length of paper and the
+# length of model it stands for, and a scale on the list is labelled by the
+# name it has there. No ratio is on a list twice: 3" = 1'-0" is the 1:4
+# already on it.
+METRIC_SCALES = ("1:1", "1:2", "1:5", "1:10", "1:20", "1:50", "1:100",
+                 "1:200")
+IMPERIAL_SCALES = (
+    "1:1", "1:2", "1:4", "1:8",
+    '1" = 1\'-0"', '3/4" = 1\'-0"', '1/2" = 1\'-0"', '3/8" = 1\'-0"',
+    '1/4" = 1\'-0"', '3/16" = 1\'-0"', '1/8" = 1\'-0"', '1/16" = 1\'-0"',
+    '1" = 10\'', '1" = 20\'', '1" = 50\'', '1" = 100\'',
+)
+
+
+def scale_presets(units: str) -> tuple:
+    """The scales a detail is offered at in a document of `units`."""
+    return IMPERIAL_SCALES if units in ("in", "ft") else METRIC_SCALES
 
 
 def _uid() -> str:
@@ -43,7 +68,7 @@ class DetailView:
     elevation: float = math.radians(89.9)
     target: list = field(default_factory=lambda: [0.0, 0.0, 0.0])
     perspective: bool = False
-    scale_denom: float = 10.0               # 1:10
+    scale_denom: float = 10.0               # model units to the paper mm
     perspective_distance: float = 60.0      # camera distance when perspective
     display_mode: str = "wireframe"         # wireframe|shaded|hidden|technical
     locked: bool = False
@@ -58,13 +83,11 @@ class DetailView:
         return (self.x <= px <= self.x + self.w
                 and self.y <= py <= self.y + self.h)
 
-    def scale_text(self) -> str:
-        d = self.scale_denom
+    def scale_text(self, units: str) -> str:
+        """The scale as it is written in a document of `units`."""
         if self.perspective:
             return "perspective"
-        if d >= 1:
-            return f"1:{d:g}"
-        return f"{1 / d:g}:1"
+        return format_scale(self.scale_denom, units)
 
 
 @dataclass
@@ -98,6 +121,8 @@ class LinearDim:
     detail_id: str = ""
     m1: list | None = None     # [x, y, z]
     m2: list | None = None
+    # drawn on bare paper, so it measures the paper and not the model
+    measures_paper: bool = False
 
 
 @dataclass
@@ -109,11 +134,13 @@ class Leader:
     style: str = ""
 
 
-# Every fill the app can draw, in the order they are offered. A layer
-# names one of these as the material it is hatched with, so the list a
-# layer can be set to and the list the `hatch` command offers are one
-# list and cannot drift apart.
-HATCH_PATTERNS = ("lines", "cross", "solid")
+# Every fill the app has of its own, in the order they are offered. A
+# layer names one of these as the material it is hatched with, so the
+# list a layer can be set to and the list the `hatch` command offers are
+# one list and cannot drift apart. The same list as
+# hatch_patterns.BUILTIN_NAMES, kept here so this module needs no numpy.
+HATCH_PATTERNS = ("lines", "cross", "solid", "dash", "dots", "plus",
+                  "squares", "triangles", "brick")
 
 # What a layer's material can be filled with where a section cuts it: any
 # of the patterns, or none at all. None is a material's choice not to be
@@ -122,12 +149,40 @@ HATCH_PATTERNS = ("lines", "cross", "solid")
 SECTION_FILLS = ("none", *HATCH_PATTERNS)
 
 
+def hatch_patterns_of(scene) -> tuple:
+    """Every pattern a hatch in this drawing can be drawn with: the app's
+    own, then those loaded into the drawing from a .pat file (#92)."""
+    library = getattr(scene, "hatch_patterns", None) or {}
+    return (*HATCH_PATTERNS, *library)
+
+
+def section_fills_of(scene) -> tuple:
+    """Every fill a layer in this drawing can name for its material."""
+    return ("none", *hatch_patterns_of(scene))
+
+
+def pattern_label(name: str) -> str:
+    """A pattern's name as a list shows it: the app's own capitalised,
+    as they always were, a loaded one as its file spells it."""
+    return name.capitalize() if name.lower() in SECTION_FILLS else name
+
+
+def pattern_named(scene, text) -> str | None:
+    """The pattern a typed or picked name means in this drawing, spelled
+    the way it is kept, or None for one it has no pattern by."""
+    key = str(text or "").strip().lower()
+    for name in section_fills_of(scene):
+        if name.lower() == key:
+            return name
+    return None
+
+
 @dataclass
 class Hatch:
     id: str = field(default_factory=_uid)
     points: list = field(default_factory=list)   # closed polygon [[x,y],...]
     holes: list = field(default_factory=list)    # rings left empty, same form
-    pattern: str = "lines"                       # one of HATCH_PATTERNS
+    pattern: str = "lines"                       # see hatch_patterns_of
     angle: float = 45.0
     spacing: float = 3.0                         # mm
     color: list | None = None                    # [r, g, b] 0..1; None: ink
@@ -144,6 +199,21 @@ class RadialDim:
     scale_denom: float = 1.0
     text: str = ""
     style: str = ""
+    measures_paper: bool = False
+
+
+def measured_text(dim, paper_length: float, scene=None) -> str:
+    """What a dimension says it measures, `paper_length` millimetres of
+    paper apart: the paper itself in the units its sheet is read in, if it
+    was drawn on bare paper, or else the model through a detail, at
+    `scale_denom` model units to the millimetre, in the document's units.
+    Its own text, when it has one, is the caller's to put first."""
+    if dim.measures_paper:
+        return (scene.format_paper_length(paper_length) if scene is not None
+                else f"{paper_length:g}")
+    measured = paper_length * dim.scale_denom
+    return (scene.format_length(measured) if scene is not None
+            else f"{measured:g}")
 
 
 @dataclass
@@ -337,14 +407,27 @@ def cut_patterns(data: dict) -> list:
 
 @dataclass(frozen=True)
 class SectionFill:
-    """What a cut face is filled with: the pattern, the angle and spacing
-    of its lines on the paper (degrees, millimetres), and the colour they
-    are drawn in, as an (r, g, b) in 0..1, or None for the ink the rest of
-    the sheet is drawn in."""
+    """How a cut face is drawn: the pattern it is filled with, the angle
+    and spacing of its lines on the paper (degrees, millimetres), and the
+    colour they are drawn in, as an (r, g, b) in 0..1, or None for the ink
+    the rest of the sheet is drawn in. Then the line round the face: its
+    width on the paper in millimetres, 0 for none, and its colour, the
+    same way (#82). `definition` is the pattern a name from the drawing's
+    library stands for (#92), and `background` the colour the face is
+    flooded with under its lines, or None to leave it as it was (#91)."""
     pattern: str = "lines"
     angle: float = 45.0
     spacing: float = 2.5
     color: tuple | None = None
+    cut_line_width: float = 0.5
+    cut_line_color: tuple | None = None
+    definition: object = None
+    background: tuple | None = None
+
+
+# Past this many segments a face's pattern is too fine for its size, and
+# the sheet draws what it has rather than locking up drawing the rest.
+MAX_PAPER_SEGMENTS = 50000
 
 
 def section_drawing(regions: list, cx: float, cy: float, s: float,
@@ -360,37 +443,48 @@ def section_drawing(regions: list, cx: float, cy: float, s: float,
     - the hatch lines, as (colour, segments) with one entry per colour
       in the order the colours first come up, so a painter changes pen
       once a colour rather than once a face;
-    - the loops to draw a line round, every ring of every face;
+    - the outlines, as (colour, width, rings) with one entry per pen in
+      the order the pens first come up, every ring of every face that
+      has a cut line; a face whose cut line is 0 wide is left out;
     - the faces to flood, as (colour, rings) with the bore among the
-      rings: solid is not a set of segments, it is the face itself.
+      rings: solid is not a set of segments, it is the face itself, and
+      a face with a background is flooded in it under its lines.
 
     "cross" goes over a face a second time square to the first, "none"
-    leaves it outlined and empty, and anything else (no pattern, or one
-    out of a file this build cannot draw) gets the plain lines it always
+    leaves it outlined and empty, a pattern from the drawing's library is
+    drawn family by family, and anything else (no pattern, or one out of
+    a file this drawing has no pattern for) gets the plain lines it always
     got. The screen and the plot both draw this, and they used to work
     it out separately: one of them was always going to be a version
     behind.
     """
+    from .hatch_patterns import fill_segments
     fills = fills or []
     lines: dict = {}
-    loops, floods = [], []
+    outlines: dict = {}
+    floods = []
     for i, region in enumerate(regions):
         paper = [[(cx + px * s, cy + py * s) for px, py in ring]
                  for ring in region if len(ring) >= 3]
         if not paper:
             continue
         fill = fills[i] if i < len(fills) else SectionFill()
-        if fill.pattern == "solid":
+        solid = fill.pattern == "solid" or getattr(fill.definition, "solid",
+                                                   False)
+        if solid:
             floods.append((fill.color, paper))
         elif fill.pattern != "none":
-            segments = lines.setdefault(fill.color, [])
-            segments.extend(hatch_region(paper, fill.angle, fill.spacing))
-            if fill.pattern == "cross":
-                segments.extend(
-                    hatch_region(paper, fill.angle + 90.0, fill.spacing))
-        loops.extend(paper)
+            if fill.background is not None:
+                floods.append((fill.background, paper))
+            lines.setdefault(fill.color, []).extend(fill_segments(
+                paper, fill.definition, fill.pattern, fill.angle,
+                fill.spacing, limit=MAX_PAPER_SEGMENTS))
+        if fill.cut_line_width > 0:
+            outlines.setdefault((fill.cut_line_color, fill.cut_line_width),
+                                []).extend(paper)
     return [(color, segs) for color, segs in lines.items() if segs], \
-        loops, floods
+        [(color, width, rings)
+         for (color, width), rings in outlines.items()], floods
 
 
 def cut_hatching(regions: list, cx: float, cy: float, s: float,
@@ -406,8 +500,9 @@ def cut_hatching(regions: list, cx: float, cy: float, s: float,
     fills = [SectionFill(patterns[i] if patterns and i < len(patterns)
                          else "", angle, spacing)
              for i in range(len(regions))]
-    lines, loops, floods = section_drawing(regions, cx, cy, s, fills)
-    return ([seg for _color, segs in lines for seg in segs], loops,
+    lines, outlines, floods = section_drawing(regions, cx, cy, s, fills)
+    return ([seg for _color, segs in lines for seg in segs],
+            [ring for _color, _width, rings in outlines for ring in rings],
             [rings for _color, rings in floods])
 
 
@@ -417,12 +512,62 @@ DEFAULT_STYLES = {
     "Heading":  {"text_height": 6.0, "arrow_size": 2.2, "dim_offset": 8.0},
 }
 
+# A sheet read in inches is lettered from round inches near the metric
+# sizes, 1/8" text for Standard, though they are kept in millimetres too.
+INCH_STYLES = {
+    name: {key: inches * TO_MM["in"] for key, inches in sizes.items()}
+    for name, sizes in {
+        "Standard": {"text_height": 0.125, "arrow_size": 0.09,
+                     "dim_offset": 0.3},
+        "Small":    {"text_height": 0.09, "arrow_size": 0.06,
+                     "dim_offset": 0.2},
+        "Heading":  {"text_height": 0.25, "arrow_size": 0.09,
+                     "dim_offset": 0.3},
+    }.items()
+}
+
+# What a new note is lettered at when nothing else says, in either set.
+NOTE_HEIGHTS = {"metric": 4.0, "inch": 0.15 * TO_MM["in"]}
+
+
+def style_set(scene) -> str:
+    """The built-in styles `scene` is lettered in, "metric" or "inch".
+
+    They are the ones for the units its sheets are read in, unless what is
+    lettered already was lettered in the others (`Scene.annot_style_set`):
+    lettering keeps its sizes when the units change, and a drawing written
+    before inch documents had inch styles stays metric."""
+    chosen = getattr(scene, "annot_style_set", None)
+    if chosen in ("metric", "inch"):
+        return chosen
+    units = paper_units(getattr(scene, "units", "mm"))
+    return "inch" if units == "in" else "metric"
+
+
+def builtin_styles(scene) -> dict:
+    """Standard, Small and Heading as `scene` letters them."""
+    return INCH_STYLES if style_set(scene) == "inch" else DEFAULT_STYLES
+
+
+def default_note_height(scene) -> float:
+    """A new note's cap height, in millimetres."""
+    return NOTE_HEIGHTS[style_set(scene)]
+
+
+def lettered_in_builtin_styles(scene) -> bool:
+    """Whether anything on a sheet takes its size from a built-in style:
+    every linear dimension, an unstyled one from Standard, and any styled
+    note. Radial and angular dimensions are lettered at their own size."""
+    return any(lay.dims or any(note.style for note in lay.notes)
+               for lay in getattr(scene, "layouts", ()))
+
 
 def annotation_style(scene, name: str) -> dict:
     """Named annotation style merged over the Standard defaults."""
-    props = dict(DEFAULT_STYLES["Standard"])
+    builtin = builtin_styles(scene)
+    props = dict(builtin["Standard"])
     if name:
-        props.update(DEFAULT_STYLES.get(name, {}))
+        props.update(builtin.get(name, {}))
         if scene is not None:
             props.update(getattr(scene, "annot_styles", {}).get(name, {}))
     return props
@@ -433,6 +578,34 @@ def note_text_height(note, scene=None) -> float:
     if getattr(note, "style", ""):
         return float(annotation_style(scene, note.style)["text_height"])
     return float(note.height)
+
+
+def letters_capitals(scene) -> bool:
+    """Whether a text height on `scene`'s sheets is the height of its
+    capitals, as drafting measures it. In a drawing saved before it was,
+    dimensions, leaders and notes not made in the on-screen editor gave
+    their height to the font as its size, which printed their capitals
+    about 0.71 of it, and they go on printing as they did
+    (`Scene.text_height_measures`). Without a drawing, as in a new one."""
+    return getattr(scene, "text_height_measures", "capitals") == "capitals"
+
+
+def font_size(height: float, scene=None) -> float:
+    """The font size, in paper millimetres, that sheet text `height` high
+    is lettered in."""
+    if not letters_capitals(scene):
+        return height
+    from .text import cap_height_ratio
+    return height / cap_height_ratio()
+
+
+def lettered_by_font_size(scene) -> bool:
+    """Whether anything on a sheet would print otherwise if its height were
+    the capitals' (`letters_capitals`): any dimension or leader, and a note
+    not made in the on-screen editor, which letters its own by them."""
+    return any(lay.dims or lay.rdims or lay.adims or lay.leaders
+               or any(not note.font_family for note in lay.notes)
+               for lay in getattr(scene, "layouts", ()))
 
 
 def _on_axis(v, tol: float = 5e-3):
@@ -534,17 +707,8 @@ def annotation_at(layout, px: float, py: float, tol: float = 2.0,
     Kinds: note, leader, dim, rdim, adim, hatch (dims before hatches so
     outlines don't shadow them)."""
     for note in reversed(layout.notes):
-        if note.font_family:
-            x0, y0, x1, y1 = annotation_bounds("note", note, scene)
-            if x0 - tol <= px <= x1 + tol and y0 - tol <= py <= y1 + tol:
-                return ("note", note)
-            continue
-        height = note_text_height(note, scene)
-        w = max(len(line) for line in (note.text or " ").split("\n")) \
-            * height * 0.62
-        h = height * (1 + (note.text or "").count("\n") * 1.6)
-        if note.x - tol <= px <= note.x + w + tol \
-                and note.y - tol <= py <= note.y + h + tol:
+        x0, y0, x1, y1 = annotation_bounds("note", note, scene)
+        if x0 - tol <= px <= x1 + tol and y0 - tol <= py <= y1 + tol:
             return ("note", note)
     for dim in reversed(layout.dims):
         import numpy as np
@@ -946,8 +1110,10 @@ def annotation_bounds(kind: str, obj, scene=None) -> tuple:
                              alignment=obj.alignment).boundingRect()
             return (obj.x + rect.left(), obj.y - rect.bottom(),
                     obj.x + rect.right(), obj.y - rect.top())
+        from .text import text_advance
         lines = (obj.text or " ").split("\n")
-        w = max(len(line) for line in lines) * height * 0.62
+        w = max(text_advance(line) for line in lines) \
+            * font_size(height, scene)
         return (obj.x, obj.y - (len(lines) - 1) * height * 1.6,
                 obj.x + w, obj.y + height)
     if kind == "dim":
@@ -1102,11 +1268,47 @@ class Layout:
                     item.id = _uid()        # bare lists, with no id to move
         return dup
 
+    def copied_details(self, dup: Layout) -> list:
+        """(this sheet's detail id, the copy's) for each detail of a sheet
+        `duplicate` made from this one: the copy keeps the order, and
+        only the ids moved."""
+        return [(old.id, new.id) for old, new in zip(self.details,
+                                                     dup.details)]
+
     def detail_at(self, px: float, py: float) -> DetailView | None:
         for d in reversed(self.details):        # topmost first
             if d.contains(px, py):
                 return d
         return None
+
+    def convert_units(self, factor: float, rescaled: bool):
+        """The document's units changed, one old unit being `factor` new.
+
+        Every scale on the sheet is a ratio of real lengths, and stays the
+        ratio it was: a detail at 1:4 is at 1:4 in the new units too, and a
+        dimension or a scale bar reads lengths at the scale it did.
+        `rescaled` says the model was scaled by `factor` to keep its real
+        size, so what looks at it or is anchored to it moves with it, and
+        the sheet plots as it did.
+        """
+        for det in self.details:
+            det.scale_denom *= factor
+            if rescaled:
+                det.target = [c * factor for c in det.target]
+                det.perspective_distance *= factor
+                if det.section_offset is not None:
+                    det.section_offset *= factor
+        for dim in [*self.dims, *self.rdims]:
+            if not dim.measures_paper:
+                dim.scale_denom *= factor
+        for bar in self.scale_bars:
+            bar[2] *= factor
+        if rescaled:
+            for dim in self.dims:
+                if dim.m1 is not None:
+                    dim.m1 = [c * factor for c in dim.m1]
+                if dim.m2 is not None:
+                    dim.m2 = [c * factor for c in dim.m2]
 
     def add(self, shape, name: str | None = None) -> PaperObject:
         """Put geometry on the paper, in millimetres.
@@ -1319,6 +1521,8 @@ def layouts_from_json(data: list) -> list:
             pool = getattr(lay, key)
             for d in ld.get(key, []):
                 pool.append(_rebuild(cls, d))
+                if key in ("dims", "rdims") and "measures_paper" not in d:
+                    pool[-1].measures_paper = _drawn_on_paper(lay, pool[-1])
         lay.scale_bars = [list(b) for b in ld.get("scale_bars", [])]
         lay.title_block = dict(ld.get("title_block", {}))
         lay.revisions = [list(r) for r in ld.get("revisions", [])]
@@ -1326,20 +1530,72 @@ def layouts_from_json(data: list) -> list:
     return layouts
 
 
-def parse_scale(text: str) -> float | None:
-    """'1:50' -> 50, '2:1' -> 0.5, '50' -> 50."""
-    text = text.strip().lower().replace(" ", "")
-    if ":" in text:
-        a, _, b = text.partition(":")
+def _drawn_on_paper(lay: Layout, dim) -> bool:
+    """Whether a dimension saved before they said what they measure was
+    drawn on bare paper: one is given a scale of one there, and nothing
+    over a detail is unless the detail shows a model unit to the paper
+    millimetre, which a centimetre detail at 1:10 does. So it also has to
+    have no detail under it, and not be anchored to one."""
+    if getattr(dim, "detail_id", "") or abs(dim.scale_denom - 1.0) > 1e-12:
+        return False
+    if isinstance(dim, RadialDim):
+        x, y = dim.cx, dim.cy
+    else:
+        x, y = (dim.x1 + dim.x2) / 2, (dim.y1 + dim.y2) / 2
+    detail = lay.detail_at(x, y)
+    return detail is None or detail.perspective
+
+
+def _scale_ratio(text: str, units: str) -> float | None:
+    """The ratio of real lengths a typed scale says: N of 1:N."""
+    if "=" in text:
+        paper, _, model = text.partition("=")
+        # an architect's 1-1/2" is the 1 1/2" a length is typed as
+        paper = re.sub(r"(\d)\s*-\s*(\d+/\d+)", r"\1 \2", paper)
+        a, b = parse_length(paper, units), parse_length(model, units)
+        ratio = b / a if (a or 0) > 0 and (b or 0) > 0 else None
+    else:
+        text = text.strip().lower().replace(" ", "")
         try:
-            a, b = float(a), float(b)
-            if a <= 0 or b <= 0:
-                return None
-            return b / a
+            if ":" in text:
+                a, _, b = text.partition(":")
+                a, b = float(a), float(b)
+                ratio = b / a if a > 0 and b > 0 else None
+            else:
+                ratio = float(text)
         except ValueError:
             return None
-    try:
-        v = float(text)
-        return v if v > 0 else None
-    except ValueError:
+    if ratio is None or not 0 < ratio < math.inf:
         return None
+    return ratio
+
+
+def parse_scale(text: str, units: str) -> float | None:
+    """A typed scale, as the `scale_denom` it sets in a document of `units`.
+
+    A ratio is of real lengths, so it means the same in any units: '1:50'
+    is a fiftieth of real size, '2:1' twice it, a bare '50' is 1:50, and in
+    an inch document 1:50 is 50/25.4 inches to the paper millimetre.
+    Architects and engineers name theirs by a length of paper and the
+    length of model it stands for, 1/4" = 1'-0" (1:48) or 1" = 20'
+    (1:240); a length there without units is in the document's.
+    """
+    ratio = _scale_ratio(text, units)
+    return None if ratio is None else ratio / TO_MM[units]
+
+
+# what each scale on offer says, which is the same in any units
+_PRESET_RATIOS = {name: _scale_ratio(name, "mm")
+                  for name in (*METRIC_SCALES, *IMPERIAL_SCALES)}
+
+
+def format_scale(denom: float, units: str) -> str:
+    """A `scale_denom` written as the ratio of real lengths it is, 1:N or
+    N:1, or by its name when it is a scale on offer in `units`."""
+    ratio = denom * TO_MM[units]
+    for name in scale_presets(units):
+        if math.isclose(_PRESET_RATIOS[name], ratio, rel_tol=1e-9):
+            return name
+    if ratio >= 1:
+        return f"1:{ratio:g}"
+    return f"{1 / ratio:g}:1"

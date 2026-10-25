@@ -207,10 +207,12 @@ QListWidget, QTreeWidget, QTableWidget, QTreeView {
 QListWidget::item, QTreeWidget::item {
     padding: 3px;
 }
-QListWidget::item:selected, QTreeWidget::item:selected {
+QListWidget::item:selected, QTreeWidget::item:selected,
+QTableWidget::item:selected {
     background: #4a3f28;
     color: #f0d9a8;
 }
+QTableWidget QLineEdit { padding: 0 6px; border-radius: 0; }
 QHeaderView::section {
     background: #2e2f34;
     border: none;
@@ -229,6 +231,29 @@ QPushButton {
 QPushButton:hover { background: #3f4047; border-color: #55565e; }
 QPushButton:pressed { background: #2b2c30; }
 QPushButton:default { border-color: #d9a441; }
+
+/* Styled here so a slider looks the same everywhere: left to the platform,
+   macOS drew no track on this dark theme and Linux filled it with the
+   desktop's highlight colour instead of ours. */
+QSlider::groove:horizontal {
+    height: 4px;
+    background: #1e1f22;
+    border: 1px solid #3a3b41;
+    border-radius: 3px;
+}
+QSlider::sub-page:horizontal {
+    background: #8a6a2f;
+    border: 1px solid #8a6a2f;
+    border-radius: 3px;
+}
+QSlider::handle:horizontal {
+    background: #cfd0d2;
+    border: 1px solid #45464d;
+    width: 14px;
+    margin: -5px 0;
+    border-radius: 8px;
+}
+QSlider::handle:horizontal:hover { background: #e6e7e9; border-color: #d9a441; }
 
 QMenuBar { background: #2b2c30; }
 QMenuBar::item { padding: 5px 10px; background: transparent; }
@@ -283,6 +308,7 @@ QPushButton[link="true"] {
     color: #d9a441; text-align: left;
 }
 QPushButton[link="true"]:hover { color: #f0d9a8; text-decoration: underline; }
+QPushButton[link="true"]:disabled { color: #8a6a2f; }
 QLabel#commandEcho {
     color: #85868a;
     font-family: monospace;
@@ -299,3 +325,25 @@ QCheckBox::indicator:checked {
     border-color: #d9a441;
 }
 """
+
+
+def apply_interface_font(app, family: str) -> None:
+    """The interface font onto the whole app ("" = system default).
+
+    Live-safe: widgets repolish on the font-change event. The kind line
+    sets its own fixed-pitch font and keeps it — tests say so.
+    """
+    from PySide6.QtGui import QFont
+    app.setFont(QFont(family))
+
+
+def apply_saved_interface_font(app) -> None:
+    """The saved interface font (Settings → Display) onto the app.
+
+    Called at startup, before any window is built, so everything inherits
+    it from the beginning.
+    """
+    from ..utils.config import Config
+    family = Config().get("display", "interface_font", default="") or ""
+    if family:
+        apply_interface_font(app, family)

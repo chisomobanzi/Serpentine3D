@@ -10,6 +10,7 @@ import math
 import os
 import struct
 import tempfile
+import warnings
 
 from . import occ
 from .tolerance import tight, tol
@@ -747,28 +748,613 @@ def offset_curve(shape, distance: float) -> TopoDS_Shape:
     return mk.Shape()
 
 
-def fillet_curves(edge_a, edge_b, radius: float,
-                  near: Point) -> tuple:
+def _curve_plane_normal(ea, eb) -> Point | None:
+    """Normal of the plane the two edges already live on, when the edges
+    say it themselves: two non-parallel lines span their own plane, and an
+    arc carries its circle's axis. None when the edges leave it open."""
+    import numpy as np
+    from OCP.GeomAbs import GeomAbs_CurveType
+
+    def line_dir(ad):
+        p, v = gp_Pnt(), gp_Vec()
+        ad.D1(ad.FirstParameter(), p, v)
+        arr = np.array([v.X(), v.Y(), v.Z()], float)
+        n = np.linalg.norm(arr)
+        return arr / n if n > 1e-12 else None
+
+    def plane_of_arc(edge):
+        ad = occ.edge_adaptor(edge)
+        if ad.GetType() != GeomAbs_CurveType.GeomAbs_Circle:
+            return None
+        circ = ad.Circle()
+        d = circ.Axis().Direction()
+        return np.array([d.X(), d.Y(), d.Z()], float)
+
+    ad_a, ad_b = occ.edge_adaptor(ea), occ.edge_adaptor(eb)
+    both_lines = (ad_a.GetType() == GeomAbs_CurveType.GeomAbs_Line
+                  and ad_b.GetType() == GeomAbs_CurveType.GeomAbs_Line)
+    if both_lines:
+        d1, d2 = line_dir(ad_a), line_dir(ad_b)
+        if d1 is not None and d2 is not None:
+            n = np.cross(d1, d2)
+            ln = np.linalg.norm(n)
+            if ln > 1e-9:
+                return tuple(n / ln)
+        return None
+    arc, other = ((ea, eb) if plane_of_arc(ea) is not None else (eb, ea))
+    n = plane_of_arc(arc)
+    if n is None:
+        return None
+    # the other edge must lie in the arc's plane: both endpoints and the
+    # line's direction perpendicular to the axis
+    ad_o = occ.edge_adaptor(other)
+    p, v = gp_Pnt(), gp_Vec()
+    ad_o.D1(ad_o.FirstParameter(), p, v)
+    d = np.array([v.X(), v.Y(), v.Z()], float)
+    nd = np.linalg.norm(d)
+    if nd < 1e-12 or abs(float(np.dot(d, n))) / nd > 1e-6:
+        return None
+    c0 = occ.edge_adaptor(arc).Circle().Location()
+    for t in (ad_o.FirstParameter(), ad_o.LastParameter()):
+        ad_o.D1(t, p, v)
+        off = np.array([p.X() - c0.X(), p.Y() - c0.Y(), p.Z() - c0.Z()])
+        if abs(float(np.dot(off, n))) > 1e-6:
+            return None
+    return tuple(n)
+
+
+def fillet_curves(edge_a, edge_b, radius: float, near: Point,
+                  plane=None, near_b: Point | None = None) -> tuple:
     """Fillet two coplanar line/arc edges; returns (trimmed_a, arc, trimmed_b).
 
-    `near` chooses the corner when the curves cross more than once.
+    `near` chooses the corner when the curves cross more than once, and
+    `near_b` says where the second curve was clicked when that was
+    somewhere else, which is what keeps the clicked side of a crossing.
+
+    The curves are brought to their corner first (see corner_curves), so
+    two that stop short of each other are carried out to it: the kernel's
+    own fillet refuses a gap, and a drawing is full of lines that nearly
+    meet.
+
+    The fillet is built in the plane the curves live on, resolved in this
+    order: the plane the edges themselves define (two lines, or an arc
+    with the other edge lying in its plane), then `plane` — a normal
+    vector or anything with a `.normal`, such as a CPlane — and finally
+    world XY at the corner's height.
     """
     from .occ import ChFi2d_FilletAPI, gp_Pln
     if radius <= 0:
         raise GeometryError("Fillet radius must be positive")
-    ea, eb = occ.to_edge(edge_a), occ.to_edge(edge_b)
-    # assume drafting plane = world XY at the corner's z
-    plane = gp_Pln(_pnt((0, 0, near[2])), _dir((0, 0, 1)))
-    api = ChFi2d_FilletAPI(ea, eb, plane)
+    # A polyline is a wire: the corner is made in the edge that was
+    # clicked, which is what `near` says.
+    here_b = near if near_b is None else near_b
+    clicked_a = occ.to_edge(edge_near(edge_a, near))
+    clicked_b = occ.to_edge(edge_near(edge_b, here_b))
+    ea, eb = clicked_a, clicked_b
+    normal = _curve_plane_normal(ea, eb)
+    if normal is None and plane is not None:
+        n = getattr(plane, "normal", plane)
+        normal = (float(n[0]), float(n[1]), float(n[2]))
+        if math.hypot(*normal) < 1e-12:
+            raise GeometryError("Fillet plane normal is degenerate")
+    if normal is None:
+        normal = (0.0, 0.0, 1.0)
+    at = near
+    whole_a, whole_b = edge_a, edge_b
+    try:
+        whole_a, whole_b = corner_curves(edge_a, edge_b, near, here_b)
+        at = _shared_end(whole_a, whole_b) or near
+        # The corner may have been reached by carrying a curve on, which
+        # leaves it in two pieces: the one that meets the corner is the
+        # one the arc is cut out of.
+        ea = occ.to_edge(edge_near(whole_a, at))
+        eb = occ.to_edge(edge_near(whole_b, at))
+    except GeometryError:
+        # Curves that already meet need no corner made. Ones that cannot
+        # be brought to one have no fillet in them either, and the corner
+        # step says that better than the kernel does.
+        if _shared_end(ea, eb) is None:
+            raise
+    # The corner, not the click: the kernel chooses its solution by the
+    # point it is given, and a click sits anywhere along the curve.
+    api = ChFi2d_FilletAPI(ea, eb, gp_Pln(_pnt(at), _dir(normal)))
     if not api.Perform(float(radius)):
-        raise GeometryError("Fillet failed (radius too large or curves "
-                            "not coplanar in XY)")
+        raise GeometryError("Fillet failed: the radius is too large for "
+                            "that corner, or the curves are not on one "
+                            "plane")
     ea_out = occ.TopoDS_Edge()
     eb_out = occ.TopoDS_Edge()
-    arc = api.Result(_pnt(near), ea_out, eb_out)
+    arc = api.Result(_pnt(at), ea_out, eb_out)
     if arc.IsNull():
         raise GeometryError("Fillet produced no result near that corner")
-    return ea_out, arc, eb_out
+    # Only the arc is taken from the kernel. What it leaves of the two
+    # curves is trimmed by its own reckoning, which keeps the stub beside
+    # the corner rather than the side that was clicked; each curve is cut
+    # back to the arc here instead, the way radius zero cuts them to the
+    # corner.
+    from OCP.BRep import BRep_Tool
+    for_a, for_b = _nearest_each(_curve_ends(arc), *_away_from(at, ea, eb))
+    ea_cut = _cut_to_corner(ea, BRep_Tool.Curve_s(ea, 0.0, 0.0), for_a,
+                            _far_end(ea, at))
+    eb_cut = _cut_to_corner(eb, BRep_Tool.Curve_s(eb, 0.0, 0.0), for_b,
+                            _far_end(eb, at))
+    return (_with_the_rest(whole_a, ea, ea_cut, for_a), arc,
+            _with_the_rest(whole_b, eb, eb_cut, for_b))
+
+
+def _with_the_rest(curve, clicked, cut, corner: Point):
+    """The cut piece, carrying whatever else the curve is made of.
+
+    Only one piece of a polyline makes the corner, and the others were
+    drawn by somebody: the fillet has no business throwing them away.
+    What lay the other side of the corner is gone, since that is the
+    part the corner cut off, so the rest is gathered by walking out from
+    the end the cut piece keeps.
+    """
+    rest = _edges_through(curve, clicked, _far_end(cut, corner))
+    if not rest:
+        return cut
+    try:
+        return join_curves([cut] + rest)
+    except GeometryError:
+        return cut
+
+
+def _edges_through(curve, clicked, at: Point) -> list:
+    """The edges of `curve`, bar `clicked`, that hang off the point `at`."""
+    import numpy as np
+
+    rest = [e for e in edges_of(curve) if not e.IsSame(clicked)]
+    found, front = [], [np.asarray(at, float)]
+    while front and rest:
+        here = front.pop()
+        for edge in list(rest):
+            ends = [np.asarray(q, float) for q in _curve_ends(edge)]
+            hit = next((i for i, q in enumerate(ends)
+                        if float(np.linalg.norm(q - here)) <= tol()), None)
+            if hit is not None:
+                rest.remove(edge)
+                found.append(edge)
+                front.append(ends[1 - hit])
+    return found
+
+
+def _far_end(edge, corner: Point) -> Point:
+    """The end of an edge that is not the corner.
+
+    Which side to keep is settled by then: the corner step already cut
+    each curve back to the side that was clicked, so what is left of it
+    runs from the corner out to one end. A click near the corner itself
+    sits in the piece the arc takes away, and would say the wrong thing.
+    """
+    import numpy as np
+    at = np.asarray(corner, float)
+    return max(_curve_ends(edge),
+               key=lambda p: float(np.linalg.norm(np.asarray(p) - at)))
+
+
+def _away_from(corner: Point, edge_a, edge_b) -> tuple:
+    return _far_end(edge_a, corner), _far_end(edge_b, corner)
+
+
+def _nearest_each(points, near_a: Point, near_b: Point) -> tuple:
+    """Which of two points belongs to which click."""
+    import numpy as np
+    first, second = (np.asarray(p, float) for p in points)
+    a, b = np.asarray(near_a, float), np.asarray(near_b, float)
+    straight = (np.linalg.norm(first - a) + np.linalg.norm(second - b))
+    crossed = (np.linalg.norm(second - a) + np.linalg.norm(first - b))
+    if straight <= crossed:
+        return tuple(first), tuple(second)
+    return tuple(second), tuple(first)
+
+
+def _shared_end(edge_a, edge_b):
+    """The point two edges meet at, or None if they do not."""
+    import numpy as np
+    for pa in _curve_ends(edge_a):
+        for pb in _curve_ends(edge_b):
+            if np.linalg.norm(np.asarray(pa) - np.asarray(pb)) <= tol():
+                return tuple(float(c) for c in pa)
+    return None
+
+
+def edge_near(curve, point: Point):
+    """The one edge of a curve that `point` lies nearest.
+
+    A polyline is a wire of several edges, and a corner is made in one
+    of them: the one that was clicked. A curve of a single edge answers
+    with itself, so a caller never has to ask which kind it has.
+    """
+    import numpy as np
+    edges = edges_of(curve)
+    if not edges:
+        raise GeometryError("That object has no curve in it")
+    if len(edges) == 1:
+        return edges[0]
+    want = np.asarray(point, float)
+
+    def _away(edge) -> float:
+        pts = np.asarray(sample_curve(edge, 24), float)
+        return float(np.linalg.norm(pts - want, axis=1).min())
+
+    return min(edges, key=_away)
+
+
+def nearest_ends(curve_a, curve_b) -> tuple:
+    """The ends of two curves that lie nearest each other, as points.
+
+    What a click would have said, for a pick that had no place on it:
+    typed, scripted, or chosen from a list. Two curves are filleted at
+    the corner they nearly make, and that is the corner their closest
+    ends stand at.
+    """
+    import numpy as np
+    ends_a = [np.asarray(p, float) for p in _curve_ends(curve_a)]
+    ends_b = [np.asarray(p, float) for p in _curve_ends(curve_b)]
+    pair = min(((a, b) for a in ends_a for b in ends_b),
+               key=lambda e: float(np.linalg.norm(e[0] - e[1])))
+    return tuple(float(c) for c in pair[0]), tuple(float(c) for c in pair[1])
+
+
+def _curve_ends(curve) -> list:
+    """A curve's two ends, or its middle where it has none (a circle)."""
+    pts = sample_curve(curve, 3)
+    return [tuple(pts[0]), tuple(pts[-1])]
+
+
+def corner_curves(edge_a, edge_b, near_a: Point, near_b: Point) -> tuple:
+    """Bring two curves to a sharp corner; returns (new_a, new_b).
+
+    What Rhino's Fillet does at radius zero: the curves meet at the point
+    their own geometry crosses at, each cut back to it or carried out to
+    it, and each keeping the side that was clicked. `near_a` and `near_b`
+    are those clicks, which say both which corner is meant, where two
+    curves cross twice, and which piece of each curve to keep.
+
+    Trimming and extending are the same act here, which is why there is
+    only one: a curve's carrier runs on past its ends, so the piece
+    between the crossing and the far end is simply taken from it, whether
+    that is shorter than the curve was or longer.
+    """
+    import numpy as np
+    from OCP.BRep import BRep_Tool
+
+    ea = occ.to_edge(edge_near(edge_a, near_a))
+    eb = occ.to_edge(edge_near(edge_b, near_b))
+    ca = BRep_Tool.Curve_s(ea, 0.0, 0.0)
+    cb = BRep_Tool.Curve_s(eb, 0.0, 0.0)
+    if ca is None or cb is None:
+        raise GeometryError("Those curves have no geometry to corner")
+
+    # Where they cross as drawn; failing that where their carriers would
+    # cross; failing that where they would if each ran on from its end.
+    crossings = (_crossings_in(ea, eb) or _crossings_extended(ca, cb)
+                 or _crossings_by_reaching_on(ea, eb))
+    if not crossings:
+        raise GeometryError("Those curves do not cross, even carried on "
+                            "from their ends")
+    want = (np.asarray(near_a, float) + np.asarray(near_b, float)) * 0.5
+    best = min(crossings, key=lambda p: float(np.linalg.norm(p - want)))
+    return (_with_the_rest(edge_a, ea, _cut_or_reach(ea, ca, best, near_a),
+                           best),
+            _with_the_rest(edge_b, eb, _cut_or_reach(eb, cb, best, near_b),
+                           best))
+
+
+def _crossings_in(edge_a, edge_b) -> list:
+    """Every point two edges cross at, from the kernel's intersector.
+
+    This is asked before the extrema below, because the extrema of the
+    distance between two curves do not reliably find a crossing: the
+    distance there is zero and a minimum, but the search is for points
+    where the shortest link stands square to both curves, and on a
+    spline it walks past the crossing often enough. A line or an arc has
+    too simple a distance function for that to show; a drawn curve does
+    not, which is why filleting one used to be refused.
+    """
+    import numpy as np
+    from OCP.IntTools import IntTools_EdgeEdge
+
+    inter = IntTools_EdgeEdge(edge_a, edge_b)
+    inter.Perform()
+    if not inter.IsDone():
+        return []
+    where = occ.edge_adaptor(edge_a)
+    parts = inter.CommonParts()
+    out = []
+    for i in range(1, parts.Length() + 1):
+        part = parts.Value(i)
+        if part.Type() != occ.VERTEX:
+            continue        # a stretch they run along: no one corner in it
+        p = where.Value(part.VertexParameter1())
+        out.append(np.array([p.X(), p.Y(), p.Z()]))
+    return out
+
+
+def _crossings_extended(curve_a, curve_b) -> list:
+    """Where two curves' carriers cross, past the ends that were drawn.
+
+    What makes a corner out of two lines that stop short of each other:
+    a line's carrier is endless, an arc's goes round, and the crossing
+    is read off those.
+    """
+    import numpy as np
+    from OCP.GeomAPI import GeomAPI_ExtremaCurveCurve
+
+    try:
+        extrema = GeomAPI_ExtremaCurveCurve(curve_a, curve_b)
+        count = extrema.NbExtrema()
+    except Exception:                                   # noqa: BLE001
+        return []           # curves running along each other: no crossing
+    out = []
+    for i in range(1, count + 1):
+        if extrema.Distance(i) > tol():
+            continue                      # they pass each other here
+        p1, p2 = gp_Pnt(), gp_Pnt()
+        extrema.Points(i, p1, p2)
+        out.append(np.array([(p1.X() + p2.X()) / 2, (p1.Y() + p2.Y()) / 2,
+                             (p1.Z() + p2.Z()) / 2]))
+    return out
+
+
+def _crossings_by_reaching_on(edge_a, edge_b) -> list:
+    """Where two curves meet if each runs on from the end facing the other.
+
+    A drawn curve stops where it stops. A line's carrier is endless and
+    an arc's goes round, so two of those are carried out to their corner
+    by geometry alone, but a spline has nothing further to read: two
+    that never touch would have no corner at all. Running on straight,
+    the way the curve was heading, is what the eye expects of them, and
+    the straight run becomes part of what the fillet hands back.
+    """
+    end_a, end_b = nearest_ends(edge_a, edge_b)
+    reach = _reach_for(edge_a, edge_b)
+    ray_a = _end_ray(edge_a, end_a, reach)
+    ray_b = _end_ray(edge_b, end_b, reach)
+    out = []
+    if ray_a is not None:
+        out += _crossings_in(ray_a, edge_b)
+    if ray_b is not None:
+        out += _crossings_in(ray_b, edge_a)
+    if ray_a is not None and ray_b is not None:
+        out += _crossings_in(ray_a, ray_b)
+    return out
+
+
+def _reach_for(edge_a, edge_b) -> float:
+    """How far a curve may be carried on: the size of what is being
+    filleted, so a corner is looked for about the drawing rather than
+    somewhere out of sight."""
+    import numpy as np
+    pts = np.asarray(list(sample_curve(edge_a, 12))
+                     + list(sample_curve(edge_b, 12)), float)
+    return float(np.linalg.norm(pts.max(axis=0) - pts.min(axis=0))) or 1.0
+
+
+def _end_ray(edge, at: Point, reach: float):
+    """A straight edge running on from `at`, the way the curve ends there."""
+    import numpy as np
+    from OCP.gp import gp_Vec
+
+    where = occ.edge_adaptor(edge)
+    u0, u1 = where.FirstParameter(), where.LastParameter()
+    here = np.asarray(at, float)
+    at_start = (np.linalg.norm(_xyz(where.Value(u0)) - here)
+                <= np.linalg.norm(_xyz(where.Value(u1)) - here))
+    p, v = gp_Pnt(), gp_Vec()
+    where.D1(u0 if at_start else u1, p, v)
+    along = np.array([v.X(), v.Y(), v.Z()])
+    length = float(np.linalg.norm(along))
+    if length < 1e-12:
+        return None
+    along = along / length * (-1.0 if at_start else 1.0)   # out, not back
+    return occ.to_edge(make_line(tuple(here), tuple(here + along * reach)))
+
+
+def _xyz(point):
+    """A kernel point as an array."""
+    import numpy as np
+    return np.array([point.X(), point.Y(), point.Z()])
+
+
+def _cut_or_reach(edge, carrier, corner, near: Point):
+    """What the corner leaves of a curve, carried on to it where needed.
+
+    A curve whose own geometry reaches the corner is simply cut there.
+    One whose does not keeps all of itself and gets a straight run to
+    the corner, which is tangent to it, since that is how the corner was
+    found in the first place.
+    """
+    from OCP.GeomAPI import GeomAPI_ProjectPointOnCurve
+
+    import numpy as np
+    proj = GeomAPI_ProjectPointOnCurve(_pnt(corner), carrier)
+    if proj.NbPoints() >= 1 and proj.LowerDistance() <= tol():
+        return _cut_to_corner(edge, carrier, corner, near)
+    at = np.asarray(corner, float)
+    tip = min(_curve_ends(edge),
+              key=lambda p: float(np.linalg.norm(np.asarray(p) - at)))
+    return join_curves([edge, make_line(tip, corner)])
+
+
+def _cut_to_corner(edge, carrier, corner, near: Point):
+    """The piece of `edge`'s carrier from `corner` out past `near`."""
+    from OCP.GeomAPI import GeomAPI_ProjectPointOnCurve
+
+    def _u(point) -> float:
+        proj = GeomAPI_ProjectPointOnCurve(_pnt(point), carrier)
+        if proj.NbPoints() < 1:
+            raise GeometryError("Could not place that point on the curve")
+        return float(proj.LowerDistanceParameter())
+
+    ad = occ.edge_adaptor(edge)
+    u0, u1 = ad.FirstParameter(), ad.LastParameter()
+    u_corner, u_near = _u(corner), _u(near)
+    if carrier.IsPeriodic():
+        # Angles: the piece runs from the corner the way round that the
+        # click lies, as far as the end it meets there.
+        period = carrier.Period()
+        if abs((u1 - u0) - period) < tight():
+            # A closed curve has no end to stop at: the corner is the one
+            # cut in it, and what is kept is everything from there round
+            # to there again. Its seam is not something anyone drew.
+            return BRepBuilderAPI_MakeEdge(carrier, u_corner,
+                                           u_corner + period).Edge()
+        ahead = (u1 - u_corner) % period        # to the end, going forward
+        behind = (u_corner - u0) % period       # to the start, going back
+        if (u_near - u_corner) % period <= ahead:
+            span, a, b = ahead, u_corner, u_corner + ahead
+        else:
+            span, a, b = behind, u_corner - behind, u_corner
+        if span < tight():
+            raise GeometryError("Nothing of that curve is left to keep")
+    else:
+        u_end = u1 if u_near > u_corner else u0
+        a, b = min(u_corner, u_end), max(u_corner, u_end)
+        if b - a < tight():
+            raise GeometryError("Nothing of that curve is left to keep")
+    return BRepBuilderAPI_MakeEdge(carrier, a, b).Edge()
+
+
+def _piece_end_tangent(edge, at_start: bool):
+    """Unit tangent at one end of an edge, pointing into the piece."""
+    import numpy as np
+    ad = occ.edge_adaptor(edge)
+    p = gp_Pnt()
+    v = gp_Vec()
+    u = ad.FirstParameter() if at_start else ad.LastParameter()
+    ad.D1(u, p, v)
+    t = np.array([v.X(), v.Y(), v.Z()], float)
+    n = np.linalg.norm(t)
+    if n < 1e-12:
+        return t
+    t /= n
+    return t if at_start else -t
+
+
+def _arc_parameter_at(edge, point: Point) -> float:
+    """The parameter of `point` (a point on the arc) in the edge's own
+    parameterization — the projector answers modulo the circle's period,
+    so it is brought into the arc's span first."""
+    from OCP.GeomAPI import GeomAPI_ProjectPointOnCurve
+    ad = occ.edge_adaptor(edge)
+    first = ad.FirstParameter()
+    proj = GeomAPI_ProjectPointOnCurve(_pnt(point), ad.Curve().Curve())
+    u = proj.LowerDistanceParameter()
+    while u < first - 1e-12:
+        u += 2 * math.pi
+    while u > first + 2 * math.pi + 1e-12:
+        u -= 2 * math.pi
+    return min(max(u, first), ad.LastParameter())
+
+
+def _trimmed_arc_piece(edge, p_from: Point, p_to: Point,
+                       piece: int, radius: float):
+    """The part of an arc edge running from p_from to p_to in the edge's
+    own direction. A radius that eats the piece backwards is the rounds
+    overlapping, refused with the piece's number."""
+    u_from = _arc_parameter_at(edge, p_from)
+    u_to = _arc_parameter_at(edge, p_to)
+    if u_to <= u_from + 1e-9:
+        raise GeometryError(
+            f"Fillet radius {radius:g} is too large: the rounds overlap "
+            f"on piece {piece + 1} of the polyline")
+    from OCP.Geom import Geom_TrimmedCurve
+    base = occ.edge_adaptor(edge).Curve().Curve()
+    trimmed = Geom_TrimmedCurve(base, u_from, u_to)
+    return BRepBuilderAPI_MakeEdge(trimmed).Edge()
+
+
+def fillet_corners(curve, radius: float) -> TopoDS_Shape:
+    """Round every corner of a polyline in one go — Rhino's
+    FilletCorners. Straight and arc pieces both round; a closed curve
+    comes back closed, an open one keeps its ends, joints that are
+    already smooth are left alone, and a radius that would make two
+    rounds overlap is refused with the piece's number."""
+    import numpy as np
+    from OCP.GeomAbs import GeomAbs_CurveType
+
+    if radius <= 0:
+        raise GeometryError("Fillet radius must be positive")
+    edges = edges_of(curve)
+    line_t = GeomAbs_CurveType.GeomAbs_Line
+    arc_t = GeomAbs_CurveType.GeomAbs_Circle
+    for k, e in enumerate(edges):
+        kind = occ.edge_adaptor(e).GetType()
+        if kind not in (line_t, arc_t):
+            raise GeometryError(
+                "filletcorners rounds straight and arc pieces — piece "
+                f"{k + 1} is neither")
+    closed = is_closed_curve(curve)
+    n = len(edges)
+    ends = [curve_endpoints(e) for e in edges]
+    corner_at = {}             # joint k (between k, k+1) -> (ta, arc, tb)
+
+    for k in range(n if closed else n - 1):
+        j2 = (k + 1) % n
+        a_start, a_end = ends[k]
+        b_start, b_end = ends[j2]
+        # the corner is whichever pairing of the pieces' ends sits closest;
+        # which end each pairing uses is carried, not compared — the joined
+        # ends can differ by a hair that == would call different
+        best = None
+        for a_at_start in (True, False):
+            p = a_start if a_at_start else a_end
+            for b_at_start in (True, False):
+                q = b_start if b_at_start else b_end
+                d2 = sum((x - y) ** 2 for x, y in zip(p, q))
+                if best is None or d2 < best[0]:
+                    best = (d2, p, a_at_start, b_at_start)
+        d2, near, a_at_start, b_at_start = best
+        if d2 > tol() ** 2:
+            continue                     # the pieces do not touch here
+        din = _piece_end_tangent(edges[k], at_start=a_at_start)
+        dout = _piece_end_tangent(edges[j2], at_start=b_at_start)
+        dot = float(np.dot(din, dout))
+        if dot < -1 + 1e-9 or dot > 1 - 1e-9:
+            continue                     # already smooth: nothing to round
+        theta = math.acos(max(-1.0, min(1.0, dot)))
+        if radius / math.tan(theta / 2) < tol():
+            continue                     # corner too shallow to notice
+        try:
+            corner_at[k] = fillet_curves(edges[k], edges[j2], radius, near)
+        except GeometryError as exc:
+            raise GeometryError(
+                f"Fillet radius {radius:g} is too large at the joint "
+                f"after piece {k + 1}: {exc}")
+
+    # each piece runs from the previous corner's exit to this corner's
+    # entry; a radius that eats a whole piece is refused, with its number
+    out = []
+    for j in range(n):
+        prev = (j - 1) % n
+        entry = corner_at[j][0] if j in corner_at else None
+        exit_ = (corner_at[prev][2]
+                 if (closed or j > 0) and prev in corner_at else None)
+        if entry is None and exit_ is None:
+            out.append(edges[j])         # untouched piece, kept as built
+        elif entry is not None and exit_ is None:
+            out.append(entry)            # already trimmed at its end
+        elif exit_ is not None and entry is None:
+            out.append(exit_)            # already trimmed at its start
+        else:
+            p_from = curve_endpoints(exit_)[0]
+            p_to = curve_endpoints(entry)[1]
+            if occ.edge_adaptor(edges[j]).GetType() == line_t:
+                run = np.array(p_to, float) - np.array(p_from, float)
+                old = np.array(ends[j][1], float) - np.array(ends[j][0], float)
+                if float(np.dot(run, old)) <= 0:
+                    raise GeometryError(
+                        f"Fillet radius {radius:g} is too large: the rounds "
+                        f"overlap on piece {j + 1} of the polyline")
+                out.append(make_line(tuple(p_from), tuple(p_to)))
+            else:
+                out.append(_trimmed_arc_piece(edges[j], tuple(p_from),
+                                              tuple(p_to), j, radius))
+        if j in corner_at:
+            out.append(corner_at[j][1])
+    return join_curves(out)
 
 
 def edge_chain(shape, edge_index: int, angle_tol_deg: float = 20.0) -> list:
@@ -811,18 +1397,198 @@ def edge_chain(shape, edge_index: int, angle_tol_deg: float = 20.0) -> list:
     return sorted(chain)
 
 
-def fillet_edges(shape, radius, edges: list | None = None,
-                 chamfer: bool = False) -> TopoDS_Shape:
+def _straight_law_points(law: list, steps: int = 8) -> list:
+    """A variable law's points redone as a dense polyline, so the
+    kernel's interpolation between them runs straight from radius to
+    radius instead of swinging through them."""
+    out = []
+    for (u1, r1), (u2, r2) in zip(law, law[1:]):
+        for k in range(steps):
+            t = k / steps
+            out.append((u1 + t * (u2 - u1), r1 + t * (r2 - r1)))
+    out.append(law[-1])
+    return out
+
+
+def fillet_edges(shape, radius=None, edges: list | None = None,
+                 chamfer: bool = False, radii: list | None = None,
+                 transition: str = "smooth") -> TopoDS_Shape:
     """Fillet (or chamfer) edges of a solid. edges=None means all edges.
-    `radius` may be a single value or (r_start, r_end) for a variable
-    fillet along each edge."""
+
+    `radius` shapes the profile:
+
+    - a single value: constant fillet, or one chamfer distance;
+    - (r_start, r_end): a radius varying linearly along each tangent
+      chain the picked edges form;
+    - a list of (u, r) pairs with u running 0 to 1 along that chain: a
+      variable fillet interpolating the radii through the given points,
+      as many of them as the shape deserves.
+
+    `radii` instead gives one constant size per picked edge, matched to
+    `edges` in order — SolidWorks' constant fillets let neighbouring
+    edges take different sizes, and so does this. Where picked edges
+    merge into one tangent chain, the last of their radii rules it.
+
+    The kernel extends each picked edge along its tangent neighbours into
+    one contour, and a variable profile spans the whole contour — the way
+    SolidWorks sweeps a variable-radius fillet over a smooth chain.
+    `transition` says how such a profile runs between its points:
+    "smooth" (the kernel's own interpolation, the default) or "straight"
+    (radius to radius on a line) — SolidWorks' two transition types.
+    A law point may take a zero radius where it ends the law — that
+    reaches radii a constant fillet cannot fit, the way SolidWorks'
+    variable fillet tapers to nothing at a chain's end. Variable profiles
+    are fillet-only: a chamfer takes a single distance, or one per edge.
+
+    The blend refuses to hand back a solid that fails its own checks: if
+    the kernel builds but the result is broken, that is reported like any
+    other failure, never returned. An invalid input gets one repair pass
+    (ShapeFix) and the blend is retried on the repaired shape before the
+    failure is reported.
+    """
     r_pair = None
-    if isinstance(radius, (tuple, list)):
+    law = None
+    if isinstance(radius, (tuple, list)) and not (
+            len(radius) > 0 and isinstance(radius[0], (tuple, list))):
+        if len(radius) != 2:
+            raise GeometryError(
+                "A linear variable fillet takes (r_start, r_end); a "
+                "multi-point one takes (u, r) pairs")
         r_pair = (float(radius[0]), float(radius[1]))
         if min(r_pair) <= 0:
             raise GeometryError("Radii must be positive")
-    elif radius <= 0:
+    elif isinstance(radius, (tuple, list)):
+        law = [(float(u), float(r)) for u, r in radius]
+        if len(law) < 2:
+            raise GeometryError("A variable fillet needs at least two "
+                                "(u, radius) points")
+        if any(not 0.0 <= u <= 1.0 for u, _ in law):
+            raise GeometryError("Variable-fillet positions (u) run from "
+                                "0 to 1 along the chain")
+        if any(r < 0 for _, r in law):
+            raise GeometryError("Radii cannot be negative")
+        law.sort(key=lambda point: point[0])
+        if any(r <= 0 for _, r in law[1:-1]) or (law[0][1] <= 0
+                                                 and law[-1][1] <= 0):
+            raise GeometryError(
+                "A zero radius may end a variable law but not fill it — "
+                "interior points need a positive radius, and at least "
+                "one end must stay positive too")
+    elif radius is not None and radius <= 0:
         raise GeometryError("Radius must be positive")
+    if radii is not None:
+        if edges is None or len(edges) != len(radii):
+            raise GeometryError(
+                "radii needs exactly one radius per picked edge")
+        if any(r is None or r <= 0 for r in radii):
+            raise GeometryError("Radii must be positive")
+        if radius is None:
+            radius = 0.0
+    elif radius is None:
+        raise GeometryError("A fillet needs a radius, or radii per edge")
+    if chamfer and (r_pair is not None or law is not None):
+        raise GeometryError("A chamfer takes a single distance — variable "
+                            "profiles are fillet-only")
+    if radii is not None and (r_pair is not None or law is not None):
+        raise GeometryError(
+            "Give either radii per edge, or a variable profile — not both")
+    transition = str(transition).lower()
+    if transition not in ("smooth", "straight"):
+        raise GeometryError(
+            "A variable fillet's transition is 'smooth' or 'straight'")
+    verb = "Chamfer" if chamfer else "Fillet"
+    try:
+        return _fillet_edges_build(shape, radius, radii, r_pair, law, edges,
+                                   chamfer, transition, verb)
+    except _FilletBuildError as err:
+        # an invalid input can make the blend fail or come out broken;
+        # one repair pass and a rebuild before the failure stands. The
+        # picked edges are handles into the ORIGINAL shape; a repair that
+        # rebuilt the topology renames them, so they are re-resolved onto
+        # the repaired solid — and when no honest stand-in exists, the
+        # retry is skipped rather than fed edges it does not own.
+        repaired = _repaired_input(shape)
+        if repaired is not None:
+            fixed_edges = (None if edges is None
+                           else _edges_on_repaired(repaired, edges))
+            if edges is None or fixed_edges is not None:
+                try:
+                    return _fillet_edges_build(repaired, radius, radii,
+                                               r_pair, law, fixed_edges,
+                                               chamfer, transition, verb)
+                except _FilletBuildError:
+                    pass  # the original failure is the honest one to report
+        raise err.as_geometry_error()
+
+
+def _repaired_input(shape):
+    """ShapeFix over `shape` when it fails its own checks, or None when
+    the input is fine (the common case — callers skip this cheaply) or
+    cannot be repaired."""
+    try:
+        if is_valid(shape):
+            return None
+        from OCP.ShapeFix import ShapeFix_Shape
+        sf = ShapeFix_Shape(shape)
+        sf.Perform()
+        fixed = sf.Shape()
+    except Exception:
+        return None
+    return fixed if is_valid(fixed) else None
+
+
+def _edges_on_repaired(repaired, edges):
+    """The repaired shape's edges standing in for picked edges of the
+    original — matched by endpoints (either way round) within tol(), the
+    closest length breaking a tie — or None when the repair rebuilt the
+    wire layout and some edge has no honest stand-in."""
+    candidates = edges_of(repaired)
+    out = []
+    used = set()
+    for e in edges:
+        p, q = curve_endpoints(e)
+        want = curve_length(e)
+        best = None
+        for k, c in enumerate(candidates):
+            if k in used:
+                continue
+            c0, c1 = curve_endpoints(c)
+            same = ((sum((a - b) ** 2 for a, b in zip(c0, p)) <= tol() ** 2
+                     and sum((a - b) ** 2 for a, b in zip(c1, q)) <= tol() ** 2)
+                    or (sum((a - b) ** 2 for a, b in zip(c0, q)) <= tol() ** 2
+                        and sum((a - b) ** 2 for a, b in zip(c1, p)) <= tol() ** 2))
+            if not same:
+                continue
+            gap = abs(curve_length(c) - want)
+            if best is None or gap < best[0]:
+                best = (gap, k)
+        if best is None:
+            return None
+        k = best[1]
+        used.add(k)
+        out.append(candidates[k])
+    return out
+
+
+class _FilletBuildError(Exception):
+    """A failed or broken blend build, carrying the kernel's blame."""
+
+    def __init__(self, text, blamed):
+        super().__init__(text)
+        self.text = text
+        self.blamed = blamed
+
+    def as_geometry_error(self):
+        err = GeometryError(self.text)
+        err.blamed = self.blamed
+        return err
+
+
+def _fillet_edges_build(shape, radius, radii, r_pair, law, edges, chamfer,
+                        transition, verb):
+    """One blend attempt with the requested profile, validated before it
+    is returned. Raises _FilletBuildError when the kernel fails or the
+    built shape would not pass its own checks."""
     if chamfer:
         from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer
         mk = BRepFilletAPI_MakeChamfer(shape)
@@ -833,15 +1599,34 @@ def fillet_edges(shape, radius, edges: list | None = None,
     if not targets:
         raise GeometryError("No edges to fillet")
     from OCP.Standard import Standard_Failure
-    verb = "Chamfer" if chamfer else "Fillet"
     failure = (f"{verb} failed — the radius or distance may be too large "
                "for the smallest edges; try a smaller value")
     try:
-        for e in targets:
-            if r_pair:
-                mk.Add(r_pair[0], r_pair[1], e)
+        if r_pair is None and law is None:
+            if radii is not None:
+                for e, r in zip(targets, radii):
+                    mk.Add(float(r), e)
             else:
-                mk.Add(float(radius), e)
+                for e in targets:
+                    mk.Add(float(radius), e)
+        else:
+            # add bare, then give every contour the profile: the law spans
+            # the chain rather than each piece of it
+            for e in targets:
+                mk.Add(e)
+            from OCP.TColgp import TColgp_Array1OfPnt2d
+            from OCP.gp import gp_Pnt2d
+            if r_pair is not None:
+                for ic in range(1, mk.NbContours() + 1):
+                    mk.SetRadius(r_pair[0], r_pair[1], ic, 1)
+            else:
+                points = (_straight_law_points(law) if transition == "straight"
+                          else law)
+                arr = TColgp_Array1OfPnt2d(1, len(points))
+                for i, (u, r) in enumerate(points, start=1):
+                    arr.SetValue(i, gp_Pnt2d(u, r))
+                for ic in range(1, mk.NbContours() + 1):
+                    mk.SetRadius(arr, ic, 1)
         if mk.NbContours() == 0:
             raise GeometryError(
                 f"No sharp edges to {verb.lower()} — pick an edge where "
@@ -849,10 +1634,113 @@ def fillet_edges(shape, radius, edges: list | None = None,
                 "be resized with this tool.")
         mk.Build()
     except Standard_Failure as exc:
-        raise GeometryError(failure) from exc
+        text, blamed = _fillet_failure(verb, failure, mk, targets)
+        raise _FilletBuildError(text, blamed) from exc
     if not mk.IsDone() or mk.Shape().IsNull():
-        raise GeometryError(failure)
-    return unwrap_compound(mk.Shape())
+        text, blamed = _fillet_failure(verb, failure, mk, targets)
+        raise _FilletBuildError(text, blamed)
+    result = unwrap_compound(mk.Shape())
+    if not is_valid(result):
+        raise _FilletBuildError(
+            f"{verb} built a shape that fails its own solid checks — the "
+            "radius collapses the narrow faces it runs against; try a "
+            "smaller value", [])
+    return result
+
+
+def _blamed_targets(mk, targets) -> tuple[int, str | None, list[int]]:
+    """(count, verdict, blamed indexes into targets): what the kernel
+    blamed after a failed fillet build. StartsolFailure is the kernel's
+    own verdict that a chain cannot even begin — the radius is too big
+    for it; TwistedSurface and WalkingFailure name the other two ways a
+    blend can die partway."""
+    from OCP.ChFiDS import ChFiDS_ErrorStatus
+    try:
+        n = mk.NbFaultyContours()
+    except Exception:
+        return 0, None, []
+    if n <= 0:
+        return 0, None, []
+    statuses = []
+    blamed = set()
+    for i in range(1, n + 1):
+        try:
+            ic = mk.FaultyContour(i)
+            statuses.append(mk.StripeStatus(ic))
+            for j in range(1, mk.NbEdges(ic) + 1):
+                e = mk.Edge(ic, j)
+                for k, t in enumerate(targets):
+                    if t.IsSame(e):
+                        blamed.add(k)
+        except Exception:
+            continue
+    verdict = None
+    if statuses and all(s == ChFiDS_ErrorStatus.ChFiDS_StartsolFailure
+                        for s in statuses):
+        verdict = "start"
+    elif statuses and all(s == ChFiDS_ErrorStatus.ChFiDS_TwistedSurface
+                          for s in statuses):
+        verdict = "twisted"
+    elif statuses and all(s == ChFiDS_ErrorStatus.ChFiDS_WalkingFailure
+                          for s in statuses):
+        verdict = "walking"
+    return n, verdict, sorted(blamed)
+
+
+def _fillet_failure(verb: str, failure: str, mk,
+                    targets) -> tuple[str, list[int]]:
+    """The generic failure line sharpened by what the kernel blamed, with
+    the blamed edges' indexes for the caller to highlight."""
+    n, verdict, blamed = _blamed_targets(mk, targets)
+    if n and verdict == "start":
+        text = (f"{verb} failed — the radius is too big for {n} of the "
+                "picked chains, none of them could even start; try a "
+                "smaller value")
+    elif n and verdict == "twisted":
+        text = (f"{verb} failed — the blend's surface twists along {n} of "
+                "the picked chains, usually where the faces meet at a "
+                "shallow angle; try a slightly different radius")
+    elif n and verdict == "walking":
+        text = (f"{verb} failed — the blend could not walk along {n} of "
+                "the picked chains; the radius is likely too large for "
+                "the faces it must cross")
+    elif n:
+        text = f"{verb} failed — {n} of the picked chains failed the blend"
+    else:
+        text = failure
+    return text, blamed
+
+
+def largest_fillet_radius(shape, radius, edges: list | None = None,
+                          chamfer: bool = False, tries: int = 9):
+    """The largest radius not greater than the requested one that the
+    kernel actually builds, or None when even a hair-thin one fails.
+
+    Bisects fillet_edges, so it costs a build per step: call it where a
+    fillet already failed, never speculatively."""
+    hi = float(radius)
+
+    def builds(r):
+        try:
+            fillet_edges(shape, r, edges=edges, chamfer=chamfer)
+            return True
+        except GeometryError:
+            return False
+
+    if builds(hi):
+        return hi
+    lo = 0.0
+    for _ in range(tries):
+        mid = 0.5 * (lo + hi)
+        if mid <= 0:
+            break
+        if builds(mid):
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo <= max(1e-5, hi * 1e-3):
+            break
+    return lo if lo > 0 else None
 
 
 def face_normal(face) -> Point:
@@ -2127,6 +3015,13 @@ def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
     if isinstance(target, PictureShape):
         return [target.with_region(face) for face in
                 split_shape(target.face(), cutters, direction)]
+    from .hatch import HatchShape
+    if isinstance(target, HatchShape):
+        # Cut the region it fills, not the compound: the pattern's lines
+        # are drawn from the region and would otherwise be cut as loose
+        # linework, leaving a heap of segments where a hatch was (#45).
+        return [target.with_region(face) for face in
+                split_shape(target.region, cutters, direction)]
     from .occ import BRepAlgoAPI_Splitter, TopTools_ListOfShape
     kind = shape_kind(target)
     length = math.sqrt(sum(float(v) ** 2 for v in direction))
@@ -3112,6 +4007,157 @@ def boolean_intersection(a, b) -> TopoDS_Shape:
     return _boolean(BRepAlgoAPI_Common, a, b, "intersection")
 
 
+def curve_regions(curves: list) -> list:
+    """The atomic regions a set of planar closed curves divides the plane into.
+
+    Every curve bounds a face, and every face is cut at the places the
+    others cross it, so what comes back is a set of faces that tile the
+    area the curves cover: no two interiors overlap, and the edge of one
+    is exactly the edge of its neighbour. That is what makes each face a
+    thing a CurveBoolean user can point at — a click lands in one region
+    and in no other.
+
+    Booleans between faces that merely touch along an edge can fail, so
+    every operation is attempted and its failure read as "no common
+    material" rather than as an error.
+    """
+    faces = []
+    for shape in curves:
+        face = planar_face(shape)
+        area = surface_area(face)
+        c = centroid(face)
+        # A curve drawn over another describes the same region twice, and a
+        # doubled region would come back doubled.
+        if any(math.isclose(surface_area(f), area, rel_tol=1e-7)
+               and math.dist(centroid(f), c) < tol() for f in faces):
+            continue
+        faces.append(face)
+    if not faces:
+        return []
+    regions = [faces[0]]
+    for face in faces[1:]:
+        pieces = []
+        for region in regions:
+            for op in (boolean_difference, boolean_intersection):
+                try:
+                    pieces.extend(faces_of(op(region, face)))
+                except GeometryError:
+                    pass
+        # The part of the new face no region placed earlier already covers.
+        outside = face
+        for region in regions:
+            try:
+                outside = boolean_difference(outside, region)
+            except GeometryError:
+                outside = None
+                break
+        if outside is not None:
+            pieces.extend(faces_of(outside))
+        regions = [f for f in pieces if surface_area(f) > tol() ** 2]
+    # Reconciliation: the regions must tile exactly the area the curves
+    # cover. A shortfall means a cut silently lost material, and the pick
+    # would be lying about what a click keeps.
+    try:
+        total = faces[0]
+        for f in faces[1:]:
+            total = boolean_union(total, f)
+        union_area = surface_area(total)
+        covered = sum(surface_area(r) for r in regions)
+    except GeometryError:
+        union_area = covered = None
+    if (union_area is not None and covered is not None
+            and covered < union_area - max(10 * tol() ** 2,
+                                           1e-6 * union_area)):
+        warnings.warn(
+            "CurveBoolean: some regions could not be computed — "
+            "the result may be incomplete.", stacklevel=2)
+    return regions
+
+
+def region_containing(regions, point: Point, plane_point: Point,
+                      plane_normal: Point) -> tuple[int | None, str]:
+    """Where a picked point falls: the region it is in, or why it is not.
+
+    Returns ``(index, "in")`` when the click is inside a region, and
+    ``(None, "on")`` / ``(None, "out")`` when it lands on a boundary
+    curve or outside everything. The click comes from the CPlane, which
+    is not always the plane the curves lie in, so it is dropped onto the
+    curves' plane first. The classifier reads the trimmed face itself, so
+    a hole is outside and a boundary curve is "on" — a click on a curve
+    is never read as being inside the region the curve bounds. Being
+    inside beats being on a boundary: a boundary is shared, so "on" is
+    only the answer when no region claims the point.
+    """
+    from OCP.TopAbs import TopAbs_State
+
+    along = sum((a - b) * n for a, b, n in
+                zip(point, plane_point, plane_normal))
+    p = tuple(a - along * n for a, n in zip(point, plane_normal))
+    for index, region in enumerate(regions):
+        if _region_state(region, p) == TopAbs_State.TopAbs_IN:
+            return index, "in"
+    for region in regions:
+        if _region_state(region, p) == TopAbs_State.TopAbs_ON:
+            return None, "on"
+    return None, "out"
+
+
+def _region_state(face, p: Point):
+    """IN/ON/OUT for a point already lying in the face's plane.
+
+    A failed classification is read as "outside" — the pick loop treats
+    it as a miss and asks again, which is the safe answer.
+    """
+    from OCP.BRepClass import BRepClass_FaceClassifier
+    from OCP.TopAbs import TopAbs_State
+
+    try:
+        cls = BRepClass_FaceClassifier()
+        cls.Perform(face, _pnt(p), tol())
+        return cls.State()
+    except Exception:                       # noqa: BLE001
+        return TopAbs_State.TopAbs_OUT
+
+
+def merge_planar_regions(faces: list) -> TopoDS_Shape:
+    """One shape from coplanar region faces, their shared edges fused.
+
+    Kept regions that share an edge belong to one outline, the way Rhino's
+    CurveBoolean combines regions: sewing stitches the faces and unifying
+    same-domain faces lifts the seams, so the boundaries read as a single
+    loop. The area has to survive the merge — if neither path hands back
+    the full area it was given, the untouched faces are returned instead,
+    and their boundaries still come back as separate loops.
+    """
+    if len(faces) == 1:
+        return faces[0]
+    total = sum(surface_area(f) for f in faces)
+
+    def _intact(shape):
+        return (shape is not None and not shape.IsNull()
+                and math.isclose(surface_area(shape), total,
+                                 rel_tol=1e-3, abs_tol=tol() ** 2))
+
+    try:
+        joined = join_surfaces(faces)
+        merged = merge_coplanar_faces(joined)
+        if _intact(merged):
+            return merged
+    except GeometryError:
+        pass
+    # Sewing cannot stitch faces that only touch at a vertex; a union
+    # fold can still succeed there.
+    try:
+        fused = faces[0]
+        for f in faces[1:]:
+            fused = boolean_union(fused, f)
+        if _intact(fused):
+            return fused
+    except GeometryError:
+        pass
+    return make_compound(faces)
+
+
 # --- transforms -------------------------------------------------------------
 
 def _apply_trsf(shape, trsf: gp_Trsf, copy: bool = True) -> TopoDS_Shape:
@@ -3455,6 +4501,12 @@ def is_valid(shape) -> bool:
 # than let every caller learn that, the bytes carry their own kind: a
 # mesh is tagged, anything else is the BREP it always was.
 _MESH_TAG = b"SMSH\x01"
+# Version 2 of it: a float64 origin, then the vertices as float32 offsets
+# from it. float32 steps 6cm at a million units, so a survey mesh written
+# absolute was rounded onto that grid every time it went through undo or
+# the clipboard. Offsets are good to a micron wherever the mesh stands and
+# cost the same bytes. A mesh near the origin is still written as \x01.
+_MESH_ORIGIN_TAG = b"SMSH\x02"
 # A point cloud the same way, for the clipboard, the journal and undo: the
 # .serp file itself keeps clouds as raw blobs (fileio/native.py), not this.
 _CLOUD_TAG = b"SPCL\x01"
@@ -3474,9 +4526,16 @@ def shape_to_bytes(shape) -> bytes:
         return _CLOUD_TAG + _cloud_pack(shape)
     if isinstance(shape, MeshShape):
         import numpy as np
-        v = np.ascontiguousarray(shape.vertices, "<f4")
+        from ..utils.math3d import offsets_from, origin_for
         t = np.ascontiguousarray(shape.triangles, "<u4")
-        return (_MESH_TAG + struct.pack("<II", len(v), len(t))
+        origin = origin_for(shape.vertices)
+        if origin is None:
+            v = np.ascontiguousarray(shape.vertices, "<f4")
+            return (_MESH_TAG + struct.pack("<II", len(v), len(t))
+                    + v.tobytes() + t.tobytes())
+        v = np.ascontiguousarray(offsets_from(shape.vertices, origin), "<f4")
+        return (_MESH_ORIGIN_TAG + struct.pack("<II", len(v), len(t))
+                + np.ascontiguousarray(origin, "<f8").tobytes()
                 + v.tobytes() + t.tobytes())
     fd, path = tempfile.mkstemp(suffix=".brep")
     os.close(fd)
@@ -3493,15 +4552,22 @@ def _cloud_pack(cloud) -> bytes:
     parts = [struct.pack("<I", cloud.count)]
     flags = ((1 if cloud.rgb is not None else 0)
              | (2 if cloud.conf is not None else 0)
-             | (4 if cloud.level is not None else 0))
+             | (4 if cloud.level is not None else 0)
+             # Bit 8: the float32 points are offsets from a float64 origin
+             # written after them, as the .serp container stores a scan far
+             # from the world's origin. Records written before this have
+             # the bit clear and their points are absolute.
+             | (8 if cloud.far else 0))
     parts.append(struct.pack("<I", flags))
-    parts.append(np.ascontiguousarray(cloud.xyz, "<f4").tobytes())
+    parts.append(np.ascontiguousarray(cloud.local, "<f4").tobytes())
     if cloud.rgb is not None:
         parts.append(np.ascontiguousarray(cloud.rgb, np.uint8).tobytes())
     if cloud.conf is not None:
         parts.append(np.ascontiguousarray(cloud.conf, "<f4").tobytes())
     if cloud.level is not None:
         parts.append(np.ascontiguousarray(cloud.level, np.uint8).tobytes())
+    if cloud.far:
+        parts.append(np.ascontiguousarray(cloud.origin, "<f8").tobytes())
     return b"".join(parts)
 
 
@@ -3522,7 +4588,11 @@ def _cloud_unpack(data: bytes, offset: int):
         at += n * 4
     if flags & 4:
         level = np.frombuffer(data, np.uint8, count=n, offset=at)
-    return PointCloudShape(xyz, rgb, conf, level)
+        at += n
+    origin = None
+    if flags & 8:
+        origin = np.frombuffer(data, "<f8", count=3, offset=at)
+    return PointCloudShape(xyz, rgb, conf, level, origin=origin)
 
 
 def shape_from_bytes(data: bytes):
@@ -3537,15 +4607,20 @@ def shape_from_bytes(data: bytes):
         return PictureShape.from_bytes(data)
     if data[:len(_CLOUD_TAG)] == _CLOUD_TAG:
         return _cloud_unpack(data, len(_CLOUD_TAG))
-    if data[:len(_MESH_TAG)] == _MESH_TAG:
+    if data[:len(_MESH_TAG)] in (_MESH_TAG, _MESH_ORIGIN_TAG):
         import numpy as np
         from .mesh import MeshShape
+        rebased = data[:len(_MESH_TAG)] == _MESH_ORIGIN_TAG
         head = len(_MESH_TAG) + 8
         nv, nt = struct.unpack("<II", data[len(_MESH_TAG):head])
+        origin = np.zeros(3)
+        if rebased:
+            origin = np.frombuffer(data, "<f8", count=3, offset=head)
+            head += 24
         cut = head + nv * 12
         return MeshShape(
             np.frombuffer(data, "<f4", count=nv * 3,
-                          offset=head).reshape(-1, 3).astype(float),
+                          offset=head).reshape(-1, 3).astype(float) + origin,
             np.frombuffer(data, "<u4", count=nt * 3,
                           offset=cut).reshape(-1, 3))
     fd, path = tempfile.mkstemp(suffix=".brep")

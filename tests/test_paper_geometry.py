@@ -406,6 +406,8 @@ def test_paper_geometry_is_exported_to_dxf(tmp_path, sheet_with_border):
     export_layout_dxf(w, sheet_with_border, path)
 
     doc = ezdxf.readfile(path)
+    assert doc.header["$INSUNITS"] == 4, \
+        "Paper is millimetres, and ezdxf labels a new drawing metres (#101)"
     polys = [e for e in doc.modelspace()
              if e.dxftype() == "LWPOLYLINE" and e.dxf.layer == "PAPER"]
     assert len(polys) == 1

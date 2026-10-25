@@ -272,23 +272,25 @@ def test_shell_still_takes_typed_numbers(env):
         1000 - 8 ** 3, rel=0.05)
 
 
-def test_fillet_asks_for_the_corner_before_the_radius(env):
-    """You cannot show a fillet until you know which corner it is on, so the
-    corner is picked first and the radius is then dragged out of it."""
+def test_fillet_reads_the_corner_off_the_two_picks(env):
+    """Where each curve is clicked says which corner is meant, so there
+    is nothing left to ask once the second one is picked: the radius and
+    Trim stand on the prompt the whole time (see
+    test_fillet_asks_for_nothing_it_can_read_off_the_clicks.py)."""
     scene, sel, _hist, _ctx, proc = env
     a = scene.add(g.make_line((0, 0, 0), (10, 0, 0)))
     b = scene.add(g.make_line((10, 0, 0), (10, 10, 0)))
     proc.run("fillet")
-    proc.click_object(a.id)          # max_count=1 advances on the click
-    proc.click_object(b.id)
-    assert "corner" in proc.request.prompt.lower()
-    proc.provide((10.0, 0.0, 0.0))
-    assert proc.request.number_from is not None, (
-        "the fillet radius should be draggable out of the corner")
-    assert proc.preview_for((8, 0, 0)) is not None, (
-        "no ghost while dragging the fillet radius")
-    proc.provide((8.0, 0.0, 0.0))
-    assert not proc.busy
+    proc.provide_text("2")           # the radius, as an option
+    proc.click_object(a.id, at=(9.0, 0.0, 0.0))
+    assert "second curve" in proc.request.prompt.lower()
+    proc.click_object(b.id, at=(10.0, 1.0, 0.0))
+
+    assert not proc.busy, "the fillet is made on the second pick"
+    curves = [o for o in scene.all() if o.kind == "curve"]
+    assert len(curves) == 1
+    assert g.curve_length(curves[0].shape) == pytest.approx(
+        16 + math.pi, rel=1e-3)   # two legs of 8 and a quarter circle
 
 
 def test_filletedge_radius_is_dragged_off_the_solid(env):

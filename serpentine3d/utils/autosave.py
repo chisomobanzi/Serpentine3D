@@ -160,3 +160,52 @@ class AutosaveManager:
                 os.unlink(entry.get(key, ""))
             except OSError:
                 pass
+
+    # -- the restart handoff --
+    # A scale restart copies unsaved work here, with a note of the document
+    # it belongs to, and the next session opens it under that name.
+    # clean_exit removes only the pid-named slots and no session lock is
+    # written, so neither clean exits nor crash recovery touch it; one that
+    # no session took up is offered back by itself (offer_handoff).
+
+    @property
+    def handoff_path(self) -> str:
+        return os.path.join(self.dir, "restart-handoff.serp")
+
+    def hand_over(self, doc_path: str | None) -> str:
+        """Copy the scene out for the next session. Raises if it cannot."""
+        from ..fileio import native
+        tmp = self.handoff_path + ".tmp"
+        try:
+            native.save_scene(self.scene, tmp)
+            with open(self.handoff_path + ".json", "w",
+                      encoding="utf-8") as f:
+                json.dump({"doc_path": doc_path}, f)
+            os.replace(tmp, self.handoff_path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        return self.handoff_path
+
+    def waiting_handoff(self) -> dict | None:
+        """The handoff in this folder, if any: its path, the document it
+        belongs to (None if never saved) and when it was written."""
+        if not os.path.exists(self.handoff_path):
+            return None
+        try:
+            with open(self.handoff_path + ".json", encoding="utf-8") as f:
+                doc_path = json.load(f).get("doc_path")
+        except (OSError, ValueError, AttributeError):
+            doc_path = None
+        return {"path": self.handoff_path, "doc_path": doc_path,
+                "mtime": os.path.getmtime(self.handoff_path)}
+
+    def discard_handoff(self):
+        for p in (self.handoff_path, self.handoff_path + ".json"):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass

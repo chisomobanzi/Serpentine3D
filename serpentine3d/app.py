@@ -7,10 +7,10 @@ import signal
 import sys
 
 import numpy as np
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QProcess, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
+    QApplication, QDialog, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
     QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QProgressDialog,
     QStackedWidget, QTabBar, QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
@@ -163,7 +163,11 @@ class MainWindow(QMainWindow):
         self.properties = PropertiesPanel(
             self.scene, self.selection, self.history,
             # a sheet's selection belongs to whichever pane is showing it
-            viewport_source=lambda: self.active_viewport)
+            viewport_source=lambda: self.active_viewport,
+            # the model panes a clipping plane lists among its views
+            panes_source=lambda: [
+                (vp.view_key, self._viewport_title(vp))
+                for vp in self.all_viewports() if vp.space == "model"])
         self.properties.modelTextChanged.connect(
             self._model_text_changed_from_properties)
         self.properties.textTypographyChanged.connect(
@@ -171,6 +175,8 @@ class MainWindow(QMainWindow):
         self.properties.textPlacementChanged.connect(
             self._text_placement_changed)
         self.properties.lookAtTextRequested.connect(self._look_at_text)
+        self.properties.hatchPatternsRequested.connect(
+            self._run_hatch_patterns)
         self._text_placement_choice = "CPlane"
         self._look_at_text_restore = None
         self._prop_dock = QDockWidget("Properties", self)
@@ -238,9 +244,12 @@ class MainWindow(QMainWindow):
         self.processor = CommandProcessor(self.ctx)
         self._cursor_preview = None
         self._file_picker_open = False
+        self._form_dialog_open = False
+        self._offered_form = None
         self.ctx.add_echo_listener(self.command_line.echo)
         self.processor.add_listener(self._sync_command_state)
         self.processor.add_listener(self._resume_dropped_imports)
+        self.processor.add_listener(self._after_hatch_patterns)
 
         # wiring
         self.command_line.submitted.connect(self._on_submit)
@@ -516,6 +525,7 @@ class MainWindow(QMainWindow):
         self._wire_viewport(vp)
         self.dock_viewports.append(vp)
         dock = self._dock_viewport(vp, "Viewport", closable=True)
+        vp.view_key = dock.objectName()       # its own, to a clipping plane
         areas = {"Right": Qt.DockWidgetArea.RightDockWidgetArea,
                  "Left": Qt.DockWidgetArea.LeftDockWidgetArea,
                  "Top": Qt.DockWidgetArea.TopDockWidgetArea,
@@ -596,6 +606,7 @@ class MainWindow(QMainWindow):
                    lambda m=mode: vp.set_display_mode(m))
         self._action(menu, "Display settings…", None,
                      lambda: self._show_display_settings(vp))
+        self._clip_planes_menu(vp, menu)
         if self.scene.layouts:
             # A space tab swaps the whole arrangement, but a space is still
             # a property of one pane underneath, and this is where you say
@@ -618,6 +629,36 @@ class MainWindow(QMainWindow):
         self._action(menu, "Single Viewport", None,
                      lambda: self.run_command("1view"))
         return menu
+
+    def _clip_planes_menu(self, vp, menu):
+        """Which clipping planes cut this pane, each one a tick to switch
+        it off or on here and nowhere else (core/clipping.py). Inside a
+        detail it is the detail that is cut; on bare paper, or with no
+        planes to list, there is nothing to offer."""
+        view = vp.clip_view()
+        planes = [o for o in self.scene.visible_objects() if o.clip_plane]
+        if view is None or not planes:
+            return
+        # Made with its parent rather than by addMenu(title), whose menu
+        # PySide6 deletes with the Python name for it, here at the return.
+        sub = QMenu("Clipping Planes", menu)
+        menu.addMenu(sub)
+        for obj in planes:
+            label = obj.name if obj.clip_plane.get("enabled") \
+                else f"{obj.name} (paused)"
+            act = sub.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(view not in obj.clip_plane.get("off_in", ()))
+            act.triggered.connect(
+                lambda on, i=obj.id: self.set_clip_view(i, view, on))
+
+    def set_clip_view(self, plane_id: str, view: str, on: bool) -> bool:
+        """Switch one clipping plane on or off in one view, as one undo
+        step. Returns whether anything changed."""
+        from .core import clipping
+        return clipping.switch(
+            self.scene, plane_id, view, on,
+            before=lambda: self.history.checkpoint("clipping plane views"))
 
     def _show_display_settings(self, vp):
         """Open one set of controls for the pane whose menu was used."""
@@ -726,6 +767,9 @@ class MainWindow(QMainWindow):
                 # primary's world XY back is what left Front and Right
                 # looking straight down the plane they had to pick on
                 aux.set_view(view)                 # named orthographic view
+                # and the pane a clipping plane knows it by, whatever it
+                # is turned to later (core/clipping.py)
+                aux.view_key = view
                 aux.camera.target = self.viewport.camera.target.copy()
                 aux.camera.distance = self.viewport.camera.distance
                 self._wire_viewport(aux)
@@ -1262,6 +1306,7 @@ class MainWindow(QMainWindow):
         self._update_status()
         self._offer_file_picker(req)
         self._offer_text_editor(req)
+        self._offer_form(req)
 
     def _selected_text_face(self):
         """The held planar face used as a lettering plane, if there is one."""
@@ -1510,6 +1555,86 @@ class MainWindow(QMainWindow):
         for pane in self.all_viewports():
             pane.set_inline_text_typography(obj_id, values)
 
+    def _offer_form(self, req):
+        """Show a running command's form as one popup (#45).
+
+        The processor is already asking the first field as an ordinary
+        prompt, so a command stays answerable by typing if this never
+        runs; what the popup adds is seeing the answers together. OK
+        answers the whole form, Cancel cancels the command, as closing a
+        file picker does.
+
+        It opens on the next turn of the event loop, not from in here.
+        `hatch Solid` feeds its answer straight after the command starts,
+        and a popup opened now would be up before the answer arrived,
+        showing the layer's pattern for OK to make instead. Waiting lets
+        typed answers win: one that moves the form on, or finishes it,
+        means someone is typing, and the rest is asked at the prompt.
+        """
+        form = self.processor.form
+        if (form is None or form is self._offered_form
+                or self.processor.headless or not self.processor.busy
+                or self.processor.request is not req):
+            return
+        self._offered_form = form
+        QTimer.singleShot(0, self, lambda: self._show_form(form, req))
+
+    def _show_form(self, form, req):
+        """The popup `_offer_form` waited a turn to open."""
+        if (self.processor.form is not form or self.processor.request is not req
+                or self._form_dialog_open or not self.processor.busy):
+            return
+        from .ui.form_dialog import FormDialog
+        self._form_dialog_open = True
+        try:
+            dialog = FormDialog(form, parent=self,
+                                changed=lambda values: self._ghost_form(
+                                    form, values))
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            values = dialog.values() if accepted else None
+        finally:
+            self._form_dialog_open = False
+            if form.preview_fn is not None:
+                for vp in self.all_viewports():
+                    vp.set_ghost(None)
+        if self.processor.form is not form:
+            return                      # answered another way meanwhile
+        if values is None:
+            self.processor.cancel()
+        else:
+            self.processor.provide_form(values)
+
+    def _run_hatch_patterns(self, action: str):
+        """Load or Delete patterns… from a pattern list in Properties. A
+        load that brings patterns switches that list to the first of them
+        once the command is over, so the pick that asked for the file gets
+        what was in it."""
+        before = self.scene.loaded_patterns
+        self._patterns_awaited = before if action == "Load" else None
+        self.run_command(f"hatchpatterns {action}")
+
+    def _after_hatch_patterns(self):
+        before = getattr(self, "_patterns_awaited", None)
+        if before is None or self.processor.busy:
+            return
+        self._patterns_awaited = None
+        loaded = self.scene.loaded_patterns
+        if loaded is not before:
+            self.properties.use_loaded_pattern(loaded)
+
+    def _ghost_form(self, form, values):
+        """What a popup's answers would make, ghosted in every pane while
+        it is open: a hatch's pattern, spacing and angle are seen on the
+        region before OK, not after."""
+        if form.preview_fn is None:
+            return
+        try:
+            shape = form.preview_fn(values)
+        except Exception:                                  # noqa: BLE001
+            shape = None
+        for vp in self.all_viewports():
+            vp.set_ghost(shape)
+
     def _offer_file_picker(self, req):
         """Let a live command's pending FileReq use the window chooser."""
         if (not isinstance(req, FileReq) or self.processor.headless
@@ -1581,7 +1706,8 @@ class MainWindow(QMainWindow):
 
     def _on_detail_entered(self, detail):
         """A click stepped into a detail instead of placing a point."""
-        self.ctx.echo(f"Now drawing inside the detail ({detail.scale_text()})"
+        self.ctx.echo("Now drawing inside the detail "
+                      f"({detail.scale_text(self.scene.units)})"
                       " — pick again to place the point.")
         self._update_status()
 
@@ -1625,7 +1751,7 @@ class MainWindow(QMainWindow):
             # of the shape it was meant to help place. The number it carried is
             # still wanted, so it is asked for as sides instead of a length.
             if len(chain) >= 2 and sides is None and req.rubber_band:
-                arr = np.asarray(chain, np.float32)
+                arr = np.asarray(chain, float)
                 segs = np.stack([arr[:-1], arr[1:]], axis=1)
         # in every pane, for the same reason the picked points already are:
         # world points with a line between them, and each pane knows how to
@@ -1644,10 +1770,13 @@ class MainWindow(QMainWindow):
         return obj is not None and obj.kind == "curve"
 
     def _delete_selected(self):
-        if self.viewport.space != "model":
-            # On a sheet the pick is the layout's own, not the scene's.
-            if self.viewport.layout_view.delete_selected():
-                self.viewport.update()
+        lv = self.ctx.sheet_view()
+        if lv is not None:
+            # On bare paper the pick is the layout's own, not the scene's.
+            # Inside a detail it is the model's, seen through the detail,
+            # by the same rule Copy and the commands go by (#93).
+            if lv.delete_selected():
+                lv.vp.update()
                 self._update_status()
             return
         # A held control point, face or curve segment is as much a pick as
@@ -1850,7 +1979,8 @@ class MainWindow(QMainWindow):
             self._open_path(path)
 
     def _import_showing_progress(self, path: str, scene=None,
-                                 replace: bool = False) -> int:
+                                 replace: bool = False,
+                                 notes: list | None = None) -> int:
         """Import `path`, showing what it is doing and offering a way out.
 
         A set-design .3dm is minutes of work; with no dialog the window simply
@@ -1878,7 +2008,7 @@ class MainWindow(QMainWindow):
         try:
             return fileio.import_file(scene or self.scene, path,
                                       progress=fileio.throttled(report),
-                                      replace=replace)
+                                      replace=replace, notes=notes)
         finally:
             dlg.close()
 
@@ -1887,13 +2017,15 @@ class MainWindow(QMainWindow):
         welcome screen)."""
         try:
             self.history.checkpoint("open")
-            self._import_showing_progress(path, replace=True)
+            notes = []
+            self._import_showing_progress(path, replace=True, notes=notes)
             if self.journal is not None:
                 self.journal.note_load(path)
             if path.endswith(".serp"):
                 self.ctx.current_path = path
             self.command_line.echo(
-                f"Opened {path}: {len(self.scene.all())} object(s).")
+                f"Opened {path}: {len(self.scene.all())} object(s)"
+                + "".join(f", {note}" for note in notes) + ".")
             self.viewport.zoom_extents()
             self.mark_saved()
             self.add_recent(path)
@@ -2131,8 +2263,11 @@ class MainWindow(QMainWindow):
                 self.scene.notify("layouts")
                 self.command_line.echo(f"Imported {n} object(s).")
                 return
-            n = self._import_showing_progress(path)
-            self.command_line.echo(f"Imported {n} object(s).")
+            notes = []
+            n = self._import_showing_progress(path, notes=notes)
+            self.command_line.echo(
+                f"Imported {n} object(s)"
+                + "".join(f", {note}" for note in notes) + ".")
             self.viewport.zoom_extents()
         except fileio.Cancelled:
             self.history.discard_checkpoint()
@@ -2258,7 +2393,10 @@ class MainWindow(QMainWindow):
         self.cfg.save()
 
     def closeEvent(self, ev):
-        if self.dirty and self.scene.all():
+        if (self.dirty and self.scene.all()
+                and not getattr(self, "_restarting", False)):
+            # a scale restart saved or handed the work over already —
+            # restart_app sets the flag so the prompt cannot double-ask
             ret = QMessageBox.question(
                 self, "Unsaved changes",
                 "Save changes before closing?",
@@ -2323,6 +2461,41 @@ class MainWindow(QMainWindow):
         except Exception as exc:                              # noqa: BLE001
             QMessageBox.warning(self, "Recovery failed", str(exc))
 
+    def offer_handoff(self):
+        """Offer back unsaved work a scale restart handed over that no
+        session took up (the new one never got going). Called once the
+        command line's file is open, which is where a restart that worked
+        has already spent it."""
+        if os.environ.get("SERP3D_NO_RECOVER") == "1":
+            return
+        entry = self.autosave.waiting_handoff()
+        if entry is None:
+            return
+        import datetime
+        when = datetime.datetime.fromtimestamp(
+            entry["mtime"]).strftime("%H:%M")
+        doc = entry["doc_path"] or "an unsaved document"
+        ret = QMessageBox.question(
+            self, "Recover unsaved work?",
+            f"A restart at {when} kept unsaved changes to {doc}, but they "
+            "were never reopened.\n\nRestore them?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if ret != QMessageBox.StandardButton.Yes:
+            self.autosave.discard_handoff()
+            return
+        try:
+            fileio.import_file(self.scene, entry["path"], replace=True)
+            self.ctx.current_path = entry["doc_path"]
+            self.autosave.set_doc_path(entry["doc_path"])
+            self.autosave.discard_handoff()
+            self.command_line.echo(
+                f"Recovered {len(self.scene.all())} object(s) a restart "
+                "had kept.")
+            self.viewport.zoom_extents()
+            self._update_status()
+        except Exception as exc:                              # noqa: BLE001
+            QMessageBox.warning(self, "Recovery failed", str(exc))
+
     # ---------------------------------------------------------- space tabs
 
     def _build_space_tab_row(self):
@@ -2369,6 +2542,7 @@ class MainWindow(QMainWindow):
         """Create a new paper-space drafting sheet and switch to it — the '+'
         button's action, i.e. 'layout' > New in one click."""
         from .core.layout import PAPER_SIZES, Layout
+        from .utils.units import format_paper_size
         w, h = PAPER_SIZES.get(paper, PAPER_SIZES["A3"])
         if not landscape:
             w, h = h, w
@@ -2378,7 +2552,8 @@ class MainWindow(QMainWindow):
         self.scene.notify()
         self.switch_space(lay.id)
         self.command_line.echo(
-            f"Created sheet '{lay.name}' ({w:g}x{h:g}mm). "
+            f"Created sheet '{lay.name}' "
+            f"({format_paper_size(w, h, self.scene.units)}). "
             "Use 'detail' to place model views.")
         return lay
 
@@ -2499,10 +2674,12 @@ class MainWindow(QMainWindow):
         which leaves you where you were: a copy you made by hand is a copy
         you are about to change.
         """
+        from .core import clipping
         from .core.layout import unique_layout_name
         self.history.checkpoint("duplicate layout")
         dup = lay.duplicate(
             unique_layout_name(self.scene.layouts, f"{lay.name} copy"))
+        clipping.carry_views(self.scene, lay.copied_details(dup))
         self.scene.layouts.append(dup)
         self.scene.notify("layouts")
         self.switch_space(dup.id)
@@ -2823,7 +3000,13 @@ class MainWindow(QMainWindow):
         return False
 
     def _text_editor_has_focus(self):
-        field = QApplication.focusWidget()
+        # This window's own focus, not the application's. In the app the
+        # two are the same widget, since a key only climbs to here from
+        # inside this window. A key sent straight to a widget, as a test
+        # sends it, is not: asking QApplication then let a field left
+        # focused in some other window swallow this one's Enter, and the
+        # viewport stopped repeating the last command.
+        field = self.focusWidget()
         return (isinstance(field, (QLineEdit, QPlainTextEdit, QTextEdit))
                 and not field.isReadOnly()
                 and field is not getattr(
@@ -2839,6 +3022,17 @@ class MainWindow(QMainWindow):
         if self._match_user_shortcut(ev):
             ev.accept()
             return
+        # Alt+A answers the running command's All keyword, when it offers
+        # one: CurveBoolean's way to keep every region in one press. The
+        # word is on a clickable chip too, and typing it works the same.
+        if (ev.modifiers() & Qt.KeyboardModifier.AltModifier
+                and not ev.modifiers() & Qt.KeyboardModifier.ControlModifier
+                and ev.key() == Qt.Key.Key_A):
+            req = self.processor.request
+            if req is not None and "All" in getattr(req, "extra_options", ()):
+                self.processor.provide_text("All")
+                ev.accept()
+                return
         # any printable key focuses the command line (Rhino behaviour)
         text = ev.text()
         if self.command_workspace.mode == "ai":
@@ -3105,6 +3299,9 @@ def run_app(app, splash=None):
     app.setDesktopFileName("serpentine3d")
     app.setStyleSheet(theme.QSS)
 
+    # The saved interface font, on before any window is built.
+    theme.apply_saved_interface_font(app)
+
     if splash:
         splash.message("Preparing workspace…", 0.7)
     window = MainWindow()
@@ -3139,19 +3336,8 @@ def run_app(app, splash=None):
                       lambda: warn_if_opengl_failed(window, splash))
     window.offer_recovery()
 
-    for arg in app.arguments()[1:]:
-        if not arg.startswith("-") and os.path.exists(arg):
-            try:
-                fileio.import_file(window.scene, arg, replace=True)
-                if arg.endswith(".serp"):
-                    window.ctx.current_path = os.path.abspath(arg)
-                window.command_line.echo(
-                    f"Opened {arg}: {len(window.scene.all())} object(s).")
-                window.viewport.zoom_extents()
-                window.add_recent(arg)
-            except Exception as exc:                          # noqa: BLE001
-                window.command_line.echo(f"Could not open {arg}: {exc}")
-            break
+    _open_launch_args(window, app.arguments()[1:])
+    window.offer_handoff()
 
     from .ui.welcome import WelcomeScreen, should_show as _welcome
     if _welcome(window):
@@ -3161,6 +3347,105 @@ def run_app(app, splash=None):
         _offer_default_app(window)
     window.start_update_check()
     return app.exec()
+
+
+def _open_launch_args(window, args: list[str]):
+    """Open the first existing file the command line names: a double-
+    clicked document, `serp3d file.serp`, or a scale restart's handoff."""
+    for arg in args:
+        if not arg.startswith("-") and os.path.exists(arg):
+            try:
+                # a restart handoff is taken up on arrival: reopened under
+                # the name it was handed over with, and spent
+                handoff = None
+                if os.path.abspath(arg) == os.path.abspath(
+                        window.autosave.handoff_path):
+                    handoff = window.autosave.waiting_handoff()
+                fileio.import_file(window.scene, arg, replace=True)
+                if handoff is not None:
+                    window.ctx.current_path = handoff["doc_path"]
+                    window.autosave.discard_handoff()
+                    window.command_line.echo(
+                        "Restarted at the new interface scale. Unsaved "
+                        "changes were kept.")
+                else:
+                    if arg.endswith(".serp"):
+                        window.ctx.current_path = os.path.abspath(arg)
+                    window.command_line.echo(
+                        f"Opened {arg}: {len(window.scene.all())} object(s).")
+                window.viewport.zoom_extents()
+                if handoff is not None:
+                    if handoff["doc_path"]:
+                        window.add_recent(handoff["doc_path"])
+                else:
+                    # as from File → Open: what is on disk is what is
+                    # open; only a handoff's work is still unsaved
+                    window.mark_saved()
+                    window.add_recent(arg)
+            except Exception as exc:                          # noqa: BLE001
+                window.command_line.echo(f"Could not open {arg}: {exc}")
+            break
+
+
+def _restart_command() -> list[str]:
+    """The argv that starts this app again, wherever it runs from.
+
+    An AppImage names itself in $APPIMAGE, and re-running it reproduces
+    the whole environment. A frozen bundle without the variable is its
+    own executable. In development the interpreter runs the package
+    module directly.
+    """
+    bundle = os.environ.get("APPIMAGE")
+    if bundle:
+        return [bundle]
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, "-m", "serpentine3d"]
+
+
+def restart_app(window):
+    """Restart so a new interface scale takes effect, asking nothing.
+
+    Qt reads the scale factor only as the QApplication is built, so the
+    setting lands on the next process (launcher._apply_ui_scale). The
+    document survives as it is: a clean one reopens from disk, and one
+    with unsaved changes (even an emptied one, which reopening from disk
+    would undo) is handed over through the autosave folder and reopened
+    unsaved under its own name. The question, if any, was the Settings
+    page's to ask.
+    """
+    handoff = None
+    if window.dirty:
+        try:
+            handoff = window.autosave.hand_over(window.ctx.current_path)
+        except Exception:                                     # noqa: BLE001
+            window.command_line.echo(
+                "Could not keep the unsaved work for a restart, so "
+                "Serpentine3D was not restarted.")
+            return
+    _relaunch(window, handoff=handoff, origin=window.ctx.current_path)
+
+
+def _relaunch(window, handoff: str | None, origin: str | None):
+    """Spawn the next session and close this one.
+
+    No unsaved-changes prompt: the work is already on disk (saved, or
+    handed over). The child starts detached, before the close, so an
+    AppImage mount vanishing under this process cannot take it down.
+    """
+    cmd = _restart_command()
+    if handoff:
+        cmd += [handoff]
+    elif origin:
+        cmd += [origin]
+    if not QProcess.startDetached(cmd[0], cmd[1:]):
+        if handoff:
+            window.autosave.discard_handoff()   # this session keeps it
+        window.command_line.echo(
+            "Could not start Serpentine3D again, so it was not restarted.")
+        return
+    window._restarting = True
+    window.close()
 
 
 def main():

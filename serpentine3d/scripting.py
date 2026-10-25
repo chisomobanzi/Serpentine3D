@@ -64,11 +64,14 @@ class Document:
         start = len(self.messages)
         if not self._proc.run(command):
             raise RuntimeError(f"Unknown command: {command}")
-        for value in (inputs or []):
+        values = [",".join(str(v) for v in value)
+                  if isinstance(value, (list, tuple)) else str(value)
+                  for value in (inputs or [])]
+        answered = []
+        for text in values:
             if not self._proc.busy:
                 break
-            text = (",".join(str(v) for v in value)
-                    if isinstance(value, (list, tuple)) else str(value))
+            answered.append((getattr(self._proc.request, "prompt", ""), text))
             from .commands.base import SelectReq
             if isinstance(self._proc.request, SelectReq):
                 if text == "":
@@ -85,6 +88,11 @@ class Document:
             prompt = self._proc.prompt_text()
             self._proc.cancel()
             raise RuntimeError(f"Command needs more input: {prompt}")
+        if len(answered) < len(values):
+            from .commands.base import unused_inputs_message
+            raise RuntimeError(unused_inputs_message(
+                command, answered, values[len(answered):],
+                self.messages[start:]))
         return self.messages[start:]
 
     # -- persistence --

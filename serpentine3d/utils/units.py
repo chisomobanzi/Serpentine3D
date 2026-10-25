@@ -41,6 +41,30 @@ def convert(value: float, from_units: str, to_units: str) -> float:
     return value * TO_MM[from_units] / TO_MM[to_units]
 
 
+def converted_note(source: str, units: str) -> str:
+    """What an import says when the file's unit was not the drawing's.
+
+    `source` is one of UNITS or, for a unit only the file knows, the file's
+    own name for it ("yards")."""
+    plain = {**UNIT_LABELS, "ft": "feet"}
+    return f"converted from {plain.get(source, source)} to {plain[units]}"
+
+
+def rescale(shape, factor: float):
+    """`shape` scaled about the origin, the way a unit conversion is.
+
+    A promise of geometry stays a promise: what a file keeps out of sight
+    is converted when something asks, and scaled then."""
+    from ..core import geometry
+    from ..core.deferred import DeferredShape
+    if isinstance(shape, DeferredShape):
+        return DeferredShape(
+            lambda d=shape: [geometry.scale(s, (0, 0, 0), factor)
+                             for s in d.shapes()],
+            kind=shape.kind)
+    return geometry.scale(shape, (0, 0, 0), factor)
+
+
 def parse_length(text: str, doc_units: str = "mm") -> float | None:
     """Parse a typed length into document units. None if unparseable."""
     text = text.strip()
@@ -95,6 +119,29 @@ def format_length(value: float, doc_units: str = "mm",
     if doc_units == "in":
         return f"{_trim(value, precision)}\""
     return f"{_trim(value, precision)} {doc_units}"
+
+
+# A sheet is kept in millimetres whatever the document's units, and is read
+# and typed in the units Rhino's templates give their layouts: inches in an
+# inch or a feet document, millimetres in a metric one.
+
+def paper_units(doc_units: str) -> str:
+    """The units a sheet is read and typed in, in a document in `doc_units`."""
+    return "in" if doc_units in ("in", "ft") else "mm"
+
+
+def format_paper_length(mm: float, doc_units: str, precision: int = 3) -> str:
+    """A length on paper, kept in millimetres, as its sheet reads it."""
+    unit = paper_units(doc_units)
+    return format_length(mm / TO_MM[unit], unit, precision)
+
+
+def format_paper_size(w: float, h: float, doc_units: str) -> str:
+    """A sheet's or a frame's width and height, kept in millimetres."""
+    unit = paper_units(doc_units)
+    if unit == "mm":
+        return f"{w:g} × {h:g} mm"
+    return f"{_trim(w / TO_MM[unit], 3)} × {_trim(h / TO_MM[unit], 3)} {unit}"
 
 
 def _format_ft_in(value_ft: float, denom: int) -> str:

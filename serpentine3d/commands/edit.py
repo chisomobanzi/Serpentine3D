@@ -260,9 +260,38 @@ def cmd_offset(ctx):
     ctx.echo(f"Offset -> {obj.name}.")
 
 
+# What a fillet is made of, carried on the prompt rather than asked for
+# afterwards: a radius to round the corner with, zero for a sharp one,
+# and whether the curves are cut back to it. Rhino puts them here too,
+# and the command reads them at the end rather than up front, so a
+# number typed between the two picks still counts.
+#
+# Remembered while the program runs, as Rhino remembers them: a radius
+# typed once is what the next fillet opens on, and the one after that.
+# They go back to a sharp, trimming corner when the program is started
+# again, which is what a module holding them does by itself.
+_FILLET_STICKY = {"Radius": "0", "Trim": "Yes"}
+
+
+def _fillet_choices() -> dict:
+    """The options as they stand, the remembered value first so that it
+    is what the chip shows and what Enter alone would take."""
+    other = "No" if _FILLET_STICKY["Trim"] == "Yes" else "Yes"
+    return {"Radius": [_FILLET_STICKY["Radius"]],
+            "Trim": [_FILLET_STICKY["Trim"], other]}
+
+
 @command("fillet")
 def cmd_fillet(ctx):
-    """Round two curves, or edges of a selected solid/surface."""
+    """Round the corner between two curves, or fillet a solid's edges.
+
+    The clicks say which corner: each curve is picked near the end that
+    is to meet the other, which is also what decides which side of a
+    crossing is kept. The fillet is made as soon as the second curve is
+    picked, with the radius and Trim as they stand on the prompt then.
+    Radius 0 is Rhino's sharp corner: the curves are cut back, or carried
+    out, to the point they cross at, with no arc between them.
+    """
     from .solids_edit import cmd_filletedge
 
     held = ctx.selection.objects()
@@ -274,43 +303,103 @@ def cmd_fillet(ctx):
             or (held and all(o.kind in ("solid", "surface") for o in held))):
         yield from cmd_filletedge(ctx)
         return
-    a = yield SelectReq("Select first curve or solid to fillet",
-                        kinds=("curve", "solid", "surface"),
-                        max_count=1)
+    # No preselection: where the curve is clicked is half the answer,
+    # and a curve that is merely selected says nothing about which
+    # corner is meant. It is also what a fillet leaves behind, so taking
+    # it would make the next run start on its own result.
+    a = yield SelectReq("Select first curve", kinds=("curve", "solid",
+                                                     "surface"),
+                        max_count=1, choices=_fillet_choices(),
+                        number_option="Radius", want_point=True,
+                        allow_preselected=False)
     if a[0].kind != "curve":
         yield from cmd_filletedge(ctx, objs=a)
         return
+    near_a = ctx.pick_points.get(a[0].id)
     b = yield SelectReq("Select second curve", kinds=("curve",),
-                        max_count=1, allow_preselected=False)
-    from . import dragging
-    from .base import PointReq
-    # the corner comes first: until we know which one, there is no fillet to
-    # show, and once we do the radius can be dragged straight out of it
-    corner = yield PointReq("Point near the corner to fillet")
-    read = dragging.distance_from(corner)
+                        max_count=1, allow_preselected=False,
+                        choices=_fillet_choices(), number_option="Radius",
+                        want_point=True)
+    near_b = ctx.pick_points.get(b[0].id)
+    if b[0].id == a[0].id:
+        ctx.echo("A curve cannot be filleted with itself.")
+        return
+    _fillet_the_corner(ctx, a[0], b[0], near_a, near_b)
 
-    def _fillet_to(p):
-        r = read(p)
-        if r < 1e-9:
-            return None
-        try:
-            return g.join_curves(list(
-                g.fillet_curves(a[0].shape, b[0].shape, r, corner)))
-        except g.GeometryError:
-            return None
 
-    rp = yield PointReq("Fillet radius (click, or type a number)",
-                        number_from=(corner, tuple(ctx.cplane.xdir)),
-                        rubber_from=corner, preview_fn=_fillet_to)
-    radius = read(rp)
+def _fillet_the_corner(ctx, first, second, near_a, near_b):
+    """Make the corner the two picks asked for, as the options stand."""
+    radius = _fillet_radius(ctx)
+    trim = ctx.opt("Trim", "Yes") == "Yes"
+    if near_a is None or near_b is None:
+        # Typed, scripted or chosen from a list: no click to read a
+        # corner off, so the ends that are nearest each other are meant.
+        near_a, near_b = g.nearest_ends(first.shape, second.shape)
+    try:
+        if radius <= 0:
+            ea, eb = g.corner_curves(first.shape, second.shape,
+                                     near_a, near_b)
+            pieces = [ea, eb]
+        else:
+            ea, arc, eb = g.fillet_curves(first.shape, second.shape, radius,
+                                          near_a, plane=ctx.cplane)
+            pieces = [ea, arc, eb]
+    except g.GeometryError as exc:
+        ctx.echo(f"{exc}")
+        return
+    if trim:
+        joined = g.join_curves(pieces)
+        ctx.scene.remove(second.id)
+        new = ctx.scene.replace_shape(first.id, joined)
+        ctx.select_result([new])
+        ctx.echo(f"Filleted into {new.name} (r={radius:g})." if radius > 0
+                 else f"Trimmed to a corner in {new.name}.")
+        return
+    # The curves stay as they were drawn; only what fills the corner is
+    # new, and at radius zero there is nothing to fill it with.
+    if radius <= 0:
+        ctx.echo("Radius 0 with Trim=No leaves the curves as they are.")
+        return
+    added = ctx.scene.add(arc, layer_id=first.layer_id)
+    ctx.select_result([added])
+    ctx.echo(f"Fillet arc added (r={radius:g}).")
+
+
+def _fillet_radius(ctx) -> float:
+    """The radius as the prompt last had it, in document units (2mm,
+    0.5in and 1/2" are read as lengths), zero if it is not one.
+
+    Also what the next fillet will open on: the options are remembered
+    for as long as the program runs.
+    """
+    from ..utils.units import parse_length
+    text = str(ctx.opt("Radius", _FILLET_STICKY["Radius"]))
+    radius = max(0.0, parse_length(text, ctx.scene.units) or 0.0)
+    _FILLET_STICKY["Radius"] = f"{radius:g}"
+    _FILLET_STICKY["Trim"] = ctx.opt("Trim", _FILLET_STICKY["Trim"])
+    return radius
+
+
+@command("filletcorners")
+def cmd_filletcorners(ctx):
+    """Round every corner of a polyline at once, straight and arc pieces alike."""
+    from .solids_edit import _edge_size_req
+    objs = yield SelectReq("Select polyline to fillet every corner of",
+                           kinds=("curve",), max_count=1)
+    read, req = _edge_size_req(
+        ctx, objs, "Fillet radius (click, or type a number)",
+        lambda r: g.fillet_corners(objs[0].shape, r))
+    radius = read((yield req))
     if radius < 1e-9:
         ctx.echo("Zero radius — nothing filleted.")
         return
-    ea, arc, eb = g.fillet_curves(a[0].shape, b[0].shape, radius, corner)
-    joined = g.join_curves([ea, arc, eb])
-    ctx.scene.remove(b[0].id)
-    new = ctx.scene.replace_shape(a[0].id, joined)
-    ctx.echo(f"Filleted into {new.name} (r={radius:g}).")
+    try:
+        new = ctx.scene.replace_shape(
+            objs[0].id, g.fillet_corners(objs[0].shape, radius))
+    except g.GeometryError as exc:
+        ctx.echo(f"{objs[0].name}: {exc}")
+        return
+    ctx.echo(f"Rounded every corner of {new.name} (r={radius:g}).")
 
 
 @command("explode", aliases=("x",))
@@ -342,9 +431,10 @@ def _add_split_piece(ctx, shape, target):
 
 @command("split")
 def cmd_split(ctx):
-    targets = yield SelectReq("Select curve, surface or picture to split",
-                              kinds=("curve", "surface", "solid", "picture"),
-                              max_count=1)
+    targets = yield SelectReq(
+        "Select curve, surface, hatch or picture to split",
+        kinds=("curve", "surface", "solid", "picture", "hatch"),
+        max_count=1)
     cutters = yield SelectReq("Select cutting objects",
                               allow_preselected=False)
     target = targets[0]
@@ -373,7 +463,7 @@ def cmd_trim(ctx):
         picked = yield SelectReq(
             "Click the part to trim away"
             + (", Enter when done" if trimmed else ""),
-            kinds=("curve", "surface", "solid", "picture"),
+            kinds=("curve", "surface", "solid", "picture", "hatch"),
             min_count=0 if trimmed else 1, max_count=1,
             allow_preselected=False, want_point=True)
         if not picked:
@@ -809,7 +899,8 @@ def cmd_layer(ctx):
             layers.set_linetype(layer.id, style)
             ctx.echo(f"Layer '{layer.name}' draws {style} lines.")
     elif action == "Hatch":
-        from ..core.layout import SECTION_FILLS
+        from ..core.layout import (pattern_label, pattern_named,
+                                   section_fills_of)
         name = yield TextReq("Layer name")
         layer = layers.find_by_name(name)
         if layer is None:
@@ -820,11 +911,12 @@ def cmd_layer(ctx):
             # leaves a cut outlined and empty.
             fill = yield OptionReq(
                 "Hatch pattern",
-                options=[p.capitalize() for p in SECTION_FILLS],
-                default=layer.hatch.capitalize())
-            layers.set_hatch(layer.id, fill)
+                options=[pattern_label(p)
+                         for p in section_fills_of(ctx.scene)],
+                default=pattern_label(layer.hatch))
+            layers.set_hatch(layer.id, pattern_named(ctx.scene, fill) or fill)
             fill = layers.get(layer.id).hatch
-            if fill in ("lines", "cross"):
+            if fill not in ("none", "solid"):
                 # the lines' angle and spacing, on the paper whatever the
                 # scale of the detail the cut is seen in
                 angle = yield NumberReq("Hatch angle (degrees)",

@@ -1,5 +1,6 @@
 """View and display commands (non-mutating)."""
 
+from ..core import clipping as _clipping
 from ..core import geometry as g
 from .base import (
     FileReq, OptionReq, PointReq, SelectReq, TextReq, command, frame_sides,
@@ -244,23 +245,81 @@ def _clip_planes_from(ctx, objs):
 @command("disableclippingplane", aliases=("dcc",), mutates=False)
 def cmd_disableclippingplane(ctx):
     """Pause clipping planes (they stay in the scene, the cut stops)."""
+    # min_count=0: Enter on nothing is every plane, as the prompt says,
+    # rather than the command cancelled
     objs = yield SelectReq("Select clipping planes (Enter or 'all' = all)",
-                           allow_preselected=True)
+                           allow_preselected=True, min_count=0)
     planes = _clip_planes_from(ctx, objs)
     for o in planes:
-        ctx.scene.update(o.id, clip_plane={"enabled": False})
+        # the views it is switched off in wait for it to resume
+        ctx.scene.update(o.id, clip_plane={**o.clip_plane, "enabled": False})
     ctx.echo(f"Disabled {len(planes)} clipping plane(s).")
 
 
 @command("enableclippingplane", aliases=("ecc",), mutates=False)
 def cmd_enableclippingplane(ctx):
     """Re-enable paused clipping planes."""
+    # min_count=0: Enter on nothing is every plane, as the prompt says,
+    # rather than the command cancelled
     objs = yield SelectReq("Select clipping planes (Enter or 'all' = all)",
-                           allow_preselected=True)
+                           allow_preselected=True, min_count=0)
     planes = _clip_planes_from(ctx, objs)
     for o in planes:
-        ctx.scene.update(o.id, clip_plane={"enabled": True})
+        ctx.scene.update(o.id, clip_plane={**o.clip_plane, "enabled": True})
     ctx.echo(f"Enabled {len(planes)} clipping plane(s).")
+
+
+def _view_here(ctx):
+    """The view a clipping plane is switched in from where you are: the
+    pane, or the detail you are inside on a sheet. None says why not."""
+    vp = getattr(ctx, "viewport", None)
+    view = vp.clip_view() if vp is not None else None
+    if view is None:
+        ctx.echo("No view to switch it in here: run this in a model "
+                 "view, or double-click a detail to go inside it first.")
+    return view
+
+
+@command("disableclippinginview", aliases=("dcv",), mutates=False)
+def cmd_disableclippinginview(ctx):
+    """Switch clipping planes off in the view you are in (the pane, or the
+    detail you are inside) and leave them cutting every other view."""
+    view = _view_here(ctx)
+    if view is None:
+        return
+    objs = yield SelectReq("Clipping planes to switch off in this view "
+                           "(Enter or 'all' = all)", allow_preselected=True,
+                           min_count=0)
+    planes = _clip_planes_from(ctx, objs)
+    for o in planes:
+        _clipping.switch(ctx.scene, o.id, view, False)
+    ctx.echo(f"{len(planes)} clipping plane(s) no longer cut this view; "
+             "'enableclippinginview' brings them back.")
+
+
+@command("enableclippinginview", aliases=("ecv",), mutates=False)
+def cmd_enableclippinginview(ctx):
+    """Switch clipping planes back on in the view you are in (the pane, or
+    the detail you are inside). A paused one resumes, and so cuts its
+    other views again as well."""
+    view = _view_here(ctx)
+    if view is None:
+        return
+    objs = yield SelectReq("Clipping planes to switch on in this view "
+                           "(Enter or 'all' = all)", allow_preselected=True,
+                           min_count=0)
+    planes = _clip_planes_from(ctx, objs)
+    resumed = 0
+    for o in planes:
+        if not o.clip_plane.get("enabled"):
+            resumed += 1
+            ctx.scene.update(o.id, clip_plane={**o.clip_plane,
+                                               "enabled": True})
+        _clipping.switch(ctx.scene, o.id, view, True)
+    ctx.echo(f"{len(planes)} clipping plane(s) cut this view.")
+    if resumed:
+        ctx.echo(f"{resumed} of them had been paused everywhere, so they "
+                 "cut their other views again too.")
 
 
 @command("selclippingplane", mutates=False)
@@ -605,12 +664,23 @@ def cmd_units(ctx):
         rescale = yield OptionReq(
             f"Scale model by {factor:g} so objects keep their real size?",
             options=["Yes", "No"], default="Yes")
+    # Before anything changes, so that one undo puts the units back with the
+    # model and the sheets. Taken after the units had changed, undo left the
+    # new units on the old model; and without a rescale there was none.
+    ctx.history.checkpoint("units")
+    # What is lettered keeps its sizes, in the built-in styles it was
+    # lettered in; a drawing with nothing lettered takes the new units' set.
+    from ..core.layout import lettered_in_builtin_styles, style_set
+    ctx.scene.annot_style_set = (style_set(ctx.scene)
+                                 if lettered_in_builtin_styles(ctx.scene)
+                                 else None)
     ctx.scene.units = choice
     if rescale == "Yes":
-        ctx.history.checkpoint("units rescale")
         for o in ctx.scene.all():
             ctx.scene.replace_shape(
                 o.id, g.scale(o.shape, (0, 0, 0), factor))
+    for lay in ctx.scene.layouts:
+        lay.convert_units(factor, rescaled=rescale == "Yes")
     ctx.scene.notify()
     ctx.echo(f"Document units: {UNIT_LABELS[choice]}."
              + (" Model rescaled." if rescale == "Yes" else ""))

@@ -93,8 +93,9 @@ def _call(method: str, **params) -> str:
 
 @mcp.tool()
 def serp_scene_info() -> str:
-    """Get the current scene: objects (name/kind/layer/bbox), layers,
-    selection, bounds, and display mode."""
+    """Get the current scene: objects (name/kind/layer/bbox, and the
+    user_text keys and values of any that carry some), layers, selection,
+    bounds, and display mode. Set user text with the setusertext command."""
     return _call("scene_info")
 
 
@@ -181,11 +182,13 @@ def serp_command(command: str, inputs: list[str] | None = None) -> str:
 
     Examples:
       command='circle', inputs=['0,0,0', '5']
-      command='extrude', inputs=['Curve 01', '', '20', 'Yes']
-        (object name(s), then '' to end selection, then distance, then cap)
+      command='extrude', inputs=['Curve 01', '', '20']
+        (object name(s), then '' to end selection, then distance)
       command='zoomextents'
 
-    Selection prompts accept object names, 'all', or '' to finish.
+    Selection prompts accept object names, 'all', or '' to finish. Too few
+    inputs is an error, and so is one left over when the command finishes:
+    the error says which prompt each input answered.
     """
     return _call("command", command=command, inputs=inputs or [])
 
@@ -210,9 +213,12 @@ def serp_layers(action: str = "list", name: str = "", new_name: str = "",
     'current', 'color' (color as [r,g,b] 0-1), 'assign' (move objects to
     layer), 'delete', 'style' (how a layer draws: style={linetype,
     print_width mm (0 = printer default), screen_width px or 'from print',
-    hatch none/lines/cross/solid, hatch_angle degrees, hatch_spacing mm on
-    paper, hatch_color ink/layer/#rrggbb}). A layer can live under
-    another: pass parent to 'create', and name a layer by its path
+    hatch none/lines/cross/solid or a pattern loaded with the hatchpatterns
+    command, hatch_angle degrees, hatch_spacing mm on paper, hatch_color
+    ink/layer/#rrggbb, hatch_background object/layer/#rrggbb (what a cut
+    shows under its hatch), cut_line_width mm on paper round a cut
+    (0 = none), cut_line_color ink/layer/#rrggbb}). A layer can live
+    under another: pass parent to 'create', and name a layer by its path
     ('Walls::Interior') where two layers share a name."""
     return _call("layers", action=action, name=name or None,
                  new_name=new_name or None, color=color, visible=visible,

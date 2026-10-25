@@ -58,7 +58,9 @@ def _pick(panel, layer_id, text):
 def test_the_row_menu_offers_every_pattern_and_a_way_out_of_them():
     _scene, panel = _panel()
     _menu, entries = _hatch_entries(panel, DEFAULT_LAYER_ID)
-    assert [a.text() for a in entries] == ["None", "Lines", "Cross", "Solid"]
+    assert [a.text() for a in entries] == [
+        "None", "Lines", "Cross", "Solid", "Dash", "Dots", "Plus", "Squares",
+        "Triangles", "Brick"]
 
 
 def test_picking_a_pattern_sets_it_on_the_layer():

@@ -7,6 +7,7 @@ import pye57
 from pye57 import libe57
 
 from ..core.pointcloud import PointCloudShape
+from ..utils.math3d import ANCHOR_NEAR, origin_for
 from ..utils.units import convert
 from .progress import Cancelled, Progress
 
@@ -91,6 +92,16 @@ def _read_scan(source, header, scale, report, label):
         # convenience reader's uint8 colors overflow on 16-bit scan colors.
         buffers.append(libe57.SourceDestBuffer(
             source.image_file, field, array, capacity, True, True))
+    # The float32 buffer holds offsets from where the scanner stood. A
+    # georeferenced station at a UTM northing steps a quarter of a metre in
+    # absolute float32, and a scan on that grid reads back as a set of
+    # lines rather than a surface; its own pose is a point near every one
+    # of its samples. None here means the pose is at home and the first
+    # block of points read decides instead, since the georeferencing can
+    # be in the coordinates rather than in the pose.
+    origin = translation * scale
+    if np.abs(origin).max() <= ANCHOR_NEAR:
+        origin = None
     xyz = np.empty((count, 3), np.float32)
     rgb = np.empty((count, 3), np.uint8) if colored else None
     read_count = kept = 0
@@ -114,7 +125,14 @@ def _read_scan(source, header, scale, report, label):
                                               horizontal * np.sin(azimuth),
                                               distance * np.sin(elevation)))
             with np.errstate(over="ignore", invalid="ignore"):
-                points = ((points @ rotation.T + translation) * scale).astype(np.float32)
+                world = (points @ rotation.T + translation) * scale
+            if origin is None and valid.any():
+                found = origin_for(world[valid])
+                origin = np.zeros(3) if found is None else found
+            # A block with nothing valid in it has no say and nothing to
+            # store, so the next one decides.
+            points = (world - (origin if origin is not None
+                               else 0.0)).astype(np.float32)
             valid &= np.isfinite(points).all(axis=1)
             length = np.count_nonzero(valid)
             xyz[kept:kept + length] = points[valid]
@@ -138,7 +156,9 @@ def _read_scan(source, header, scale, report, label):
     xyz.resize((kept, 3), refcheck=False)
     if colored:
         rgb.resize((kept, 3), refcheck=False)
-    return PointCloudShape(xyz, rgb)
+    return PointCloudShape(
+        xyz, rgb,
+        origin=origin if origin is not None and np.any(origin) else None)
 
 
 def import_e57(path: str, *, units: str = "mm", progress=None) -> list:

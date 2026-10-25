@@ -12,10 +12,43 @@ Keep this module free of heavy imports at the top level.
 
 from __future__ import annotations
 
+import os
 import signal
 import sys
 
 from . import version_line
+
+
+def _apply_ui_scale() -> None:
+    """Honour the saved interface scale (Settings → Display).
+
+    Qt reads QT_SCALE_FACTOR only as the QApplication is built, so the
+    value has to be in the environment before one exists — the same
+    one-shot rule as the GL surface format below. Left unset at the
+    default scale, so normal high-DPI detection stays untouched.
+    """
+    from .utils.config import Config
+    try:
+        scale = float(Config().get("display", "ui_scale", default=1.0))
+    except (TypeError, ValueError):
+        return                      # hand-edited settings are not a crash
+    if 1.0 < scale <= 1.5:          # the slider's range
+        os.environ["QT_SCALE_FACTOR"] = f"{scale:g}"
+    else:
+        # also clears a factor inherited from the process we were
+        # restarted by, so scaling back to 100% sticks
+        os.environ.pop("QT_SCALE_FACTOR", None)
+
+
+def running_scale() -> float:
+    """The interface scale this process runs at: whatever was in
+    QT_SCALE_FACTOR when Qt read it. Not the saved setting, which may be
+    waiting on a restart."""
+    try:
+        scale = float(os.environ.get("QT_SCALE_FACTOR", 1.0))
+    except ValueError:
+        return 1.0
+    return scale if scale > 0 else 1.0
 
 
 def main() -> int:
@@ -67,6 +100,10 @@ def main() -> int:
         return replay_main(sys.argv[2:])
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+    # The saved interface scale must be in the environment before the
+    # QApplication below exists — see _apply_ui_scale.
+    _apply_ui_scale()
 
     # Both the surface format and the share-group attribute are only read
     # as the QApplication is built, so they have to be set before one

@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from ..core.layout import (PAPER_SIZES, Layout, SheetGroup, sheet_label,
                            sheet_tree)
+from ..utils.units import format_paper_size
 from . import theme
 
 _KIND_ROLE = Qt.ItemDataRole.UserRole          # "sheet" or "group"
@@ -226,7 +227,8 @@ class SheetsPanel(QWidget):
         else:
             item.setData(0, _OPEN_ROLE, thing.id == self._open_id)
             w, h = thing.paper_w, thing.paper_h
-            item.setToolTip(0, f"{sheet_label(thing)}: {_paper_name(w, h)}; "
+            size = _paper_name(w, h, self.scene.units)
+            item.setToolTip(0, f"{sheet_label(thing)}: {size}; "
                                "double-click to open")
         item.setFlags(flags)
         for child in children:
@@ -501,11 +503,12 @@ class SheetsPanel(QWidget):
         return (item.data(0, _KIND_ROLE), item.data(0, _ID_ROLE))
 
 
-def _paper_name(w: float, h: float) -> str:
-    """A3 landscape, or the size in millimetres when it is not a standard."""
+def _paper_name(w: float, h: float, units: str) -> str:
+    """A3 landscape, or the size when it is not a standard, in the units
+    the sheet is read in."""
     for name, (pw, ph) in PAPER_SIZES.items():
         if (abs(w - pw) < 0.5 and abs(h - ph) < 0.5):
             return f"{name} landscape"
         if (abs(w - ph) < 0.5 and abs(h - pw) < 0.5):
             return f"{name} portrait"
-    return f"{w:g} × {h:g} mm"
+    return format_paper_size(w, h, units)

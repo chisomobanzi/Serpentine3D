@@ -919,8 +919,8 @@ class LayersPanel(QWidget):
         # one Python owns is collected while the menu is still open.
         sub = QMenu("Hatch", menu)
         menu.addMenu(sub)
-        for pattern in _layout.SECTION_FILLS:
-            action = sub.addAction(pattern.capitalize())
+        for pattern in _layout.section_fills_of(self.scene):
+            action = sub.addAction(_layout.pattern_label(pattern))
             action.setCheckable(True)
             action.setChecked(have == {pattern})
             action.triggered.connect(

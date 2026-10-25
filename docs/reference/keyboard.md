@@ -92,6 +92,7 @@ Nothing is bound out of the box.
 | ++ctrl+n++ / ++ctrl+o++ / ++ctrl+s++ | New / Open / Save |
 | ++ctrl+z++ / ++ctrl+y++ | Undo / Redo |
 | ++ctrl+a++ | Select all |
+| ++alt+a++ | Keep every region, while CurveBoolean asks which to keep |
 | ++ctrl+g++ / ++ctrl+shift+g++ | Group / ungroup |
 | ++ctrl+h++ / ++ctrl+shift+h++ | Hide selection / show all hidden objects |
 | ++ctrl+l++ / ++ctrl+shift+l++ | Lock selection / unlock all objects |
@@ -124,6 +125,13 @@ or enter a signed distance such as `-25mm`. Add `! _Move _Vertical` or
   empty space to deselect.
 - **Box selection**: drag **left→right** for a *window* (fully enclosed, gold
   box); **right→left** for a *crossing* (anything touched, white box).
+- **Objects in the same place** offer themselves: click where two of them
+  sit on top of each other and a small list opens, naming each and lighting
+  it in the viewport as you point at a row. Nothing a camera angle could
+  separate, so the click cannot mean one rather than the other.
+- **Something behind something else** is picked in front, as always. To
+  reach past it, **hold the button still** for a moment or **Alt-click**:
+  the same list, this time of everything under the cursor.
 - **Object snaps** — end, mid, center, quadrant, intersection, apparent
   intersection, perpendicular, nearest — toggle on the **osnap bar** under
   the command line. They keep working while a direction is held: the point

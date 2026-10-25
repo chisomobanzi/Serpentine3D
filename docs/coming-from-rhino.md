@@ -50,6 +50,11 @@ page maps your habits over and is honest about the gaps.
 - **Interchange** — reads and writes `.3dm` for Rhino 5–8 (curves stay exact
   NURBS; surfaces write as meshes — use STEP for an exact surface round
   trip), STEP, and more. See [File formats](reference/file-formats.md).
+- **Attribute User Text** comes in with a `.3dm` and goes back out with
+  it. Properties lists an object's keys and values under **User text**,
+  where you add, rename and remove them as in Rhino's panel, and
+  `setusertext` / `getusertext` work as Rhino's SetUserText and
+  GetUserText do.
 
 ## Bring your Rhino settings over
 
@@ -74,7 +79,7 @@ Most Rhino command names and aliases resolve directly. A few worth knowing:
 | `Dir` `Flip` | `dir` `flip` |
 | `ExtrudeCrv` `Revolve` `Loft` `Sweep1/2` | `extrude` `revolve` `loft` `sweep1` `sweep2` |
 | `FilletEdge` `ChamferEdge` `Shell` | `filletedge` `chamferedge` `shell` |
-| `BooleanUnion / Difference / Intersection` | `booleanunion` `booleandifference` `booleanintersection` |
+| `BooleanUnion / Difference / Intersection` `CurveBoolean` | `booleanunion` `booleandifference` `booleanintersection` `curveboolean` |
 | `Move` `Copy` `Rotate` `Scale` `Mirror` `Array` | `move` `copy` `rotate` `scale` `mirror` `array` |
 | `Trim` `Split` `Join` `Explode` `Offset` | `trim` `split` `join` `offset` |
 | `Layout` `Detail` `Make2D` `Dim` | `layout` `detail` `make2d` `dim` |

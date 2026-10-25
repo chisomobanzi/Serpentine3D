@@ -47,8 +47,13 @@ def test_a_far_mesh_gets_an_anchor_at_its_middle():
 
 
 def test_a_mesh_near_the_origin_gets_none_and_the_old_path():
-    mesh = _far_mesh()
-    mesh.vertices = mesh.vertices - FAR
+    """Built at home rather than moved there: where a mesh sits is
+    settled by the first coordinates it is given, and one that belongs
+    somewhere else is a different mesh (core/tessellate.py)."""
+    mesh = DisplayMesh()
+    mesh.vertices = _far_mesh().vertices - FAR
+    mesh.normals = np.zeros_like(mesh.vertices)
+    mesh.triangles = np.array([[0, 1, 2], [0, 2, 3]], np.uint32)
     assert vp.mesh_anchor(mesh) is None
 
 

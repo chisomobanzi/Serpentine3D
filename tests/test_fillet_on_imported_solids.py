@@ -82,7 +82,9 @@ def test_fillet_still_rounds_two_curves():
     doc = Document()
     doc.add(g.make_line((0, 0, 0), (10, 0, 0)), name="First")
     doc.add(g.make_line((10, 0, 0), (10, 10, 0)), name="Second")
-    messages = doc.run("fillet", ["First", "Second", "10,0,0", "2"])
+    # The radius is an option on the prompt now, so it is set before the
+    # curves are picked and the fillet happens on the second pick.
+    messages = doc.run("fillet", ["2", "First", "Second"])
     assert any(m.startswith("Filleted into ") for m in messages)
     assert len(doc.objects()) == 1
     assert g.is_valid(doc.objects()[0].shape)

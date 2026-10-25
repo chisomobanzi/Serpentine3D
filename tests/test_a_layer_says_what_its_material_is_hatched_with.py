@@ -50,13 +50,17 @@ def test_the_case_it_is_written_in_does_not_matter():
     assert lm.get(DEFAULT_LAYER_ID).hatch == "cross"
 
 
-def test_a_pattern_the_app_cannot_draw_is_lines():
+def test_a_pattern_named_before_it_is_loaded_keeps_its_name():
+    """A layer can name a pattern from a .pat file (#92), and a file or an
+    import can name one the drawing has not loaded yet: the name is kept,
+    and the cut is drawn with lines until the pattern comes."""
     lm = LayerManager()
     lm.set_hatch(DEFAULT_LAYER_ID, "cross")
-    lm.set_hatch(DEFAULT_LAYER_ID, "herringbone")
+    lm.set_hatch(DEFAULT_LAYER_ID, " Herringbone ")
+    assert lm.get(DEFAULT_LAYER_ID).hatch == "Herringbone"
+    lm.set_hatch(DEFAULT_LAYER_ID, "")
     assert lm.get(DEFAULT_LAYER_ID).hatch == "lines", \
-        "a pattern nothing can draw was kept, so the prompt offers a word " \
-        "that fills nothing"
+        "nothing at all is the lines it always was"
 
 
 def test_a_layer_can_be_put_back_to_having_no_hatch():

@@ -12,6 +12,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `booleandifference` (`difference`, `bd`) | Booleandifference |
 | `booleanintersection` (`intersection`, `bi`) | Booleanintersection |
 | `booleanunion` (`union`, `bu`) | Booleanunion |
+| `curveboolean` (`curvebool`) | Closed curves around the regions of overlapping planar curves. KeepObjects leaves the curves it worked from in place. |
 
 ## Camera
 
@@ -71,8 +72,10 @@ Commands that need a file open a filtered chooser by default. Append
 | `cplane` | Reposition the construction plane (drawing plane + grid). |
 | `curvature` | Curvature |
 | `curvatureanalysis` (`curvmap`) | Curvatureanalysis |
+| `disableclippinginview` (`dcv`) | Switch clipping planes off in the view you are in (the pane, or the detail you are inside) and leave them cutting every other view. |
 | `disableclippingplane` (`dcc`) | Pause clipping planes (they stay in the scene, the cut stops). |
 | `distance` (`dist`) | Distance |
+| `enableclippinginview` (`ecv`) | Switch clipping planes back on in the view you are in (the pane, or the detail you are inside). |
 | `enableclippingplane` (`ecc`) | Re-enable paused clipping planes. |
 | `floatviewport` (`floatvp`) | Open a floating viewport window (drag it to another monitor). |
 | `front` | Front |
@@ -140,7 +143,8 @@ Commands that need a file open a filtered chooser by default. Append
 | `exportdxf` | Export the active layout sheet (or the model) to DXF. |
 | `exportpdf` (`pdf`) | Exportpdf |
 | `exportsvg` | Exportsvg |
-| `hatch` | Fill a region with a pattern, on a sheet or in the model, starting from its layer's hatch. |
+| `hatch` | Fill a region with a pattern, on a sheet or in the model, starting from its layer's hatch. Curves that cross ask which of the regions they make to fill (All, or Alt+A, for every one). The popup shows the hatch it would make while it is open. |
+| `hatchpatterns` (`loadpat`) | The drawing's hatch patterns: Load those in a .pat file, to offer them wherever a hatch or a section hatch is picked, Delete one that was loaded, or Purge every loaded one nothing uses. |
 | `layout` | Layout |
 | `leader` | Leader |
 | `make2d` | Make2d |
@@ -160,7 +164,8 @@ Commands that need a file open a filtered chooser by default. Append
 | `delete` (`del`, `erase`) | Delete |
 | `dir` | Show which way curves run and which way surfaces face. |
 | `explode` (`x`) | Explode |
-| `fillet` | Round two curves, or edges of a selected solid/surface. |
+| `fillet` | Round the corner between two curves, or edges of a selected solid/surface. Pick each curve near the corner you mean. Radius and Trim stay on the prompt and can be changed between the picks (a typed number is the radius, `t` flips Trim), and both are remembered until the program is started again. Radius 0 gives a sharp corner: the curves are cut back, or carried out, to the point they cross at. |
+| `filletcorners` | Round every corner of a polyline at once with one radius — straight and arc pieces both round. |
 | `flip` | Turn curves round and surfaces inside out, as Rhino's Flip does. |
 | `hide` | Hide |
 | `insertknot` (`insertcontrolpoint`) | Add a control point to a curve without moving the curve. |
@@ -212,6 +217,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `bringtofront` (`bf`) | Draw the selected objects on top of overlapping ones. |
 | `changelayer` (`tolayer`) | Move objects to a layer by name (created if missing). |
 | `count` | Count objects: totals by block, kind and layer (for takeoffs). |
+| `getusertext` | Report the user text on the selected objects, as Rhino's GetUserText does: one key's value, or with Enter every key. |
 | `group` | Group objects and keep them selected. |
 | `insert` | Insert |
 | `linetype` (`lt`, `setlinetype`) | Set the dash style of selected objects (Continuous/Dashed/…/ByLayer). |
@@ -225,6 +231,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `sectionhatch` (`sectionstyle`) | Set how a section cut through selected objects is filled. |
 | `sendbackward` (`sendbackwards`) | Nudge the selected objects one step towards the back. |
 | `sendtoback` (`sb`) | Draw the selected objects behind overlapping ones. |
+| `setusertext` (`setattributeusertext`) | Set a key of user text on the selected objects, as Rhino's SetUserText does. |
 | `ungroup` | Ungroup objects and keep them selected. |
 | `unlockall` (`unlock`) | Unlockall |
 | `what` | Report details of the selected objects. |
@@ -258,7 +265,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `cap` | Cap |
 | `chamferedge` (`che`) | Chamferedge |
 | `contour` | Contour |
-| `filletedge` (`fe`) | Fillet edges. Ctrl+Shift-click edges first to fillet only those; |
+| `filletedge` (`fe`) | Fillet edges. Ctrl+Shift-click edges first to fillet only those; the radius may be `start,end` or `u:r;u:r;…` for a variable law along the smooth chain, straight between points on request. |
 | `intersect` (`int`) | Intersect |
 | `mergeallcoplanarfaces` (`mergeallfaces`) | Fuse coplanar neighbouring faces of each selected polysurface. |
 | `pushpull` (`pp`, `moveface`) | SketchUp-style push/pull on a planar face. |

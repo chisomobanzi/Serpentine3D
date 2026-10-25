@@ -136,7 +136,7 @@ def _write_ascii(tris: np.ndarray, normals: np.ndarray, path: str, name: str):
         out.append(f"  facet normal {nrm[0]:.6e} {nrm[1]:.6e} {nrm[2]:.6e}")
         out.append("    outer loop")
         for v in (a, b, c):
-            out.append(f"      vertex {v[0]:.6e} {v[1]:.6e} {v[2]:.6e}")
+            out.append(f"      vertex {v[0]:.12e} {v[1]:.12e} {v[2]:.12e}")
         out.append("    endloop")
         out.append("  endfacet")
     out.append(f"endsolid {name}")

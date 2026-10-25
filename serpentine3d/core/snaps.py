@@ -328,17 +328,22 @@ class SnapIndex:
         shape = obj.shape
         entry = self._cloud_cache.get(obj.id)
         if entry is None or entry[0] is not shape:
-            index = build_index(shape.xyz[:, None, :])
+            # Indexed where the points are stored, which for a scan at
+            # survey coordinates is about its own origin; only the chunk
+            # corners come out into the world, and there are eight of them
+            # per chunk rather than one per point.
+            index = build_index(shape.local[:, None, :])
             corners = None
             if index is not None:
                 axes = np.array([[x, y, z] for x in (0, 1)
                                  for y in (0, 1) for z in (0, 1)], bool)
-                corners = np.where(axes[None, :, :], index.maxs[:, None, :],
-                                   index.mins[:, None, :])
+                corners = shape.to_world(
+                    np.where(axes[None, :, :], index.maxs[:, None, :],
+                             index.mins[:, None, :]))
             entry = (shape, index, corners)
             self._cloud_cache[obj.id] = entry
         _, index, corners = entry
-        xyz = shape.xyz
+        xyz = shape.local
         if index is not None:
             # Detail-frame clipping belongs to samples, not chunk corners:
             # a box can enclose the whole frame with every corner outside.
@@ -356,6 +361,7 @@ class SnapIndex:
             xyz = xyz[index.gather(keep)]
         if not len(xyz):
             return None
+        xyz = shape.to_world(xyz)
         screen = camera.project(xyz, width, height)
         d2 = (screen[:, 0] - px) ** 2 + (screen[:, 1] - py) ** 2
         valid = np.flatnonzero((screen[:, 2] > 0) & (d2 < radius_px ** 2))
@@ -494,7 +500,7 @@ class SnapIndex:
         cursor = np.array([px, py])
         for obj in objects:
             mesh = obj.mesh
-            if not len(mesh.edge_segments):
+            if not len(mesh.local_edges):
                 continue
             seg = mesh.edge_segments
             a3, b3 = seg[:, 0, :].astype(float), seg[:, 1, :].astype(float)

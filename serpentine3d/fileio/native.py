@@ -14,12 +14,14 @@ from __future__ import annotations
 import base64
 import json
 
-from ..core import geometry
-from ..core.layers import DEFAULT_SCREEN_WIDTH, Layer, section_fill_dict
+from ..core import geometry, user_text
+from ..utils.units import convert, converted_note, rescale
+from ..core.layers import (DEFAULT_CUT_LINE_WIDTH, DEFAULT_SCREEN_WIDTH,
+                           Layer, section_fill_dict)
 
 # The newest version this reader understands. Anything newer is refused
 # with the version it asks for, never a traceback.
-FORMAT_VERSION = 5
+FORMAT_VERSION = 8
 # What a document with none of the version-3 kinds is written as.
 PLAIN_VERSION = 2
 # The Serpentine3D release a version-3 file asks its reader to be.
@@ -83,7 +85,7 @@ def read_thumbnail(path: str) -> bytes | None:
 
 
 def save_scene(scene, path: str, thumbnail: bytes | None = None):
-    from ..core.layout import layouts_to_json, sheet_groups_to_json
+    from ..core.layout import layouts_to_json, sheet_groups_to_json, style_set
     clouds = [o for o in scene.all() if o.kind == "pointcloud"]
     trajectories = list(getattr(scene, "trajectories", None) or [])
     session = getattr(scene, "session", None) or None
@@ -98,7 +100,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                  visible=obj.visible, locked=obj.locked, group=obj.group_id,
                  block=obj.block_id, color=obj.color, material=obj.material,
                  linetype=obj.linetype, draw_order=obj.draw_order,
-                 annotation=obj.annotation)
+                 annotation=obj.annotation, user_text=obj.user_text)
             for obj in scene.all() if obj.kind == "picture"], blobs),
         "block_defs": {
             bid: {
@@ -112,6 +114,11 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
         "layouts": layouts_to_json(scene.layouts),
         "sheet_groups": sheet_groups_to_json(scene.sheet_groups),
         "annot_styles": {k: dict(v) for k, v in scene.annot_styles.items()},
+        # which built-in styles its lettering is in, so it keeps their sizes
+        "annot_style_set": style_set(scene),
+        # whether its text heights are capital heights, or font sizes
+        "text_height_measures": scene.text_height_measures,
+        "hatch_patterns": [p.to_dict() for p in scene.hatch_patterns.values()],
         "history_records": scene.history_records,
         "layers": [
             {
@@ -128,6 +135,9 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "hatch_angle": layer.hatch_angle,
                 "hatch_spacing": layer.hatch_spacing,
                 "hatch_color": layer.hatch_color,
+                "hatch_background": layer.hatch_background,
+                "cut_line_width": layer.cut_line_width,
+                "cut_line_color": layer.cut_line_color,
                 "parent": layer.parent,
             }
             for layer in scene.layers.all()
@@ -151,6 +161,8 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                 "print_width": obj.print_width,
                 "section_fill": (dict(obj.section_fill)
                                  if obj.section_fill else None),
+                "user_text": (dict(obj.user_text) if obj.user_text
+                              else None),
                 "group": obj.group_id,
                 "block": obj.block_id,
                 "brep": (None if obj.kind == "mesh" else
@@ -192,7 +204,49 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
     if any(isinstance(shape, HatchShape) for shape in new_shapes):
         doc["version"] = 5
         doc["requires"] = "0.10.5"
+    # A release before user text opens the file and drops every key without
+    # a word, and a save there loses them for good.
+    if any(obj.user_text for obj in scene.all()):
+        doc["version"] = 6
+        doc["requires"] = "0.12.1"
+    # Geometry far from the world's origin is written as float32 offsets
+    # from a float64 origin, which is the only way four bytes can hold a
+    # millimetre out at survey coordinates. A reader that knows nothing of
+    # that origin takes the offsets for the coordinates themselves and
+    # puts the object at the world's origin, without a word, and a save
+    # there makes it stick. So a file carrying one says so.
+    if any(_carries_an_origin(shape) for shape in new_shapes):
+        doc["version"] = 7
+        doc["requires"] = "0.12.2"
+    # A release that knows only Lines, Cross and Solid refuses a model
+    # hatch drawn with any other pattern, and the whole file with it
+    # (#92). A layer naming one is only drawn with lines there.
+    from ..core.hatch_patterns import is_legacy
+    if any(isinstance(shape, HatchShape) and not is_legacy(shape.pattern)
+           for shape in new_shapes):
+        doc["version"] = 8
+        doc["requires"] = "0.12.2"
     _write_container(doc, path, thumbnail, blobs)
+
+
+def _carries_an_origin(shape) -> bool:
+    """Whether this shape is written as offsets from an origin.
+
+    Meshes and clouds are, wherever they are written from: an object, a
+    block definition, or a layout. A picture is a mesh by inheritance but
+    writes itself its own way, with no offsets in it.
+    """
+    from ..core.mesh import MeshShape
+    from ..core.picture import PictureShape
+    from ..core.pointcloud import PointCloudShape
+    from ..utils.math3d import origin_for
+    if isinstance(shape, PointCloudShape):
+        return bool(shape.far)
+    if isinstance(shape, PictureShape):
+        return False
+    if isinstance(shape, MeshShape):
+        return origin_for(shape.vertices) is not None
+    return False
 
 
 def _image_planes_to_json(planes, blobs: dict) -> list[dict]:
@@ -229,7 +283,7 @@ def _cloud_to_json(obj, blobs: dict) -> dict:
     cloud = obj.shape
     base = f"blobs/{obj.id}/"
     names = {"xyz": base + "xyz.f32"}
-    blobs[names["xyz"]] = np.ascontiguousarray(cloud.xyz, "<f4").tobytes()
+    blobs[names["xyz"]] = np.ascontiguousarray(cloud.local, "<f4").tobytes()
     if cloud.rgb is not None:
         names["rgb"] = base + "rgb.u8"
         blobs[names["rgb"]] = np.ascontiguousarray(
@@ -252,12 +306,19 @@ def _cloud_to_json(obj, blobs: dict) -> dict:
         "bbox": [list(mn), list(mx)],
         "blobs": names,
     }
+    if cloud.far:
+        # What the float32 blob is measured from. Only a scan standing far
+        # from the world's origin carries one, so a file of near-home
+        # clouds is byte for byte what it was before.
+        entry["origin"] = [float(c) for c in cloud.origin]
     if cloud.provenance:
         entry["provenance"] = dict(cloud.provenance)
     if obj.color:
         entry["color"] = list(obj.color)
     if obj.locked:
         entry["locked"] = True
+    if obj.user_text:
+        entry["user_text"] = dict(obj.user_text)
     return entry
 
 
@@ -279,10 +340,10 @@ def load_scene(scene, path: str):
 
 _CARRIED_FIELDS = ("visible", "locked", "group_id", "block_id", "color",
                    "material", "clip_plane", "annotation", "linetype",
-                   "draw_order", "print_width", "section_fill")
+                   "draw_order", "print_width", "section_fill", "user_text")
 
 
-def merge_scene(scene, path: str) -> int:
+def merge_scene(scene, path: str, notes: list | None = None) -> int:
     """Add a .serp file's objects to `scene`, keeping everything already there.
 
     What Import means for every other format. The file is read into a scene
@@ -290,11 +351,18 @@ def merge_scene(scene, path: str) -> int:
     so `Kit::Parts` in the file lands on a `Kit::Parts` the scene already
     has, or on one made for it under the same parents. The scene's own
     settings stay the scene's: units, current layer, named views, layouts.
+    A file in other units is scaled into the scene's first (#101).
     Returns the number of objects added.
     """
     from ..core.scene import Scene
     incoming = Scene()
     load_scene(incoming, path)
+    # Scaled on the way across rather than in `incoming`, where replacing a
+    # shape rebuilds what its history built from it, which would then be
+    # scaled a second time.
+    factor = convert(1.0, incoming.units, scene.units)
+    if factor != 1.0 and notes is not None:
+        notes.append(converted_note(incoming.units, scene.units))
     layer_for = {}
 
     def target_layer(layer_id):
@@ -320,11 +388,21 @@ def merge_scene(scene, path: str) -> int:
     # What the objects lean on comes with them, but never over the scene's
     # own: a block the file instances, a style its dimensions are drawn in,
     # a view it named. Units, layouts and the current layer stay the scene's.
-    for block_id, shapes in incoming.block_defs.items():
-        scene.block_defs.setdefault(block_id, shapes)
+    for block_id, block in incoming.block_defs.items():
+        if factor != 1.0:
+            block = {**block, "shapes": [rescale(s, factor)
+                                         for s in block["shapes"]]}
+        scene.block_defs.setdefault(block_id, block)
     for name, style in incoming.annot_styles.items():
         scene.annot_styles.setdefault(name, style)
+    from ..core.hatch_patterns import lookup
+    for name, pattern in incoming.hatch_patterns.items():
+        if lookup(scene.hatch_patterns, name) is None:
+            scene.hatch_patterns[name] = pattern
     for name, view in incoming.named_views.items():
+        if factor != 1.0:
+            view = {**view, "target": [c * factor for c in view["target"]],
+                    "distance": view["distance"] * factor}
         scene.named_views.setdefault(name, view)
     # The whole layer tree comes in, empty layers too, as it does in Rhino:
     # a layer is set up before anything is drawn on it.
@@ -332,7 +410,9 @@ def merge_scene(scene, path: str) -> int:
         target_layer(layer.id)
     new_id = {}
     for source in incoming.all():
-        obj = scene.add(source._shape, name=source.name,
+        shape = (source._shape if factor == 1.0
+                 else rescale(source._shape, factor))
+        obj = scene.add(shape, name=source.name,
                         layer_id=target_layer(source.layer_id))
         new_id[source.id] = obj.id
         carried = {f: getattr(source, f) for f in _CARRIED_FIELDS
@@ -346,9 +426,24 @@ def merge_scene(scene, path: str) -> int:
         record["inputs"] = [new_id.get(i, i) for i in record.get("inputs", [])]
         if "output" in record:
             record["output"] = new_id.get(record["output"], record["output"])
+        if factor != 1.0:
+            record["params"] = _rescaled_params(record.get("params", {}),
+                                                factor)
         scene.history_records.append(record)
     scene.layers.current_id = current
     return len(incoming.all())
+
+
+def _rescaled_params(params: dict, factor: float) -> dict:
+    """A history record's parameters with its lengths in the new units:
+    an extrusion's distance and a revolve's axis point. Directions and
+    angles have no size."""
+    params = dict(params)
+    if "dist" in params:
+        params["dist"] = float(params["dist"]) * factor
+    if "origin" in params:
+        params["origin"] = [float(c) * factor for c in params["origin"]]
+    return params
 
 
 def _check_version(doc: dict):
@@ -367,11 +462,17 @@ def _check_version(doc: dict):
 
 
 def _copy_hatch_look(layers, layer_id: str, ld: dict):
-    """A layer's hatch angle, spacing and colour, or the 45 degrees,
-    2.5 mm and ink every cut had before a layer could say otherwise."""
+    """A layer's hatch angle, spacing and colour and the width and colour
+    of its cut line, or the 45 degrees, 2.5 mm, ink and 0.5 mm of ink
+    every cut had before a layer could say otherwise."""
     layers.set_hatch_angle(layer_id, ld.get("hatch_angle", 45.0))
     layers.set_hatch_spacing(layer_id, ld.get("hatch_spacing", 2.5))
     layers.set_hatch_color(layer_id, ld.get("hatch_color", "ink"))
+    layers.set_hatch_background(layer_id,
+                                ld.get("hatch_background", "object"))
+    layers.set_cut_line_width(layer_id, ld.get("cut_line_width",
+                                               DEFAULT_CUT_LINE_WIDTH))
+    layers.set_cut_line_color(layer_id, ld.get("cut_line_color", "ink"))
 
 
 def _restore_widths(layers, layer_id: str, ld: dict):
@@ -451,6 +552,7 @@ def _load_doc(scene, doc: dict, blobs=None):
                      block_id=plane.get("block"), color=plane.get("color"),
                      material=plane.get("material"),
                      annotation=plane.get("annotation"),
+                     user_text=user_text.cleaned(plane.get("user_text")),
                      linetype=plane.get("linetype", "ByLayer"),
                      draw_order=plane.get("draw_order", 0))
     for bid, bd in doc.get("block_defs", {}).items():
@@ -459,11 +561,29 @@ def _load_doc(scene, doc: dict, blobs=None):
             "shapes": [geometry.shape_from_bytes(base64.b64decode(s))
                        for s in bd["shapes"]],
         }
-    from ..core.layout import layouts_from_json, sheet_groups_from_json
+    from ..core.layout import (layouts_from_json, lettered_by_font_size,
+                               lettered_in_builtin_styles,
+                               sheet_groups_from_json)
     scene.layouts = layouts_from_json(doc.get("layouts", []))
     scene.sheet_groups = sheet_groups_from_json(doc.get("sheet_groups", []))
     scene.annot_styles = {k: dict(v) for k, v in
                           doc.get("annot_styles", {}).items()}
+    # What is lettered keeps the sizes it was lettered at: in the built-in
+    # styles the file names, or, from a release before inch styles, the
+    # metric ones. With nothing lettered, the units choose (style_set).
+    scene.annot_style_set = (doc.get("annot_style_set", "metric")
+                             if lettered_in_builtin_styles(scene) else None)
+    # A drawing from before text heights were capital heights prints as it
+    # did, its heights font sizes; one with nothing lettered by them has
+    # nothing to keep (layout.letters_capitals).
+    scene.text_height_measures = doc.get(
+        "text_height_measures",
+        "em" if lettered_by_font_size(scene) else "capitals")
+    from ..core.hatch_patterns import HatchPattern
+    scene.hatch_patterns = {}
+    for data in doc.get("hatch_patterns", []):
+        pattern = HatchPattern.from_dict(data)
+        scene.hatch_patterns[pattern.name] = pattern
     scene.history_records = list(doc.get("history_records", []))
 
     for od in doc.get("objects", []):
@@ -495,7 +615,11 @@ def _load_doc(scene, doc: dict, blobs=None):
         if od.get("section_fill"):
             updates["section_fill"] = section_fill_dict(**{
                 k: v for k, v in od["section_fill"].items()
-                if k in ("pattern", "angle", "spacing", "color")})
+                if k in ("pattern", "angle", "spacing", "color",
+                         "cut_line_width", "cut_line_color", "background")})
+        text = user_text.cleaned(od.get("user_text"))
+        if text:
+            updates["user_text"] = text
         if od.get("locked"):
             updates["locked"] = True
         if od.get("group"):
@@ -520,6 +644,9 @@ def _load_doc(scene, doc: dict, blobs=None):
             updates["color"] = tuple(cd["color"])
         if cd.get("locked"):
             updates["locked"] = True
+        text = user_text.cleaned(cd.get("user_text"))
+        if text:
+            updates["user_text"] = text
         if updates:
             scene.update(obj.id, **updates)
 
@@ -582,24 +709,42 @@ def _cloud_from_json(cd: dict, blobs):
     return PointCloudShape(xyz, sized(read("rgb", np.uint8, 3)),
                            sized(read("conf", "<f4")),
                            sized(read("level", np.uint8)),
-                           provenance=cd.get("provenance"))
+                           provenance=cd.get("provenance"),
+                           origin=cd.get("origin"))
 
 
 def _mesh_to_json(mesh) -> dict:
+    """The vertices as float32, with an origin when the mesh needs one.
+
+    float32 steps 6cm at a million units, so a survey mesh written in
+    absolute coordinates came back from its own file on that grid. Out
+    there the vertices are written as offsets from "o" instead, which the
+    same four bytes hold to a fraction of a micron. A mesh near the
+    origin carries no "o" and is written exactly as it always was."""
     import numpy as np
-    return {
+    from ..utils.math3d import offsets_from, origin_for
+    origin = origin_for(mesh.vertices)
+    verts = (mesh.vertices if origin is None
+             else offsets_from(mesh.vertices, origin))
+    out = {
         "v": base64.b64encode(
-            mesh.vertices.astype("<f4").tobytes()).decode("ascii"),
+            np.asarray(verts).astype("<f4").tobytes()).decode("ascii"),
         "t": base64.b64encode(
             mesh.triangles.astype("<u4").tobytes()).decode("ascii"),
     }
+    if origin is not None:
+        out["o"] = [float(c) for c in origin]
+    return out
 
 
 def _mesh_from_json(data: dict):
     import numpy as np
     from ..core.mesh import MeshShape
     v = np.frombuffer(base64.b64decode(data["v"]),
-                      dtype="<f4").reshape(-1, 3)
+                      dtype="<f4").reshape(-1, 3).astype(float)
     t = np.frombuffer(base64.b64decode(data["t"]),
                       dtype="<u4").reshape(-1, 3)
+    origin = data.get("o")
+    if origin is not None:
+        v = v + np.asarray(origin, float)
     return MeshShape(v, t)

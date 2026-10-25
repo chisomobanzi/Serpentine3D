@@ -22,7 +22,6 @@ from serpentine3d.core import geometry as g
 from serpentine3d.core.cplane import CPlane
 from serpentine3d.core.layout import (
     Hatch, Layout, Leader, LinearDim, TextNote, annotation_at, annotation_bounds,
-    layouts_from_json,
 )
 from serpentine3d.core.scene import Scene
 from serpentine3d.core.text import TextShape, text_path
@@ -424,7 +423,7 @@ def test_formatted_note_survives_native_save_and_reopen(tmp_path, typography):
     assert (loaded.id, loaded.x, loaded.y) == (note.id, note.x, note.y)
 
 
-def _render_note(note, k=5., *, legacy=False):
+def _render_note(note, k=5., *, legacy=False, scene=None):
     image = QImage(900, 650, QImage.Format.Format_ARGB32)
     image.fill(Qt.GlobalColor.white)
     painter = QPainter(image)
@@ -439,7 +438,7 @@ def _render_note(note, k=5., *, legacy=False):
                 x, y = to_dev(note.x, note.y - i * note.height * 1.6)
                 painter.drawText(int(x), int(y), line)
         else:
-            draw_note(painter, to_dev, k, note)
+            draw_note(painter, to_dev, k, note, scene)
     finally:
         painter.end()
     return image
@@ -471,9 +470,10 @@ def test_note_selection_bounds_match_the_formatted_ink_on_paper(typography, alig
 def test_legacy_notes_keep_their_existing_rendering_when_loaded():
     data = [{"name": "Older drawing", "notes": [dict(
         id="existing-note", x=50., y=70., text="First floor\nNorth wing", height=4.)]}]
-    lay, = layouts_from_json(data)
-    note, = lay.notes
-    assert _render_note(note) == _render_note(note, legacy=True), (
+    scene = Scene()
+    native._load_doc(scene, {"format": "serpentine3d", "layouts": data})
+    note, = scene.layouts[0].notes
+    assert _render_note(note, scene=scene) == _render_note(note, legacy=True), (
         "Loading an old file must not silently change the note size or line spacing")
 
 

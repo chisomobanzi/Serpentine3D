@@ -2,7 +2,36 @@
 
 from __future__ import annotations
 
+import functools
+
 from .text_object import TextShape
+
+
+@functools.cache
+def _metrics(font_family: str):
+    """`font_family`'s metrics at 2048 pixels, enough that rounding them is
+    far below anything drawn."""
+    from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
+
+    if QGuiApplication.instance() is None:      # headless/scripting use
+        import os
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        _metrics._app = QGuiApplication([])
+    font = QFont(font_family)
+    font.setPixelSize(2048)
+    return QFontMetricsF(font)
+
+
+def cap_height_ratio(font_family: str = "sans") -> float:
+    """A font's capital height for each unit of its size, its em: 0.714 for
+    Noto Sans. The size has room for ascenders, descenders and accents too,
+    so text whose capitals are `h` tall is set in a font `h / ratio` big."""
+    return _metrics(font_family).capHeight() / 2048
+
+
+def text_advance(text: str, font_family: str = "sans") -> float:
+    """How far a line of `text` runs in a font, for each unit of its size."""
+    return _metrics(font_family).horizontalAdvance(text) / 2048
 
 
 def text_path(text: str, height: float, font_family: str = "sans",

@@ -8,17 +8,20 @@ import math
 
 import numpy as np
 from PySide6.QtCore import Qt, QPointF
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF, QTransform
+from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QPainter, QPen,
+                           QPolygonF, QTransform)
 
-from ..core.layout import (annotation_style, hatch_region, note_text_height,
+from ..core.layout import (MAX_PAPER_SEGMENTS, annotation_style, font_size,
+                           letters_capitals, measured_text, note_text_height,
                            resolve_associative)
 
 INK = QColor(25, 25, 30)
 DIM_INK = QColor(45, 70, 130)
 HATCH_INK = QColor(70, 72, 80)
-# Solid is drawn see-through so the linework under it still reads:
-# a poched wall on a section is meant to sit behind its own edges.
-SOLID_FILL = QColor(120, 122, 130, 120)
+# Solid is the ink of a hatch's lines, as solid as they are: a fill drawn
+# see-through read as a tint rather than a hatch. A cut's own edges are
+# drawn after it, so a poched wall still sits behind them.
+SOLID_FILL = QColor(HATCH_INK)
 
 
 def style_of(scene, name: str) -> dict:
@@ -27,9 +30,18 @@ def style_of(scene, name: str) -> dict:
 
 
 def _font(k: float, height_mm: float) -> QFont:
+    """A font `height_mm` big. That is its size, its em: its capitals are
+    about 0.71 of it. The sheet's own text, the title block and the like,
+    is sized this way; lettering given a height uses `_lettering`."""
     f = QFont("sans")
     f.setPixelSize(max(int(height_mm * k), 4))
     return f
+
+
+def _lettering(k: float, height_mm: float, scene) -> QFont:
+    """The font for sheet text `height_mm` high, as `scene` measures it
+    (layout.letters_capitals)."""
+    return _font(k, font_size(height_mm, scene))
 
 
 def _line(painter, to_dev, a, b):
@@ -61,13 +73,13 @@ def draw_note(painter, to_dev, k, note, scene=None):
         painter.fillPath(QTransform().translate(x, y).scale(k, k).map(path), INK)
         return
     painter.setPen(QPen(INK))
-    painter.setFont(_font(k, height))
+    painter.setFont(_lettering(k, height, scene))
     for i, line in enumerate((note.text or "").split("\n")):
         x, y = to_dev(note.x, note.y - i * height * 1.6)
         painter.drawText(int(x), int(y), line)
 
 
-def draw_leader(painter, to_dev, k, leader):
+def draw_leader(painter, to_dev, k, leader, scene=None):
     pts = leader.points
     if len(pts) < 2:
         return
@@ -76,15 +88,14 @@ def draw_leader(painter, to_dev, k, leader):
         _line(painter, to_dev, a, b)
     _arrow(painter, to_dev, pts[0],
            (pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]))
-    painter.setFont(_font(k, leader.height))
+    painter.setFont(_lettering(k, leader.height, scene))
     tx, ty = to_dev(pts[-1][0] + 1.5, pts[-1][1])
     painter.drawText(int(tx), int(ty), leader.text)
 
 
-def fill_cut_solid(painter, to_dev, regions, color=None, outline=None):
+def fill_cut_solid(painter, to_dev, regions, color=None):
     """Flood the cut faces of a section that name a solid material, in
-    `color` (r, g, b in 0..1) or, with none, the grey poché of ink, and
-    with an `outline` pen stroke each face's edge again over its flood.
+    `color` (r, g, b in 0..1) or, with none, the grey poché of ink.
 
     `regions` are the solid rings `cut_hatching` hands back, in paper
     millimetres: for each face the ring round the outside first and
@@ -94,8 +105,8 @@ def fill_cut_solid(painter, to_dev, regions, color=None, outline=None):
 
     One path per face, not one for the lot: cut faces overlap on the
     page all the time, and even-odd across two of them would leave the
-    overlap unpainted. Nothing is outlined here, because the cut draws
-    its own outline, heavier than a hairline.
+    overlap unpainted. Nothing is outlined here: the cut draws its own
+    lines, after the floods, each face's in its own pen.
     """
     from PySide6.QtGui import QPainterPath
     if not regions:
@@ -111,49 +122,43 @@ def fill_cut_solid(painter, to_dev, regions, color=None, outline=None):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
         painter.drawPath(path)
-        if outline is not None:
-            # A colour is opaque where the grey poché was not, so the
-            # outline drawn before it would be lost under it.
-            painter.setPen(outline)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPath(path)
     painter.setBrush(QColor(0, 0, 0, 0))
 
 
-def draw_hatch(painter, to_dev, k, hatch):
+def draw_hatch(painter, to_dev, k, hatch, scene=None):
+    """A sheet's hatch, its pattern looked up in the drawing's library
+    when it is not one of the app's own (#92). Its fill only: the edge of
+    a hatch is the linework drawn round it, as in Rhino and AutoCAD."""
+    from ..core.hatch_patterns import fill_segments, lookup
     pts = hatch.points
     if len(pts) < 3:
         return
-    # A hole is drawn like any other edge and filled like no material at
-    # all, which is the whole of the difference between a pipe and a bar.
+    # A hole is filled like no material at all, which is the whole of the
+    # difference between a pipe and a bar.
     rings = [pts] + [r for r in (getattr(hatch, "holes", None) or [])
                      if len(r) >= 3]
     polys = [QPolygonF([QPointF(*to_dev(p[0], p[1])) for p in ring])
              for ring in rings]
     color = getattr(hatch, "color", None)
     ink = HATCH_INK if color is None else QColor.fromRgbF(*color[:3])
-    if hatch.pattern == "solid":
+    definition = lookup(getattr(scene, "hatch_patterns", None), hatch.pattern)
+    if hatch.pattern == "solid" or (definition and definition.solid):
         from PySide6.QtGui import QPainterPath
         path = QPainterPath()
         path.setFillRule(Qt.OddEvenFill)      # the holes stay unpainted
         for poly in polys:
             path.addPolygon(poly)
             path.closeSubpath()
-        painter.setPen(QPen(ink, 0))
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(SOLID_FILL if color is None else ink)
         painter.drawPath(path)
         painter.setBrush(QColor(0, 0, 0, 0))
         return
     painter.setPen(QPen(ink, max(0.15 * k, 1.0)))
     painter.setBrush(QColor(0, 0, 0, 0))
-    for poly in polys:
-        painter.drawPolygon(poly)
-    angles = [hatch.angle]
-    if hatch.pattern == "cross":
-        angles.append(hatch.angle + 90)
-    for ang in angles:
-        for a, b in hatch_region(rings, ang, hatch.spacing):
-            _line(painter, to_dev, a, b)
+    for a, b in fill_segments(rings, definition, hatch.pattern, hatch.angle,
+                              hatch.spacing, limit=MAX_PAPER_SEGMENTS):
+        _line(painter, to_dev, a, b)
 
 
 def draw_lin_dim(painter, to_dev, k, dim, scene=None):
@@ -173,13 +178,17 @@ def draw_lin_dim(painter, to_dev, k, dim, scene=None):
     _line(painter, to_dev, ao, bo)
     _arrow(painter, to_dev, ao, d, st["arrow_size"])
     _arrow(painter, to_dev, bo, -d, st["arrow_size"])
-    measured = length * dim.scale_denom
-    text = dim.text or (scene.format_length(measured) if scene
-                        else f"{measured:g}")
+    text = dim.text or measured_text(dim, length, scene)
     mid = (a + b) / 2 + n * (dim.offset + 2.2)
-    painter.setFont(_font(k, st["text_height"]))
+    font = _lettering(k, st["text_height"], scene)
+    painter.setFont(font)
     tx, ty = to_dev(mid[0], mid[1])
-    painter.drawText(int(tx) - len(text) * int(k), int(ty), text)
+    if letters_capitals(scene):
+        # centred on the dimension line, however long the text runs
+        shift = round(QFontMetricsF(font).horizontalAdvance(text) / 2)
+    else:
+        shift = len(text) * int(k)      # where a drawing from before had it
+    painter.drawText(int(tx) - shift, int(ty), text)
 
 
 def draw_radial_dim(painter, to_dev, k, dim, scene=None):
@@ -196,17 +205,16 @@ def draw_radial_dim(painter, to_dev, k, dim, scene=None):
     _arrow(painter, to_dev, p, -d)
     if dim.diameter:
         _arrow(painter, to_dev, start, d)
-    measured = r * dim.scale_denom * (2 if dim.diameter else 1)
     prefix = "Ø" if dim.diameter else "R"
-    text = dim.text or (prefix + (scene.format_length(measured) if scene
-                                  else f"{measured:g}"))
+    text = dim.text or prefix + measured_text(
+        dim, r * (2 if dim.diameter else 1), scene)
     label = p + d * 5
-    painter.setFont(_font(k, 3.2))
+    painter.setFont(_lettering(k, 3.2, scene))
     tx, ty = to_dev(label[0], label[1])
     painter.drawText(int(tx), int(ty), text)
 
 
-def draw_angular_dim(painter, to_dev, k, dim):
+def draw_angular_dim(painter, to_dev, k, dim, scene=None):
     v = np.array([dim.vx, dim.vy])
     a1 = math.atan2(dim.y1 - dim.vy, dim.x1 - dim.vx)
     a2 = math.atan2(dim.y2 - dim.vy, dim.x2 - dim.vx)
@@ -228,7 +236,7 @@ def draw_angular_dim(painter, to_dev, k, dim):
         prev = pt
     mid_ang = a1 + sweep / 2
     label = v + np.array([math.cos(mid_ang), math.sin(mid_ang)]) * (r + 3)
-    painter.setFont(_font(k, 3.2))
+    painter.setFont(_lettering(k, 3.2, scene))
     tx, ty = to_dev(label[0], label[1])
     painter.drawText(int(tx), int(ty), f"{math.degrees(sweep):.1f}°")
 
@@ -237,7 +245,7 @@ TITLE_FIELDS = ("project", "title", "author", "date", "scale", "sheet")
 
 
 def draw_title_block(painter, to_dev, k, layout, sheet_index=1,
-                     sheet_count=1):
+                     sheet_count=1, scene=None):
     tb = layout.title_block
     if not tb:
         return
@@ -246,7 +254,8 @@ def draw_title_block(painter, to_dev, k, layout, sheet_index=1,
     fields.setdefault("date", datetime.date.today().isoformat())
     fields.setdefault("sheet", f"{sheet_index} / {sheet_count}")
     if not fields.get("scale") and layout.details:
-        fields["scale"] = layout.details[0].scale_text()
+        fields["scale"] = layout.details[0].scale_text(
+            scene.units if scene is not None else "mm")
 
     w, h = 92.0, 26.0
     m = layout.margin
@@ -355,18 +364,19 @@ def draw_all(painter, to_dev, k, layout, scene=None, sheet_index=1,
     """Every annotation for one layout, in drawing order."""
     resolve_associative(layout)
     for hatch in layout.hatches:
-        draw_hatch(painter, to_dev, k, hatch)
+        draw_hatch(painter, to_dev, k, hatch, scene)
     for note in layout.notes:
         draw_note(painter, to_dev, k, note, scene)
     for leader in layout.leaders:
-        draw_leader(painter, to_dev, k, leader)
+        draw_leader(painter, to_dev, k, leader, scene)
     for dim in layout.dims:
         draw_lin_dim(painter, to_dev, k, dim, scene)
     for dim in layout.rdims:
         draw_radial_dim(painter, to_dev, k, dim, scene)
     for dim in layout.adims:
-        draw_angular_dim(painter, to_dev, k, dim)
-    draw_title_block(painter, to_dev, k, layout, sheet_index, sheet_count)
+        draw_angular_dim(painter, to_dev, k, dim, scene)
+    draw_title_block(painter, to_dev, k, layout, sheet_index, sheet_count,
+                     scene)
     draw_revision_table(painter, to_dev, k, layout)
     for bar in getattr(layout, "scale_bars", []):
         draw_scale_bar(painter, to_dev, k, bar[0], bar[1], bar[2], scene)

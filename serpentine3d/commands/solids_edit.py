@@ -5,14 +5,44 @@ from .base import OptionReq, SelectReq, command
 
 
 def _parse_radius(ctx, text):
+    """A radius from typed text: one length, or `start,end` for a linear
+    variable fillet, or `u:r;u:r;...` (positions 0..1 along the chain)
+    for a SolidWorks-style variable one."""
     from ..utils.units import parse_length
     text = text.strip()
+    if ";" in text:
+        points = []
+        for part in text.split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            u, _, r = part.partition(":")
+            try:
+                u_val = float(u)
+            except ValueError:
+                return None
+            r_val = parse_length(r, ctx.scene.units)
+            if r_val is None:
+                return None
+            points.append((u_val, r_val))
+        return points or None
     if "," in text:
         a, _, b = text.partition(",")
         ra = parse_length(a, ctx.scene.units)
         rb = parse_length(b, ctx.scene.units)
         return (ra, rb) if ra and rb else None
     return parse_length(text, ctx.scene.units)
+
+
+def _echo_largest_fit(ctx, obj, radius, edges=None):
+    """After a failed fillet, name the biggest radius that does fit —
+    a number beats 'try a smaller value'."""
+    if not isinstance(radius, (int, float)):
+        return
+    best = g.largest_fillet_radius(obj.shape, radius, edges=edges)
+    if best:
+        ctx.echo(f"{obj.name}: the largest radius that fits is about "
+                 f"{best:.3g}.")
 
 
 def _edge_size_req(ctx, objs, prompt, build):
@@ -65,14 +95,21 @@ def cmd_filletedge(ctx, objs=None):
         chain = yield OptionReq("Extend picks to smooth chains?",
                                 options=["No", "Yes"], default="No")
         from .base import TextReq
-        r_text = yield TextReq("Fillet radius (or start,end for variable)",
+        r_text = yield TextReq("Fillet radius (start,end or u:r;u:r for "
+                               "variable)",
                                default="1")
         radius = _parse_radius(ctx, r_text)
         if radius is None:
             ctx.echo("Could not parse the radius.")
             return
+        transition = "smooth"
+        if isinstance(radius, list):
+            transition = yield OptionReq(
+                "Straight lines between the radius points?",
+                options=["Smooth", "Straight"], default="Smooth")
         done = 0
         succeeded = set()
+        blamed_picks = {}
         for obj_id, edges in picked.items():
             obj = ctx.scene.get(obj_id)
             if chain == "Yes":
@@ -81,18 +118,42 @@ def cmd_filletedge(ctx, objs=None):
                 for (oid, kind, idx) in ctx.selection.subobjects:
                     if oid == obj_id and kind == "edge":
                         idx_set.update(g.edge_chain(obj.shape, idx))
-                edges = [all_edges[i] for i in sorted(idx_set)]
+                span = sorted(idx_set)
+                edges = [all_edges[i] for i in span]
+            else:
+                span = [idx for (oid, kind, idx) in ctx.selection.subobjects
+                        if oid == obj_id and kind == "edge"]
             try:
                 ctx.scene.replace_shape(
-                    obj_id, g.fillet_edges(obj.shape, radius, edges=edges))
+                    obj_id, g.fillet_edges(obj.shape, radius, edges=edges,
+                                           transition=transition))
                 done += len(edges)
                 succeeded.add(obj_id)
             except g.GeometryError as exc:
                 ctx.echo(f"{obj.name}: {exc}")
+                _echo_largest_fit(ctx, obj, radius, edges=edges)
+                blamed = getattr(exc, "blamed", None)
+                if blamed:
+                    # the kernel says which chains it choked on: keep
+                    # exactly those edges selected for the next try
+                    blamed_picks[obj_id] = [span[k] for k in blamed
+                                            if 0 <= k < len(span)]
         ctx.selection.clear()
-        remaining = [s for s in held_picks if s[0] not in succeeded]
+        remaining = []
+        seen = set()
+        for s in held_picks:
+            if s[0] in succeeded:
+                continue
+            keep = [(s[0], "edge", i)
+                    for i in blamed_picks.get(s[0], [])]
+            for t in (keep or [s]):
+                if t not in seen:
+                    seen.add(t)
+                    remaining.append(t)
         ctx.result_subobjects = remaining
         ctx.echo(f"Filleted {done} edge(s).")
+        if blamed_picks:
+            ctx.echo("The edges the kernel blamed stay selected.")
         return
     if objs is None:
         objs = yield SelectReq("Select solids to fillet (Ctrl+Shift-click "
@@ -115,6 +176,7 @@ def cmd_filletedge(ctx, objs=None):
             done += 1
         except g.GeometryError as exc:
             ctx.echo(f"{o.name}: {exc}")
+            _echo_largest_fit(ctx, o, radius)
             ctx.echo("Try a smaller radius, or Ctrl+Shift-click specific "
                      "edges before running Fillet again.")
     if done:

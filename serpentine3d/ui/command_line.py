@@ -54,7 +54,8 @@ class CommandInput(QLineEdit):
             return False
         modifiers = ev.modifiers()
         return (modifiers == Qt.KeyboardModifier.NoModifier
-                and ev.key() in (Qt.Key.Key_Home, Qt.Key.Key_End)) or (
+                and ev.key() in (Qt.Key.Key_Home, Qt.Key.Key_End,
+                                 Qt.Key.Key_Delete)) or (
             modifiers & Qt.KeyboardModifier.ControlModifier
             and ev.key() in (Qt.Key.Key_C, Qt.Key.Key_V, Qt.Key.Key_A,
                              Qt.Key.Key_Z, Qt.Key.Key_Y, Qt.Key.Key_H))
@@ -103,6 +104,13 @@ class CommandInput(QLineEdit):
             self.downPressed.emit()
         elif key == Qt.Key.Key_Escape:
             self.escPressed.emit()
+        elif (key == Qt.Key.Key_A
+                and ev.modifiers() & Qt.KeyboardModifier.AltModifier
+                and not ev.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            # the line edit has no use for Alt+A; let it bubble to the
+            # main window, where it answers the running command's All
+            # keyword (CurveBoolean's keep-everything chord)
+            ev.ignore()
         elif self._model_editing_shortcut(ev):
             ev.ignore()          # bubble to the main window
         else:

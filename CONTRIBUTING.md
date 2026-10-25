@@ -21,10 +21,18 @@ to compile.
 ## Running the tests
 
 ```bash
-.venv/bin/pytest                          # the whole suite
-QT_QPA_PLATFORM=offscreen .venv/bin/pytest   # headless (what CI does)
-.venv/bin/pytest tests/test_commands.py -k fillet   # one area
+.venv/bin/pytest -n 4                     # the whole suite, four at a time
+QT_QPA_PLATFORM=offscreen .venv/bin/pytest -n 4   # headless (what CI does)
+.venv/bin/pytest tests/test_commands.py -k fillet    # one area
 ```
+
+The suite is some 4,600 independent tests, and each one brings its own
+settings, journal and autosave directories, so `-n` runs them side by
+side. Choose the number of workers by memory, not cores: each one can
+grow past 2 GB over the run, so `-n auto` on a machine with many cores
+can run it out of memory. Four is a safe start, and is what CI's runner
+gets. Leave `-n` off when you suspect one test is leaving something
+behind for the next, which is the one thing running them apart can hide.
 
 CI runs the suite on Python 3.12 plus a `serp3d-batch` smoke test.
 PRs need green CI; if you change behaviour, add or update a test that
