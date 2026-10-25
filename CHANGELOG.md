@@ -106,7 +106,8 @@
   their height now, and a dimension's text sits centred on its line. A
   drawing saved before goes on printing as it did, as text 40% larger
   could crowd what is around it, and the title block, scale bar and
-  revision table keep their sizes in any drawing.
+  revision table keep their sizes in any drawing. A note picks anywhere on
+  its letters, the end of a long line and a second line included.
 - **A solid measures its true volume, whatever its faces are made of
   (#104).** A bow limb from Rhino, a valid solid of 18 NURBS faces, read
   0.8% light, while its area and a fine mesh of it were right. The exact

@@ -1110,8 +1110,10 @@ def annotation_bounds(kind: str, obj, scene=None) -> tuple:
                              alignment=obj.alignment).boundingRect()
             return (obj.x + rect.left(), obj.y - rect.bottom(),
                     obj.x + rect.right(), obj.y - rect.top())
+        from .text import text_advance
         lines = (obj.text or " ").split("\n")
-        w = max(len(line) for line in lines) * font_size(height, scene) * 0.62
+        w = max(text_advance(line) for line in lines) \
+            * font_size(height, scene)
         return (obj.x, obj.y - (len(lines) - 1) * height * 1.6,
                 obj.x + w, obj.y + height)
     if kind == "dim":
