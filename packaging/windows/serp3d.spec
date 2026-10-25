@@ -26,9 +26,8 @@ a = Analysis(
     binaries=vtk_bins + e57_bins,
     datas=[],
     hiddenimports=[],
-    # User hook dirs outrank the contributed hooks (priority 1000 vs -1000),
-    # so hooks/hook-zoneinfo.py shadows the upstream one that demands the
-    # uninstalled `tzdata` package on Windows. See the hook for the rationale.
+    # A hook here replaces contrib's hook of the same name: hook-OpenGL.py
+    # leaves out the DLLs PyOpenGL never loads on this Python.
     hookspath=[str(Path(SPECPATH) / "hooks")],
     excludes=[
         "tkinter",
@@ -44,14 +43,6 @@ a = Analysis(
     ],
     noarchive=False,
 )
-
-# Both build warnings are silenced by the local user hooks in hooks/ (see each
-# file for the rationale), which take priority over the contributed ones:
-# hook-OpenGL.py drops the dead MSVCR90-era VC9 DLLs before the binary scan,
-# hook-zoneinfo.py drops the uninstalled `tzdata` demand. The OpenGL filename is
-# case-sensitive on purpose: PyInstaller matches it against the `OpenGL` module
-# name exactly, and a lowercase spelling silently fails to load.
-
 pyz = PYZ(a.pure)
 
 exe = EXE(

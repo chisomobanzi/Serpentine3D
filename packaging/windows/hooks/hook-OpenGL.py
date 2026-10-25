@@ -1,56 +1,22 @@
-# ------------------------------------------------------------------
-# Local override of the contributed hook-opengl.py hook.
+# Stands in for pyinstaller-hooks-contrib's hook-OpenGL.py, which a hook of the
+# same name in the spec's hookspath replaces outright, so this one must do all
+# it does. It was checked against contrib 2026.9; compare the two whenever
+# PyInstaller or its contrib hooks are bumped.
 #
-# Upstream does, on Windows:
-#
-#     datas = collect_data_files('OpenGL')
-#
-# which sweeps in every file under OpenGL/DLLS, including the VC9 builds
-# (freeglut*.vc9.dll, gle*.vc9.dll). Those link against the MSVC 2008 runtime
-# (MSVCR90.dll), which no modern Windows ships, so binary dependency resolution
-# inside Analysis() reports:
-#
-#     WARNING: Library not found: could not resolve 'MSVCR90.dll' ...
-#
-# Filtering Analysis().binaries afterwards cannot silence that: the scan runs
-# during Analysis(), before the spec gets control back. The dead weight has to
-# be kept out of the collected files in the first place.
-#
-# The VC9 files are never loaded anyway: on Python >= 3.5
-# OpenGL/platform/win32.py hardcodes vc = 'vc14' (vc10 for 3.3-3.4), so the
-# runtime only ever dlopen()s the vc14/vc10 variant.
-#
-# Everything else here deliberately mirrors upstream so the override only
-# removes the dead VC9 files and changes nothing else: the platform plugin
-# hidden import, the OpenGL.arrays submodules, and the rest of the OpenGL data
-# files. Revisit if PyOpenGL's hook gains new responsibilities.
-# ------------------------------------------------------------------
-
-import os
-
-from PyInstaller.compat import is_darwin, is_win
+# PyOpenGL ships freeglut and GLE built against three Visual C++ runtimes:
+# 2008 (vc9), 2010 (vc10) and 2015 (vc14). From Python 3.5 on,
+# OpenGL/platform/win32.py loads only vc14. The contrib hook collects all
+# three, so the installer carried two sets nothing loads, and every build
+# warned that MSVCR90.dll and MSVCR100.dll, which they link against, could not
+# be found. That check runs inside Analysis(), so the only way to stop it is to
+# leave those files out here (#77).
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-# PlatformPlugin performs a conditional import based on os.name and
-# sys.platform. PyInstaller misses this so let's add it ourselves...
-if is_win:
-    hiddenimports = ['OpenGL.platform.win32']
-elif is_darwin:
-    hiddenimports = ['OpenGL.platform.darwin']
-# Use glx for other platforms (Linux, ...)
-else:
-    hiddenimports = ['OpenGL.platform.glx']
+# PyOpenGL imports its platform module and array handlers by name at run time,
+# where PyInstaller cannot follow.
+hiddenimports = ["OpenGL.platform.win32", *collect_submodules("OpenGL.arrays")]
 
-# Arrays modules are needed too.
-hiddenimports += collect_submodules('OpenGL.arrays')
-
-
-def _is_dead_vc9(src, dest):
-    name = os.path.basename(str(src))
-    return name.lower().endswith('.vc9.dll')
-
-
-# PyOpenGL loads these DLLs through ctypes, so PyInstaller cannot discover
-# them by import; they must be shipped as data files.
-if is_win:
-    datas = [(s, d) for s, d in collect_data_files('OpenGL') if not _is_dead_vc9(s, d)]
+# It opens its DLLs with ctypes, so they go in as data files.
+_NEVER_LOADED = (".vc9.dll", ".vc10.dll")
+datas = [(src, dest) for src, dest in collect_data_files("OpenGL")
+         if not src.lower().endswith(_NEVER_LOADED)]

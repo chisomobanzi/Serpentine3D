@@ -73,6 +73,12 @@
 
 ### Fixed
 
+- **The Windows installer leaves out OpenGL libraries nothing loads (#77).**
+  PyOpenGL carries its GLUT and GLE libraries built for three Visual C++
+  runtimes and loads only the newest, so the installer carried two sets that
+  were never used, 1.2 MB in all, and every build warned that their runtimes
+  were missing. Contributed by MaxKarpyza.
+
 - **A sheet reads in inches in an inch or feet document.** A dimension on
   bare paper wrote its paper millimetres with the document's unit after
   them, so 50.8 mm of paper read 50.8" in an inch document and 50.8 cm in
