@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.2 (2026-10-26)
 
 ### Added
 
@@ -23,20 +23,22 @@
   with it, and a DXF export writes the pattern under its own name, Lines
   and Cross where they lie here. A layer may name a pattern there is no
   pattern by yet; its cuts are drawn with lines until there is.
+  Contributed by Jonas Pedrotti (#111).
 - **A hatch is its fill.** As in Rhino and AutoCAD, a hatch no longer
   draws a line round itself or its holes, in the model, in a detail or on
   a sheet; its edge is the linework it was made from. It still snaps to
-  its edge's ends and middles.
+  its edge's ends and middles. Contributed by Jonas Pedrotti (#111).
 - **A hatch has a colour and a background.** A hatch in the model takes
   its layer's Hatch colour and Hatch background, and its Properties can
   give it its own of either, By layer to begin with. A background fills
   the hatch under its lines, in the model, on a sheet and in the PDF, and
   a click anywhere inside a hatch picks it, as in Rhino. A detail draws
   its hatches under the rest of its linework, each in its colour and at
-  its print width.
+  its print width. Contributed by Jonas Pedrotti (#114).
 - **A few patterns every drawing has.** As in Rhino, one of each basic
   form and none that is another turned or scaled: Lines, Cross and Solid
   as before, and now Dash, Dots, Plus, Squares, Triangles and Brick.
+  Contributed by Jonas Pedrotti (#111).
 - **Hatches from Rhino and AutoCAD look as they did there (#92).** A
   .3dm's hatches come in with the patterns of the file's own pattern
   table, at their scale and rotation and laid from their base points, and
@@ -46,18 +48,19 @@
   comes in looking the same. A pattern that draws like one of the app's
   own becomes that one, and one that only shares a name with one is kept
   apart as, say, "BRICK (dxf)". The patterns come into the drawing's list.
+  Contributed by Jonas Pedrotti (#111).
 - **A cut's hatch has a background of its own (#91).** Layers, and objects
   with a section style of their own, have a Hatch background: None, a
   darker shade of the object on screen and bare paper on a sheet as
   before, or the layer's colour or one of its own, which fills the cut
   under its hatch on screen and on paper alike. Scripts set it as
-  `hatch_background`.
+  `hatch_background`. Contributed by Jonas Pedrotti (#111).
 - **The hatch popup shows the hatch while it is open.** Changing the
   pattern, spacing or angle redraws the hatch it would make, in the model
   and on a sheet, before OK makes it. At the prompt each answer shows the
   same. A solid hatch is ghosted as a fill as strong as any other
   pattern's lines, and Solid on a sheet is the ink of a hatch's lines
-  rather than a see-through grey.
+  rather than a see-through grey. Contributed by Jonas Pedrotti (#111).
 - **A clipping plane can be switched off in some views and not others.**
   Rhino lets a clipping plane choose the views it cuts, and a sheet needs
   it: a plan detail cut at sill height, a section detail cut down the
@@ -81,11 +84,12 @@
 - **A picked solid shows where it is cut.** Where a clipping plane cuts a
   solid, its cut line turns gold while the solid is picked, in the model
   and in a detail, where the cut can be all there is to see of it.
+  Contributed by Jonas Pedrotti (#114).
 - **A hidden-line detail shows its print widths.** On the sheet, each of
   a hidden-line detail's lines is drawn by its print width, as a layer
   that follows its print width is in the model, so a heavy wall reads
   heavy before the sheet is printed. A line with no print width is drawn
-  as before.
+  as before. Contributed by Jonas Pedrotti (#114).
 
 ### Changed
 
@@ -102,7 +106,8 @@
   plane that cuts, with `hide`, `isolate`, `layer` or a layer's
   visibility box, says that it still cuts. Only a plane in sight draws
   its arrow. A drawing saved before this opens with the planes it hid
-  paused, so it looks as it was saved.
+  paused, so it looks as it was saved. Contributed by Jonas Pedrotti
+  (#114).
 
 ### Fixed
 
@@ -120,6 +125,7 @@
   cut off, and the cut line and the hatching drew the chamfer, on the
   sheet and in the PDF. Each loop is now followed edge by edge: a
   straight side is its two ends, and a curve is followed closely.
+  Contributed by Jonas Pedrotti (#114).
 - **The Windows installer leaves out OpenGL libraries nothing loads (#77).**
   PyOpenGL carries its GLUT and GLE libraries built for three Visual C++
   runtimes and loads only the newest, so the installer carried two sets that
@@ -231,7 +237,8 @@
   session record carries it through undo and paste, and a PLY export of a
   far scan is written as doubles rather than rounded on the way out. Old
   files have no origin and open exactly as they did; a file of clouds
-  near the world's origin is byte for byte what it was before.
+  near the world's origin is byte for byte what it was before. Contributed
+  by Jonas Pedrotti (#86).
 
 - **A far model goes out of the program with the detail it has.** The
   sweep that followed the two fixes above found the same rounding on
@@ -253,6 +260,7 @@
   since a curve leaves a `.3dm` as a NURBS curve at full precision. On screen, the rubber band, a command's preview
   and a detail view on a sheet were each casting model points to float32
   before the anchor could subtract anything; they no longer do.
+  Contributed by Jonas Pedrotti (#86).
 
 - **A millimetre detail at survey coordinates is the size you modelled
   it.** 0.8.1 stopped far geometry swimming while the camera moved, but
@@ -278,7 +286,7 @@
   offsets untouched and folds the mesh's origin into its matrix, a pick
   moves the ray into the mesh rather than the mesh into the world, and a
   clipping plane travels to the mesh instead of the mesh travelling to
-  it.
+  it. Contributed by Jonas Pedrotti (#86).
 
 - **A file holding far geometry says which release can read it.** The
   offsets and their origin are new, and a reader that knows nothing of
@@ -288,7 +296,7 @@
   drawing carrying an origin is written as file version 7 and names the
   release that reads it, the way hatches and user text did; a drawing
   near home is written exactly as before and opens in every release it
-  did before.
+  did before. Contributed by Jonas Pedrotti (#86).
 
 - **Zooming in on a far model no longer empties the view.** The clip
   planes wrap the drawing and the grid together, and the near plane is
