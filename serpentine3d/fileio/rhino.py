@@ -1543,6 +1543,9 @@ def object_to_shapes(geo, report=None, patterns=None) -> list:
     """
     step = report or Progress()
     shapes = []
+    if isinstance(geo, r3.Dimension):
+        dim = dimension_to_shape(geo, _DIM_STYLES)
+        return [dim] if dim is not None else []
     if isinstance(geo, r3.Hatch):
         return hatch_to_shapes(geo, _HATCH_PATTERNS if patterns is None
                                else patterns)
@@ -1578,6 +1581,108 @@ def object_to_shapes(geo, report=None, patterns=None) -> list:
         shape = _r3_mesh_to_shape(geo, report=step)
         shapes = [shape] if shape is not None else []
     return shapes
+
+
+# The file's dimension styles by id, read with the file as its hatch
+# patterns are.
+_DIM_STYLES: dict = {}
+
+
+def read_dim_styles(model) -> dict:
+    """{style id: what a dimension drawn in it looks like}."""
+    out = {}
+    for style in model.DimStyles:
+        try:
+            arrow = str(style.ArrowType1).rsplit(".", 1)[-1].lower()
+            out[str(style.Id)] = {
+                "text_height": float(style.TextHeight),
+                "arrow_size": float(style.ArrowLength),
+                "arrow": "tick" if "tick" in arrow else "arrow",
+                "length_factor": float(style.LengthFactor) or 1.0,
+                "extension_offset": float(style.ExtensionLineOffset),
+                "extension_beyond": float(style.ExtensionLineExtension),
+                "text_gap": float(style.TextGap),
+                "font_family": _font_name(style),
+            }
+        except Exception:                                       # noqa: BLE001
+            continue
+    return out
+
+
+def _font_name(style) -> str:
+    try:
+        name = str(style.Font.FamilyName or "")
+    except Exception:                                           # noqa: BLE001
+        name = ""
+    return name or "sans"
+
+
+# What closes an object written by openNURBS: its class's end chunk, a
+# typecode and a zero length.
+_CLASS_END = bytes.fromhex("ff7f0280") + bytes(8)
+
+
+def _linear_points(geo):
+    """(second point, dimension line point) of a linear dimension, on its
+    plane, whose origin is its first point.
+
+    rhino3dm gives a dimension's plane and text but not the points it
+    measures, so they are read from the object as openNURBS writes it: an
+    ON_DimLinear ends with those two 2D points, then the CRCs of its two
+    chunks and its class's end chunk."""
+    import base64
+    import struct
+    data = base64.b64decode(geo.Encode()["data"])
+    if len(data) < 52 or data[-12:] != _CLASS_END:
+        return None
+    x2, y2, xl, yl = struct.unpack_from("<4d", data, len(data) - 52)
+    values = (x2, y2, xl, yl)
+    if not all(np.isfinite(v) and abs(v) < 1e12 for v in values):
+        return None
+    return (x2, y2), (xl, yl)
+
+
+def dimension_to_shape(geo, styles: dict):
+    """A Rhino linear (rotated or aligned) dimension as a model dimension,
+    in its style's look, saying what it said in Rhino; None for any other
+    kind, which is left out as it always was."""
+    import re
+    from ..core.dimension import DimensionShape
+    kind = str(geo.AnnotationType).rsplit(".", 1)[-1]
+    if kind not in ("Rotated", "Aligned"):
+        return None
+    points = _linear_points(geo)
+    if points is None:
+        return None
+    (x2, y2), (xl, yl) = points
+    plane = geo.Plane
+    o = np.array([plane.Origin.X, plane.Origin.Y, plane.Origin.Z])
+    x = np.array([plane.XAxis.X, plane.XAxis.Y, plane.XAxis.Z])
+    y = np.array([plane.YAxis.X, plane.YAxis.Y, plane.YAxis.Z])
+    style = dict(styles.get(str(geo.DimensionStyleId), {}))
+    measured = abs(x2) * style.get("length_factor", 1.0)
+    # its text is how the style wrote the number, and anything around it:
+    # the decimals and suffix it was written with, or words typed over it
+    said = str(geo.PlainText or "").strip()
+    for match in re.finditer(r"-?\d+(?:[.,](\d+))?", said):
+        if abs(float(match.group(0).replace(",", ".")) - measured) <= \
+                0.5 * 10 ** -len(match.group(1) or ""):
+            style["decimals"] = len(match.group(1) or "")
+            before, after = said[:match.start()], said[match.end():]
+            if before:
+                style["text"] = before + "<>" + after
+            else:
+                style["suffix"] = after
+            break
+    else:
+        if said:
+            style["text"] = said
+    try:
+        return DimensionShape(tuple(o), tuple(o + x * x2 + y * y2),
+                              tuple(o + x * xl + y * yl), direction=tuple(x),
+                              normal=tuple(np.cross(x, y)), **style)
+    except geometry.GeometryError:
+        return None
 
 
 def hatch_to_shapes(geo, patterns: dict) -> list:
@@ -1766,8 +1871,9 @@ def import_3dm(path: str, progress=None, units: str = "mm",
     model = r3.File3dm.Read(path)
     if model is None:
         raise IOError(f"Could not read 3dm file: {path}")
-    global _HATCH_PATTERNS
+    global _HATCH_PATTERNS, _DIM_STYLES
     _HATCH_PATTERNS = patterns = read_hatch_patterns(path)
+    _DIM_STYLES = read_dim_styles(model)
 
     layers = read_layers(model)
     materials = read_materials(model)

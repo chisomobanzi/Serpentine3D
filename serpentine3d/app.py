@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import sys
@@ -2055,10 +2056,15 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
             return not dlg.wasCanceled()
 
+        # The journal waits for the file: reading it pumps events, and its
+        # quiet-period timer would write the drawing half in as edits.
+        paused = (self.journal.pause() if self.journal is not None
+                  else contextlib.nullcontext())
         try:
-            return fileio.import_file(scene or self.scene, path,
-                                      progress=fileio.throttled(report),
-                                      replace=replace, notes=notes)
+            with paused:
+                return fileio.import_file(scene or self.scene, path,
+                                          progress=fileio.throttled(report),
+                                          replace=replace, notes=notes)
         finally:
             dlg.close()
 
@@ -2315,6 +2321,8 @@ class MainWindow(QMainWindow):
                 return
             notes = []
             n = self._import_showing_progress(path, notes=notes)
+            if self.journal is not None:
+                self.journal.note_import(path)
             self.command_line.echo(
                 f"Imported {n} object(s)"
                 + "".join(f", {note}" for note in notes) + ".")

@@ -481,8 +481,10 @@ def apply_matrix(shape, matrix):
     from .pointcloud import PointCloudShape
     from .text_object import TextShape
     from .hatch import HatchShape
+    from .dimension import DimensionShape
     m = np.asarray(matrix, float)
-    if isinstance(shape, (MeshShape, PointCloudShape, TextShape, HatchShape)):
+    if isinstance(shape, (MeshShape, PointCloudShape, TextShape, HatchShape,
+                          DimensionShape)):
         return shape.transformed(m)
     a = m[:3, :3]
     # a similarity is a rotation times a single scale, so A@A.T is that
@@ -605,8 +607,10 @@ def extrude_profiles(shapes: list, direction: Point, distance: float,
                      cap: bool = False) -> list[TopoDS_Shape]:
     """Extrude several curves, treating nested capped curves as one profile."""
     from .text_object import TextShape
+    from .dimension import DimensionShape
     shapes = [curve for shape in shapes
-              for curve in (shape.to_curves() if isinstance(shape, TextShape)
+              for curve in (shape.to_curves()
+                            if isinstance(shape, (TextShape, DimensionShape))
                             else [shape])]
     if not cap:
         return [extrude(shape, direction, distance, cap=False)
@@ -4210,7 +4214,8 @@ def merge_planar_regions(faces: list) -> TopoDS_Shape:
 def _apply_trsf(shape, trsf: gp_Trsf, copy: bool = True) -> TopoDS_Shape:
     from .text_object import TextShape
     from .hatch import HatchShape
-    if isinstance(shape, (TextShape, HatchShape)):
+    from .dimension import DimensionShape
+    if isinstance(shape, (TextShape, HatchShape, DimensionShape)):
         return shape.transformed(_transform_matrix(trsf))
     return BRepBuilderAPI_Transform(shape, trsf, copy).Shape()
 
@@ -4261,7 +4266,8 @@ def _gtransform(shape, gtrsf) -> TopoDS_Shape:
     Strip the triangulation first, then reject a degenerate result."""
     from .text_object import TextShape
     from .hatch import HatchShape
-    if isinstance(shape, (TextShape, HatchShape)):
+    from .dimension import DimensionShape
+    if isinstance(shape, (TextShape, HatchShape, DimensionShape)):
         return shape.transformed(_transform_matrix(gtrsf))
     from OCP.BRepTools import BRepTools
     BRepTools.Clean_s(shape)
@@ -4415,7 +4421,9 @@ def copy_shape(shape) -> TopoDS_Shape:
     from .pointcloud import PointCloudShape
     from .text_object import TextShape
     from .hatch import HatchShape
-    if isinstance(shape, (MeshShape, PointCloudShape, TextShape, HatchShape)):
+    from .dimension import DimensionShape
+    if isinstance(shape, (MeshShape, PointCloudShape, TextShape, HatchShape,
+                          DimensionShape)):
         return shape.copy()
     return BRepBuilderAPI_Copy(shape).Shape()
 
@@ -4562,7 +4570,8 @@ _CLOUD_TAG = b"SPCL\x01"
 def shape_to_bytes(shape) -> bytes:
     from .text_object import TextShape
     from .hatch import HatchShape
-    if isinstance(shape, (TextShape, HatchShape)):
+    from .dimension import DimensionShape
+    if isinstance(shape, (TextShape, HatchShape, DimensionShape)):
         return shape.to_bytes()
     from .picture import PictureShape
     if isinstance(shape, PictureShape):
@@ -4649,6 +4658,9 @@ def shape_from_bytes(data: bytes):
     from .hatch import HATCH_TAG, HatchShape
     if data.startswith(HATCH_TAG):
         return HatchShape.from_bytes(data)
+    from .dimension import DIMENSION_TAG, DimensionShape
+    if data.startswith(DIMENSION_TAG):
+        return DimensionShape.from_bytes(data)
     from .picture import PICTURE_TAG, PictureShape
     if data.startswith(PICTURE_TAG):
         return PictureShape.from_bytes(data)

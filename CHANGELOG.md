@@ -1,5 +1,67 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A DXF comes in looking as it was drawn.** Each layer brings its
+  colour, its lineweight as a print width, its linetype and whether it
+  is on, off, frozen or locked; each object its own colour (true colour
+  as well as AutoCAD's index), lineweight and linetype where it overrides
+  its layer's; a hatch its colour and background colour. A linetype is
+  read by what its name says, so VERDECKT comes in as Hidden and MITTE
+  as Center. Until now everything came in grey on bare layers.
+- **DXF block references come in.** Each one as the pieces its block is
+  made of, where the reference puts them, grouped so a click takes the
+  lot, as a Rhino block comes in; blocks inside blocks are opened up
+  too. A piece that leaves its look to the block (BYBLOCK, or layer 0)
+  takes the reference's colour, lineweight, linetype and layer.
+- **DXF text comes in as editable text.** TEXT, MTEXT and a block's
+  attribute values keep their words, line breaks, height, font, turn,
+  width factor and the point they hang from. Wrapping at an MTEXT's
+  frame width and inline formatting are not read yet.
+- **Linear dimensions in the model.** `dim` on a sheet works as it
+  did; in the model it places a dimension on the construction plane:
+  two points, then where its line goes. Auto measures along the plane's
+  x or y, whichever way the line is pulled out, as Rhino's Dim does;
+  Aligned measures between the points. A dimension is one object that
+  measures: moved, turned or scaled, its number follows, and mirrored
+  or turned over its text still reads. Properties edits its text height,
+  decimal places, suffix (set off by a space), arrowheads or ticks, arrow
+  size, and text typed over the number, where <> stands for it. A new
+  dimension looks like the last one drawn. Drawings with one need
+  0.12.3 to open.
+- **DXF and Rhino dimensions come in as dimensions.** A linear or
+  aligned DIMENSION keeps the points it measures, its line, text height,
+  arrows or ticks, decimals, suffix, typed text and overall scale, and
+  goes back out to DXF as a DIMENSION. A rotated or aligned dimension in
+  a .3dm comes in the same way, in its dimension style's look. Both say
+  what they said in their file's unit after the drawing is converted to
+  the document's. Other DXF dimensions come in as the lines, arrows and
+  text the file draws them with, grouped; a filled SOLID, the usual
+  arrowhead, now comes in as a solid hatch.
+- **A DXF comes in at its real size.** A file that says its unit
+  ($INSUNITS) is converted to the document's, as STEP and Rhino files
+  are, and the import says so.
+- **A DXF import says how far it has got,** and can be cancelled.
+
+### Fixed
+
+- **Importing a large file no longer holds the window up.** The session
+  journal wrote every imported object out as exact geometry, one
+  temporary file apiece, while the progress bar was still moving: a DXF
+  of twenty thousand lines took minutes. An import is now one journal
+  entry, as opening a file is, and replay imports the file again.
+- **A DXF's mirrored arcs, circles and polylines land where they were
+  drawn, and a filleted polyline keeps its rounds.** These are written in
+  their own plane's coordinates, and one AutoCAD mirrored has that plane
+  facing down; read as world coordinates every such fillet arc landed
+  mirrored, far away from its lines. The arcs inside a polyline (its
+  bulges) were left out altogether, so its fillets came in as corners.
+- **A DXF export keeps colours and lineweights.** Layer colours were never
+  written, and neither were an object's own colour, lineweight and
+  linetype, nor a hatch's colour and background.
+
 ## 0.12.2 (2026-10-26)
 
 ### Added

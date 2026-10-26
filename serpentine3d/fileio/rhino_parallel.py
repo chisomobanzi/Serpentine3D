@@ -264,6 +264,7 @@ def _init_worker(path: str):
     _MATERIALS = rhino.read_materials(_MODEL)
     _BLOCKS = rhino.read_blocks(_MODEL)
     rhino._HATCH_PATTERNS = rhino.read_hatch_patterns(path)
+    rhino._DIM_STYLES = rhino.read_dim_styles(_MODEL)
 
 
 def _convert(indices: list[int]):

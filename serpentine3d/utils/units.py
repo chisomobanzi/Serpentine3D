@@ -62,7 +62,12 @@ def rescale(shape, factor: float):
             lambda d=shape: [geometry.scale(s, (0, 0, 0), factor)
                              for s in d.shapes()],
             kind=shape.kind)
-    return geometry.scale(shape, (0, 0, 0), factor)
+    from ..core.dimension import DimensionShape
+    scaled = geometry.scale(shape, (0, 0, 0), factor)
+    if isinstance(scaled, DimensionShape):
+        # it still says what it said in the file's unit
+        scaled = scaled.edited(length_factor=scaled.length_factor / factor)
+    return scaled
 
 
 def parse_length(text: str, doc_units: str = "mm") -> float | None:

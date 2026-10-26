@@ -21,7 +21,7 @@ from ..core.layers import (DEFAULT_CUT_LINE_WIDTH, DEFAULT_SCREEN_WIDTH,
 
 # The newest version this reader understands. Anything newer is refused
 # with the version it asks for, never a traceback.
-FORMAT_VERSION = 8
+FORMAT_VERSION = 9
 # What a document with none of the version-3 kinds is written as.
 PLAIN_VERSION = 2
 # The Serpentine3D release a version-3 file asks its reader to be.
@@ -233,6 +233,12 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
             or doc["hatch_patterns"] or _hatching_0121_loses(scene)):
         doc["version"] = 8
         doc["requires"] = "0.12.2"
+    # A release before model dimensions cannot read one, and refuses the
+    # whole file with it.
+    from ..core.dimension import DimensionShape
+    if any(isinstance(shape, DimensionShape) for shape in new_shapes):
+        doc["version"] = 9
+        doc["requires"] = "0.12.3"
     _write_container(doc, path, thumbnail, blobs)
 
 
