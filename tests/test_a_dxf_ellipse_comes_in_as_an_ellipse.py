@@ -39,7 +39,7 @@ MAJOR, MINOR = 10.0, 4.0
 def imported(tmp_path):
     """Write entities into a DXF, read it back, hand over the shapes."""
     def go(build):
-        doc = ezdxf.new("R2010")
+        doc = ezdxf.new("R2010", units=ezdxf.units.MM)
         build(doc.modelspace())
         path = tmp_path / "e.dxf"
         doc.saveas(path)

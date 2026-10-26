@@ -203,7 +203,8 @@ def _import_file(scene, path: str, ext: str, report, replace: bool = False,
         return len(named)
     if ext == ".dxf":
         from . import dxf as dxf_mod
-        return dxf_mod.import_dxf(scene, path)
+        return dxf_mod.import_dxf(scene, path, progress=report,
+                                  units=scene.units, notes=notes)
     if ext == ".svg":
         from . import svg as svg_mod
         return svg_mod.import_svg(scene, path)
