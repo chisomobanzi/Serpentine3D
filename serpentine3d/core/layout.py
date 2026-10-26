@@ -78,6 +78,22 @@ class DetailView:
     # layers this detail leaves out, as Rhino's per-detail visibility does
     # (a sublayer goes with its parent); the model itself is untouched
     hidden_layers: list = field(default_factory=list)
+    # and single objects, by id, as Rhino's HideInDetail leaves them out;
+    # assigned anew, never edited in place, as undo keeps a copy
+    hidden_objects: list = field(default_factory=list)
+
+    def left_out(self, scene) -> set:
+        """The ids of the objects this detail does not draw or let you
+        pick, on top of what is hidden anyway: its own hidden ones and
+        everything on a layer it leaves out. While a command picks from
+        objects on show (`Scene.showing_only`), it leaves out only the
+        layers, so what it hid can be drawn to be picked."""
+        layers = scene.layers.with_descendants(self.hidden_layers) \
+            if self.hidden_layers else set()
+        out = {o.id for o in scene.all() if o.layer_id in layers}
+        if scene.showing_only is None:
+            out.update(self.hidden_objects)
+        return out
 
     def contains(self, px: float, py: float) -> bool:
         return (self.x <= px <= self.x + self.w

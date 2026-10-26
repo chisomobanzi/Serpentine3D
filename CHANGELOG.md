@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Show the hidden objects you pick.** `show` brings back everything
+  hidden at once. As in Rhino, `showselected` (`unhideselected`) puts the
+  hidden objects on show while it waits, with everything else stepped
+  aside, so what you click is exactly what can come back. The ones you
+  pick come back and the rest stay hidden. Escape changes nothing, and
+  until you pick, nothing in the drawing has changed.
+- **A detail can hide objects of its own.** Inside a detail, as in Rhino,
+  `hideindetail` hides the objects you pick in that detail only, and the
+  model and every other detail still show them. `showindetail` brings back
+  all a detail has hidden, and `showselectedindetail` the ones you pick,
+  with them on show while it asks. A detail leaves them out on screen, in
+  hidden-line and shaded details alike, and in the PDF and DXF. Inside a
+  detail, what it hides cannot be picked, and nor, now, can what is on a
+  layer it leaves out. A drawing that uses this is written as file version
+  9 and names 0.12.3, the release that keeps it: 0.12.2 would open it with
+  those objects back in the detail and lose them on a save.
+
 ## 0.12.2 (2026-10-26)
 
 ### Added

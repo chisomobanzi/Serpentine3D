@@ -1805,8 +1805,8 @@ class Viewport(QOpenGLWidget):
             GL.glDisable(GL.GL_DEPTH_TEST)
             return
 
-        key = (self.scene.revision, round(cam.azimuth, 5),
-               round(cam.elevation, 5),
+        key = (self.scene.revision, self.scene.showing_only,
+               round(cam.azimuth, 5), round(cam.elevation, 5),
                tuple(round(float(c), 4) for c in cam.target))
         cached = getattr(self, "_tech_cache", None)
         if cached is None or cached[0] != key:
@@ -2215,15 +2215,18 @@ class Viewport(QOpenGLWidget):
         Not `scene.all()`. A drawing is opened with most of it switched off
         — 65,000 objects over three ticked layers in the report — and
         meshing and uploading the rest is work for geometry that no draw
-        loop will ever reach (GitHub #5).
+        loop will ever reach (GitHub #5). Hidden objects on show for a pick
+        are drawn, and what they stand in for keeps its buffers meanwhile.
         """
-        return self.scene.visible_objects()
+        return self.scene.drawable_objects()
 
     def _gpu_sync_key(self) -> tuple:
         """Everything the reconcile below reads, so it can be skipped when
-        none of it has moved. See `_sync_gpu`."""
+        none of it has moved. See `_sync_gpu`. Putting hidden objects on
+        show for a pick moves no revision, so that is in it too."""
         return (self.scene.revision, self._tess_epoch,
-                self._layer_linetypes(), self._visible_layers())
+                self._layer_linetypes(), self._visible_layers(),
+                self.scene.showing_only)
 
     def _sync_gpu(self):
         """Reconcile the GPU cache against the scene: buffers for what is new,
@@ -2404,7 +2407,7 @@ class Viewport(QOpenGLWidget):
 
     def _curvature_range(self) -> float:
         """95th percentile of |curvature| across visible meshes (cached)."""
-        rev = self.scene.revision
+        rev = (self.scene.revision, self.scene.showing_only)
         cached = getattr(self, "_curv_range_cache", None)
         if cached is not None and cached[0] == rev:
             return cached[1]
@@ -2422,8 +2425,38 @@ class Viewport(QOpenGLWidget):
         self._curv_range_cache = (rev, max(rng, 1e-9))
         return self._curv_range_cache[1]
 
+    def _drawn_objects(self, hidden_layers=(), hidden_objects=()) -> list:
+        """The objects a draw paints, front-most first: what is in sight,
+        less what a detail leaves out, its layers and its own hidden
+        objects. While a pick puts objects on show, a detail's own hidden
+        ones are drawn, being what is on show."""
+        # Higher draw_order on top: with GL_LESS the first-drawn wins
+        # coincident depth ties, so draw front-most first. Stable, so
+        # equal-order objects keep insertion order.
+        objects = sorted(self.scene.visible_objects(),
+                         key=lambda o: -getattr(o, "draw_order", 0))
+        if hidden_layers:
+            left_out = self.scene.layers.with_descendants(hidden_layers)
+            objects = [o for o in objects if o.layer_id not in left_out]
+        if hidden_objects and self.scene.showing_only is None:
+            hidden = set(hidden_objects)
+            objects = [o for o in objects if o.id not in hidden]
+        return objects
+
+    def _shown_here(self) -> list:
+        """What can be seen, and so picked, from where you are: the objects
+        in sight, less what the detail you are inside leaves out."""
+        objects = self.scene.visible_objects()
+        detail = (self.layout_view._entered() if self.space != "model"
+                  else None)
+        if detail is None:
+            return objects
+        out = detail.left_out(self.scene)
+        return [o for o in objects if o.id not in out]
+
     def _draw_objects(self, mvp, view, mode_override=None,
-                      light_background=False, hidden_layers=()):
+                      light_background=False, hidden_layers=(),
+                      hidden_objects=()):
         """Draw the scene. `hidden_layers` are left out on top of what is
         hidden anyway, with what is under them: a detail's own (#38).
 
@@ -2433,7 +2466,8 @@ class Viewport(QOpenGLWidget):
         clips = self._clip_vectors()
         try:
             self._draw_objects_with_clips(mvp, view, clips, mode_override,
-                                          light_background, hidden_layers)
+                                          light_background, hidden_layers,
+                                          hidden_objects)
         finally:
             # Qt also draws in this context. Leaving clip distances enabled
             # after a failed upload makes its shaders' unwritten distances
@@ -2491,7 +2525,8 @@ class Viewport(QOpenGLWidget):
         return _caps.hatch_period(spacing_mm, ppu)
 
     def _draw_objects_with_clips(self, mvp, view, clips, mode_override=None,
-                                light_background=False, hidden_layers=()):
+                                light_background=False, hidden_layers=(),
+                                hidden_objects=()):
         # The matrices arrive float64 and stay that way until each
         # object's anchor is folded in: the fold is the whole fix for
         # far geometry swimming, and it only works before the cast.
@@ -2506,14 +2541,7 @@ class Viewport(QOpenGLWidget):
         curv_range = self._curvature_range() if mode == "curvature" else 0.0
         show_isos = self.shows_isocurves(mode)
         show_edges = self.shows_edges(mode)
-        # Higher draw_order on top: with GL_LESS the first-drawn wins coincident
-        # depth ties, so draw front-most first. Stable, so equal-order objects
-        # keep insertion order (unchanged default behaviour).
-        objects = sorted(self.scene.visible_objects(),
-                         key=lambda o: -getattr(o, "draw_order", 0))
-        if hidden_layers:
-            left_out = self.scene.layers.with_descendants(hidden_layers)
-            objects = [o for o in objects if o.layer_id not in left_out]
+        objects = self._drawn_objects(hidden_layers, hidden_objects)
         # A locked layer greys what is on it, as a locked object is greyed.
         # Worked out once a frame over the layers, not once per object.
         layers = self.scene.layers
@@ -3627,10 +3655,11 @@ class Viewport(QOpenGLWidget):
         Native plane geometry is read once a revision, shared by the cut
         and its arrow and by every view that asks; a sheet asks once for
         each detail on it, every frame. Layer visibility can change
-        without a scene revision, so it is part of the key the arrows are
-        kept under.
+        without a scene revision, and so can what a pick puts on show, so
+        both are part of the key the arrows are kept under.
         """
-        key = (self.scene.revision, self._visible_layers())
+        key = (self.scene.revision, self._visible_layers(),
+               self.scene.showing_only)
         cache = getattr(self, "_clip_frames_cache", None)
         if cache is None or cache[0] != key:
             visible = {o.id for o in self.scene.visible_objects()}
@@ -4252,7 +4281,8 @@ class Viewport(QOpenGLWidget):
                 self._draw_objects(mvp64, view,
                                    mode_override=detail.display_mode,
                                    light_background=True,
-                                   hidden_layers=detail.hidden_layers)
+                                   hidden_layers=detail.hidden_layers,
+                                   hidden_objects=detail.hidden_objects)
             img = fbo.toImage()
             fbo.release()
             ratio = self.devicePixelRatioF()
@@ -4619,7 +4649,7 @@ class Viewport(QOpenGLWidget):
         found: list[tuple[float, str]] = []
 
         r = PICK_RADIUS_PX
-        selectable = [obj for obj in self.scene.visible_objects()
+        selectable = [obj for obj in self._shown_here()
                       if self.scene.is_selectable(obj.id)
                       and self.selection.filter_allows(obj.kind)]
         for obj in self._pick_candidates(selectable, px - r, py - r,
@@ -4736,7 +4766,7 @@ class Viewport(QOpenGLWidget):
         origin, direction = eye.ray_through(px, py, w, h)
         # edges first (they are the smaller target)
         r = PICK_RADIUS_PX
-        selectable = [obj for obj in self.scene.visible_objects()
+        selectable = [obj for obj in self._shown_here()
                       if self.scene.is_selectable(obj.id)]
         near_cursor = self._pick_candidates(selectable, px - r, py - r,
                                             px + r, py + r, w, h)
@@ -5499,7 +5529,7 @@ class Viewport(QOpenGLWidget):
         w, h = self.width(), self.height()
         eye = self._eye()
         picked = []
-        selectable = [obj for obj in self.scene.visible_objects()
+        selectable = [obj for obj in self._shown_here()
                       if self.scene.is_selectable(obj.id)
                       and self.selection.filter_allows(obj.kind)]
         for obj in self._pick_candidates(selectable, *rect, w, h):
@@ -5634,7 +5664,7 @@ class Viewport(QOpenGLWidget):
         w, h = self.width(), self.height()
         eye = self._eye()
         faces_shown = self._pick_mode() != "wireframe"
-        selectable = [obj for obj in self.scene.visible_objects()
+        selectable = [obj for obj in self._shown_here()
                       if self.scene.is_selectable(obj.id)
                       and self.selection.filter_allows(obj.kind)]
         caught = []
