@@ -61,24 +61,52 @@ Filename: "{app}\serp3d.exe"; Description: "Launch {#AppName}"; \
   Flags: nowait postinstall skipifsilent
 
 [Code]
-{ Clearing the "check for updates" task writes a minimal settings.json so the
-  launch-time check is off from first run - SignPath's terms require an opt-out
-  at install time, not only a runtime setting. An existing settings file is
-  never touched: whatever the user already chose in the app wins. }
+{ The "check for updates" task is applied to settings.json on every install,
+  ticked or cleared - SignPath's terms require an opt-out at install time, not
+  only a runtime setting. Ticking it again must also undo an earlier opt-out,
+  so an existing file gets its check_updates value flipped in place; the rest
+  of the file is left as it is. }
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   CfgDir, CfgPath: String;
+  Json, Wanted, Other: AnsiString;
+  P: Integer;
 begin
-  if (CurStep = ssPostInstall) and (not WizardIsTaskSelected('updatecheck')) then
+  if CurStep <> ssPostInstall then
+    Exit;
+  CfgDir := ExpandConstant('{%USERPROFILE}') + '\.config\serpentine3d';
+  CfgPath := CfgDir + '\settings.json';
+  if WizardIsTaskSelected('updatecheck') then
   begin
-    CfgDir := ExpandConstant('{%USERPROFILE}') + '\.config\serpentine3d';
-    CfgPath := CfgDir + '\settings.json';
-    if not FileExists(CfgPath) then
+    Wanted := '"check_updates": true';
+    Other := '"check_updates": false';
+  end else begin
+    Wanted := '"check_updates": false';
+    Other := '"check_updates": true';
+  end;
+  if FileExists(CfgPath) then
+  begin
+    if not LoadStringFromFile(CfgPath, Json) then
+      Exit;
+    P := Pos(Other, Json);
+    if P > 0 then
+      Json := Copy(Json, 1, P - 1) + Wanted + Copy(Json, P + Length(Other), MaxInt)
+    else if (Pos('"check_updates"', Json) = 0) and
+            (not WizardIsTaskSelected('updatecheck')) then
     begin
-      ForceDirectories(CfgDir);
-      SaveStringToFile(CfgPath,
-        '{' + #13#10 + '  "check_updates": false' + #13#10 + '}' + #13#10,
-        False);
-    end;
+      P := Pos('{', Json);
+      if P = 0 then
+        Exit;
+      Insert(#13#10 + '  ' + Wanted + ',', Json, P + 1);
+    end else
+      Exit;
+    SaveStringToFile(CfgPath, Json, False);
+  end
+  else if not WizardIsTaskSelected('updatecheck') then
+  begin
+    ForceDirectories(CfgDir);
+    SaveStringToFile(CfgPath,
+      '{' + #13#10 + '  "check_updates": false' + #13#10 + '}' + #13#10,
+      False);
   end;
 end;
