@@ -21,7 +21,7 @@ from ..core.layers import (DEFAULT_CUT_LINE_WIDTH, DEFAULT_SCREEN_WIDTH,
 
 # The newest version this reader understands. Anything newer is refused
 # with the version it asks for, never a traceback.
-FORMAT_VERSION = 8
+FORMAT_VERSION = 9
 # What a document with none of the version-3 kinds is written as.
 PLAIN_VERSION = 2
 # The Serpentine3D release a version-3 file asks its reader to be.
@@ -233,6 +233,12 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
             or doc["hatch_patterns"] or _hatching_0121_loses(scene)):
         doc["version"] = 8
         doc["requires"] = "0.12.2"
+    # 0.12.2 rebuilds a detail from the fields it knows and lets the rest
+    # go, so the objects a detail hides would come back in it without a
+    # word, and a save there would lose them for good.
+    if any(d.hidden_objects for lay in scene.layouts for d in lay.details):
+        doc["version"] = 9
+        doc["requires"] = "0.12.3"
     _write_container(doc, path, thumbnail, blobs)
 
 

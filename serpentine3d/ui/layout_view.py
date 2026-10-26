@@ -615,7 +615,8 @@ class LayoutView:
                              self.px_per_mm, detail.id):
             vp._draw_objects(mvp64, view, mode_override=mode,
                              light_background=True,
-                             hidden_layers=detail.hidden_layers)
+                             hidden_layers=detail.hidden_layers,
+                             hidden_objects=detail.hidden_objects)
         GL.glDisable(GL.GL_SCISSOR_TEST)
         GL.glViewport(0, 0, int(vp.width() * ratio),
                       int(vp.height() * ratio))
@@ -623,23 +624,25 @@ class LayoutView:
     def _detail_hlr(self, detail) -> dict:
         vp = self.vp
         # The clipping planes that cut this detail, which a layer's
-        # visibility can change without the scene's revision moving.
+        # visibility can change without the scene's revision moving; and so
+        # can what a pick puts on show.
         clips = tuple(f for f in vp._clip_frames(detail.id) if f[2])
         key = (vp.scene.revision, round(detail.azimuth, 6),
                round(detail.elevation, 6), tuple(detail.target),
                detail.perspective, detail.section_offset,
-               tuple(detail.hidden_layers), clips)
+               tuple(detail.hidden_layers), tuple(detail.hidden_objects),
+               vp.scene.showing_only, clips)
         cached = self._hlr_cache.get(detail.id)
         if cached is not None and cached[0] == key:
             return cached[1]
         d, right, up = detail_direction(detail)
         from ..core.mesh import MeshShape
         from ..core.pointcloud import PointCloudShape
-        left_out = vp.scene.layers.with_descendants(detail.hidden_layers)
+        left_out = detail.left_out(vp.scene)
         # A clipping plane is not drawn on a sheet, only what it cut.
         objs = [o for o in vp.scene.visible_objects()
                 if not isinstance(o.shape, (MeshShape, PointCloudShape))
-                and o.layer_id not in left_out and not o.clip_plane]
+                and o.id not in left_out and not o.clip_plane]
         # A hatch is drawn by the sheet itself, in its colour and on its
         # background, under the linework (#91): a hidden-line pass has one
         # ink and no fills.

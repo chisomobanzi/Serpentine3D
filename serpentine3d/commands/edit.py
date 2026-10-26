@@ -814,6 +814,113 @@ def cmd_show(ctx):
     yield from ()
 
 
+def pick_from_hidden(ctx, ids, prompt: str):
+    """Ask which of the hidden objects `ids` you mean, with them on show in
+    place of what is in sight, as Rhino's ShowSelected does: what can be
+    clicked is then exactly what can be brought back. They go off show
+    again however the prompt ends, Escape included."""
+    from .view import _redraw_all
+    offered = frozenset(ids)
+    # what was selected is in sight, and steps aside with the rest
+    ctx.selection.clear()
+    try:
+        ctx.scene.showing_only = offered
+        _redraw_all(ctx)
+        picked = yield SelectReq(prompt, allow_preselected=False,
+                                 accept=lambda o: o.id in offered)
+    finally:
+        ctx.scene.showing_only = None
+        _redraw_all(ctx)
+    return picked
+
+
+@command("showselected", aliases=("unhideselected",))
+def cmd_showselected(ctx):
+    """Show the hidden objects you pick and leave the rest hidden."""
+    # one on a layer that is off would not appear if shown
+    hidden = [o.id for o in ctx.scene.all()
+              if not o.visible and ctx.scene.layers.is_visible(o.layer_id)]
+    if not hidden:
+        ctx.echo("There is nothing hidden to show.")
+        return
+    objs = yield from pick_from_hidden(ctx, hidden,
+                                       "Select hidden objects to show")
+    n = ctx.scene.update_many([o.id for o in objs], visible=True)
+    ctx.echo(f"Showed {n} object(s); {len(hidden) - n} still hidden.")
+
+
+def _detail_here(ctx):
+    """The detail you are inside on a sheet, or None, saying why not."""
+    vp = getattr(ctx, "viewport", None)
+    lv = getattr(vp, "layout_view", None)
+    detail = lv._entered() if lv is not None else None
+    if detail is None:
+        ctx.echo("This works inside a detail: double-click one on a sheet "
+                 "to go inside it first.")
+    return detail
+
+
+def _set_hidden_in(ctx, detail, ids):
+    # assigned, not edited in place: undo holds a copy of the detail
+    detail.hidden_objects = list(ids)
+    ctx.scene.notify("layouts")
+
+
+@command("hideindetail")
+def cmd_hideindetail(ctx):
+    """Hide the objects you pick in the detail you are inside, and nowhere
+    else: the model and every other detail still show them."""
+    detail = _detail_here(ctx)
+    if detail is None:
+        return
+    objs = yield SelectReq("Select objects to hide in this detail")
+    hidden = list(detail.hidden_objects)
+    hidden += [o.id for o in objs if o.id not in hidden]
+    _set_hidden_in(ctx, detail, hidden)
+    ctx.echo(f"Hid {len(objs)} object(s) in this detail; 'showindetail' "
+             "brings them back.")
+
+
+@command("showindetail")
+def cmd_showindetail(ctx):
+    """Show everything the detail you are inside has hidden."""
+    detail = _detail_here(ctx)
+    if detail is None:
+        return
+    n = len(detail.hidden_objects)
+    if n:
+        _set_hidden_in(ctx, detail, [])
+    ctx.echo(f"Showed {n} object(s) in this detail.")
+    yield from ()
+
+
+@command("showselectedindetail")
+def cmd_showselectedindetail(ctx):
+    """Show the objects you pick of those the detail you are inside has
+    hidden, and leave the rest hidden there."""
+    detail = _detail_here(ctx)
+    if detail is None:
+        return
+    scene = ctx.scene
+    left_out = (scene.layers.with_descendants(detail.hidden_layers)
+                if detail.hidden_layers else set())
+    # one hidden in the model, or on a layer off here, would not appear
+    offered = [i for i in detail.hidden_objects
+               if (o := scene.get(i)) is not None and o.visible
+               and scene.layers.is_visible(o.layer_id)
+               and o.layer_id not in left_out]
+    if not offered:
+        ctx.echo("There is nothing hidden in this detail to show.")
+        return
+    objs = yield from pick_from_hidden(
+        ctx, offered, "Select objects to show in this detail")
+    back = {o.id for o in objs}
+    _set_hidden_in(ctx, detail,
+                   [i for i in detail.hidden_objects if i not in back])
+    ctx.echo(f"Showed {len(back)} object(s) in this detail; "
+             f"{len(offered) - len(back)} still hidden here.")
+
+
 @command("selall", aliases=("sa",), mutates=False)
 def cmd_selall(ctx):
     ctx.selection.select_all()

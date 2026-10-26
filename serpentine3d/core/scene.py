@@ -215,6 +215,10 @@ class Scene:
         self.hatch_patterns: dict = {}
         # the names the last load gave, a fresh list each time; not saved
         self.loaded_patterns: list = []
+        # ids put on show in place of what is in sight while a command picks
+        # from them, `showselected`'s hidden objects; None the rest of the
+        # time. Not an edit: no object's `visible` moves, nothing is saved
+        self.showing_only: frozenset | None = None
         self.record_history = False     # new surfaces remember their inputs
         self.history_records: list = []   # {"op", "inputs", "output", ...}
         self._regen_active = False
@@ -510,10 +514,26 @@ class Scene:
         return [self.objects[i] for i in self._order]
 
     def visible_objects(self) -> list[SceneObject]:
+        """What is drawn, picked and snapped to: the objects in sight, or
+        while a command picks from `showing_only`, those in their place."""
         # is_visible, not the layer's own switch: a layer under a parent
         # that is off is off, whatever its own switch says.
         return [o for o in self.all()
-                if o.visible and self.layers.is_visible(o.layer_id)]
+                if self._in_sight(o) and self.layers.is_visible(o.layer_id)]
+
+    def drawable_objects(self) -> list[SceneObject]:
+        """The objects in sight and any on show for a pick: what a pane
+        keeps buffers for, so a pick drawing the hidden ones costs no upload
+        of the rest when it ends."""
+        return [o for o in self.all()
+                if (o.visible or (self.showing_only is not None
+                                  and o.id in self.showing_only))
+                and self.layers.is_visible(o.layer_id)]
+
+    def _in_sight(self, obj) -> bool:
+        if self.showing_only is not None:
+            return obj.id in self.showing_only
+        return obj.visible
 
     def selectable_objects(self) -> list[SceneObject]:
         return [o for o in self.visible_objects()
@@ -521,7 +541,7 @@ class Scene:
 
     def is_selectable(self, obj_id: str) -> bool:
         obj = self.get(obj_id)
-        return (obj is not None and obj.visible and not obj.locked
+        return (obj is not None and self._in_sight(obj) and not obj.locked
                 and self.layers.is_visible(obj.layer_id)
                 and not self.layers.is_locked(obj.layer_id))
 
@@ -669,6 +689,7 @@ class Scene:
         self.annot_style_set = None
         self.text_height_measures = "capitals"
         self.hatch_patterns = {}
+        self.showing_only = None
         self.image_planes = []
         self.history_records = []
         self.trajectories = []
