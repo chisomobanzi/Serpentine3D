@@ -159,7 +159,7 @@ def test_a_hatch_crosses_between_import_processes(rhino_hatches):
 
 def _dxf_with(tmp_path, name, angle=0.0, scale=1.0, shift=None):
     ezdxf = pytest.importorskip("ezdxf")
-    doc = ezdxf.new("R2010")
+    doc = ezdxf.new("R2010", units=ezdxf.units.MM)
     doc.header["$MEASUREMENT"] = 1
     hatch = doc.modelspace().add_hatch()
     hatch.set_pattern_fill(name, angle=angle, scale=scale)

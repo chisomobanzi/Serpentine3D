@@ -229,6 +229,15 @@ class Replayer:
         for a, b in zip(e.get("made", []), new):
             self.idmap[a] = b
 
+    def _ev_import(self, e, i):
+        from .. import fileio
+        before = set(self.scene.objects)
+        self.history.checkpoint("import")
+        fileio.import_file(self.scene, e["path"])
+        new = [oid for oid in self.scene._order if oid not in before]
+        for a, b in zip(e.get("made", []), new):
+            self.idmap[a] = b
+
     def _ev_fp(self, e, i):
         self.fingerprints_checked += 1
         rec = e.get("objects", [])

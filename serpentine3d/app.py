@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import sys
@@ -2055,10 +2056,15 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
             return not dlg.wasCanceled()
 
+        # The journal waits for the file: reading it pumps events, and its
+        # quiet-period timer would write the drawing half in as edits.
+        paused = (self.journal.pause() if self.journal is not None
+                  else contextlib.nullcontext())
         try:
-            return fileio.import_file(scene or self.scene, path,
-                                      progress=fileio.throttled(report),
-                                      replace=replace, notes=notes)
+            with paused:
+                return fileio.import_file(scene or self.scene, path,
+                                          progress=fileio.throttled(report),
+                                          replace=replace, notes=notes)
         finally:
             dlg.close()
 
@@ -2315,6 +2321,8 @@ class MainWindow(QMainWindow):
                 return
             notes = []
             n = self._import_showing_progress(path, notes=notes)
+            if self.journal is not None:
+                self.journal.note_import(path)
             self.command_line.echo(
                 f"Imported {n} object(s)"
                 + "".join(f", {note}" for note in notes) + ".")
@@ -2966,9 +2974,19 @@ class MainWindow(QMainWindow):
     def _on_update_available(self, rel):
         """Main-thread slot: a newer release was found on launch."""
         self._pending_update = rel
-        self.statusBar().showMessage(
-            f"Serpentine3D {rel['version']} is available — "
-            f"Help ▸ Check for Updates to download.", 12000)
+        # A permanent widget: a timed message is wiped by the next status
+        # refresh or menu hover, so the notice was gone before anyone saw it.
+        if getattr(self, "_update_button", None) is None:
+            from PySide6.QtWidgets import QPushButton
+            self._update_button = QPushButton()
+            self._update_button.setFlat(True)
+            self._update_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._update_button.clicked.connect(self._check_updates_manual)
+            self.statusBar().addPermanentWidget(self._update_button)
+        self._update_button.setText(
+            f"Serpentine3D {rel['version']} is available")
+        self._update_button.setToolTip("Download or read the release notes")
+        self._update_button.show()
 
     def _check_updates_manual(self):
         """Help ▸ Check for Updates: synchronous, always reports back."""

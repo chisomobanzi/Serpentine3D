@@ -21,8 +21,8 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFontComboBox,
     QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPlainTextEdit,
-    QPushButton, QStackedWidget, QTabBar, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QPushButton, QSpinBox, QStackedWidget, QTabBar, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..core import clipping
@@ -36,6 +36,7 @@ from ..core.layout import (PAPER_SIZES, SECTION_FILLS, DetailView,
                            PaperObject, TextNote, hatch_patterns_of,
                            parse_scale, pattern_label, scale_presets,
                            section_fills_of, sheet_label)
+from ..core.dimension import DimensionShape
 from ..core.text import TextShape
 from ..core.linetype import LINETYPES
 from ..utils.units import (TO_MM, format_paper_length, format_paper_size,
@@ -122,6 +123,20 @@ def _seam() -> QWidget:
     seam.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     seam.setStyleSheet(f"background: {theme.SEAM};")
     return seam
+
+
+class _SizeBox(QDoubleSpinBox):
+    """A size that steps by a tenth while small, by one from 5 up and by
+    ten from 50 up."""
+
+    def __init__(self):
+        super().__init__()
+        self.setDecimals(2)
+
+    def stepBy(self, steps: int):
+        value = self.value() + 1e-9
+        step = 10.0 if value >= 50.0 else 1.0 if value >= 5.0 else 0.1
+        self.setValue(self.value() + steps * step)
 
 
 def _link(text: str = "") -> QPushButton:
@@ -1214,6 +1229,49 @@ class PropertiesPanel(QWidget):
         form.addRow("Hatch background", self.hatch_background)
         self._hatch_checkpoint_id = None
 
+        # A dimension in the model: what it says and how it looks, redrawn
+        # in place; its number always the length it measures.
+        self.dim_text = QLineEdit()
+        self.dim_text.setObjectName("dim_text")
+        self.dim_text.setToolTip(
+            "Text in place of the measurement; <> stands for the "
+            "measurement, empty shows it alone")
+        self.dim_text.editingFinished.connect(self._change_dim)
+        form.addRow("Dimension text", self.dim_text)
+        self.dim_text_height = _SizeBox()
+        self.dim_text_height.setObjectName("dim_text_height")
+        self.dim_text_height.setRange(.01, 1e9)
+        self.dim_text_height.setToolTip(
+            "Height of a capital letter of the dimension's text")
+        self.dim_text_height.valueChanged.connect(self._change_dim)
+        form.addRow("Text height", self.dim_text_height)
+        self.dim_decimals = QSpinBox()
+        self.dim_decimals.setObjectName("dim_decimals")
+        self.dim_decimals.setRange(0, 8)
+        self.dim_decimals.setToolTip("Decimal places of the measurement")
+        self.dim_decimals.valueChanged.connect(self._change_dim)
+        form.addRow("Decimal places", self.dim_decimals)
+        self.dim_suffix = QLineEdit()
+        self.dim_suffix.setObjectName("dim_suffix")
+        self.dim_suffix.setToolTip(
+            "Written after the measurement and a space, a unit such as "
+            "\"mm\"")
+        self.dim_suffix.editingFinished.connect(self._change_dim)
+        form.addRow("Suffix", self.dim_suffix)
+        self.dim_arrow = QComboBox()
+        self.dim_arrow.setObjectName("dim_arrow")
+        self.dim_arrow.addItem("Arrow", "arrow")
+        self.dim_arrow.addItem("Tick", "tick")
+        self.dim_arrow.currentIndexChanged.connect(self._change_dim)
+        form.addRow("Arrowheads", self.dim_arrow)
+        self.dim_arrow_size = _SizeBox()
+        self.dim_arrow_size.setObjectName("dim_arrow_size")
+        self.dim_arrow_size.setRange(0., 1e9)
+        self.dim_arrow_size.setToolTip("Length of an arrowhead or tick")
+        self.dim_arrow_size.valueChanged.connect(self._change_dim)
+        form.addRow("Arrow size", self.dim_arrow_size)
+        self._dim_checkpoint_id = None
+
         # The keys and values a model object carries, Rhino's Attribute User
         # Text: what a .3dm brings in and takes back out, edited here the way
         # Rhino's own panel edits it. Last, so it pushes no editor down.
@@ -1341,6 +1399,7 @@ class PropertiesPanel(QWidget):
             self._show_detail_layers(detail)
             self._show_detail_clips(detail)
         self._show_hatch()
+        self._show_dim()
         editable = self._editable_text()
         editable_id = editable.id if editable is not None else None
         selection_changed = editable_id != self._text_edit_selection_id
@@ -1492,6 +1551,7 @@ class PropertiesPanel(QWidget):
         if n == 1:
             obj = objs[0]
             kind = ("Editable text" if isinstance(obj.shape, TextShape)
+                    else "Dimension" if isinstance(obj.shape, DimensionShape)
                     else kind_label(obj.kind))
             return said("Object", obj.name, f"{kind} {where}")
         kinds = [kind_label(o.kind) for o in objs]
@@ -2758,6 +2818,70 @@ class PropertiesPanel(QWidget):
         if self._hatch_checkpoint_id != obj.id:
             self.history.checkpoint("edit hatch")
             self._hatch_checkpoint_id = obj.id
+        self.scene.replace_shape(obj.id, edited)
+
+    def _editable_dim(self):
+        obj, paper = self._current()
+        if obj is None or paper or not isinstance(obj.shape, DimensionShape):
+            return None
+        return obj
+
+    def _dim_rows(self):
+        return (self.dim_text, self.dim_text_height, self.dim_decimals,
+                self.dim_suffix, self.dim_arrow, self.dim_arrow_size)
+
+    def _show_dim(self):
+        """The dimension rows, for exactly one dimension in the model."""
+        obj = self._editable_dim()
+        if obj is None or obj.id != self._dim_checkpoint_id:
+            self._dim_checkpoint_id = None
+        for row in self._dim_rows():
+            self.form.setRowVisible(row, obj is not None)
+        if obj is None:
+            return
+        dim = obj.shape
+        for widget in self._dim_rows():
+            widget.blockSignals(True)
+        try:
+            if self.dim_text.text() != dim.text:
+                self.dim_text.setText(dim.text)
+            self.dim_text.setPlaceholderText(dim.measurement_text)
+            self.dim_text_height.setValue(dim.text_height)
+            self.dim_decimals.setValue(int(dim.decimals))
+            if self.dim_suffix.text() != dim.suffix:
+                self.dim_suffix.setText(dim.suffix)
+            self.dim_arrow.setCurrentIndex(self.dim_arrow.findData(dim.arrow))
+            self.dim_arrow_size.setValue(dim.arrow_size)
+        finally:
+            for widget in self._dim_rows():
+                widget.blockSignals(False)
+        self.dim_text_height.setSuffix(f" {self.scene.units}")
+        self.dim_arrow_size.setSuffix(f" {self.scene.units}")
+
+    def _change_dim(self, *_):
+        if self._updating:
+            return
+        obj = self._editable_dim()
+        if obj is None:
+            return
+        dim = obj.shape
+        values = dict(text=self.dim_text.text(),
+                      text_height=self.dim_text_height.value(),
+                      decimals=self.dim_decimals.value(),
+                      suffix=self.dim_suffix.text(),
+                      arrow=self.dim_arrow.currentData(),
+                      arrow_size=self.dim_arrow_size.value())
+        if all(getattr(dim, key) == value for key, value in values.items()):
+            return
+        try:
+            edited = dim.edited(**values)
+        except g.GeometryError as exc:
+            self.measure_label.setText(str(exc))
+            return
+        # one undo step for a run of edits to the same dimension
+        if self._dim_checkpoint_id != obj.id:
+            self.history.checkpoint("edit dimension")
+            self._dim_checkpoint_id = obj.id
         self.scene.replace_shape(obj.id, edited)
 
     def _editable_text(self):

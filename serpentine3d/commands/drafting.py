@@ -464,13 +464,15 @@ def cmd_text(ctx):
     ctx.echo("Note placed.")
 
 
-@command("dim", aliases=("dimension", "dimlinear"), space="paper")
+# "paper" for the same reason as hatch: on a sheet a point is millimetres
+# of paper, in the model it is the model's.
+@command("dim", aliases=("dimension", "dimlinear", "dimaligned"),
+         space="paper")
 def cmd_dim(ctx):
     lay = _active_layout(ctx)
     if lay is None:
-        ctx.echo("Dimensions go on layouts — switch to one first.")
+        yield from _dim_in_the_model(ctx)
         return
-        yield  # pragma: no cover
     p1 = yield PointReq("First dimension point")
     p2 = yield PointReq("Second dimension point", rubber_from=p1)
     p3 = yield PointReq("Dimension line position", rubber_from=p2)
@@ -510,6 +512,94 @@ def cmd_dim(ctx):
                  f"{ctx.scene.format_length(length * scale_denom)} "
                  f"({'anchored to' if dim.detail_id else 'through'} the detail "
                  f"at {detail.scale_text(ctx.scene.units)})")
+
+_DIM_DIRECTIONS = ["Auto", "Aligned", "Horizontal", "Vertical"]
+
+
+def _dim_in_the_model(ctx):
+    """A linear dimension in the model, on the construction plane: two
+    points, then where its line goes. Auto measures along the plane's x or
+    y, whichever the line is pulled away from, as Rhino's Dim does;
+    Aligned along the two points."""
+    from ..core.dimension import DimensionShape
+    cp = ctx.cplane
+    p1 = yield PointReq("First dimension point")
+    p2 = yield PointReq("Second dimension point", rubber_from=p1)
+    if np.linalg.norm(np.subtract(p2, p1)) < 1e-9:
+        ctx.echo("Points coincide.")
+        return
+    style = _dim_style_for(ctx, p1, p2)
+
+    def made(at):
+        try:
+            return DimensionShape(p1, p2, at,
+                                  direction=_dim_direction(ctx, cp, p1, p2,
+                                                           at),
+                                  normal=tuple(cp.normal), **style)
+        except g.GeometryError:
+            return None
+
+    at = yield PointReq("Dimension line location", rubber_band=False,
+                        choices={"Direction": _DIM_DIRECTIONS},
+                        preview_fn=made)
+    shape = made(at)
+    if shape is None:
+        ctx.echo("Nothing to measure along that direction.")
+        return
+    obj = ctx.scene.add(shape, name="Dimension")
+    ctx.select_result([obj])
+    ctx.echo(f"Dimension placed: {shape.label}. Edit its text height, "
+             "decimals and suffix in Properties.")
+
+
+def _dim_direction(ctx, cp, p1, p2, at):
+    """What a new dimension measures along, as its Direction option says."""
+    mode = ctx.opt("Direction", "Auto")
+    x, y = np.asarray(cp.xdir, float), np.asarray(cp.ydir, float)
+    if mode == "Horizontal":
+        return tuple(x)
+    if mode == "Vertical":
+        return tuple(y)
+    d = np.subtract(p2, p1)
+    if mode == "Aligned":
+        return tuple(d)
+    # pulled out past the two points across x: a horizontal dimension;
+    # across y: a vertical one; inside the box both span, the longer side
+    a, b, c = (np.dot(np.asarray(p, float), x) for p in (p1, p2, at))
+    a2, b2, c2 = (np.dot(np.asarray(p, float), y) for p in (p1, p2, at))
+    inside_x = min(a, b) - 1e-9 <= c <= max(a, b) + 1e-9
+    inside_y = min(a2, b2) - 1e-9 <= c2 <= max(a2, b2) + 1e-9
+    if inside_x and not inside_y:
+        return tuple(x)
+    if inside_y and not inside_x:
+        return tuple(y)
+    return tuple(x) if abs(np.dot(d, x)) >= abs(np.dot(d, y)) else tuple(y)
+
+
+def _dim_style_for(ctx, p1, p2) -> dict:
+    """The look of a new dimension: the last one's, so a drawing's
+    dimensions match, or for the first a text height that reads at the
+    size of what is measured."""
+    from ..core.dimension import DimensionShape
+    for obj in reversed(ctx.scene.all()):
+        if isinstance(obj.shape, DimensionShape):
+            style = obj.shape.style
+            style["text"] = ""
+            return style
+    length = float(np.linalg.norm(np.subtract(p2, p1)))
+    height = _nice(length / 25)
+    return {"text_height": height, "arrow_size": height}
+
+
+def _nice(value: float) -> float:
+    """The round number nearest below `value`: 1, 1.5, 2, 2.5, 3 or 5 to
+    some power of ten."""
+    if not value > 0:
+        return 1.0
+    power = 10 ** np.floor(np.log10(value))
+    steps = [s for s in (1, 1.5, 2, 2.5, 3, 5) if s * power <= value * 1.0001]
+    return float(steps[-1] * power)
+
 
 @command("leader", space="paper")
 def cmd_leader(ctx):
