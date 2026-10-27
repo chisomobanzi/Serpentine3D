@@ -295,12 +295,23 @@ class SnapIndex:
         self.enabled = True
         self.types = {t: t in ("end", "point", "mid", "center", "quad", "int")
                       for t in SNAP_TYPES}
+        # Project, as in Rhino: every picked point lands at one height,
+        # whatever it snapped to. Not dormant with the master switch. For
+        # this session only: every launch starts with it off, at 0.
+        self.project_enabled = False
+        self.project_z = 0.0
         if config is not None:
             osnaps = config.get("osnaps", default={}) or {}
             self.enabled = bool(osnaps.get("enabled", True))
             for t in SNAP_TYPES:
                 if t in osnaps:
                     self.types[t] = bool(osnaps[t])
+
+    def projected(self, point):
+        """`point` at the Project height when Project is on."""
+        if not self.project_enabled or point is None:
+            return point
+        return (float(point[0]), float(point[1]), float(self.project_z))
 
     # -- caches --
 

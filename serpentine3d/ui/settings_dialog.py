@@ -942,6 +942,8 @@ class SettingsDialog(QDialog):
         vp.snaps.enabled = True
         for t in SNAP_TYPES:
             vp.snaps.types[t] = t in ("end", "mid", "center", "quad", "int")
+        vp.snaps.project_enabled = False
+        vp.snaps.project_z = 0.0
         vp.grid_snap = False
         self.window.osnap_bar.refresh()
         self.accept()

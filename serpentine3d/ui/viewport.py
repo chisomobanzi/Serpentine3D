@@ -3275,6 +3275,19 @@ class Viewport(QOpenGLWidget):
                 at = np.asarray(snap[0], np.float32)
                 axes = self.camera.right_up()
             segs = _snap_marker(snap[1], at, *axes, size * 0.95)
+            if self._projecting():
+                # the snap stays on its feature; a faint line runs down to
+                # a plain point marker where the point will land
+                down = np.asarray(self.snaps.projected(snap[0]), np.float32)
+                if self.space != "model":
+                    down = self._on_paper([down])[0]
+                self._preview.update(rebased(np.stack([at, down]),
+                                             self._frame_anchor))
+                self._draw_lines(self._preview, mvp,
+                                 (*theme.SELECTION_COLOR, 0.35), 1.0)
+                r, u = (np.asarray(a, np.float32) * size * 0.5 for a in axes)
+                segs = np.concatenate([segs, np.stack([down - r, down + r]),
+                                       np.stack([down - u, down + u])])
             self._preview.update(rebased(segs, self._frame_anchor))
             self._draw_lines(self._preview, mvp,
                              _snap_marker_color(self.space), 2.0)
@@ -4289,7 +4302,21 @@ class Viewport(QOpenGLWidget):
         On a sheet this is paper millimetres (x, y, 0) — except inside an
         entered detail, where a command asking for a model point gets the
         model point that detail is showing. `point_space` is what says which
-        of the two the caller means."""
+        of the two the caller means. With Project on, a model point lands at
+        the Project height, unless it is picked along a held axis: a box's
+        height flattened to the plane would be no height at all."""
+        point = self._point_at(px, py)
+        return self.snaps.projected(point) if self._projecting() else point
+
+    def _projecting(self) -> bool:
+        """Does Project move the point being picked now?"""
+        if not self.snaps.project_enabled:
+            return False
+        if (self._locked_axis() or self.point_axis) is not None:
+            return False
+        return self.space == "model" or self._drawing_through() is not None
+
+    def _point_at(self, px: float, py: float):
         if self.space != "model":
             self._active_snap = None
             x, y = self.layout_view.screen_to_paper(px, py)
