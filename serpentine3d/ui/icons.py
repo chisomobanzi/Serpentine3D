@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap,
@@ -325,6 +327,138 @@ def _points(p):
     _dot(p, 19, 15)
 
 
+# -- view strip: the camera and what is in sight ---------------------------
+
+def _arrowhead(p, tip, back, size=3.6):
+    """Two barbs at `tip`, for a stroke arriving there from `back`."""
+    dx, dy = tip[0] - back[0], tip[1] - back[1]
+    length = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / length, dy / length
+    for turn in (0.55, -0.55):
+        c, s = math.cos(turn), math.sin(turn)
+        bx, by = ux * c - uy * s, ux * s + uy * c
+        p.drawLine(QPointF(*tip), QPointF(tip[0] - bx * size,
+                                          tip[1] - by * size))
+
+
+def _corners(p, reach=4):
+    """The four corners of a view, framing what is inside it."""
+    for x, y, sx, sy in ((2, 2, 1, 1), (20, 2, -1, 1),
+                         (2, 20, 1, -1), (20, 20, -1, -1)):
+        p.drawPolyline([QPointF(x, y + sy * reach), QPointF(x, y),
+                        QPointF(x + sx * reach, y)])
+
+
+def _view_arrow(p):
+    arrow = QPainterPath(QPointF(19, 9))
+    arrow.quadTo(11, -1.5, 3, 9)
+    p.drawPath(arrow)
+    _arrowhead(p, (3, 9), (5.2, 5.2), 3.8)
+
+
+def _undoview(p):
+    _view_arrow(p)
+    _magnifier(p, 11, 13, 4.2, 6.5)
+
+
+def _redoview(p):
+    p.save()
+    p.translate(SIZE, 0)
+    p.scale(-1, 1)
+    _view_arrow(p)
+    p.restore()
+    _magnifier(p, 11, 13, 4.2, 6.5)
+
+
+def _magnifier(p, cx, cy, r, reach):
+    p.drawEllipse(QPointF(cx, cy), r, r)
+    k = r / math.sqrt(2)
+    p.drawLine(QPointF(cx + k, cy + k), QPointF(cx + reach, cy + reach))
+
+
+def _zoomextents(p):
+    _corners(p)
+    _magnifier(p, 10, 10, 4.2, 6.5)
+
+
+def _zoomselected(p):
+    p.save()
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(_ACCENT))
+    p.drawRect(QRectF(6.8, 6.8, 4.4, 4.4))
+    p.restore()
+    _magnifier(p, 9, 9, 6, 10)
+
+
+def _halved(p, path):
+    """Fill `path` solid above the diagonal through its middle and faint
+    below, then outline it: what stays in play, the way Rhino's isolate
+    marks it."""
+    box = path.boundingRect()
+    upper = QPainterPath(box.topLeft())
+    upper.lineTo(box.topRight())
+    upper.lineTo(box.bottomLeft())
+    upper.closeSubpath()
+    p.save()
+    p.setClipPath(path)
+    p.fillPath(path, _FILL)
+    p.fillPath(upper, _ACCENT)
+    p.restore()
+    p.drawPath(path)
+
+
+def _bulb():
+    bulb = QPainterPath(QPointF(8, 15))
+    bulb.cubicTo(8, 13, 4, 11.8, 4, 8.5)
+    bulb.arcTo(QRectF(4, 1.5, 14, 14), 180, -180)
+    bulb.cubicTo(18, 11.8, 14, 13, 14, 15)
+    bulb.closeSubpath()
+    return bulb
+
+
+def _socket(p):
+    socket = QPainterPath(QPointF(8, 15))
+    socket.lineTo(14, 15)
+    socket.lineTo(12.9, 19)
+    socket.quadTo(11, 20.6, 9.1, 19)
+    socket.closeSubpath()
+    p.drawPath(socket)
+
+
+def _hide(p):
+    p.drawPath(_bulb())
+    _socket(p)
+
+
+def _isolate(p):
+    _halved(p, _bulb())
+    _socket(p)
+
+
+def _shackle(p):
+    shackle = QPainterPath(QPointF(7, 10))
+    shackle.lineTo(7, 7)
+    shackle.arcTo(QRectF(7, 3, 8, 8), 180, -180)
+    shackle.lineTo(15, 10)
+    p.drawPath(shackle)
+
+
+def _body():
+    body = QPainterPath()
+    body.addRoundedRect(QRectF(4, 10, 14, 10), 2, 2)
+    return body
+
+
+def _lock(p):
+    _shackle(p)
+    p.drawPath(_body())
+
+
+def _lockother(p):
+    _shackle(p)
+    _halved(p, _body())
+
+
 _DRAWERS = {
     "line": _line, "polyline": _polyline, "curve": _curve, "circle": _circle,
     "arc": _arc, "rectangle": _rect, "extrude": _extrude, "revolve": _revolve,
@@ -336,17 +470,22 @@ _DRAWERS = {
     "join": _join, "delete": _delete, "trim": _trim, "split": _split,
     "offset": _offset, "fillet": _fillet, "explode": _explode,
     "pointson": _points,
+    "undoview": _undoview, "redoview": _redoview,
+    "zoomextents": _zoomextents, "zoomselected": _zoomselected,
+    "hide": _hide, "isolate": _isolate, "lock": _lock,
+    "lockother": _lockother,
 }
 
 
-def command_icon(name: str) -> QIcon | None:
+def command_icon(name: str, size: int = SIZE) -> QIcon | None:
     drawer = _DRAWERS.get(name)
     if drawer is None:
         return None
-    pix = QPixmap(SIZE * _SCALE, SIZE * _SCALE)
+    pix = QPixmap(size * _SCALE, size * _SCALE)
     pix.setDevicePixelRatio(_SCALE)
     pix.fill(Qt.GlobalColor.transparent)
     p = _painter(pix)
+    p.scale(size / SIZE, size / SIZE)
     drawer(p)
     p.end()
     return QIcon(pix)
