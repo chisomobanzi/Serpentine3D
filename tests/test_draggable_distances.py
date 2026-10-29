@@ -251,9 +251,11 @@ def test_offset_still_takes_typed_numbers(env):
 def test_shell_thickness_is_dragged_off_the_wall(env):
     """A 1 mm wall on a 10 mm box should be a 1 mm drag, so the drag starts
     at the surface being thickened, not at the middle of the solid."""
-    scene, sel, _hist, _ctx, proc = env
-    _box(scene, sel)
+    scene, _sel, _hist, _ctx, proc = env
+    obj = _box(scene)
     proc.run("shell")
+    proc.click_object(obj.id, at=(5, 5, 10))
+    proc.finish_selection()
     assert proc.request.number_from is not None
     base, _dir = proc.request.number_from
     assert math.dist(base, (10, 5, 5)) < 1e-6
@@ -263,13 +265,48 @@ def test_shell_thickness_is_dragged_off_the_wall(env):
 
 
 def test_shell_still_takes_typed_numbers(env):
+    scene, _sel, _hist, _ctx, proc = env
+    obj = _box(scene)
+    proc.run("shell")
+    proc.click_object(obj.id, at=(5, 5, 10))
+    proc.finish_selection()
+    proc.provide_text("1")
+    assert not proc.busy
+    # open at the top: a tray, its inside 8 x 8 and 9 deep
+    assert g.volume(scene.get(obj.id).shape) == pytest.approx(
+        1000 - 8 * 8 * 9, rel=0.01)
+
+
+def test_shell_opens_the_clicked_face(env):
+    """The face the solid was clicked on is the one taken away: click the
+    top of a box and it comes back a tray, open upward."""
+    scene, _sel, _hist, _ctx, proc = env
+    obj = _box(scene)
+    proc.run("shell")
+    proc.click_object(obj.id, at=(5, 5, 10))
+    proc.finish_selection()
+    proc.provide_text("1")
+    shape = scene.get(obj.id).shape
+    # 5 outer walls, 5 inner ones, and the rim where the top was
+    assert len(g.faces_of(shape)) == 11
+    # nothing sits across the top any more: the middle of it is open air
+    assert g.distance_point_to_shape(shape, (5, 5, 10)) == pytest.approx(
+        4.0, abs=1e-6)
+
+
+def test_shell_opens_every_held_face(env):
+    """Ctrl+Shift-clicked faces are all opened, with no prompt for one."""
     scene, sel, _hist, _ctx, proc = env
-    obj = _box(scene, sel)
+    obj = _box(scene)
+    top = g.face_index_near(obj.shape, (5, 5, 10))
+    bottom = g.face_index_near(obj.shape, (5, 5, 0))
+    sel.set_subobjects([(obj.id, "face", top), (obj.id, "face", bottom)])
     proc.run("shell")
     proc.provide_text("1")
     assert not proc.busy
+    # a square tube: 10 x 10 outside, 8 x 8 inside, 10 long
     assert g.volume(scene.get(obj.id).shape) == pytest.approx(
-        1000 - 8 ** 3, rel=0.05)
+        1000 - 8 * 8 * 10, rel=0.01)
 
 
 def test_fillet_reads_the_corner_off_the_two_picks(env):

@@ -2652,14 +2652,42 @@ def offset_surface(shape, distance: float) -> TopoDS_Shape:
     return mk.Shape()
 
 
-def shell_solid(shape, thickness: float) -> TopoDS_Shape:
-    """Hollow a solid with a uniform wall thickness (negative = inward)."""
+def face_index_near(shape, point: Point) -> int:
+    """Index into faces_of(shape) of the face closest to a point — the face
+    a click on the solid landed on."""
+    from OCP.BRepExtrema import BRepExtrema_DistShapeShape
+    v = BRepBuilderAPI_MakeVertex(_pnt(point)).Vertex()
+    best = None
+    for i, face in enumerate(faces_of(shape)):
+        dist = BRepExtrema_DistShapeShape(v, face)
+        if dist.IsDone() and (best is None or dist.Value() < best[0]):
+            best = (dist.Value(), i)
+    if best is None:
+        raise GeometryError("No face there")
+    return best[1]
+
+
+def shell_solid(shape, thickness: float,
+                open_faces=()) -> TopoDS_Shape:
+    """Hollow a solid with a uniform wall thickness, grown inward.
+
+    `open_faces` are indices into faces_of(shape): those faces are taken
+    away, so the shell is open there — a box with its top picked becomes a
+    tray. With none, the solid stays closed around a sealed void, which
+    looks no different from outside.
+    """
     from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeThickSolid
     from OCP.TopTools import TopTools_ListOfShape
     if shape_kind(shape) != "solid":
         raise GeometryError("Shell needs a closed solid")
+    faces = faces_of(shape)
+    removed = TopTools_ListOfShape()
+    for idx in sorted(set(open_faces)):
+        if not 0 <= idx < len(faces):
+            raise GeometryError("That face is not on the solid")
+        removed.Append(faces[idx])
     mk = BRepOffsetAPI_MakeThickSolid()
-    mk.MakeThickSolidByJoin(shape, TopTools_ListOfShape(),
+    mk.MakeThickSolidByJoin(shape, removed,
                             -abs(float(thickness)), tol())
     if not mk.IsDone() or mk.Shape().IsNull():
         raise GeometryError("Shell failed (thickness may exceed the "
