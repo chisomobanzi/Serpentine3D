@@ -587,12 +587,25 @@ def cmd_closecrv(ctx):
 # mark on the page, at the millimetres it was put at, and it is not printed.
 @command("point", aliases=("pt",), space="any")
 def cmd_point(ctx):
+    p = yield PointReq("Location of point object (Enter to cancel)",
+                       allow_empty=True, preview_fn=g.make_point)
+    if p is None:
+        ctx.echo("No point placed.")
+        return
+    ctx.add(g.make_point(p))
+    ctx.echo("Placed 1 point object.")
+
+
+@command("points", space="any")
+def cmd_points(ctx):
     count = 0
-    p = yield PointReq("Location of point object")
+    p = yield PointReq("Location of point object (Enter to finish)",
+                       allow_empty=True, preview_fn=g.make_point)
     while p is not None:
         ctx.add(g.make_point(p))
         count += 1
-        p = yield PointReq("Next point (Enter to finish)", allow_empty=True)
+        p = yield PointReq("Next point (Enter or right-click to finish)",
+                           allow_empty=True, preview_fn=g.make_point)
     ctx.echo(f"Placed {count} point object(s).")
 
 

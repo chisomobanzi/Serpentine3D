@@ -159,7 +159,6 @@ def test_a_point_placed_on_the_sheet_lands_on_the_sheet(sheet):
     w, _lv, lay = sheet
     w.run_command("point")
     w.processor.provide_text("60,70,0")
-    w.processor.provide_text("")
     assert w.scene.all() == []               # not in the model at paper numbers
     assert len(lay.objects) == 1
     assert tuple(lay.objects[0].points[0]) == pytest.approx((60.0, 70.0, 0.0))
@@ -195,7 +194,6 @@ def test_a_point_placed_in_a_detail_is_a_model_point(sheet):
     lv.entered_detail = lay.details[0].id
     w.run_command("point")
     w.processor.provide_text("400,250,0")
-    w.processor.provide_text("")
     assert lay.objects == []
     objs = w.scene.all()
     assert len(objs) == 1

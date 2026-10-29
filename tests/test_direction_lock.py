@@ -498,3 +498,23 @@ def test_tab_at_the_prompt_locks_the_viewports_direction():
     assert w.viewport.toggle_direction_lock(550, 220)
     w.command_line.tabPressed.emit()
     assert w.viewport.dir_lock is None
+
+
+def test_the_point_after_an_elevated_one_is_free_again():
+    """`points` never moves its base, so a lock that only expired with the
+    base held every point after an elevator on the same axis."""
+    from serpentine3d.app import MainWindow
+    w = MainWindow()
+    w.resize(1200, 800)
+    vp = w.viewport
+    vp.resize(1100, 440)
+    w.run_command("points")
+    _press(vp, 550, 220, ctrl=True)
+    assert vp.dir_lock is not None
+    _press(vp, 560, 120)                     # the point up the axis
+    pts = [o for o in w.scene.all() if o.kind == "point"]
+    assert len(pts) == 1
+    assert vp.dir_lock is None, "the next point is still on the axis"
+    w.processor.provide_text("")
+    w.mark_saved()
+    w.close()

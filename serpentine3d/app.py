@@ -958,6 +958,8 @@ class MainWindow(QMainWindow):
         bar.setOrientation(Qt.Orientation.Vertical)
         bar.setMovable(False)
         groups = [
+            [("Point", "point",
+              ("Multiple points, finish with Enter or right-click", "points"))],
             [("Line", "line"), ("Polyline", "polyline"), ("Curve", "curve"),
              ("Circle", "circle"), ("Arc", "arc"), ("Rectangle", "rectangle")],
             [("Extrude", "extrude"), ("Revolve", "revolve"),
@@ -1292,6 +1294,14 @@ class MainWindow(QMainWindow):
         if (self._cursor_preview is not None
                 and self._cursor_preview[0] is not req):
             self._cursor_preview = None
+        if req is not getattr(self, "_lock_request", None):
+            # A held direction is for the point it was taken for. A command
+            # that never moves its base (points) would keep it otherwise,
+            # and every point after an elevator would be stuck on its axis.
+            self._lock_request = req
+            for vp in self.all_viewports():
+                vp.dir_lock = None
+                vp._lock_owner = None
         active = self.processor.active
         self.properties.set_model_text_command_active(
             active is not None and active.name == "textobject")
@@ -1769,17 +1779,40 @@ class MainWindow(QMainWindow):
         req = self.processor.request
         if isinstance(req, PointReq) and getattr(req, "preview_fn", None):
             self._cursor_preview = (req, point)
-            # ghost of the pending result under the cursor, ~30Hz cap
-            from PySide6.QtCore import QElapsedTimer
+            # A cheap ghost follows every move. An expensive one is capped
+            # at ~30Hz, and the move it skipped is drawn once the gap is up,
+            # or it is left behind where the cursor stopped.
+            from PySide6.QtCore import QElapsedTimer, QTimer
             timer = getattr(self, "_ghost_timer", None)
-            due = timer is None or timer.elapsed() >= 33
+            gap = 33 if getattr(self, "_ghost_cost_ms", 0.0) > 4.0 else 0
+            due = timer is None or timer.elapsed() >= gap
             if timer is None:
                 timer = self._ghost_timer = QElapsedTimer()
+            trail = getattr(self, "_ghost_trail", None)
+            if trail is None:
+                trail = self._ghost_trail = QTimer(self)
+                trail.setSingleShot(True)
+                trail.timeout.connect(self._trailing_ghost)
             if due:
+                trail.stop()
                 timer.restart()
-                ghost = self.processor.preview_for(point)
-                for vp in self.all_viewports():
-                    vp.set_ghost(ghost)
+                self._show_cursor_ghost(point)
+            else:
+                trail.start(max(1, gap - timer.elapsed()))
+
+    def _show_cursor_ghost(self, point):
+        from time import perf_counter
+        start = perf_counter()
+        ghost = self.processor.preview_for(point)
+        for vp in self.all_viewports():
+            vp.set_ghost(ghost)
+        self._ghost_cost_ms = (perf_counter() - start) * 1000.0
+
+    def _trailing_ghost(self):
+        pending = self._cursor_preview
+        if pending is not None and pending[0] is self.processor.request:
+            self._ghost_timer = None
+            self._show_cursor_ghost(pending[1])
 
     def _refresh_rubber(self, cursor, source=None):
         """`source` is the pane the cursor is in, and gets the number."""

@@ -53,13 +53,13 @@ class ToolPalette(QWidget):
                 rule.setFrameShadow(QFrame.Shadow.Plain)
                 self._rules.append(rule)
                 self._items.append((rule, True))
-            for label, command in group:
-                button = self._button(label, command, invoke)
+            for label, command, *alt in group:
+                button = self._button(label, command, invoke, *alt)
                 self._buttons.append(button)
                 self._items.append((button, False))
         self.reflow()
 
-    def _button(self, label, command, invoke) -> QToolButton:
+    def _button(self, label, command, invoke, alt=None) -> QToolButton:
         button = QToolButton(self)
         button.setText(label)
         icon = command_icon(command)
@@ -69,7 +69,15 @@ class ToolPalette(QWidget):
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         button.setFixedSize(BUTTON, BUTTON)
         button.setAutoRaise(True)
-        button.setToolTip(f"{label}  ({command})")
+        tip = f"{label}  ({command})"
+        if alt is not None:
+            # A right-click runs the alternative instead of a context menu.
+            alt_label, alt_command = alt
+            tip += f"\nRight-click: {alt_label}  ({alt_command})"
+            button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            button.customContextMenuRequested.connect(
+                lambda _pos, c=alt_command: invoke(c))
+        button.setToolTip(tip)
         button.clicked.connect(lambda _=False, c=command: invoke(c))
         return button
 

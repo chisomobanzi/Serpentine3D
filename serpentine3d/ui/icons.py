@@ -34,6 +34,14 @@ def _dot(p: QPainter, x, y, r=1.6, color=_ACCENT):
 
 
 # each drawer paints into a 22x22 logical box
+def _point(p):
+    """The crosshair a point is placed with, the point in its gap."""
+    for a, b in ((1.5, 5.5), (16.5, 20.5)):
+        p.drawLine(QPointF(a, 11), QPointF(b, 11))
+        p.drawLine(QPointF(11, a), QPointF(11, b))
+    _dot(p, 11, 11, r=3)
+
+
 def _line(p):
     p.drawLine(4, 18, 18, 4)
     _dot(p, 4, 18)
@@ -326,7 +334,7 @@ def _points(p):
 
 
 _DRAWERS = {
-    "line": _line, "polyline": _polyline, "curve": _curve, "circle": _circle,
+    "point": _point, "points": _point, "line": _line, "polyline": _polyline, "curve": _curve, "circle": _circle,
     "arc": _arc, "rectangle": _rect, "extrude": _extrude, "revolve": _revolve,
     "loft": _loft, "planarsrf": _planar, "sweep1": _sweep1, "sweep2": _sweep2,
     "box": _box, "sphere": _sphere, "cylinder": _cylinder, "torus": _torus,

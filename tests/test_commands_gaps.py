@@ -26,6 +26,25 @@ def test_point_command(env):
     scene, sel, hist, ctx, proc = env
     proc.run("point")
     proc.provide_text("1,2,3")
+    assert not proc.busy
+    pts = [o for o in scene.all() if o.kind == "point"]
+    assert len(pts) == 1
+    assert g.point_coords(pts[0].shape) == pytest.approx((1, 2, 3))
+
+
+
+@pytest.mark.parametrize("name", ["point", "points"])
+def test_enter_ends_a_point_command_before_any_point(env, name):
+    scene, sel, hist, ctx, proc = env
+    proc.run(name)
+    proc.provide_text("")
+    assert not proc.busy
+    assert not [o for o in scene.all() if o.kind == "point"]
+
+def test_points_command_places_until_enter(env):
+    scene, sel, hist, ctx, proc = env
+    proc.run("points")
+    proc.provide_text("1,2,3")
     proc.provide_text("4,5,6")
     proc.provide_text("")
     assert not proc.busy

@@ -392,6 +392,43 @@ out vec4 frag;
 void main() { frag = vec4(mix(vColor, uColor, uColorMix), 1.0); }
 """
 
+# A point object: a disc of uSize pixels with a uRim-pixel ring round it,
+# anti-aliased at both edges.
+MARKER_VERT = """
+#version 330 core
+layout(location=0) in vec3 pos;
+uniform mat4 uMVP;
+uniform float uSize;
+uniform int uClipCount;
+uniform vec4 uClips[4];
+out float gl_ClipDistance[4];
+void main() {
+    gl_Position = uMVP * vec4(pos, 1.0);
+    gl_PointSize = uSize;
+    for (int i = 0; i < uClipCount; ++i)
+        gl_ClipDistance[i] = dot(uClips[i], vec4(pos, 1.0));
+}
+"""
+
+MARKER_FRAG = """
+#version 330 core
+uniform vec4 uFill;
+uniform vec4 uColor;        // the rim
+uniform float uSize;
+uniform float uRim;
+out vec4 frag;
+void main() {
+    float radius = 0.5 * uSize;
+    float r = length(gl_PointCoord - 0.5) * uSize;
+    float cover = clamp(radius - r, 0.0, 1.0);
+    if (cover <= 0.0)
+        discard;
+    float rim = clamp(r - (radius - uRim) + 0.5, 0.0, 1.0);
+    vec4 c = mix(uFill, uColor, rim);
+    frag = vec4(c.rgb, c.a * cover);
+}
+"""
+
 THICK_VERT = """
 #version 330 core
 layout(location=0) in vec3 pos;      // this end of the segment
@@ -1324,9 +1361,11 @@ class Viewport(QOpenGLWidget):
         self._inline_text_id = None
         self._marker_points: list = []
         self._last_mouse = None
+        self._hover_px = None           # the cursor, for a drawn crosshair
+        self._hover_world = None        # and the point it picks
         self._mesh_prog = self._line_prog = self._bg_prog = 0
         self._thick_prog = 0
-        self._point_prog = 0
+        self._point_prog = self._marker_prog = 0
         self._count_prog = self._cap_prog = 0     # section caps
         self._cap_quad = None
         self._cut_lines = _caps.CutLines()       # the line round each cap
@@ -1392,6 +1431,7 @@ class Viewport(QOpenGLWidget):
         self._line_prog = _compile(LINE_VERT, LINE_FRAG)
         self._thick_prog = _compile(THICK_VERT, LINE_FRAG)
         self._point_prog = _compile(POINT_VERT, POINT_FRAG)
+        self._marker_prog = _compile(MARKER_VERT, MARKER_FRAG)
         self._bg_prog = _compile(BG_VERT, BG_FRAG)
         self._tex_prog = _compile(TEX_VERT, TEX_FRAG)
         self._count_prog = _compile(_caps.COUNT_VERT, _caps.COUNT_FRAG)
@@ -1450,6 +1490,12 @@ class Viewport(QOpenGLWidget):
         # the point shader sets gl_PointSize; a core profile needs telling
         try:
             GL.glEnable(GL.GL_PROGRAM_POINT_SIZE)
+        except Exception:                        # noqa: BLE001
+            pass
+        # and a compatibility profile gives point objects no gl_PointCoord
+        # without sprites; a core one has them always and refuses the enum
+        try:
+            GL.glEnable(GL.GL_POINT_SPRITE)
         except Exception:                        # noqa: BLE001
             pass
 
@@ -2523,7 +2569,7 @@ class Viewport(QOpenGLWidget):
         for i in range(len(clips)):
             GL.glEnable(GL.GL_CLIP_DISTANCE0 + i)
         for prog in (self._mesh_prog, self._line_prog, self._thick_prog,
-                     self._point_prog):
+                     self._point_prog, self._marker_prog):
             self._set_clip_uniforms(prog, clips)
         translucent = mode == "ghosted" or any(
             (o.material or {}).get("opacity", 1.0) < 1.0 for o in objects)
@@ -2581,7 +2627,8 @@ class Viewport(QOpenGLWidget):
                 # anchored object needs them re-expressed around its
                 # anchor, and the next unanchored one needs them back.
                 for prog in (self._mesh_prog, self._line_prog,
-                             self._thick_prog, self._point_prog):
+                             self._thick_prog, self._point_prog,
+                             self._marker_prog):
                     self._set_clip_uniforms(prog, oclips)
                 clips_dirty = gpu.anchor is not None
             selected = self._looks_selected(obj.id)
@@ -2730,7 +2777,8 @@ class Viewport(QOpenGLWidget):
                     GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
             if obj.clip_plane is not None and clips:
                 for prog in (self._mesh_prog, self._line_prog,
-                             self._thick_prog, self._point_prog):
+                             self._thick_prog, self._point_prog,
+                             self._marker_prog):
                     self._set_clip_uniforms(prog, oclips)
             if gpu.iso_count and show_isos:
                 if selected:
@@ -2745,9 +2793,10 @@ class Viewport(QOpenGLWidget):
                 GL.glBindVertexArray(gpu.iso_vao)
                 GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
             if len(obj.mesh.points) and not obj.annotation:
-                self._draw_point_markers(omvp, obj.mesh.points,
-                                         (*line_color, 1.0), selected,
-                                         anchor=gpu.anchor)
+                self._draw_point_markers(
+                    omvp, obj.mesh.points,
+                    (*gold, 1.0) if selected else (0.0, 0.0, 0.0, 1.0),
+                    selected, anchor=gpu.anchor)
         self._line_width(1.0)
         if clips and mode in CAP_MODES:
             self._draw_section_caps(mvp, view, clips, objects, locked_layers,
@@ -2957,28 +3006,32 @@ class Viewport(QOpenGLWidget):
             GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
             GL.glEnable(GL.GL_STENCIL_TEST)
 
-    def _draw_point_markers(self, mvp, points, color, selected: bool,
+    def _draw_point_markers(self, mvp, points, rim, selected: bool,
                             anchor=None):
-        """Point objects as fixed-ish size crosses (always visible)."""
-        size = self.camera.distance * (0.009 if selected else 0.007)
-        segs = []
-        axes = np.eye(3, dtype=np.float32) * size
-        for p in rebased(points, anchor):
-            for axis in axes:
-                segs.append(np.stack([p - axis, p + axis]))
-        self._preview.update(np.concatenate(segs).astype(np.float32))
-        self._set_line_uniforms(mvp, color)
-        self._line_width(2.6 if selected else 1.8)
+        """Point objects as white discs in a thin `rim`, a fixed number of
+        pixels across whatever the zoom, and never hidden."""
+        ratio = self._draw_target().ratio
+        size = (11.0 if selected else 8.0) * ratio
+        pts = np.asarray(rebased(points, anchor), np.float32).reshape(-1, 3)
+        self._preview.update(pts)
+        prog = self._marker_prog
+        self._use(prog)
+        self._set_mvp(prog, mvp)
+        self._set_color4(prog, rim)
+        GL.glUniform4f(self._uloc(prog, "uFill"), 1.0, 1.0, 1.0, 1.0)
+        GL.glUniform1f(self._uloc(prog, "uSize"), size)
+        GL.glUniform1f(self._uloc(prog, "uRim"),
+                       (2.5 if selected else 1.75) * ratio)
         GL.glDisable(GL.GL_DEPTH_TEST)
         GL.glBindVertexArray(self._preview.vao)
-        GL.glDrawArrays(GL.GL_LINES, 0, len(segs) * 2)
+        GL.glDrawArrays(GL.GL_POINTS, 0, len(pts))
         GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _end_clips(self, clips):
         for i in range(len(clips)):
             GL.glDisable(GL.GL_CLIP_DISTANCE0 + i)
         for prog in (self._mesh_prog, self._line_prog, self._thick_prog,
-                     self._point_prog):
+                     self._point_prog, self._marker_prog):
             self._set_clip_uniforms(prog, [])
 
     # ------------------------------------------------------------ point clouds
@@ -3237,15 +3290,15 @@ class Viewport(QOpenGLWidget):
         if len(pts) == 0 and not markers and snap is None and held is None:
             return
         segs = [pts] if len(pts) else []
-        # screen-scaled cross markers at picked points
         if self.space != "model":
+            # screen-scaled crosses at picked points, as paper points are
             size = 5.0 / max(self.layout_view.px_per_mm, 1e-6)
+            for m in markers:
+                m = np.asarray(m, np.float32)
+                for axis in np.eye(3, dtype=np.float32) * size:
+                    segs.append(np.stack([m - axis, m + axis]))
         else:
             size = self.camera.distance * 0.008
-        for m in markers:
-            m = np.asarray(m, np.float32)
-            for axis in np.eye(3, dtype=np.float32) * size:
-                segs.append(np.stack([m - axis, m + axis]))
         GL.glDisable(GL.GL_DEPTH_TEST)
         if held is not None:
             # under everything else, and faint: it is the rule being drawn
@@ -3278,6 +3331,11 @@ class Viewport(QOpenGLWidget):
             self._preview.update(rebased(segs, self._frame_anchor))
             self._draw_lines(self._preview, mvp,
                              _snap_marker_color(self.space), 2.0)
+        if markers and self.space == "model":
+            # the picked points as the points they are, over their legs
+            self._draw_point_markers(mvp, markers,
+                                     (*theme.SELECTION_COLOR, 0.85), False,
+                                     anchor=self._frame_anchor)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _draw_control_points(self, mvp):
@@ -3721,11 +3779,7 @@ class Viewport(QOpenGLWidget):
         if self._preview is None:
             return
         tris, segs = self._ghost_geometry()
-        points = self._ghost.points if self._ghost is not None else []
-        if (len(points) and self.space != "model"
-                and self._drawing_through() is not None):
-            points = self._on_paper(points)
-        if tris is None and segs is None and not len(points):
+        if tris is None and segs is None:
             return
         gold = theme.SELECTION_COLOR
         # on a sheet everything is flat at z=0, so the order it is drawn in is
@@ -3751,21 +3805,34 @@ class Viewport(QOpenGLWidget):
             GL.glBindVertexArray(self._preview.vao)
             GL.glDrawArrays(GL.GL_LINES, 0, len(segs))
             self._line_width(1.0)
-        if len(points):
-            # Free vertices have no face or edge to draw. Use the same marks
-            # as placed point objects, after taking model points onto paper.
-            if flat:
-                from .layout_view import point_marks
-                marks = point_marks(points, self.layout_view._point_mark_size())
-                self._preview.update(rebased(marks.reshape(-1, 3),
-                                            self._frame_anchor))
-                self._draw_lines(self._preview, mvp, (*gold, 0.85), 1.8)
-            else:
-                self._draw_point_markers(mvp, points, (*gold, 0.85), False,
-                                         anchor=self._frame_anchor)
-            self._line_width(1.0)
         if flat:
             GL.glEnable(GL.GL_DEPTH_TEST)
+
+    def _draw_ghost_points(self, mvp):
+        """The ghost's free vertices, last of all, so that no snap marker or
+        axis drawn for the same pick lies over the point being placed."""
+        if self._preview is None or self._ghost is None:
+            return
+        points = self._ghost.points
+        if not len(points):
+            return
+        if self.space != "model" and self._drawing_through() is not None:
+            points = self._on_paper(points)
+        gold = theme.SELECTION_COLOR
+        # Free vertices have no face or edge to draw. Use the same marks as
+        # placed point objects, after taking model points onto paper.
+        if self.space != "model":
+            from .layout_view import point_marks
+            marks = point_marks(points, self.layout_view._point_mark_size())
+            self._preview.update(rebased(marks.reshape(-1, 3),
+                                         self._frame_anchor))
+            GL.glDisable(GL.GL_DEPTH_TEST)
+            self._draw_lines(self._preview, mvp, (*gold, 0.85), 1.8)
+            GL.glEnable(GL.GL_DEPTH_TEST)
+        else:
+            self._draw_point_markers(mvp, points, (*gold, 0.85), False,
+                                     anchor=self._frame_anchor)
+        self._line_width(1.0)
 
     def _draw_pending(self, mvp):
         """What the running command would make, and where you are drawing it.
@@ -3776,6 +3843,45 @@ class Viewport(QOpenGLWidget):
         self._draw_ghost(mvp)
         self._draw_preview(mvp)
         self._draw_script_preview(mvp)
+        self._draw_crosshair()
+        self._draw_cursor_point(mvp)
+        self._draw_ghost_points(mvp)
+
+    def _draw_cursor_point(self, mvp):
+        """Where the pick would land, as a point, in the gap of the drawn
+        crosshair. A point's own ghost already is that point."""
+        at = self._hover_world
+        if getattr(self, "_cursor_shape", None) != "drawn" or at is None:
+            return
+        g = self._ghost
+        if (g is not None and len(g.points)
+                and not (g.has_faces and len(g.triangles))
+                and not len(g.edge_segments)):
+            return
+        self._draw_point_markers(mvp, [at], (*theme.SELECTION_COLOR, 0.85),
+                                 False, anchor=self._frame_anchor)
+
+    def _draw_crosshair(self):
+        """The crosshair a point ghost is placed with (see _update_cursor):
+        white, in screen space, with a gap round the point."""
+        at = self._hover_px
+        if getattr(self, "_cursor_shape", None) != "drawn" or at is None:
+            return
+        w, h = max(self.width(), 1), max(self.height(), 1)
+        x, y = at.x(), at.y()
+        gap, arm = 7.0, 17.0
+        ends = []
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ends += [(x + dx * gap, y + dy * gap), (x + dx * arm, y + dy * arm)]
+        ndc = np.array([(2.0 * px / w - 1.0, 1.0 - 2.0 * py / h, 0.0)
+                        for px, py in ends], np.float32)
+        self._preview.update(ndc)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        # two pixels, so that a line centred on the cursor, which lies on a
+        # pixel boundary as the point does, fills both of them in full
+        self._draw_lines(self._preview, np.eye(4, dtype=np.float32),
+                         (1.0, 1.0, 1.0, 1.0), 2.0 * self.devicePixelRatioF())
+        GL.glEnable(GL.GL_DEPTH_TEST)
 
     def _draw_script_preview(self, mvp):
         """Script reviews are independent from the active command's ghost.
@@ -3843,6 +3949,23 @@ class Viewport(QOpenGLWidget):
                             and all(s > 1e-9 for s in sides) else None)
         self._update_draw_readout()
 
+    def _update_cursor(self):
+        """A crosshair while a point is wanted. In the model the frame draws
+        it itself, with the point being picked in its gap: the system cursor
+        goes over everything, and is placed by its own rounding and scaling
+        rather than by the projection the point is drawn with."""
+        if not self.point_mode:
+            shape = "arrow"
+        else:
+            shape = "drawn" if self.space == "model" else "cross"
+        if shape == getattr(self, "_cursor_shape", None):
+            return
+        self._cursor_shape = shape
+        self.setCursor(QCursor({
+            "drawn": Qt.CursorShape.BlankCursor,
+            "cross": Qt.CursorShape.CrossCursor,
+        }.get(shape, Qt.CursorShape.ArrowCursor)))
+
     def set_readout_visible(self, on: bool):
         """Whether this pane writes the number, as against drawing the band.
 
@@ -3856,8 +3979,7 @@ class Viewport(QOpenGLWidget):
 
     def set_point_mode(self, on: bool):
         self.point_mode = on
-        self.setCursor(QCursor(Qt.CursorShape.CrossCursor if on
-                               else Qt.CursorShape.ArrowCursor))
+        self._update_cursor()
         if not on:
             self.set_preview(None)
             self.dir_lock = None
@@ -4281,6 +4403,7 @@ class Viewport(QOpenGLWidget):
         if space != "model":
             self.layout_view._fitted_for = None
         self.set_preview(None)
+        self._update_cursor()
         self.update()
 
     def world_point_at(self, px: float, py: float):
@@ -5020,7 +5143,16 @@ class Viewport(QOpenGLWidget):
                 self._hold_timer.stop()
                 self._offer_the_stack()
 
+    def leaveEvent(self, ev):
+        self._hover_px = self._hover_world = None
+        if getattr(self, "_cursor_shape", None) == "drawn":
+            self.update()
+        super().leaveEvent(ev)
+
     def mouseMoveEvent(self, ev):
+        self._hover_px = ev.position()
+        if getattr(self, "_cursor_shape", None) == "drawn":
+            self.update()
         pos = ev.position()
         if self._last_mouse is None:
             self._last_mouse = pos
@@ -5097,6 +5229,7 @@ class Viewport(QOpenGLWidget):
             self._track_band(pos)
         elif self.point_mode:
             pt = self.world_point_at(pos.x(), pos.y())
+            self._hover_world = pt
             if pt is not None:
                 self.mouseWorldMoved.emit(pt)
                 self._show_lock_readout(pt)

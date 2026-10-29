@@ -111,3 +111,19 @@ def test_it_can_be_measured_while_it_is_still_being_built(_qapp):
     palette = Watched(GROUPS, lambda command: None)
     assert seen and all(h >= 0 for h in seen)
     assert palette.sizeHint().height() > 0
+
+
+def test_a_right_click_runs_the_alternative_and_the_tooltip_says_so(_qapp):
+    from PySide6.QtCore import QPoint
+    ran = []
+    groups = [[("Point", "point",
+                ("Multiple points, finish with Enter or right-click",
+                 "points"))]]
+    p = ToolPalette(groups, ran.append)
+    button = _buttons(p)[0]
+    assert "Right-click" in button.toolTip()
+    assert "Enter" in button.toolTip()
+    button.click()
+    button.customContextMenuRequested.emit(QPoint(1, 1))
+    assert ran == ["point", "points"]
+    p.deleteLater()
