@@ -1262,6 +1262,7 @@ class Viewport(QOpenGLWidget):
         from ..core.snaps import SnapIndex
         self.snaps = SnapIndex(scene, config)
         self._active_snap = None            # (point, kind) under cursor
+        self._guide_rails = []              # (guide, point) the cursor is on
         self.snap_base = None               # reference point for perp snap
         self.point_axis = None              # (base, axis) while axis-locked
         self.point_frame = False            # the pick drags out a frame
@@ -3239,7 +3240,10 @@ class Viewport(QOpenGLWidget):
         # it did nothing at all.
         held = (self._locked_axis()
                 if self.point_mode and self.space == "model" else None)
-        if len(pts) == 0 and not markers and snap is None and held is None:
+        guides = (self.snaps.guides if self.point_mode and self.space == "model"
+                  and self.snaps.tracking else [])
+        if (len(pts) == 0 and not markers and snap is None and held is None
+                and not guides):
             return
         segs = [pts] if len(pts) else []
         # screen-scaled cross markers at picked points
@@ -3260,6 +3264,19 @@ class Viewport(QOpenGLWidget):
                 self._frame_anchor))
             self._draw_lines(self._preview, mvp,
                              (*theme.SELECTION_COLOR, 0.35), 1.0)
+        if guides:
+            if self._guide_rails:
+                self._preview.update(rebased(
+                    np.asarray(self._guide_rails, np.float32).reshape(-1, 3),
+                    self._frame_anchor))
+                self._draw_lines(self._preview, mvp,
+                                 (*theme.SELECTION_COLOR, 0.5), 1.0)
+            axes = self.camera.right_up()
+            self._preview.update(rebased(np.concatenate(
+                [_snap_marker("guide", np.asarray(g, np.float32), *axes, size)
+                 for g in guides]), self._frame_anchor))
+            self._draw_lines(self._preview, mvp,
+                             (*theme.SELECTION_COLOR, 0.9), 1.6)
         if segs:
             allpts = np.concatenate(segs)
             self._preview.update(rebased(allpts, self._frame_anchor))
@@ -3875,6 +3892,38 @@ class Viewport(QOpenGLWidget):
         return bool(np.allclose(np.asarray(a, float),
                                 np.asarray(b, float), atol=1e-9))
 
+    def tap_guide(self, px: float, py: float) -> bool:
+        """Drop a guide at the pixel, or take back the one already there.
+
+        It lands wherever a click would, so a guide tapped on the end of a
+        line is on that end. Returns whether anything changed.
+        """
+        snaps = self.snaps
+        if not self.point_mode or self.space != "model" or not snaps.tracking:
+            return False
+        near = snaps.near_guide(self.camera, px, py, self.width(),
+                                self.height())
+        if near is not None:
+            del snaps.guides[near]
+        else:
+            pt = self.world_point_at(px, py)
+            if pt is None:
+                return False
+            snaps.guides.append(tuple(float(c) for c in pt))
+        self.world_point_at(px, py)         # the marker, without a mouse move
+        return True
+
+    def _snap_at(self, px: float, py: float):
+        """What the pixel lands on in the model, your own guides first."""
+        near = self.snaps.near_guide(self.camera, px, py, self.width(),
+                                     self.height())
+        if near is not None:
+            return (self.snaps.guides[near], "guide")
+        return self.snaps.find(self.camera, px, py, self.width(),
+                               self.height(), base_point=self.snap_base,
+                               pending_points=self.pending_points,
+                               picked_points=self.picked_points)
+
     def _locked_axis(self):
         """The held direction, if it still belongs to the point being picked.
 
@@ -4295,6 +4344,7 @@ class Viewport(QOpenGLWidget):
         entered detail, where a command asking for a model point gets the
         model point that detail is showing. `point_space` is what says which
         of the two the caller means."""
+        self._guide_rails = []
         if self.space != "model":
             self._active_snap = None
             x, y = self.layout_view.screen_to_paper(px, py)
@@ -4388,6 +4438,8 @@ class Viewport(QOpenGLWidget):
                         self.cplane.normal)
         if hit is None:
             return None
+        cursor = hit
+        free = (True, True)                 # which of u, v a guide may set
         if self.grid_snap:
             hit = np.asarray(
                 self.cplane.snap_to_grid(hit, self.grid_snap_step))
@@ -4408,10 +4460,18 @@ class Viewport(QOpenGLWidget):
                 # sides, as Shift gives in any drawing program.
                 hit = np.asarray(self.cplane.to_world(
                     *square_corner(bu, bv, u, v), bw))
+                free = (False, False)
             elif abs(u - bu) >= abs(v - bv):
                 hit = np.asarray(self.cplane.to_world(u, bv, bw))
+                free = (True, False)
             else:
                 hit = np.asarray(self.cplane.to_world(bu, v, bw))
+                free = (False, True)
+        hit, self._guide_rails = self.snaps.align(
+            self.cplane, self.camera, cursor, hit, px, py, self.width(),
+            self.height(), free)
+        if self._guide_rails:
+            self._active_snap = (hit, "track")
         return tuple(round(float(c), 9) for c in hit)
 
     def _reject_boxes(self, boxes: list, x0, y0, x1, y1, w, h) -> np.ndarray:
@@ -6093,6 +6153,8 @@ def _snap_marker(kind: str, c: np.ndarray, right: np.ndarray,
         # nothing is joined, which is what separates this from `int`
         segs = [np.stack([c + d * 0.4, c + d])
                 for d in (r + u, -(r + u), r - u, u - r)]
+    elif kind in ("guide", "track"):      # plus
+        segs = [np.stack([c - r, c + r]), np.stack([c - u, c + u])]
     elif kind == "perp":                  # perpendicular glyph
         segs = [np.stack([c - r - u, c + r - u]),
                 np.stack([c - u, c + u])]

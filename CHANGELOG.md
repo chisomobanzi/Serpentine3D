@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A tap of Ctrl drops a guide.** As with Rhino's SmartTrack, tapping Ctrl
+  while a command wants a point leaves a temporary guide at the cursor, on
+  whatever a click there would have snapped to. The cursor snaps to it and
+  lines up with it along the CPlane axes, and two guides give the corner
+  where their lines cross. A line-up changes only the coordinate it shares,
+  so a guide on top of a box does not lift the point off the CPlane, and it
+  respects ortho. Tap on a guide to remove it. Guides show in every pane, work
+  with the object snaps off, and go when the command ends. *Guides* on the
+  osnap bar turns them off. Model space only for now.
+
 ## 0.12.4 (2026-11-08)
 
 ### Fixed

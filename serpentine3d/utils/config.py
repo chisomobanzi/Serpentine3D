@@ -94,6 +94,7 @@ DEFAULTS = {
     },
     "grid_snap": False,
     "grid_snap_step": 1.0,
+    "smart_track": True,               # a tap of Ctrl drops a guide point
     "default_units": "mm",
     "recent_files": [],                # most-recent-first document paths
     "show_welcome": True,              # start screen on launch
