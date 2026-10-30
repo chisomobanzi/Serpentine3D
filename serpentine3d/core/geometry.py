@@ -736,11 +736,16 @@ def planar_face(shape) -> TopoDS_Shape:
 
 
 def offset_curve(shape, distance: float) -> TopoDS_Shape:
-    """Offset a planar curve by a distance (sign picks the side)."""
+    """Offset a planar curve by a distance (sign picks the side).
+
+    Corners stay sharp: the segments are extended until they meet rather
+    than joined by an arc, so a rectangle offsets to a rectangle. Rounding
+    them is a fillet, done afterwards if wanted.
+    """
     from .occ import BRepOffsetAPI_MakeOffset, GeomAbs_JoinType
     wire = occ.to_wire(to_wire(shape))
     open_result = not is_closed_curve(shape)
-    mk = BRepOffsetAPI_MakeOffset(wire, GeomAbs_JoinType.GeomAbs_Arc,
+    mk = BRepOffsetAPI_MakeOffset(wire, GeomAbs_JoinType.GeomAbs_Intersection,
                                   open_result)
     mk.Perform(float(distance))
     if not mk.IsDone() or mk.Shape().IsNull():
