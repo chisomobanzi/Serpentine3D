@@ -10,7 +10,9 @@
   lines up with it along the CPlane axes, and two guides give the corner
   where their lines cross. A line-up changes only the coordinate it shares,
   so a guide on top of a box does not lift the point off the CPlane, and it
-  respects ortho. Tap on a guide to remove it. Guides show in every pane, work
+  respects ortho. A pick held to one direction, like a rectangle's width
+  after a typed length, or Tab, stops level with a guide. Tap on a guide to
+  remove it. Guides show in every pane, work
   with the object snaps off, and go when the command ends. *Guides* on the
   osnap bar turns them off. Model space only for now.
 

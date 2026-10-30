@@ -4420,6 +4420,21 @@ class Viewport(QOpenGLWidget):
             t = ray_line_parameter(origin, direction, base, axis)
             if t is None:
                 return None
+            # the CPlane's own direction when the axis lies along it, so a
+            # rail reads the same here as it does on a free pick; an axis
+            # standing out of it has only the point nearest the ray
+            cursor = None
+            if abs(float(np.dot(unit, self.cplane.normal))) < 0.99:
+                cursor = ray_plane_any(origin, direction, base,
+                                       self.cplane.normal)
+            if cursor is None:
+                cursor = base + t * unit
+            level, self._guide_rails = self.snaps.align_on_axis(
+                self.camera, cursor, base, unit, px, py, self.width(),
+                self.height())
+            if level is not None:
+                self._active_snap = (self._guide_rails[0][1], "track")
+                return self._guide_rails[0][1]
             if self.grid_snap:
                 t = round(t / self.grid_snap_step) * self.grid_snap_step
             return tuple(float(c) for c in base + t * unit)

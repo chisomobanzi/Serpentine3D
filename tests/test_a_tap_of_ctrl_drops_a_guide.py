@@ -180,6 +180,34 @@ def test_a_held_direction_runs_out_to_a_guide():
     assert np.allclose(vp.world_point_at(px, py), (5.0, 0.0, 0.0))
 
 
+def test_a_held_direction_stops_level_with_a_guide_off_to_the_side():
+    """The cursor need not reach the guide: being on its rail is enough."""
+    vp = _viewport(base=(0.0, 0.0, 0.0))
+    vp.point_axis = ((10.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+    vp.snaps.guides.append((-5.0, 6.0, 0.0))
+    px, py = _pixel(vp, (2.0, 6.0, 0.0))
+    assert np.allclose(vp.world_point_at(px + 3, py + 3), (10.0, 6.0, 0.0))
+    assert vp._active_snap[1] == "track"
+    assert np.allclose(vp._guide_rails[0][0], (-5.0, 6.0, 0.0))
+
+
+def test_a_held_direction_ignores_a_guide_it_is_nowhere_near():
+    vp = _viewport(base=(0.0, 0.0, 0.0))
+    vp.point_axis = ((10.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+    vp.snaps.guides.append((-5.0, 6.0, 0.0))
+    px, py = _pixel(vp, (2.0, -9.0, 0.0))
+    assert vp.world_point_at(px, py)[1] < 0
+    assert vp._guide_rails == []
+
+
+def test_a_guide_above_the_axis_gives_an_elevator_its_height():
+    vp = _viewport(base=(0.0, 0.0, 0.0))
+    vp.point_axis = ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+    vp.snaps.guides.append((3.0, 0.0, 7.0))
+    px, py = _pixel(vp, (0.0, 0.0, 7.0))
+    assert np.allclose(vp.world_point_at(px + 3, py), (0.0, 0.0, 7.0))
+
+
 # -- telling a tap from everything else Ctrl does --
 
 @pytest.fixture
@@ -283,6 +311,30 @@ def test_guides_last_as_long_as_the_command(window):
     QApplication.processEvents()
     assert not window.processor.busy
     assert vp.snaps.guides == []
+
+
+def test_a_rectangles_width_lines_up_after_its_length_is_typed(window):
+    """A typed length leaves the width held to one axis: the rails must
+    still answer there, or a width can't be matched to anything."""
+    vp = window.viewport
+    window.run_command("rectangle")
+    vp.pointPicked.emit((0.0, 0.0, 0.0))
+    QApplication.processEvents()
+    vp.snaps.guides.append((-5.0, 6.0, 0.0))
+    window.processor.provide_text("10")
+    QApplication.processEvents()
+    assert vp.point_axis is not None and len(vp.snaps.guides) == 1
+
+    px, py = _pixel(vp, (2.0, 6.0, 0.0))
+    point = vp.world_point_at(px + 3, py + 3)
+    assert point[1] == pytest.approx(6.0)
+    vp.pointPicked.emit(point)
+    QApplication.processEvents()
+    assert not window.processor.busy
+    rect = window.scene.all()[-1]
+    from serpentine3d.core import geometry as g
+    _lo, hi = g.bbox(rect.shape)
+    assert hi[1] == pytest.approx(6.0)
 
 
 def test_cancelling_the_command_clears_them(window):

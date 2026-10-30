@@ -658,6 +658,31 @@ class SnapIndex:
         point = cplane.to_world(*landed)
         return point, [(self.guides[i], point) for i in held]
 
+    def align_on_axis(self, camera, cursor, base, unit, px: float, py: float,
+                      width: int, height: int,
+                      radius_px: float = GUIDE_ALIGN_PX):
+        """Where a held direction draws level with a guide, or (None, []).
+
+        A pick held to an axis can't go to a guide, so what's on offer is the
+        spot on the axis square to it. `cursor` is the mouse on a plane the
+        axis lies in, so the test is the mouse being on the guide's rail
+        however far off the axis it has wandered. The answer is the distance
+        along the axis, with the rail as `align` gives them.
+        """
+        if not self.tracking or not self.guides:
+            return None, []
+        guides = np.asarray(self.guides, float)
+        along = (guides - base) @ unit
+        rail = cursor + (along - float((cursor - base) @ unit))[:, None] * unit
+        scr = camera.project(rail, width, height)
+        d2 = (scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2
+        d2[scr[:, 2] <= 0] = np.inf
+        i = int(np.argmin(d2))
+        if d2[i] >= radius_px ** 2:
+            return None, []
+        point = tuple(float(c) for c in base + along[i] * unit)
+        return float(along[i]), [(self.guides[i], point)]
+
     def _perp_feet(self, objects, base_point) -> list:
         """Feet of perpendiculars from base_point onto visible curves."""
         from OCP.BRepExtrema import BRepExtrema_DistShapeShape
