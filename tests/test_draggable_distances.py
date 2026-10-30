@@ -294,6 +294,26 @@ def test_shell_opens_the_clicked_face(env):
         4.0, abs=1e-6)
 
 
+def test_shell_keeps_sharp_corners_sharp():
+    """A star shells to a star: the inner walls meet at points rather than
+    being rounded off, so every face of the result is still flat. Rounding
+    them is a fillet, a step of its own."""
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    pts = []
+    for i in range(10):
+        r = 10 if i % 2 == 0 else 4
+        a = math.pi / 2 + i * math.pi / 5
+        pts.append((r * math.cos(a), r * math.sin(a), 0))
+    star = g.extrude(g.make_polyline(pts, closed=True), (0, 0, 1), 5,
+                     cap=True)
+    top = g.face_index_near(star, (0, 0, 5))
+    shelled = g.shell_solid(star, 0.5, [top])
+    kinds = {BRepAdaptor_Surface(f).GetType() for f in g.faces_of(shelled)}
+    assert kinds == {GeomAbs_SurfaceType.GeomAbs_Plane}
+    assert g.volume(shelled) < g.volume(star)
+
+
 def test_shell_opens_every_held_face(env):
     """Ctrl+Shift-clicked faces are all opened, with no prompt for one."""
     scene, sel, _hist, _ctx, proc = env

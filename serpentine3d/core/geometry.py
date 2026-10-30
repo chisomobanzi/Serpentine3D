@@ -2675,8 +2675,14 @@ def shell_solid(shape, thickness: float,
     away, so the shell is open there — a box with its top picked becomes a
     tray. With none, the solid stays closed around a sealed void, which
     looks no different from outside.
+
+    Corners stay sharp: the walls are extended until they meet rather than
+    rounded off (the kernel's default), so a star shells to a star. Rounding
+    them is a fillet, done afterwards if wanted.
     """
+    from OCP.BRepOffset import BRepOffset_Mode
     from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeThickSolid
+    from OCP.GeomAbs import GeomAbs_JoinType
     from OCP.TopTools import TopTools_ListOfShape
     if shape_kind(shape) != "solid":
         raise GeometryError("Shell needs a closed solid")
@@ -2688,7 +2694,9 @@ def shell_solid(shape, thickness: float,
         removed.Append(faces[idx])
     mk = BRepOffsetAPI_MakeThickSolid()
     mk.MakeThickSolidByJoin(shape, removed,
-                            -abs(float(thickness)), tol())
+                            -abs(float(thickness)), tol(),
+                            BRepOffset_Mode.BRepOffset_Skin, False, False,
+                            GeomAbs_JoinType.GeomAbs_Intersection)
     if not mk.IsDone() or mk.Shape().IsNull():
         raise GeometryError("Shell failed (thickness may exceed the "
                             "solid's smallest feature)")
