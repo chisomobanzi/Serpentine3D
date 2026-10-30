@@ -2643,10 +2643,19 @@ def contour(shape, direction: Point = (0, 0, 1),
 
 
 def offset_surface(shape, distance: float) -> TopoDS_Shape:
-    """Offset a surface/shell by a distance along its normals."""
+    """Offset a surface/shell by a distance along its normals.
+
+    Corners stay sharp: the faces are extended until they meet rather than
+    rounded off (the kernel's default), so a box offsets to a bigger box.
+    Rounding them is a fillet, done afterwards if wanted.
+    """
+    from OCP.BRepOffset import BRepOffset_Mode
     from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
+    from OCP.GeomAbs import GeomAbs_JoinType
     mk = BRepOffsetAPI_MakeOffsetShape()
-    mk.PerformByJoin(shape, float(distance), tol())
+    mk.PerformByJoin(shape, float(distance), tol(),
+                     BRepOffset_Mode.BRepOffset_Skin, False, False,
+                     GeomAbs_JoinType.GeomAbs_Intersection)
     if not mk.IsDone() or mk.Shape().IsNull():
         raise GeometryError("Offset surface failed")
     return mk.Shape()
