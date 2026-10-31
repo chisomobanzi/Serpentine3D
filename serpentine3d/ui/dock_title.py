@@ -33,11 +33,15 @@ _QSS = (
 
 class DockTitleBar(QWidget):
     """Icon, name, then whatever a subclass puts in `row`, then the dock's
-    own float and close buttons for the features it has."""
+    own float and close buttons for the features it has. With `float_button`
+    False there is no float button: the panel still floats by dragging or
+    by a double-click on its title."""
 
-    def __init__(self, icon, title: str, dock: QDockWidget | None = None):
+    def __init__(self, icon, title: str, dock: QDockWidget | None = None,
+                 float_button: bool = True):
         super().__init__()
         self._dock = dock
+        self._float_button = float_button
         self.setObjectName("dockTitle")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(_QSS)
@@ -85,7 +89,8 @@ class DockTitleBar(QWidget):
         feats = (self._dock.features() if self._dock is not None
                  else QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         self.float_btn.setVisible(
-            bool(feats & QDockWidget.DockWidgetFeature.DockWidgetFloatable))
+            self._float_button
+            and bool(feats & QDockWidget.DockWidgetFeature.DockWidgetFloatable))
         self.close_btn.setVisible(
             bool(feats & QDockWidget.DockWidgetFeature.DockWidgetClosable))
 

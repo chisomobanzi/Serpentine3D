@@ -124,6 +124,22 @@ class _Strip(QScrollArea):
         self.updateGeometry()
 
 
+def hydra_button(invoke, parent=None) -> QWidget:
+    """Hydra's logo, at the foot of the strip, sized like every tool."""
+    host = QWidget(parent)
+    host.setObjectName("hydraButton")
+    host.setFixedSize(BUTTON + MARGIN * 2, BUTTON + MARGIN * 2)
+    button = QToolButton(host)
+    button.setIcon(command_icon("hydra"))
+    button.setIconSize(QSize(ICON + 2, ICON + 2))
+    button.setFixedSize(BUTTON, BUTTON)
+    button.move(MARGIN, MARGIN)
+    button.setAutoRaise(True)
+    button.setToolTip("Hydra  (hydra)")
+    button.clicked.connect(lambda _=False: invoke())
+    return host
+
+
 def tool_strip(groups, invoke, parent=None) -> QScrollArea:
     """The palette, in something that will scroll it if it has to."""
     area = _Strip(parent)

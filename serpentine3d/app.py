@@ -218,6 +218,8 @@ class MainWindow(QMainWindow):
         # modeless window only when requested, leaving this column for
         # Properties and Layers.
         self._display_settings = None
+        self.hydra = None
+        self._hydra_dock = None
 
         # The panels a field's Enter must stay in, and whose splitter the
         # user drags: see eventFilter.
@@ -550,6 +552,45 @@ class MainWindow(QMainWindow):
     def show_ai_panel(self):
         """Reveal the conversation without changing the input destination."""
         return self.command_workspace.show_assistant()
+
+    def show_hydra(self):
+        """Hydra's graph editor, floating beside the model like a viewport
+        torn off. Made on first use, then shown and hidden. The first
+        opening starts on the recent graphs; closed with its X it is only
+        hidden, and comes back as it was left."""
+        opening = self._hydra_dock is None
+        if self._hydra_dock is None:
+            from .ui.hydra import HydraEditor
+            self.hydra = HydraEditor(self)
+            from .ui.icons import hydra_icon
+            from .ui.dock_title import DockTitleBar
+            dock = QDockWidget("Hydra", self)
+            dock.setObjectName("hydraDock")
+            dock.setWindowIcon(hydra_icon())
+            # the side panels' own title, its close button plain to see; no
+            # float button, it floats by a drag or a double-click
+            title = DockTitleBar(hydra_icon().pixmap(16, 16), "Hydra", dock,
+                                 float_button=False)
+            dock.windowTitleChanged.connect(title.title.setText)
+            dock.setTitleBarWidget(title)
+            dock.setWidget(self.hydra)
+            self.hydra.set_path(self.hydra.path)    # its file in the title
+            # Where it was last time, docked or floating: made after the
+            # window's layout was put back, it has to ask for its own place.
+            if not self.restoreDockWidget(dock):
+                self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea,
+                                   dock)
+                dock.setFloating(True)
+                dock.resize(1000, 600)
+            # closed, its preview goes with it; tabbed behind a panel, not
+            dock.visibilityChanged.connect(
+                lambda shown: self.hydra.set_active(not dock.isHidden()))
+            self._hydra_dock = dock
+        self._hydra_dock.show()
+        self._hydra_dock.raise_()
+        if opening:
+            self.hydra.show_start()
+        return self.hydra
 
     def _viewport_title(self, vp) -> str:
         """What a pane is showing, in the order you would say it: the view,
@@ -952,7 +993,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ UI assembly
 
     def _build_toolbar(self):
-        from .ui.tool_palette import tool_strip
+        from .ui.tool_palette import hydra_button, tool_strip
         bar = QToolBar("Tools")
         bar.setObjectName("toolPalette")
         bar.setOrientation(Qt.Orientation.Vertical)
@@ -979,6 +1020,9 @@ class MainWindow(QMainWindow):
         # actions it has no room for behind a chevron, where the palette
         # sizes the tools to the height it has and keeps them all in sight.
         bar.addWidget(tool_strip(groups, self.run_command, bar))
+        # below the strip, which takes all the height it is given, so Hydra
+        # sits at the very bottom however tall the window is
+        bar.addWidget(hydra_button(lambda: self.run_command("hydra"), bar))
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, bar)
         self._tools_toolbar = bar
 
@@ -1060,6 +1104,8 @@ class MainWindow(QMainWindow):
         m_view.addSeparator()
         self._action(m_view, "AI Assistant", "Ctrl+Shift+A",
                      self.show_ai_panel)
+        self._action(m_view, "Hydra", None,
+                     lambda: self.run_command("hydra"))
         tools_toolbar_action = self._tools_toolbar.toggleViewAction()
         tools_toolbar_action.setText("Tools Toolbar")
         m_view.addAction(tools_toolbar_action)
@@ -2065,6 +2111,10 @@ class MainWindow(QMainWindow):
     def _open_path(self, path: str):
         """Open a file by path (shared by the dialog, Recent menu and the
         welcome screen)."""
+        if path.lower().endswith(".hydra"):
+            # a graph, not a model: it opens in Hydra beside the model
+            self.show_hydra().open_path(path)
+            return
         try:
             self.history.checkpoint("open")
             notes = []
@@ -2470,6 +2520,8 @@ class MainWindow(QMainWindow):
             self.command_workspace.console.shutdown()
         if self.command_workspace.assistant is not None:
             self.command_workspace.assistant.shutdown()
+        if self.hydra is not None:
+            self.hydra.shutdown()
         self.autosave.clean_exit()
         if self.journal is not None:
             self.journal.write_fingerprint()
@@ -3403,6 +3455,10 @@ def _open_launch_args(window, args: list[str]):
     """Open the first existing file the command line names: a double-
     clicked document, `serp3d file.serp`, or a scale restart's handoff."""
     for arg in args:
+        if (not arg.startswith("-") and os.path.exists(arg)
+                and arg.lower().endswith(".hydra")):
+            window.show_hydra().open_path(arg)
+            break
         if not arg.startswith("-") and os.path.exists(arg):
             try:
                 # a restart handoff is taken up on arrival: reopened under

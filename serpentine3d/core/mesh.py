@@ -17,9 +17,9 @@ _CREASE_DEG = 30.0
 class MeshShape:
     """Immutable triangle mesh. Transform methods return new instances."""
 
-    __slots__ = ("vertices", "triangles", "normals")
+    __slots__ = ("vertices", "triangles", "normals", "faceted")
 
-    def __init__(self, vertices, triangles, normals=None):
+    def __init__(self, vertices, triangles, normals=None, faceted=False):
         self.vertices = np.ascontiguousarray(vertices, np.float64)
         self.triangles = np.ascontiguousarray(triangles, np.uint32)
         # None, which is the usual case, means work the shading out from the
@@ -28,6 +28,9 @@ class MeshShape:
         # that wants a particular look — says so here and is believed.
         self.normals = None if normals is None \
             else np.ascontiguousarray(normals, np.float64)
+        # drawn as flat triangles with every edge shown, as a terrain is,
+        # rather than shaded smooth across its gentler folds
+        self.faceted = bool(faceted)
 
     # -- interrogation --
 
@@ -89,15 +92,16 @@ class MeshShape:
         # a reflecting transform flips winding
         if np.linalg.det(m[:3, :3]) < 0:
             tris = tris[:, ::-1].copy()
-        return MeshShape(verts, tris, normals)
+        return MeshShape(verts, tris, normals, self.faceted)
 
     def translated(self, offset) -> "MeshShape":
         return MeshShape(self.vertices + np.asarray(offset, float),
-                         self.triangles, self.normals)
+                         self.triangles, self.normals, self.faceted)
 
     def copy(self) -> "MeshShape":
         return MeshShape(self.vertices.copy(), self.triangles.copy(),
-                         None if self.normals is None else self.normals.copy())
+                         None if self.normals is None else self.normals.copy(),
+                         self.faceted)
 
     # -- display --
 
@@ -192,7 +196,8 @@ def merge(meshes) -> MeshShape:
                        else _smoothed(m.vertices, m.triangles))
         offset += len(m.vertices)
     return MeshShape(np.concatenate(verts), np.concatenate(tris),
-                     np.concatenate(normals))
+                     np.concatenate(normals),
+                     faceted=all(m.faceted for m in meshes))
 
 
 def _weld(vertices) -> tuple:
@@ -321,6 +326,8 @@ def mesh_to_display(mesh: MeshShape):
         # shading and the outline, and it is the same answer, so it is found
         # once and lent to each.
         welding = _weld(verts)
+        if mesh.faceted:
+            return _faceted_display(mesh, dm, welding)
         dm.edge_segments = mesh.feature_edges(welding=welding)
 
         if mesh.normals is not None and len(mesh.normals) == len(verts):
@@ -361,6 +368,31 @@ def mesh_to_display(mesh: MeshShape):
         dm.normals = normals
         dm.face_of_triangle = np.zeros(len(tris), np.int32)
         dm.curvature = np.zeros(len(verts), np.float32)
+    return dm
+
+
+def _faceted_display(mesh: MeshShape, dm, welding):
+    """A faceted mesh for the viewport: each triangle flat, on corners of
+    its own carrying its own normal, and every edge drawn once."""
+    tris = mesh.triangles.astype(np.int64)
+    corners = mesh.vertices[tris]                          # (T, 3, 3)
+    normals = np.cross(corners[:, 1] - corners[:, 0],
+                       corners[:, 2] - corners[:, 0])
+    lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+    lengths[lengths < 1e-12] = 1.0
+    # an edge two triangles share is drawn once, matched by where its ends
+    # stand, so a mesh stored unwelded is drawn the same
+    ends = np.stack([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]],
+                    axis=1).reshape(-1, 2)
+    named = np.sort(welding[1][ends], axis=1)
+    _named, first = np.unique(named, axis=0, return_index=True)
+    dm.edge_segments = mesh.vertices[ends[np.sort(first)]].astype(np.float32)
+    count = len(tris) * 3
+    dm.vertices = corners.reshape(count, 3)
+    dm.triangles = np.arange(count, dtype=np.uint32).reshape(-1, 3)
+    dm.normals = np.repeat(normals / lengths, 3, axis=0).astype(np.float32)
+    dm.face_of_triangle = np.zeros(len(tris), np.int32)
+    dm.curvature = np.zeros(count, np.float32)
     return dm
 
 

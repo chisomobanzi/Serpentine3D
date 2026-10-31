@@ -37,6 +37,7 @@ Name: "updatecheck"; Description: "Check GitHub for &updates on startup"; \
 [Files]
 Source: "dist\serp3d\*"; DestDir: "{app}"; \
   Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "hydra.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\serp3d.exe"
@@ -54,6 +55,22 @@ Root: HKA; Subkey: "Software\Classes\Serpentine3D.Document"; \
 Root: HKA; Subkey: "Software\Classes\Serpentine3D.Document\DefaultIcon"; \
   ValueType: string; ValueName: ""; ValueData: "{app}\serp3d.exe,0"
 Root: HKA; Subkey: "Software\Classes\Serpentine3D.Document\shell\open\command"; \
+  ValueType: string; ValueName: ""; ValueData: """{app}\serp3d.exe"" ""%1"""
+; A Hydra graph wears Hydra's logo, and opens in Hydra beside the model.
+; Nothing else claims .hydra, so it is ours by default: the Explorer shows
+; a file's icon from the type it defaults to, not one it could open with.
+Root: HKA; Subkey: "Software\Classes\.hydra"; \
+  ValueType: string; ValueName: ""; ValueData: "Serpentine3D.Hydra"; \
+  Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.hydra\OpenWithProgids"; \
+  ValueType: string; ValueName: "Serpentine3D.Hydra"; ValueData: ""; \
+  Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Serpentine3D.Hydra"; \
+  ValueType: string; ValueName: ""; ValueData: "Hydra graph"; \
+  Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Serpentine3D.Hydra\DefaultIcon"; \
+  ValueType: string; ValueName: ""; ValueData: "{app}\hydra.ico"
+Root: HKA; Subkey: "Software\Classes\Serpentine3D.Hydra\shell\open\command"; \
   ValueType: string; ValueName: ""; ValueData: """{app}\serp3d.exe"" ""%1"""
 
 [Run]

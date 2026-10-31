@@ -3776,6 +3776,7 @@ class Viewport(QOpenGLWidget):
         self._draw_ghost(mvp)
         self._draw_preview(mvp)
         self._draw_script_preview(mvp)
+        self._draw_hydra_preview(mvp)
 
     def _draw_script_preview(self, mvp):
         """Script reviews are independent from the active command's ghost.
@@ -3784,27 +3785,45 @@ class Viewport(QOpenGLWidget):
         the same preview and no hidden pane can retain an obsolete copy.
         """
         overlay = getattr(self.scene, "script_preview", None)
-        if overlay is None or self.space != "model" or self._preview is None:
+        if overlay is None:
             return
-        for (tris, segs, points), color in zip(overlay, ((.43, .87, .69), (.95, .40, .35))):
-            if len(tris):
-                self._preview.update(rebased(tris, self._frame_anchor))
-                self._set_line_uniforms(mvp, (*color, .24))
-                GL.glDepthMask(False)
-                GL.glBindVertexArray(self._preview.vao)
-                GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(tris))
-                GL.glDepthMask(True)
-            if len(segs):
-                GL.glDisable(GL.GL_DEPTH_TEST)
-                self._preview.update(rebased(segs, self._frame_anchor))
-                self._draw_lines(self._preview, mvp, (*color, .92), 1.8)
-                GL.glEnable(GL.GL_DEPTH_TEST)
-            if len(points):
-                self._preview.update(rebased(points, self._frame_anchor))
-                self._set_line_uniforms(mvp, (*color, .9))
-                GL.glPointSize(4.0)
-                GL.glBindVertexArray(self._preview.vao)
-                GL.glDrawArrays(GL.GL_POINTS, 0, len(points))
+        for geometry, color in zip(overlay, ((.43, .87, .69), (.95, .40, .35))):
+            self._draw_overlay(mvp, geometry, color)
+
+    def _draw_hydra_preview(self, mvp):
+        """What the Hydra graph makes, until it is baked. Kept on the scene
+        for the same reason as the script preview."""
+        overlay = getattr(self.scene, "hydra_preview", None)
+        if overlay is not None:
+            self._draw_overlay(mvp, overlay, (.62, .55, 1.0))
+        # what the components selected in Hydra make, in green, as in
+        # Grasshopper: you see what you picked
+        selected = getattr(self.scene, "hydra_selected", None)
+        if selected is not None:
+            self._draw_overlay(mvp, selected, (.44, .81, .48))
+
+    def _draw_overlay(self, mvp, geometry, color):
+        if self.space != "model" or self._preview is None:
+            return
+        tris, segs, points = geometry
+        if len(tris):
+            self._preview.update(rebased(tris, self._frame_anchor))
+            self._set_line_uniforms(mvp, (*color, .24))
+            GL.glDepthMask(False)
+            GL.glBindVertexArray(self._preview.vao)
+            GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(tris))
+            GL.glDepthMask(True)
+        if len(segs):
+            GL.glDisable(GL.GL_DEPTH_TEST)
+            self._preview.update(rebased(segs, self._frame_anchor))
+            self._draw_lines(self._preview, mvp, (*color, .92), 1.8)
+            GL.glEnable(GL.GL_DEPTH_TEST)
+        if len(points):
+            self._preview.update(rebased(points, self._frame_anchor))
+            self._set_line_uniforms(mvp, (*color, .9))
+            GL.glPointSize(4.0)
+            GL.glBindVertexArray(self._preview.vao)
+            GL.glDrawArrays(GL.GL_POINTS, 0, len(points))
 
     def set_preview(self, segments: np.ndarray | None,
                     markers: list | None = None):
