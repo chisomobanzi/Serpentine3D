@@ -364,6 +364,12 @@ class CommandContext:
             obj = self.scene.get(obj_id)
             if obj is None:
                 continue
+            if obj.kind == "mesh":
+                # a mesh's triangles, edges and corners all come down to
+                # its points, kept as they were held
+                parts.setdefault("mesh", {}).setdefault(obj_id, []).append(
+                    (kind, int(index)))
+                continue
             if kind == "cv":
                 bucket = "cv"
             elif kind == "face":
@@ -375,6 +381,25 @@ class CommandContext:
             parts.setdefault(bucket, {}).setdefault(obj_id, []).append(
                 int(index))
         return parts
+
+    def moved_mesh_parts(self, held, fn):
+        """(obj_id, mesh) for each mesh, its held parts' points put through
+        `fn`, as one change: a corner two held triangles share moves once."""
+        from ..core.mesh import _weld
+        for obj_id, entries in held.items():
+            obj = self.scene.get(obj_id)
+            if obj is None:
+                continue
+            mesh = obj.shape
+            welding = _weld(mesh.vertices)
+            try:
+                points = {i for kind, index in entries
+                          for i in mesh.part_points(kind, index, welding)}
+            except (IndexError, ValueError):
+                continue
+            yield obj_id, mesh.points_moved(
+                points, lambda p: geometry.transform_points([tuple(p)], fn)[0],
+                welding)
 
     def control_point_ghost(self, held, fn):
         """Preview of those objects with their held points put through `fn`."""

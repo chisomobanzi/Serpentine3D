@@ -5,9 +5,9 @@ With an OBJ imported and the pointer over the pane, asking for a point raised
 gatherer handled pictures, text and point clouds by name and treated
 everything else as an OpenCascade shape. A plain mesh is none of those.
 
-A mesh brings no end, mid or centre points of its own; it has no edges in the
-CAD sense. What it keeps is what every visible object has, the nearest point
-on its drawn outline, and the other objects' snaps go on working beside it.
+A mesh snaps at its corners, as ends, and at the middles of the edges it
+draws; one too big for that keeps only the nearest point on its drawn
+outline. Either way the other objects' snaps go on working beside it.
 """
 
 from __future__ import annotations
@@ -27,7 +27,16 @@ def _tablet():
                      [[0, 1, 2], [0, 2, 3]])
 
 
-def test_a_mesh_offers_no_cad_snap_points_and_does_not_raise():
+def test_a_mesh_snaps_at_its_corners_and_does_not_raise():
+    points = _static_snap_points(_tablet())
+    ends = sorted(p for p, kind in points if kind == "end")
+    assert ends == [(0, 0, 0), (0, 14, 0), (20, 0, 0), (20, 14, 0)]
+    assert {kind for _p, kind in points} == {"end", "mid"}
+
+
+def test_a_mesh_too_big_to_list_offers_only_its_outline(monkeypatch):
+    from serpentine3d.core import snaps
+    monkeypatch.setattr(snaps, "MESH_SNAPS_UP_TO", 3)
     assert _static_snap_points(_tablet()) == []
 
 

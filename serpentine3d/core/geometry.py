@@ -310,6 +310,11 @@ def make_control_curve(control_points: list[Point], degree: int = 3,
 # --- wires / joining --------------------------------------------------------
 
 def edges_of(shape) -> list:
+    """The shape's edges, each once. A mesh, a point cloud or a picture has
+    none of OpenCascade's, so it gives none: a mesh edge picked with
+    Ctrl+Shift is not one a Brep tool can take."""
+    if not isinstance(shape, TopoDS_Shape):
+        return []
     out, seen = [], set()
     exp = TopExp_Explorer(shape, occ.EDGE)
     while exp.More():
@@ -329,6 +334,10 @@ def edges_of(shape) -> list:
 
 
 def faces_of(shape) -> list:
+    """The shape's faces; none for a mesh, a point cloud or a picture, as
+    edges_of gives none."""
+    if not isinstance(shape, TopoDS_Shape):
+        return []
     out = []
     exp = TopExp_Explorer(shape, occ.FACE)
     while exp.More():
@@ -3362,6 +3371,10 @@ def _control_point_map(shape) -> tuple:
 
 
 def get_control_points(shape) -> list[Point]:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        # a mesh's are its corners, each place counted once
+        return [tuple(float(c) for c in p) for p in shape.points()]
     return _control_point_map(shape)[1]
 
 
@@ -3446,7 +3459,13 @@ def _curve_from_splines(splines) -> TopoDS_Shape:
 
 
 def move_control_point(shape, index: int, new_point: Point) -> TopoDS_Shape:
-    """Return a new curve with control point `index` (0-based) moved."""
+    """Return a new curve with control point `index` (0-based) moved; a
+    mesh with that corner moved."""
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        if not 0 <= index < len(shape.points()):
+            raise GeometryError(f"Control point index {index} out of range")
+        return shape.points_moved([index], lambda _p: new_point)
     splines, pts, owners = _control_point_map(shape)
     if not (0 <= index < len(pts)):
         raise GeometryError(f"Control point index {index} out of range")

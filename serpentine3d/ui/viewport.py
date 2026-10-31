@@ -3228,7 +3228,10 @@ class Viewport(QOpenGLWidget):
         if self.space != "model" and self._drawing_through() is not None:
             pts = self._on_paper(pts) if len(pts) else pts
             markers = [self._on_paper([m])[0] for m in markers]
-        snap = self._active_snap if self.point_mode else None
+        # a point being picked, or a gumball being dragged, shows its snap
+        dragging = getattr(getattr(self, "gumball", None), "drag", None)
+        snap = (self._active_snap
+                if self.point_mode or dragging is not None else None)
         # An elevator standing before the first point has no leg drawn
         # against it, so without the axis itself on screen Ctrl looks like
         # it did nothing at all.

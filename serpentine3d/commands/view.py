@@ -606,10 +606,12 @@ def cmd_gridsnap(ctx):
 
 @command("pointson", aliases=("po",), mutates=False)
 def cmd_pointson(ctx):
-    """Show control points for selected curves and surfaces (F10)."""
+    """Show control points for selected curves, surfaces and meshes
+    (F10); a mesh's are its corners."""
     from ..core import geometry as gm
-    objs = yield SelectReq("Select curves or surfaces to show control points",
-                           kinds=("curve", "surface"))
+    objs = yield SelectReq("Select curves, surfaces or meshes to show "
+                           "control points",
+                           kinds=("curve", "surface", "mesh"))
     vp = _vp(ctx)
     shown = 0
     for o in objs:
