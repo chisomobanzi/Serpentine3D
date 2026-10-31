@@ -294,6 +294,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `extendsrf` | Extend a surface past a Ctrl+Shift-picked boundary edge. |
 | `extractisocurve` (`isocurve`) | Extractisocurve |
 | `extractsrf` (`extractsurface`, `extractface`) | Pull Ctrl+Shift-picked faces out of the polysurfaces holding them. |
+| `splitface` | Divide Ctrl+Shift-picked faces along curves, keeping the object whole. |
 | `extrude` (`ext`, `extrudecrv`) | Extrude |
 | `helix` | Helix |
 | `loft` | Loft |

@@ -472,6 +472,47 @@ def cmd_extractsrf(ctx):
              + (" as copies." if copy == "Yes" else "."))
 
 
+@command("splitface")
+def cmd_splitface(ctx):
+    """Divide Ctrl+Shift-picked faces along curves, keeping the object whole.
+
+    `split` takes a solid apart. This leaves it one solid with more faces,
+    so part of a face can be pushed, pulled or moved on its own.
+    """
+    picked: dict = {}
+    for (obj_id, kind, idx) in ctx.selection.subobjects:
+        if kind != "face":
+            continue
+        obj = ctx.scene.get(obj_id)
+        if (obj is None or obj.kind not in ("surface", "solid")
+                or not (0 <= idx < len(g.faces_of(obj.shape)))):
+            continue
+        picked.setdefault(obj_id, []).append(idx)
+    if not picked:
+        ctx.echo("Ctrl+Shift-click one or more faces first, "
+                 "then run SplitFace.")
+        yield from ()
+        return
+    cutters = yield SelectReq("Select cutting curves or surfaces",
+                              kinds=("curve", "surface", "solid"),
+                              allow_preselected=False,
+                              accept=lambda o: o.id not in picked)
+    shapes = [c.shape for c in cutters]
+    added = 0
+    for obj_id, indices in picked.items():
+        obj = ctx.scene.get(obj_id)
+        try:
+            shape = g.split_faces(obj.shape, indices, shapes,
+                                  direction=tuple(ctx.cplane.normal))
+        except g.GeometryError as exc:
+            ctx.echo(f"{obj.name}: {exc}")
+            continue
+        added += len(g.faces_of(shape)) - len(g.faces_of(obj.shape))
+        ctx.scene.replace_shape(obj_id, shape)
+    if added:
+        ctx.echo(f"Split faces, adding {added} new face(s).")
+
+
 def _picked_face_edges(ctx):
     """[(obj, face_shape, edge_shape, edge_index)] from Ctrl+Shift picks."""
     out = []

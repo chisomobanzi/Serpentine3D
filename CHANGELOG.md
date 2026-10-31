@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`splitface`.** Ctrl+Shift-click faces, run it and pick the curves or
+  surfaces to cut them with: each face is divided and the object stays in
+  one piece, so a solid is the same solid with more faces, and part of a
+  face can then be pushed, pulled or moved on its own. A curve is projected
+  along the face, so it need not be drawn on it.
+
 ## 0.12.4 (2026-11-08)
 
 ### Fixed

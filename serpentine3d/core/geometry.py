@@ -3358,6 +3358,43 @@ def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
     return pieces
 
 
+def _split_one_face(face, cutters: list, direction) -> list:
+    """The pieces cutters leave of a face; [] if they never reach it."""
+    for d in (face_point_normal(face)[1], direction):
+        try:
+            return split_shape(face, cutters, direction=d)
+        except GeometryError:
+            pass
+    return []
+
+
+def split_faces(shape, indices, cutters: list,
+                direction=(0.0, 0.0, 1.0)) -> TopoDS_Shape:
+    """Divide faces of a polysurface in place, leaving it one object.
+
+    `split_shape` takes a solid apart. This cuts each face on its own and
+    sews it back among the others, which breaks a neighbour's edge wherever
+    a cut reaches it too, so a solid stays the same solid with more faces.
+
+    A curve is swept along the face's own normal, so it lands on the face
+    however far off it was drawn. One running along that normal sweeps into
+    nothing, and then `direction` is the sweep: the normal of the plane the
+    command is drawing on, as for `split_shape`.
+    """
+    wanted = set(indices)
+    kept, cut = [], False
+    for i, face in enumerate(faces_of(shape)):
+        pieces = _split_one_face(face, cutters, direction) if i in wanted else []
+        kept.extend(pieces or [face])
+        cut = cut or bool(pieces)
+    if not cut:
+        raise GeometryError("Objects do not intersect — nothing to split")
+    joined = join_surfaces(kept)
+    if shape_kind(shape) == "solid" and shape_kind(joined) != "solid":
+        raise GeometryError("Splitting these faces would open the solid")
+    return joined
+
+
 # --- control points ---------------------------------------------------------
 
 def _adaptor_with_a_3d_curve(edge):
