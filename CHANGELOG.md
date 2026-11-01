@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Positioning an `array` keeps up with the mouse.** Dragging the spacing of
+  a 5 x 5 array of a filleted plate took ten seconds for every mouse move in
+  the four-pane layout, and takes about five milliseconds now. The copies
+  were built and tessellated from nothing to draw the ghost, once for each
+  pane; the ghost is now the object's own mesh repeated at each spacing. Any
+  other preview is also tessellated once rather than once a pane.
+
 ## 0.12.4 (2026-11-08)
 
 ### Fixed

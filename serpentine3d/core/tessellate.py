@@ -241,6 +241,44 @@ def default_deflection(shape) -> float:
     return _deflection_for(shape)
 
 
+def copies_of(meshes, offsets) -> DisplayMesh | None:
+    """`meshes` repeated at every offset, as one mesh for a ghost to draw.
+
+    A copy that has only moved is the same triangles somewhere else, and
+    the original's are already here. Tessellating 24 copies to show them is
+    seconds of work a frame, and a ghost is built again each time the mouse
+    moves; adding an offset to arrays that exist takes about a millisecond.
+
+    Only what a ghost draws comes across: positions, triangles, edges and
+    free points. None if there are no offsets to put anything at.
+    """
+    shifts = np.asarray(offsets, np.float64).reshape(-1, 1, 3)
+    if not len(shifts):
+        return None
+    verts, tris, edges, points = [], [], [], []
+    base = 0
+    for dm in meshes:
+        if dm.has_faces:
+            n = len(dm.local)
+            verts.append((dm.vertices + shifts).reshape(-1, 3))
+            starts = base + n * np.arange(len(shifts), dtype=np.uint32)
+            tris.append((dm.triangles + starts[:, None, None]).reshape(-1, 3))
+            base += n * len(shifts)
+        if len(dm.local_edges):
+            edges.append((dm.edge_segments.reshape(-1, 3) + shifts)
+                         .reshape(-1, 2, 3))
+        if len(dm.local_points):
+            points.append((dm.points + shifts).reshape(-1, 3))
+    mesh = DisplayMesh()
+    mesh.place(
+        vertices=np.concatenate(verts) if verts else None,
+        edge_segments=np.concatenate(edges) if edges else None,
+        points=np.concatenate(points) if points else None)
+    if tris:
+        mesh.triangles = np.concatenate(tris)
+    return mesh
+
+
 def _face_mesh(face) -> tuple | None:
     loc = TopLoc_Location()
     tri = occ.triangulation(face, loc)

@@ -636,7 +636,7 @@ def test_array_spacing_puts_the_next_copy_under_the_cursor(env):
         "spacing is centre to centre, so the drag starts at the centre")
     ghost = proc.preview_for((9, 1, 1))
     assert ghost is not None, "no ghost while dragging the array spacing"
-    lo, hi = g.bbox(ghost)
+    lo, hi = ghost.bounds()
     assert (lo[0] + hi[0]) / 2 == pytest.approx(9, abs=1e-6), (
         "the copy should be centred under the cursor")
 

@@ -609,6 +609,41 @@ def view_anchor(target):
     return t
 
 
+# The last shape ghosted and what it tessellated to. A ghost is one shape
+# handed to every pane in turn, and four panes tessellating it for themselves
+# is four times the wait for four identical meshes, on every mouse move.
+_ghost_memo = (None, None)
+
+
+def _ghost_mesh(shape):
+    """What a pane draws for a ghost of `shape`, or None if it will not
+    tessellate. The panes only read it, so they can all have the one."""
+    global _ghost_memo
+    from ..core.hatch import HatchGroup, HatchShape
+    from ..core.tessellate import DisplayMesh, tessellate
+    if isinstance(shape, DisplayMesh):
+        return shape                # already what a pane draws
+    if _ghost_memo[0] is shape:     # held here, so `is` cannot be a new shape
+        return _ghost_memo[1]
+    drawn = shape
+    if isinstance(shape, (HatchShape, HatchGroup)) and not shape.solid:
+        # only its lines: the face a line hatch carries is its
+        # background, and a ghost of it read as a tint over the area
+        drawn = shape.drawn()
+    try:
+        mesh = tessellate(drawn)
+    except Exception:                                      # noqa: BLE001
+        mesh = None
+    _ghost_memo = (shape, mesh)
+    return mesh
+
+
+def _forget_ghost_mesh():
+    """Let go of the last ghost: it should not outlive the command."""
+    global _ghost_memo
+    _ghost_memo = (None, None)
+
+
 def rebased(pts, anchor):
     """Points minus the anchor, subtracted in float64, cast to float32."""
     if anchor is None:
@@ -3599,6 +3634,7 @@ class Viewport(QOpenGLWidget):
             self.update()
             return
         if shape is None:
+            _forget_ghost_mesh()
             if self._ghost is not None or had_picture or had_note:
                 self._ghost = None
                 self.update()
@@ -3608,15 +3644,7 @@ class Viewport(QOpenGLWidget):
         from ..core.hatch import HatchGroup, HatchShape
         self._ghost_solid = (isinstance(shape, (HatchShape, HatchGroup))
                              and shape.solid)
-        if isinstance(shape, (HatchShape, HatchGroup)) and not shape.solid:
-            # only its lines: the face a line hatch carries is its
-            # background, and a ghost of it read as a tint over the area
-            shape = shape.drawn()
-        try:
-            from ..core.tessellate import tessellate
-            self._ghost = tessellate(shape)
-        except Exception:                                  # noqa: BLE001
-            self._ghost = None
+        self._ghost = _ghost_mesh(shape)
         self.update()
 
     def _clip_frames(self, view: str | None = None, shown: bool = False):
