@@ -244,6 +244,8 @@ QToolButton[framed="true"] {
     border: 1px solid #45464d;
     padding: 4px 8px;
 }
+/* The row Join and Explode sit in is the menu itself, not a strip on it. */
+QWidget#popupButtons { background: transparent; }
 QToolButton[framed="true"]:hover { background: #3f4047; border-color: #55565e; }
 QToolButton[framed="true"]:pressed { background: #4a3f28; border-color: #d9a441; }
 

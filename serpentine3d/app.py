@@ -783,6 +783,7 @@ class MainWindow(QMainWindow):
             self.command_line.run_command(name)
 
         row = QWidget(menu)
+        row.setObjectName("popupButtons")
         layout = QHBoxLayout(row)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
