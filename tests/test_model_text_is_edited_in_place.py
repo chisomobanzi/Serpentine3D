@@ -207,3 +207,18 @@ def test_text_in_the_model_places_model_text(window, monkeypatch):
     QApplication.processEvents()
     obj, = window.scene.all()
     assert isinstance(obj.shape, TextShape)
+
+
+def test_typing_the_first_text_does_not_shift_the_view(window, monkeypatch):
+    """The text fields Properties shows for it must fit the panel as it
+    is: a panel that widened pushed the view beside it sideways."""
+    _forbid_modal_dialog(monkeypatch)
+    viewport = window.viewport
+    width = viewport.width()
+    window.processor.run("text")
+    window.processor.provide((10., 10., 0.))
+    editor = _multiline_editor(viewport)
+    editor.setFocus()
+    QTest.keyClicks(editor, "First")
+    QApplication.processEvents()
+    assert viewport.width() == width

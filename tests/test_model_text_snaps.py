@@ -143,3 +143,22 @@ def test_text_seen_almost_edge_on_keeps_its_dots_apart():
                           axis=1)
     assert len(dots) == len(starts)
     assert gaps.min() > 1.0, "dots on screen must not crowd together"
+
+
+@pytest.mark.parametrize("move", ["translate", "rotate", "scale"])
+def test_moved_text_carries_its_fill_and_frame(move):
+    """A move changes where lettering is, not its shape: what was worked out
+    from the shape goes along, which is what keeps dragging text smooth."""
+    from serpentine3d.core.tessellate import tessellate
+    text = TextShape("Carried", 5.)
+    tessellate(text)
+    text.frame_box()
+    moved = {"translate": lambda t: g.translate(t, (7., -3., 2.)),
+             "rotate": lambda t: g.rotate(t, (1., 2., 0.), (0., 0., 1.), 35.),
+             "scale": lambda t: g.scale(t, (0., 0., 0.), 2.)}[move](text)
+    assert getattr(moved, "_fill", None) is not None
+    carried = moved.frame_box()
+    del moved._frame_box
+    np.testing.assert_allclose(carried, moved.frame_box(), atol=1e-6)
+    mesh = tessellate(moved)
+    assert len(mesh.triangles) == len(tessellate(text).triangles)

@@ -642,20 +642,28 @@ class LayoutView:
                 and o.layer_id not in left_out and not o.clip_plane]
         # A hatch is drawn by the sheet itself, in its colour and on its
         # background, under the linework (#91): a hidden-line pass has one
-        # ink and no fills. Editable text is drawn the same way, filled.
+        # ink and no fills. Editable text is filled the same way, but over
+        # the linework, on its background when it has one, which hides what
+        # lies behind the lettering as it does on screen.
         from ..core.hatch import HatchShape
         from ..core.text_object import TextShape
-        hatch_objs = [o for o in objs if isinstance(o.shape, HatchShape)
-                      or (isinstance(o.shape, TextShape)
-                          and o.shape.fill() is not None)]
-        objs = [o for o in objs if o not in hatch_objs]
+        hatch_objs = [o for o in objs if isinstance(o.shape, HatchShape)]
+        text_objs = [o for o in objs if isinstance(o.shape, TextShape)
+                     and o.shape.fill() is not None]
+        objs = [o for o in objs
+                if o not in hatch_objs and o not in text_objs]
         hatches = [_flat_hatch(o, detail.target, right, up)
                    for o in hatch_objs]
+        texts = []
+        for o in text_objs:
+            if o.shape.background:
+                texts.append(_flat_background(o, detail.target, right, up))
+            texts.append(_flat_hatch(o, detail.target, right, up))
         axes = np.stack([np.asarray(right, float), np.asarray(up, float)], 1)
         text_frames = {
             o.id: (o.shape.frame_box() - np.asarray(detail.target,
                                                     float)) @ axes
-            for o in hatch_objs if isinstance(o.shape, TextShape)}
+            for o in text_objs}
         shapes = [o.shape for o in objs]
         layer_types = vp._layer_linetypes()                 # once, not per object
         lts = [vp._effective_linetype(o, layer_types)
@@ -698,7 +706,7 @@ class LayoutView:
         if not shapes:
             data = {"visible": [], "hidden": [], "cut": cut_regions,
                     "cut_by_obj": cut_by_obj, "hatches": hatches,
-                    "text_frames": text_frames,
+                    "texts": texts, "text_frames": text_frames,
                     "visible_lt": [], "visible_by_obj": [], "visible_groups": []}
             self._hlr_cache[detail.id] = (key, data)
             return data
@@ -736,6 +744,7 @@ class LayoutView:
                 "cut": cut_regions,
                 "cut_by_obj": cut_by_obj,
                 "hatches": hatches,
+                "texts": texts,
                 "text_frames": text_frames,
                 "visible_lt": [(n, p) for n, p in lt_groups.items()],
                 "visible_by_obj": by_obj,
@@ -834,6 +843,8 @@ class LayoutView:
                     outline.append(np.stack([ring[:-1], ring[1:]], axis=1))
                 self._draw_segs(paper_mvp, np.concatenate(outline), gold,
                                 2.2)
+        # text last, so its background hides the lines behind it
+        self._paint_detail_hatches(paper_mvp, data, cx, cy, s, "texts")
         GL.glDisable(GL.GL_SCISSOR_TEST)
 
     # ------------------------------------------------------- QPainter texts
@@ -975,14 +986,18 @@ class LayoutView:
                        for ring in region if len(ring) >= 3)
         return out
 
-    def hatch_looks(self, data) -> list:
+    def hatch_looks(self, data, key="hatches") -> list:
         """(colour, background, solid) for each of a detail's hatches,
-        aligned with its `hatches`, as the scene says now; a hatch that
-        has gone draws in ink on nothing. Text is a solid one in ink."""
+        aligned with its `hatches` (or `texts`), as the scene says now; a
+        hatch that has gone draws in ink on nothing. Text is a solid one in
+        ink, and its background a solid one in paper white."""
         from ..core.text_object import TextShape
         scene = self.vp.scene
         out = []
-        for oid, *_drawn in data.get("hatches") or []:
+        for oid, *_drawn in data.get(key) or []:
+            if isinstance(oid, tuple):          # ("background", object id)
+                out.append(((1.0, 1.0, 1.0), None, True, 0.0))
+                continue
             obj = scene.get(oid)
             if obj is None:
                 out.append((None, None, False, 0.0))
@@ -996,12 +1011,13 @@ class LayoutView:
                         scene.print_width_of(obj)))
         return out
 
-    def _paint_detail_hatches(self, paper_mvp, data, cx, cy, s):
+    def _paint_detail_hatches(self, paper_mvp, data, cx, cy, s,
+                              key="hatches"):
         from ..core.layout import detail_hatches
-        hatches = data.get("hatches") or []
+        hatches = data.get(key) or []
         if not hatches:
             return
-        floods, lines = detail_hatches(hatches, self.hatch_looks(data),
+        floods, lines = detail_hatches(hatches, self.hatch_looks(data, key),
                                        cx, cy, s, min_dot=self._min_dot(),
                                        snap=self._snap_dot)
         picked = self.vp.selection.is_selected
@@ -1679,6 +1695,16 @@ def _flat_hatch(obj, target, right, up) -> tuple:
     dots = [(tuple(((np.asarray(c, float) - target) @ axes).tolist()), r)
             for c, r in hatch.dots()]
     return obj.id, tris, (segs - target) @ axes, dots
+
+
+def _flat_background(obj, target, right, up) -> tuple:
+    """The patch text with a background sits on, as a hatch entry in a
+    detail's projector frame, under the key ("background", object id)."""
+    target = np.asarray(target, float)
+    axes = np.stack([np.asarray(right, float), np.asarray(up, float)], 1)
+    a, b, c, d = (obj.shape.frame_box() - target) @ axes
+    return (("background", obj.id), np.array([[a, b, c], [a, c, d]]),
+            np.zeros((0, 2, 2)), [])
 
 
 def _clip_cut(shapes, cuttable, planes, target, right, up, also=()):

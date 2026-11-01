@@ -2654,6 +2654,9 @@ class Viewport(QOpenGLWidget):
                 fill_alpha_obj = 0.18
             else:
                 fill_alpha_obj = fill_alpha
+            if lettering and obj.shape.background:
+                self._draw_text_background(obj.shape, omvp, gpu.anchor,
+                                           light_background)
             if fill_alpha_obj > 0 and gpu.tri_count:
                 self._use(self._mesh_prog)
                 self._set_mvp(self._mesh_prog, omvp)
@@ -2688,7 +2691,10 @@ class Viewport(QOpenGLWidget):
                         or obj.clip_plane is not None:
                     GL.glDepthMask(False)
                 GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
-                GL.glPolygonOffset(1.0, 1.0)
+                # lettering in front of its background, which is in front
+                # of the plane it stands on
+                GL.glPolygonOffset(*((-2.0, -2.0) if lettering
+                                     else (1.0, 1.0)))
                 GL.glBindVertexArray(gpu.tri_vao)
                 GL.glDrawElements(GL.GL_TRIANGLES, gpu.tri_count,
                                   GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
@@ -2714,8 +2720,12 @@ class Viewport(QOpenGLWidget):
             if lettering and selected:
                 dots = self._text_frame_dots(obj.shape.frame_box(), mvp)
                 if len(dots):
+                    # on its own background's edge, which stands in front
+                    if obj.shape.background:
+                        GL.glDisable(GL.GL_DEPTH_TEST)
                     self._draw_thick_segments(rebased(dots, gpu.anchor),
                                               omvp, (*gold, 1.0), 2.0)
+                    GL.glEnable(GL.GL_DEPTH_TEST)
 
             # A drag that rebuilds this object every move (fillet,
             # push/pull) leaves the picked indices pointing into the
@@ -3114,6 +3124,21 @@ class Viewport(QOpenGLWidget):
             GL.glDrawElements(GL.GL_TRIANGLES, gpu.tri_count,
                               GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
         GL.glDepthMask(True)
+
+    def _draw_text_background(self, text, mvp, anchor, light: bool):
+        """The patch of drawing colour text sits on, hiding what lies
+        behind it: pulled a hair towards the eye, so it covers the lines in
+        its own plane, with the lettering a hair further still."""
+        a, b, c, d = text.frame_box()
+        tris = rebased(np.array([a, b, c, a, c, d]), anchor)
+        colour = (1.0, 1.0, 1.0) if light else theme.TEXT_BACKGROUND
+        self._preview.update(tris)
+        self._set_line_uniforms(mvp, (*colour, 1.0))
+        GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
+        GL.glPolygonOffset(-1.0, -1.0)
+        GL.glBindVertexArray(self._preview.vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(tris))
+        GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
 
     def _text_frame_dots(self, corners, mvp) -> np.ndarray:
         """The dotted frame round picked text, through its frame's

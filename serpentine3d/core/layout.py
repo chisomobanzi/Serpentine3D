@@ -103,6 +103,10 @@ class TextNote:
     font_family: str = ""
     font_style: str = ""
     alignment: str = "left"
+    # A patch of paper under the lettering, hiding what lies behind it,
+    # reaching `margin` cap heights past it on every side.
+    background: bool = False
+    margin: float = 0.25
 
 
 @dataclass
@@ -1169,14 +1173,17 @@ def annotation_bounds(kind: str, obj, scene=None) -> tuple:
             rect = text_path(obj.text, height, obj.font_family,
                              font_style=obj.font_style,
                              alignment=obj.alignment).boundingRect()
-            return (obj.x + rect.left(), obj.y - rect.bottom(),
-                    obj.x + rect.right(), obj.y - rect.top())
-        from .text import text_advance
-        lines = (obj.text or " ").split("\n")
-        w = max(text_advance(line) for line in lines) \
-            * font_size(height, scene)
-        return (obj.x, obj.y - (len(lines) - 1) * height * 1.6,
-                obj.x + w, obj.y + height)
+            box = (obj.x + rect.left(), obj.y - rect.bottom(),
+                   obj.x + rect.right(), obj.y - rect.top())
+        else:
+            from .text import text_advance
+            lines = (obj.text or " ").split("\n")
+            w = max(text_advance(line) for line in lines) \
+                * font_size(height, scene)
+            box = (obj.x, obj.y - (len(lines) - 1) * height * 1.6,
+                   obj.x + w, obj.y + height)
+        grow = obj.margin * height if obj.background else 0.0
+        return (box[0] - grow, box[1] - grow, box[2] + grow, box[3] + grow)
     if kind == "dim":
         import numpy as np
         a = np.array([obj.x1, obj.y1])
