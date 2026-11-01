@@ -768,23 +768,55 @@ class MainWindow(QMainWindow):
         CommandPalette.popup(self, self.command_line.run_command)
 
     def _show_mmb_popup(self):
-        """Middle-click popup: recent commands + staples (Rhino-style)."""
         from PySide6.QtGui import QCursor
-        from PySide6.QtWidgets import QMenu
+        self._mmb_menu().exec(QCursor.pos())
+
+    def _mmb_menu(self) -> QMenu:
+        """Middle-click popup: Join and Explode side by side, then the last
+        three commands and the staples (Rhino-style)."""
+        from PySide6.QtWidgets import QHBoxLayout, QToolButton, QWidgetAction
+        from .ui.icons import command_icon
         menu = QMenu(self)
-        recent = self.command_line.recent_commands()
+
+        def run(name):
+            menu.close()
+            self.command_line.run_command(name)
+
+        row = QWidget(menu)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+        for label, name in (("Join", "join"), ("Explode", "explode")):
+            button = QToolButton(row)
+            button.setObjectName(f"popup_{name}")
+            button.setText(label)
+            button.setIcon(command_icon(name))
+            button.setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            button.setProperty("framed", True)
+            button.clicked.connect(lambda _=False, n=name: run(n))
+            layout.addWidget(button)
+        layout.addStretch(1)
+        pair = QWidgetAction(menu)
+        pair.setDefaultWidget(row)
+        menu.addAction(pair)
+        menu.addSeparator()
+        recent = self.command_line.recent_commands(limit=3)
         for name in recent:
-            menu.addAction(name, lambda n=name:
-                           self.command_line.run_command(n))
+            menu.addAction(name, lambda n=name: run(n))
         if recent:
             menu.addSeparator()
         for name in ("line", "circle", "extrude", "move", "zoomextents"):
             if name not in recent:
-                menu.addAction(name, lambda n=name:
-                               self.command_line.run_command(n))
+                menu.addAction(name, lambda n=name: run(n))
         menu.addSeparator()
         menu.addAction("Command palette…", self._show_palette)
-        menu.exec(QCursor.pos())
+        return menu
+
+    def flash_objects(self, ids):
+        """Light what a command just made, in every pane that shows it."""
+        for vp in self.all_viewports():
+            vp.flash(ids)
 
     def all_viewports(self) -> list:
         """Every pane you can see. The primary is asked the same question

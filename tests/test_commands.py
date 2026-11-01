@@ -260,10 +260,9 @@ def test_delete_and_join(env):
     proc.finish_selection()
     assert len(scene.all()) == 1
     assert g.curve_length(scene.all()[0].shape) == pytest.approx(20)
+    assert sel.ids == [scene.all()[0].id], "the joined curve stays picked"
 
-    proc.run("delete")
-    proc.click_object(scene.all()[0].id)
-    proc.finish_selection()
+    proc.run("delete")                   # takes the curve still picked
     assert len(scene.all()) == 0
 
 
