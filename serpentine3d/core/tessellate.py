@@ -241,6 +241,34 @@ def default_deflection(shape) -> float:
     return _deflection_for(shape)
 
 
+def merged(meshes) -> DisplayMesh:
+    """One mesh holding all of `meshes`, to be drawn in a single call.
+
+    For meshes near home, whose offsets are already world coordinates: a
+    far mesh's are measured from an origin of its own. Only what a draw
+    reads comes across, so nothing is picked or measured on the result.
+    """
+    mesh = DisplayMesh()
+    faced = [m for m in meshes if m.has_faces]
+    if faced:
+        starts = np.cumsum([0] + [len(m.local) for m in faced[:-1]],
+                           dtype=np.uint32)
+        mesh.local = np.concatenate([m.local for m in faced])
+        mesh.normals = np.concatenate(
+            [np.asarray(m.normals, np.float32) for m in faced])
+        mesh.triangles = np.concatenate(
+            [m.triangles.astype(np.uint32) + start
+             for m, start in zip(faced, starts)])
+        mesh.curvature = np.concatenate(
+            [m.curvature if len(m.curvature) == len(m.local)
+             else np.zeros(len(m.local), np.float32) for m in faced])
+    for name in ("local_edges", "local_isos"):
+        parts = [getattr(m, name) for m in meshes if len(getattr(m, name))]
+        if parts:
+            setattr(mesh, name, np.concatenate(parts))
+    return mesh
+
+
 def _face_mesh(face) -> tuple | None:
     loc = TopLoc_Location()
     tri = occ.triangulation(face, loc)

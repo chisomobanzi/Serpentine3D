@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from ..core import clipping as _clipping
 from ..core import linetype as _lt
 from ..core import spatial
+from ..core.tessellate import merged
 from ..utils import config as _cfg
 from ..utils import units as _units
 # Lives in utils so the launcher can set it without importing this
@@ -510,6 +511,20 @@ def _dashed_edge_segments(mesh, pattern, scale):
 # vertex the shaded and wide-line shaders both read.
 _POINT_ATTRS = ((0, 3, 0, 0),)
 _WIDE_ATTRS = ((0, 3, 28, 0), (1, 3, 28, 12), (2, 1, 28, 24))
+
+# What can share a draw call. A mesh past the triangle limit keeps its own,
+# which is no loss: the call is nothing beside the triangles, and merging it
+# would hold it on the card twice.
+BATCH_KINDS = frozenset(("solid", "surface", "compound", "curve", "mesh"))
+BATCH_MAX_TRIANGLES = 2048
+# A run is cut where a mesh's serial says to rather than every so many
+# objects: a cut by position would move every batch after a deleted object,
+# and they would all have to go up again. This way one change costs one batch.
+BATCH_CUT_EVERY = 64
+BATCH_MAX_OBJECTS = 256
+# Draws a batch can go unused before its buffers are given back. Not one:
+# each detail on a sheet is a draw with its own idea of what is shown.
+BATCH_KEEP_DRAWS = 256
 
 
 def _back_to_front(centres, valid, eye):
@@ -1007,7 +1022,7 @@ class _MeshBuffers:
 class _GpuObject:
     """One viewport's vertex arrays over the shared buffers for a mesh."""
 
-    def __init__(self, mesh, dash=None, dash_key=None):
+    def __init__(self, mesh, dash=None, dash_key=None, share_id=None):
         # The mesh's own serial, not id(mesh): the question "are these
         # buffers still current?" is asked after the mesh they came from may
         # have been freed, and an address gets recycled. See DisplayMesh.uid.
@@ -1016,10 +1031,17 @@ class _GpuObject:
         # Sharing is a property of a context group, not of the whole process.
         # An embedded host or a recreated window can have a separate group.
         # Reusing another group's buffer ids can crash a native GL driver.
-        self._share_key = (_current_share_group(), mesh.uid, dash_key)
+        self._share_key = (_current_share_group(),
+                           mesh.uid if share_id is None else share_id,
+                           dash_key)
         self.buffers = gpu_share.acquire(
             self._share_key, lambda: _MeshBuffers(mesh, dash))
         buf = self.buffers
+        # Can go in a _Batch, as far as the mesh goes: see _batched.
+        self.plain = (buf.anchor is None and not buf.cloud_count
+                      and dash_key == "Continuous"
+                      and not len(mesh.local_points)
+                      and len(mesh.triangles) <= BATCH_MAX_TRIANGLES)
         self.tri_vao = self.tri_count = 0
         self.line_vao = self.line_count = 0
         self.thick_vao = self.thick_count = 0
@@ -1098,6 +1120,27 @@ class _GpuObject:
         self.tri_vao = self.line_vao = self.iso_vao = self.thick_vao = 0
         self.cloud_vao = 0
         gpu_share.release(self._share_key)
+
+
+class _Batch:
+    """A run of objects that look alike, on the GPU as one mesh.
+
+    Drawing an object costs Python far more than it costs the card: a few
+    thousand small objects spend two thirds of a frame just asking for
+    themselves to be drawn. A batch asks once. `look` is what the run looks
+    like in the draw under way, and is set again for every draw.
+
+    It stands in for an object in the draw list, so `_cull` can judge it by
+    the same two attributes.
+    """
+
+    mesh_ready = True
+
+    def __init__(self, meshes, key):
+        self.mesh = merged(meshes)
+        self.gpu = _GpuObject(self.mesh, share_id=key)
+        self.look = None
+        self.last_draw = 0
 
 
 class _LineBatch:
@@ -1299,6 +1342,8 @@ class Viewport(QOpenGLWidget):
         self._box_end = None
         self._box_active = False
         self._gpu: dict[str, _GpuObject] = {}
+        self._batches: dict[tuple, _Batch] = {}
+        self._batch_draws = 0                  # see _retire_batches
         self._grid = None
         self._grid_params = (
             int(config.get("display", "grid_extent", default=100))
@@ -2196,6 +2241,9 @@ class Viewport(QOpenGLWidget):
         for gpu in self._gpu.values():
             gpu.forget()
         self._gpu = {}
+        for batch in self._batches.values():
+            batch.gpu.forget()
+        self._batches = {}
         self._gpu_synced = None
 
     def _visible_layers(self) -> tuple:
@@ -2538,8 +2586,15 @@ class Viewport(QOpenGLWidget):
             # before culling: an object above the frustum can still stamp a
             # shadow that is inside it
             self._draw_ground_shadow(mvp, objects)
+        # Clipping planes re-express themselves around anchored objects as
+        # the loop goes, translucency needs its order and rendered mode has
+        # its materials, so those frames draw an object at a time.
+        if not (translucent or clips or mode == "rendered"):
+            objects = self._batched(objects, locked_layers, mode,
+                                    light_background)
         objects = self._cull(mvp, objects)
-        max_level = self._cloud_budget(objects)
+        max_level = self._cloud_budget(
+            [o for o in objects if not isinstance(o, _Batch)])
         # Uniform state belongs to the program, not the draw call. The
         # display-mode uniforms are the same for every object in the
         # frame, so they are set once here; the matrices moved into the
@@ -2556,6 +2611,10 @@ class Viewport(QOpenGLWidget):
         GL.glUniform1i(self._uloc(self._mesh_prog, "uRendered"),
                        1 if mode == "rendered" else 0)
         for obj in objects:
+            if isinstance(obj, _Batch):
+                self._draw_batch(obj, flat, flat_view, fill_alpha,
+                                 show_edges, show_isos)
+                continue
             if obj.clip_plane is not None and self._target is not None:
                 # A sheet shows what a plane cut, not the plane: it is a
                 # tool for the model, the way a section line is not drawn
@@ -2757,6 +2816,126 @@ class Viewport(QOpenGLWidget):
         if clips and mode in CAP_MODES:
             self._draw_section_caps(mvp, view, clips, objects, locked_layers,
                                     mode)
+
+    def _batched(self, objects, locked_layers, mode, light_background) -> list:
+        """`objects` with runs of alike ones replaced by a `_Batch` each.
+
+        Only neighbours are merged, so the draw order holds and coincident
+        faces settle the way they did. What is special about an object keeps
+        it out and it draws as ever: picked, a section plane, a hatch, its
+        own material, dashes, far from home. Asked every frame rather than
+        kept, because colours and locks can change without the scene saying
+        so, and a batch that draws the wrong colour is worse than a slow one.
+        """
+        self._batch_draws += 1
+        picked = {sub[0] for sub in self.selection.subobjects}
+        looks = {}
+        items, run, run_look = [], [], None
+
+        def finish():
+            if len(run) < 2:
+                items.extend(obj for obj, _gpu in run)
+            else:
+                items.append(self._batch_of(run, run_look))
+            run.clear()
+
+        for obj in objects:
+            gpu = self._gpu.get(obj.id)
+            look = None
+            if (gpu is not None and getattr(gpu, "plain", False)
+                    and obj.kind in BATCH_KINDS and not obj.material
+                    and obj.clip_plane is None and not obj.annotation
+                    and obj.id not in picked
+                    and not self._looks_selected(obj.id)):
+                locked = obj.locked or obj.layer_id in locked_layers
+                key = (tuple(obj.color or ()), obj.layer_id, obj.print_width,
+                       locked, obj.kind == "curve", gpu.tri_count > 0)
+                look = looks.get(key)
+                if look is None:
+                    look = looks[key] = self._batch_look(
+                        obj, locked, mode, light_background)
+            if look is None:
+                finish()
+                items.append(obj)
+                continue
+            if look is not run_look:
+                finish()
+                run_look = look
+            run.append((obj, gpu))
+            if (gpu.mesh_key % BATCH_CUT_EVERY == 0
+                    or len(run) >= BATCH_MAX_OBJECTS):
+                finish()
+        finish()
+        self._retire_batches()
+        return items
+
+    def _batch_of(self, run, look) -> _Batch:
+        """The batch for a run, built the first time it is seen."""
+        key = tuple(gpu.mesh_key for _obj, gpu in run)
+        batch = self._batches.get(key)
+        if batch is None:
+            batch = _Batch([obj.mesh for obj, _gpu in run], key)
+            self._batches[key] = batch
+        batch.look = look
+        batch.last_draw = self._batch_draws
+        return batch
+
+    def _retire_batches(self):
+        """Give back the batches that have stopped being drawn, now and then
+        rather than every draw: selecting an object and letting go of it
+        wants the same batches again."""
+        if self._batch_draws % BATCH_KEEP_DRAWS:
+            return
+        oldest = self._batch_draws - BATCH_KEEP_DRAWS
+        for key in [k for k, b in self._batches.items()
+                    if b.last_draw < oldest]:
+            self._batches.pop(key).gpu.release()
+
+    def _batch_look(self, obj, locked, mode, light_background) -> tuple:
+        """(fill, edges, edge width, isocurves): the colours the object loop
+        works out, for an object with nothing special about it."""
+        color = self.scene.color_of(obj)
+        if locked:
+            grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
+            color = (grey, grey, grey)
+        line = color
+        if light_background:
+            line = (min(color[0], 0.3), min(color[1], 0.3),
+                    min(color[2], 0.33))
+        edge = (*line, 1.0) if obj.kind == "curve" else (
+            line[0] * 0.35, line[1] * 0.35, line[2] * 0.35, 1.0)
+        iso = (*color, 0.55) if mode == "wireframe" else (
+            color[0] * 0.30, color[1] * 0.30, color[2] * 0.30, 0.8)
+        return (theme.shaded_fill(color), edge,
+                self.scene.screen_width_of(obj), iso)
+
+    def _draw_batch(self, batch, mvp, view, fill_alpha, show_edges, show_isos):
+        """A batch, as the object loop would draw each object in it."""
+        gpu = batch.gpu
+        fill, edge, width, iso = batch.look
+        if fill_alpha > 0 and gpu.tri_count:
+            prog = self._mesh_prog
+            self._use(prog)
+            self._set_mvp(prog, mvp)
+            self._set_view(prog, view)
+            GL.glUniform1i(self._uloc(prog, "uFlat"), 0)
+            GL.glUniform3f(self._uloc(prog, "uColor"), *fill)
+            GL.glUniform1f(self._uloc(prog, "uAlpha"), fill_alpha)
+            GL.glUniform1f(self._uloc(prog, "uMetallic"), 0.0)
+            GL.glUniform1f(self._uloc(prog, "uRoughness"), 0.55)
+            GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
+            GL.glPolygonOffset(1.0, 1.0)
+            GL.glBindVertexArray(gpu.tri_vao)
+            GL.glDrawElements(GL.GL_TRIANGLES, gpu.tri_count,
+                              GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
+            GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
+        if gpu.line_count and (show_edges or not gpu.tri_count):
+            self._draw_edges(gpu, mvp, edge, width)
+        if gpu.iso_count and show_isos:
+            self._set_line_uniforms(mvp, iso)
+            self._line_width(1.0)
+            GL.glBindVertexArray(gpu.iso_vao)
+            GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
 
     def _draw_section_caps(self, mvp, view, clips, objects, locked_layers,
                            mode):
