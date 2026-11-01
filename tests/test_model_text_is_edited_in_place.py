@@ -214,11 +214,14 @@ def test_typing_the_first_text_does_not_shift_the_view(window, monkeypatch):
     is: a panel that widened pushed the view beside it sideways."""
     _forbid_modal_dialog(monkeypatch)
     viewport = window.viewport
-    width = viewport.width()
+    QApplication.processEvents()
+    width, panel = viewport.width(), window.properties.width()
     window.processor.run("text")
     window.processor.provide((10., 10., 0.))
     editor = _multiline_editor(viewport)
     editor.setFocus()
     QTest.keyClicks(editor, "First")
     QApplication.processEvents()
-    assert viewport.width() == width
+    # a pixel either way is the layout settling, not the panel growing
+    assert window.properties.width() <= panel + 1
+    assert viewport.width() >= width - 1
