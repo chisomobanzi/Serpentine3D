@@ -446,7 +446,7 @@ def test_extend_still_takes_typed_numbers(env):
     assert hi[0] == pytest.approx(13, abs=1e-3)
 
 
-def test_textobject_asks_where_before_how_big(env):
+def test_text_asks_where_before_how_big(env):
     """Text height is a size in the model, so it is dragged, but there is
     nothing to drag it from until the text has somewhere to sit.
 
@@ -455,10 +455,10 @@ def test_textobject_asks_where_before_how_big(env):
     "Hi" spans 1.02 times the drag against DejaVu here and 1.37 times on a
     Windows box, where PySide6 ships no fonts and Qt falls back to whatever
     it can find. So the check is that the ghost tracks the drag, which is
-    what textobject is answerable for.
+    what text is answerable for.
     """
     scene, sel, _hist, _ctx, proc = env
-    proc.run("textobject")
+    proc.run("text")
     proc.provide_text("Hi")
     assert "position" in proc.request.prompt.lower()
     proc.provide((0.0, 0.0, 0.0))
@@ -479,9 +479,9 @@ def test_textobject_asks_where_before_how_big(env):
         "any font's metrics would put it")
 
 
-def test_textobject_still_takes_typed_numbers(env):
+def test_text_still_takes_typed_numbers(env):
     scene, sel, _hist, _ctx, proc = env
-    proc.run("textobject")
+    proc.run("text")
     proc.provide_text("Hi")
     proc.provide_text("0,0,0")
     proc.provide_text("10")

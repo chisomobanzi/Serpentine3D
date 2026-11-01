@@ -16,9 +16,9 @@ from PySide6.QtWidgets import QToolButton
 
 from serpentine3d.ui.tool_palette import BUTTON, ICON, MARGIN, ToolPalette
 
-# The real palette's shape: thirty-two tools in seven groups.
+# The real palette's shape: thirty-three tools in seven groups.
 GROUPS = [[(f"Tool {g}{i}", f"tool{g}{i}") for i in range(n)]
-          for g, n in enumerate([6, 6, 4, 5, 3, 4, 4])]
+          for g, n in enumerate([7, 6, 4, 5, 3, 4, 4])]
 TOOLS = sum(len(g) for g in GROUPS)
 RESTORED = 854                               # what a restored window gives
 

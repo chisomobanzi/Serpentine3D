@@ -642,12 +642,20 @@ class LayoutView:
                 and o.layer_id not in left_out and not o.clip_plane]
         # A hatch is drawn by the sheet itself, in its colour and on its
         # background, under the linework (#91): a hidden-line pass has one
-        # ink and no fills.
+        # ink and no fills. Editable text is drawn the same way, filled.
         from ..core.hatch import HatchShape
-        hatch_objs = [o for o in objs if isinstance(o.shape, HatchShape)]
-        objs = [o for o in objs if not isinstance(o.shape, HatchShape)]
+        from ..core.text_object import TextShape
+        hatch_objs = [o for o in objs if isinstance(o.shape, HatchShape)
+                      or (isinstance(o.shape, TextShape)
+                          and o.shape.fill() is not None)]
+        objs = [o for o in objs if o not in hatch_objs]
         hatches = [_flat_hatch(o, detail.target, right, up)
                    for o in hatch_objs]
+        axes = np.stack([np.asarray(right, float), np.asarray(up, float)], 1)
+        text_frames = {
+            o.id: (o.shape.frame_box() - np.asarray(detail.target,
+                                                    float)) @ axes
+            for o in hatch_objs if isinstance(o.shape, TextShape)}
         shapes = [o.shape for o in objs]
         layer_types = vp._layer_linetypes()                 # once, not per object
         lts = [vp._effective_linetype(o, layer_types)
@@ -690,6 +698,7 @@ class LayoutView:
         if not shapes:
             data = {"visible": [], "hidden": [], "cut": cut_regions,
                     "cut_by_obj": cut_by_obj, "hatches": hatches,
+                    "text_frames": text_frames,
                     "visible_lt": [], "visible_by_obj": [], "visible_groups": []}
             self._hlr_cache[detail.id] = (key, data)
             return data
@@ -727,6 +736,7 @@ class LayoutView:
                 "cut": cut_regions,
                 "cut_by_obj": cut_by_obj,
                 "hatches": hatches,
+                "text_frames": text_frames,
                 "visible_lt": [(n, p) for n, p in lt_groups.items()],
                 "visible_by_obj": by_obj,
                 "visible_groups": merge_line_groups(entries)}
@@ -968,13 +978,17 @@ class LayoutView:
     def hatch_looks(self, data) -> list:
         """(colour, background, solid) for each of a detail's hatches,
         aligned with its `hatches`, as the scene says now; a hatch that
-        has gone draws in ink on nothing."""
+        has gone draws in ink on nothing. Text is a solid one in ink."""
+        from ..core.text_object import TextShape
         scene = self.vp.scene
         out = []
         for oid, *_drawn in data.get("hatches") or []:
             obj = scene.get(oid)
             if obj is None:
                 out.append((None, None, False, 0.0))
+                continue
+            if isinstance(obj.shape, TextShape):
+                out.append((None, None, True, scene.print_width_of(obj)))
                 continue
             color, ground = scene.hatch_look_of(obj)
             out.append((color, ground,
@@ -1004,12 +1018,25 @@ class LayoutView:
                 *(HATCH_INK[:3] if color is None else color), 1.0),
                 sheet_line_width(width, 1.0))
         if gold:
+            from ..core.text_object import dotted_frame
+            from .viewport import TEXT_FRAME_DOT_GAP_PX, TEXT_FRAME_DOT_PX
+            frames = data.get("text_frames") or {}
             for oid, _tris, segs, _dots in hatches:
-                if picked(oid) and len(segs):
+                if not picked(oid):
+                    continue
+                if oid in frames:
+                    paper = np.asarray(frames[oid]) * s + (cx, cy)
+                    segs = dotted_frame(paper, paper * self.px_per_mm,
+                                        TEXT_FRAME_DOT_GAP_PX,
+                                        TEXT_FRAME_DOT_PX)
+                else:
+                    segs = np.asarray(segs) * s + (cx, cy)
+                if len(segs):
                     flat = np.zeros((len(segs), 2, 3), np.float32)
-                    flat[:, :, :2] = np.asarray(segs) * s + (cx, cy)
+                    flat[:, :, :2] = segs
                     self._draw_segs(paper_mvp, flat,
-                                    (*theme.SELECTION_COLOR, 1.0), 1.6)
+                                    (*theme.SELECTION_COLOR, 1.0),
+                                    2.0 if oid in frames else 1.6)
 
     def _min_dot(self) -> float:
         """The smallest dot the screen draws, in paper mm: a pixel and a
@@ -1636,14 +1663,18 @@ def _flat_hatch(obj, target, right, up) -> tuple:
     in a detail's projector frame, model units: what the sheet draws of
     it, its dots as (centre, radius) to be filled."""
     from ..core.tessellate import tessellate
+    from ..core.text_object import TextShape
     hatch = obj.shape
     target = np.asarray(target, float)
     axes = np.stack([np.asarray(right, float), np.asarray(up, float)], 1)
-    mesh = tessellate(hatch.region)
+    lettering = isinstance(hatch, TextShape)
+    mesh = tessellate(hatch.fill() if lettering else hatch.region)
     tris = np.zeros((0, 3, 2))
     if mesh.has_faces and len(mesh.triangles):
         tris = ((np.asarray(mesh.vertices, float) - target) @ axes)[
             np.asarray(mesh.triangles)]
+    if lettering:
+        return obj.id, tris, np.zeros((0, 2, 2)), []
     segs = np.asarray(hatch.line_segments(), float).reshape(-1, 2, 3)
     dots = [(tuple(((np.asarray(c, float) - target) @ axes).tolist()), r)
             for c, r in hatch.dots()]

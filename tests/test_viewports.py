@@ -150,23 +150,23 @@ def test_right_click_accepts_defaults(window):
 
 
 def test_command_terminates_cleanly_after_completion(window):
-    """The playtest bug: scale must end when done — a habitual right-click
-    afterwards re-prompts for objects (selection released), and another
-    right-click on the empty prompt cancels instead of sticking."""
+    """The playtest bug: scale must end when done. What it scaled stays
+    selected, so a habitual right-click afterwards repeats it on the same
+    objects, asking straight for the base point."""
     from serpentine3d.core import geometry as g
     obj = window.scene.add(g.make_box((0, 0, 0), 2, 2, 2))
     window.selection.set([obj.id])
-    window.processor.run("scale")        # preselection consumed
+    window.processor.run("scale")        # preselection used
     window.processor.provide_text("0,0,0")
     window.processor.provide_text("2")
     assert not window.processor.busy     # terminated
-    assert window.selection.ids == []    # selection released (Rhino-style)
+    assert window.selection.ids == [obj.id]   # a transform keeps hold
 
     _rmb_click(window.viewport)          # RMB after finishing repeats
     assert window.processor.busy
-    from serpentine3d.commands.base import SelectReq
-    assert isinstance(window.processor.request, SelectReq)
-    _rmb_click(window.viewport)          # RMB on nothing bows out again
+    from serpentine3d.commands.base import PointReq
+    assert isinstance(window.processor.request, PointReq)
+    window.processor.cancel()
     assert not window.processor.busy
     assert g.volume(window.scene.all()[0].shape) == pytest.approx(64)
 
@@ -241,7 +241,8 @@ def test_sellast_recovers_released_selection(window):
     window.processor.run("move")
     window.processor.provide_text("0,0,0")
     window.processor.provide_text("5,0,0")
-    assert window.selection.ids == []
+    assert window.selection.ids == [obj.id]   # a transform keeps hold
+    window.selection.clear()
     window.processor.run("sellast")
     assert window.selection.ids == [obj.id]
 

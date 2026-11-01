@@ -8,6 +8,7 @@ import pytest
 from serpentine3d.core import geometry as g
 from serpentine3d.core.snaps import SnapIndex, _static_snap_points
 from serpentine3d.core.text import TextShape
+from serpentine3d.core.text_object import dotted_frame
 from serpentine3d.ui.camera import Camera
 
 
@@ -115,3 +116,30 @@ def test_converted_text_curves_keep_their_ordinary_contour_snaps():
     assert kinds["end"] > 4
     assert kinds["mid"] > 4
     assert kinds["point"] == 0
+
+
+def test_the_selection_frame_runs_through_the_text_snaps():
+    text = g.apply_matrix(TextShape("Frame", 5.), np.array([
+        [0., -2., 0., 7.], [2., 0., 0., -3.], [0., 0., 1., 4.], [0., 0., 0., 1.]]))
+    corners = [p for p, kind in text.snap_points() if kind == "end"]
+    np.testing.assert_allclose(text.frame_box(), corners)
+    box = text.frame_box()
+    dots = dotted_frame(box, box[:, :2], 0.7, 0.1)
+    starts = dots[:, 0]
+    for corner in corners:
+        assert np.min(np.linalg.norm(starts - corner, axis=1)) < 1e-9
+    gaps = np.linalg.norm(np.diff(starts, axis=0), axis=1)
+    assert gaps.max() < 0.7 * 1.5, "dots stay evenly spread along the frame"
+
+
+def test_text_seen_almost_edge_on_keeps_its_dots_apart():
+    """Dots are spaced on the screen: an edge foreshortened to a few pixels
+    gets a few dots, not as many as its length in the model would."""
+    box = TextShape("Flat", 5.).frame_box()
+    seen = box[:, :2] * (40., 0.4)            # the height nearly edge on
+    dots = dotted_frame(box, seen, 6., 1.5)
+    starts = dotted_frame(seen, seen, 6., 1.5)[:, 0]
+    gaps = np.linalg.norm(np.diff(np.vstack([starts, starts[:1]]), axis=0),
+                          axis=1)
+    assert len(dots) == len(starts)
+    assert gaps.min() > 1.0, "dots on screen must not crowd together"

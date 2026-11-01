@@ -77,7 +77,7 @@ def test_new_model_text_uses_the_plane_chosen_in_the_contextual_ui(
     camera.target = np.asarray((8., 9., 10.))
     camera.distance = 140.
 
-    window.processor.run("textobject")
+    window.processor.run("text")
     combo = _placement_control(window)
     _choose(combo, placement)
     if placement == "CPlane":
@@ -98,7 +98,7 @@ def test_new_model_text_uses_the_plane_chosen_in_the_contextual_ui(
 
 def test_selected_face_placement_uses_a_held_planar_face_and_asks_when_missing(
         window):
-    window.processor.run("textobject")
+    window.processor.run("text")
     combo = _placement_control(window)
     _choose(combo, "Selected face")
     assert "face" in window.processor.request.prompt.lower(), (
@@ -113,7 +113,7 @@ def test_selected_face_placement_uses_a_held_planar_face_and_asks_when_missing(
     window.selection.set([box.id])
     window.selection.toggle_subobject(box.id, "face", face_index)
 
-    window.processor.run("textobject")
+    window.processor.run("text")
     combo = _placement_control(window)
     _choose(combo, "Selected face")
     anchor = (4., 6., 10.)

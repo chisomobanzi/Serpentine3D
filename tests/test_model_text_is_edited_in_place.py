@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QPlainTextEdit, QTextEdit
 from serpentine3d.app import MainWindow
 from serpentine3d.commands.base import PointReq
 from serpentine3d.core.text import TextShape
+from serpentine3d.ui.text_editor import InlineTextEditor
 
 
 @pytest.fixture
@@ -49,7 +50,11 @@ def _replace_text(editor, lines):
     QTest.keyClick(editor, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
     for index, line in enumerate(lines):
         if index:
-            QTest.keyClick(editor, Qt.Key.Key_Return)
+            # the viewport popup closes on Enter and breaks on Ctrl+Enter
+            QTest.keyClick(editor, Qt.Key.Key_Return,
+                           Qt.KeyboardModifier.ControlModifier
+                           if isinstance(editor, InlineTextEditor)
+                           else Qt.KeyboardModifier.NoModifier)
         QTest.keyClicks(editor, line)
     QApplication.processEvents()
 
@@ -88,7 +93,7 @@ def test_model_text_is_placed_and_written_directly_in_the_viewport(
         window, monkeypatch):
     _forbid_modal_dialog(monkeypatch)
 
-    window.processor.run("textobject")
+    window.processor.run("text")
     assert isinstance(window.processor.request, PointReq), (
         "Text should ask for its model-space anchor before asking for content")
 
@@ -108,6 +113,29 @@ def test_model_text_is_placed_and_written_directly_in_the_viewport(
     assert not window.processor.busy, "Escape should finish and keep the text object"
     assert window.scene.get(obj.id).shape.text == "Room\nschedule"
     assert editor.isHidden(), "Finishing text should remove its viewport editor"
+
+
+def test_enter_closes_the_text_editor_and_ctrl_enter_breaks_the_line(
+        window, monkeypatch):
+    _forbid_modal_dialog(monkeypatch)
+    window.processor.run("text")
+    window.processor.provide((0., 0., 0.))
+    editor = _multiline_editor(window.viewport)
+
+    editor.setFocus()
+    QTest.keyClicks(editor, "Top")
+    QTest.keyClick(editor, Qt.Key.Key_Return,
+                   Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClicks(editor, "line")
+    QApplication.processEvents()
+    assert not editor.isHidden(), "Ctrl+Enter must keep the editor open"
+
+    QTest.keyClick(editor, Qt.Key.Key_Return)
+    QApplication.processEvents()
+    assert editor.isHidden(), "Enter should close the text editor"
+    assert not window.processor.busy
+    obj, = window.scene.all()
+    assert obj.shape.text == "Top\nline"
 
 
 def test_double_click_and_properties_edit_the_same_live_model_text(
@@ -148,3 +176,34 @@ def test_double_click_and_properties_edit_the_same_live_model_text(
     QTest.keyClick(inline, Qt.Key.Key_Escape)
     QApplication.processEvents()
     assert inline.isHidden()
+
+
+def test_text_is_picked_anywhere_inside_its_frame(window):
+    text = TextShape("I I", 6., _available_font(), origin=(0., 0., 0.))
+    obj = window.scene.add(text, name="Sparse label")
+    viewport = window.viewport
+    viewport.camera.set_standard_view("top")
+    box = text.frame_box()
+    viewport.camera.target = box.mean(axis=0)
+    viewport.camera.distance = 60.
+    QApplication.processEvents()
+
+    corner, opposite = box[0], box[2]
+    inside = corner + (opposite - corner) * 0.05
+    screen = viewport.camera.project(
+        np.asarray([inside]), viewport.width(), viewport.height())[0]
+    assert viewport.pick_object(float(screen[0]), float(screen[1])) == obj.id, (
+        "A click inside the text's frame but off its letters should pick it")
+
+
+def test_text_in_the_model_places_model_text(window, monkeypatch):
+    _forbid_modal_dialog(monkeypatch)
+    window.processor.run("text")
+    window.processor.provide((0., 0., 0.))
+    editor = _multiline_editor(window.viewport)
+    editor.setFocus()
+    QTest.keyClicks(editor, "Model")
+    QTest.keyClick(editor, Qt.Key.Key_Return)
+    QApplication.processEvents()
+    obj, = window.scene.all()
+    assert isinstance(obj.shape, TextShape)

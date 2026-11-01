@@ -156,7 +156,7 @@ def _click_drawing_outside_editor(window, editor):
 
 
 def _place_model(window, typography, *, position=(25., 35., 0.)):
-    window.processor.run("textobject")
+    window.processor.run("text")
     assert isinstance(window.processor.request, PointReq), (
         "Text must ask for its baseline anchor before opening an editor")
     window.processor.provide(position)
@@ -210,12 +210,12 @@ def _formatted_note(values, **placement):
     return TextNote(**values, **placement)
 
 
-def test_textobject_places_live_typography_on_the_cplane(
+def test_text_places_live_typography_on_the_cplane(
         window, monkeypatch, typography):
     _forbid_modal(monkeypatch)
     plane = CPlane(origin=(0., 8., 0.), normal=(0., -1., 0.), xdir=(1., 0., 0.))
     window.viewport.cplane = plane
-    window.processor.run("textobject")
+    window.processor.run("text")
     assert isinstance(window.processor.request, PointReq)
     position = (25., 8., 40.)
     window.processor.provide(position)
@@ -249,7 +249,7 @@ def test_textobject_places_live_typography_on_the_cplane(
 
 def test_new_text_keeps_live_style_and_clicking_the_drawing_finishes(
         window, typography):
-    window.processor.run("textobject")
+    window.processor.run("text")
     window.processor.provide((25., 35., 0.))
     QApplication.processEvents()
     editor = _inline_editor(window)
@@ -310,7 +310,7 @@ def test_curve_output_keeps_contours_and_has_real_group_selection(
 def test_cancelling_model_text_leaves_no_objects_or_undo_entry(
         window, monkeypatch, typography, stage):
     _forbid_modal(monkeypatch)
-    window.processor.run("textobject")
+    window.processor.run("text")
     assert isinstance(window.processor.request, PointReq)
     if stage == "anchor":
         window.processor.cancel()
@@ -502,9 +502,9 @@ def test_extrude_offers_caps_for_editable_text_and_keeps_the_counters(env, typog
     assert sum(g.volume(s) for s in solids) == pytest.approx(abs(area)*5./400., rel=.001)
 
 
-def test_existing_scripted_textobject_and_text_input_still_work(env):
+def test_existing_scripted_model_and_paper_text_input_still_work(env):
     scene, _sel, _hist, ctx, proc = env
-    proc.run("textobject")
+    proc.run("text")
     for value in ("Hi", "0,0,0", "10"):
         proc.provide_text(value)
     assert not proc.busy and scene.all()

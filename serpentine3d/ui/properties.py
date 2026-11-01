@@ -114,6 +114,23 @@ class Subject:
 _INSET = theme.PANEL_INSET
 
 
+class _FontFamilyBox(QFontComboBox):
+    """A font family picker whose list is exactly as wide as the box: a
+    click opens the list, and a long family name is cut short in it."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(False)
+        self.view().setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.view().setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def resizeEvent(self, event):
+        # after Qt's own, which makes the list five thirds of the box
+        super().resizeEvent(event)
+        self.view().window().setFixedWidth(self.width())
+
+
 def _seam() -> QWidget:
     """The dark line that closes a page's header off from its fields."""
     seam = QWidget()
@@ -1090,7 +1107,7 @@ class PropertiesPanel(QWidget):
         self.text_content.textChanged.connect(self._change_text_content)
         form.addRow("Content", self.text_content)
 
-        self.text_font_family = QFontComboBox()
+        self.text_font_family = _FontFamilyBox()
         self.text_font_family.setObjectName("text_font_family")
         self.text_font_family.currentFontChanged.connect(
             self._text_family_changed)
@@ -2236,7 +2253,7 @@ class PropertiesPanel(QWidget):
         del blocker
 
     def set_model_text_command_active(self, active: bool):
-        """Show the model-lettering controls while TextObject is running."""
+        """Show the model-lettering controls while Text places model text."""
         active = bool(active)
         if active == self._model_text_command_active:
             return

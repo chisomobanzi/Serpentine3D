@@ -133,17 +133,30 @@ class TextShape(TopoDS_Compound):
         return self._from_geometry(self._typography(), self._frame,
                                    geometry.copy_shape(self._brep))
 
-    def snap_points(self):
-        """Insertion point and oriented visible bounds in world space."""
+    def _local_box(self):
         frame = np.asarray(self._frame, dtype=float)
         local = geometry.apply_matrix(self._brep, np.linalg.inv(frame))
         lo, hi = geometry.bbox(local)
         x0, y0 = lo[:2]
         x1, y1 = hi[:2]
-        corners = np.array([
+        return np.array([
             [x0, y0, 0., 1.], [x1, y0, 0., 1.],
             [x1, y1, 0., 1.], [x0, y1, 0., 1.],
         ])
+
+    def frame_box(self):
+        """The four corners of the oriented visible bounds in world space,
+        the ones the text snaps to: the area a click picks it by, and where
+        its selection frame is drawn."""
+        if not hasattr(self, "_frame_box"):
+            frame = np.asarray(self._frame, dtype=float)
+            self._frame_box = (self._local_box() @ frame.T)[:, :3]
+        return self._frame_box
+
+    def snap_points(self):
+        """Insertion point and oriented visible bounds in world space."""
+        frame = np.asarray(self._frame, dtype=float)
+        corners = self._local_box()
         mids = (corners + np.roll(corners, -1, axis=0)) / 2.
         center = corners.mean(axis=0)
 
@@ -164,6 +177,18 @@ class TextShape(TopoDS_Compound):
             explorer.Next()
         return wires
 
+    def fill(self):
+        """The glyphs as planar faces, counters left open: what is drawn of
+        the text, like a solid hatch. None when the outlines do not close
+        into regions."""
+        if not hasattr(self, "_fill"):
+            try:
+                faces = geometry.planar_regions(self.to_curves())
+                self._fill = geometry.make_compound(faces) if faces else None
+            except Exception:                              # noqa: BLE001
+                self._fill = None
+        return self._fill
+
     def to_bytes(self):
         header = json.dumps(dict(typography=self._typography(), frame=self._frame),
                             ensure_ascii=False).encode("utf-8")
@@ -178,6 +203,42 @@ class TextShape(TopoDS_Compound):
         header = json.loads(data[start:start + size])
         brep = geometry.shape_from_bytes(data[start + size:])
         return cls._from_geometry(header["typography"], header["frame"], brep)
+
+
+class TextPreview(TopoDS_Compound):
+    """A preview of several shapes that remembers which were text, so a
+    ghost can draw their dotted frames as their selection shows them."""
+
+    def __init__(self, compound, texts):
+        super().__init__()
+        self.TShape(compound.TShape())
+        self.Location(compound.Location())
+        self.Orientation(compound.Orientation())
+        self.texts = list(texts)
+
+
+def dotted_frame(corners, screen, spacing: float, dot: float) -> np.ndarray:
+    """The dots of a dotted frame through `corners`, a closed ring of
+    points in 2D or 3D, as (K, 2, D) short segments: one on every corner,
+    the rest spread evenly between. `screen` is the same ring where it is
+    seen, in pixels, and `spacing` and `dot` are measured there, so an
+    edge seen end on gets few dots however long it really is.
+    What marks picked text, which as a fill has no outline of its own."""
+    corners = np.asarray(corners, float)
+    screen = np.asarray(screen, float)
+    out = []
+    for i, (a, b) in enumerate(zip(corners, np.roll(corners, -1, axis=0))):
+        seen = float(np.linalg.norm(screen[(i + 1) % len(screen)]
+                                    - screen[i]))
+        if seen < 1e-9:
+            continue
+        count = min(max(1, round(seen / spacing)), 128)
+        starts = a + np.outer(np.arange(count) / count, b - a)
+        out.append(np.stack([starts, starts + (b - a) * min(dot / seen, 1.)],
+                            1))
+    if not out:
+        return np.zeros((0, 2, corners.shape[1]))
+    return np.concatenate(out)
 
 
 def output_shapes(text: TextShape, output: str, depth: float = 1.) -> list:

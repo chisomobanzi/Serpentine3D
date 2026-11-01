@@ -1,6 +1,6 @@
 """Model lettering output is chosen directly in Properties.
 
-The tests drive the real MainWindow and ``textobject`` command.  They keep
+The tests drive the real MainWindow and ``text`` command.  They keep
 the interaction non-modal and verify the resulting OpenCascade geometry, so
 the output picker cannot be satisfied by controls which do not affect the
 model.
@@ -260,7 +260,7 @@ def test_direct_creation_can_choose_geometry_output_before_escape(
     plane = CPlane(origin=(4., 11., 7.), normal=(0., -1., 0.),
                    xdir=(1., 0., 0.))
     window.viewport.cplane = plane
-    window.processor.run("textobject")
+    window.processor.run("text")
     window.processor.provide(plane.origin)
     QApplication.processEvents()
     editor = window.viewport.findChild(QPlainTextEdit, "model_text_content")

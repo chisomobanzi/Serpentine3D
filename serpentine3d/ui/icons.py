@@ -325,9 +325,22 @@ def _points(p):
     _dot(p, 19, 15)
 
 
+def _text(p):
+    """A filled T in the dotted frame picked text is drawn with."""
+    p.save()
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(_STROKE))
+    p.drawRect(QRectF(6, 6, 10, 2.4))
+    p.drawRect(QRectF(9.8, 6, 2.4, 11))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.setPen(QPen(_ACCENT, 1.1, Qt.PenStyle.DotLine))
+    p.drawRect(QRectF(3, 3.5, 16, 16))
+    p.restore()
+
+
 _DRAWERS = {
     "line": _line, "polyline": _polyline, "curve": _curve, "circle": _circle,
-    "arc": _arc, "rectangle": _rect, "extrude": _extrude, "revolve": _revolve,
+    "arc": _arc, "rectangle": _rect, "text": _text, "extrude": _extrude, "revolve": _revolve,
     "loft": _loft, "planarsrf": _planar, "sweep1": _sweep1, "sweep2": _sweep2,
     "box": _box, "sphere": _sphere, "cylinder": _cylinder, "torus": _torus,
     "move": _move, "copy": _copy, "rotate": _rotate, "scale": _scale,
