@@ -10,7 +10,7 @@ from ..core import geometry as g
 from .base import PointReq, command, quadrant
 
 
-@command("box")
+@command("box", on_faces=True)
 def cmd_box(ctx):
     """Box from a base and height; Center spreads the base evenly."""
     c1 = yield PointReq("First corner of base", extra_options=("Center",))
@@ -146,7 +146,7 @@ def _box_from_center(ctx):
     ctx.echo(f"Created {obj.name}.")
 
 
-@command("sphere", aliases=("sph",))
+@command("sphere", aliases=("sph",), on_faces=True)
 def cmd_sphere(ctx):
     """Sphere from center and radius; 2Point spans a diameter instead."""
     center = yield PointReq("Center of sphere", extra_options=("2Point",))
@@ -185,7 +185,7 @@ def cmd_sphere(ctx):
     ctx.echo(f"Created {obj.name} (r={r:g}).")
 
 
-@command("cylinder", aliases=("cyl",))
+@command("cylinder", aliases=("cyl",), on_faces=True)
 def cmd_cylinder(ctx):
     base = yield PointReq("Center of base")
     cp = ctx.cplane
@@ -222,7 +222,7 @@ def cmd_cylinder(ctx):
     ctx.echo(f"Created {obj.name}.")
 
 
-@command("cone")
+@command("cone", on_faces=True)
 def cmd_cone(ctx):
     base = yield PointReq("Center of base")
     cp = ctx.cplane
@@ -255,7 +255,7 @@ def cmd_cone(ctx):
     ctx.echo(f"Created {obj.name}.")
 
 
-@command("torus")
+@command("torus", on_faces=True)
 def cmd_torus(ctx):
     center = yield PointReq("Center of torus")
     cp = ctx.cplane

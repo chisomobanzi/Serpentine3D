@@ -997,6 +997,21 @@ def cmd_ortho(ctx):
     yield from ()
 
 
+@command("autocplane", mutates=False)
+def cmd_autocplane(ctx):
+    """Toggle drawing on faces: a drawing command's first point takes the
+    plane of the flat face under it, for that command only."""
+    window = getattr(ctx, "window", None)
+    # the one the bar shows, not the pane that happens to be active
+    vp = window.viewport if window is not None else _vp(ctx)
+    vp.auto_cplane = not vp.auto_cplane
+    bar = getattr(window, "osnap_bar", None)
+    if bar is not None:
+        bar.refresh()
+    ctx.echo(f"AutoCPlane {'on' if vp.auto_cplane else 'off'}.")
+    yield from ()
+
+
 @command("angle", mutates=False)
 def cmd_angle(ctx):
     """Angle at a vertex point between two directions."""

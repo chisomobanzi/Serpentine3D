@@ -263,6 +263,12 @@ class CommandDef:
     # the default is the safe one — a command that never said is not let
     # loose on paper it cannot mean anything about.
     space: str = "model"
+    # Whether this command draws something new on the plane, so that a flat
+    # face under its first point can lend it that plane. Not for a command
+    # whose points only measure, like Move: the plane it reads is a way of
+    # saying which way is up, and a face passing under the cursor should not
+    # be able to change that.
+    on_faces: bool = False
 
 
 _REGISTRY: dict[str, CommandDef] = {}
@@ -271,11 +277,11 @@ _ALIASES: dict[str, str] = {}
 
 def command(name: str, aliases: tuple = (), label: str = "",
             mutates: bool = True, space: str = "model",
-            repeatable: bool = True):
+            repeatable: bool = True, on_faces: bool = False):
     def wrap(fn):
         cd = CommandDef(name=name.lower(), fn=fn, aliases=aliases,
                         label=label or name.capitalize(), mutates=mutates,
-                        space=space, repeatable=repeatable)
+                        space=space, repeatable=repeatable, on_faces=on_faces)
         _REGISTRY[cd.name] = cd
         for a in aliases:
             _ALIASES[a.lower()] = cd.name

@@ -25,7 +25,7 @@ def _rubber(pts):
     return np.stack([a[:-1], a[1:]], axis=1)
 
 
-@command("line", aliases=("l",), space="any")
+@command("line", aliases=("l",), space="any", on_faces=True)
 def cmd_line(ctx):
     """Straight line; BothSides grows it evenly out of its middle."""
     p1 = yield PointReq("Start of line", extra_options=("BothSides",))
@@ -50,7 +50,7 @@ def cmd_line(ctx):
     ctx.echo(f"Created {obj.name}.")
 
 
-@command("polyline", aliases=("pl", "pline"), space="any")
+@command("polyline", aliases=("pl", "pline"), space="any", on_faces=True)
 def cmd_polyline(ctx):
     pts = [(yield PointReq("Start of polyline"))]
     while True:
@@ -90,7 +90,7 @@ def _curve_ghost(build, pts, **kw):
     return ghost
 
 
-@command("curve", aliases=("cv",), space="any")
+@command("curve", aliases=("cv",), space="any", on_faces=True)
 def cmd_curve(ctx):
     """NURBS curve by control points, as Rhino's Curve does.
 
@@ -130,7 +130,7 @@ def cmd_curve(ctx):
     ctx.echo(f"Created {obj.name} from {len(pts)} control points.")
 
 
-@command("interpcrv", aliases=("interpcurve",), space="any")
+@command("interpcrv", aliases=("interpcurve",), space="any", on_faces=True)
 def cmd_interpcrv(ctx):
     """NURBS curve through picked points; Close joins it back smoothly."""
     pts = []
@@ -155,7 +155,7 @@ def cmd_interpcrv(ctx):
     ctx.echo(f"Created {obj.name} through {len(pts)} points.")
 
 
-@command("circle", aliases=("c", "ci"), space="any")
+@command("circle", aliases=("c", "ci"), space="any", on_faces=True)
 def cmd_circle(ctx):
     """Circle from center and radius; or 2Point across, or 3Point through."""
     import math
@@ -232,7 +232,7 @@ def cmd_circle(ctx):
     ctx.echo(f"Created {obj.name} (r={ctx.as_typed(r):g}).")
 
 
-@command("arc", aliases=("a",), space="any")
+@command("arc", aliases=("a",), space="any", on_faces=True)
 def cmd_arc(ctx):
     """Arc through three points; or Center and a sweep, or StartEnd."""
     import math
@@ -317,7 +317,7 @@ def cmd_arc(ctx):
     ctx.echo(f"Created {obj.name}.")
 
 
-@command("ellipse", aliases=("el",), space="any")
+@command("ellipse", aliases=("el",), space="any", on_faces=True)
 def cmd_ellipse(ctx):
     """Ellipse from center and two radii; Diameter takes an axis whole."""
     import math
@@ -500,7 +500,7 @@ def _rect_from_edge(ctx):
     ctx.echo(f"Created {obj.name}.")
 
 
-@command("rectangle", aliases=("rect", "rec"), space="any")
+@command("rectangle", aliases=("rect", "rec"), space="any", on_faces=True)
 def cmd_rectangle(ctx):
     """Rectangle corner to corner; or Center out, or 3Point to lean it."""
     c1 = yield PointReq("First corner",
@@ -585,7 +585,7 @@ def cmd_closecrv(ctx):
 
 # "any" since the sheet draws vertices as well as edges: a point on paper is a
 # mark on the page, at the millimetres it was put at, and it is not printed.
-@command("point", aliases=("pt",), space="any")
+@command("point", aliases=("pt",), space="any", on_faces=True)
 def cmd_point(ctx):
     count = 0
     p = yield PointReq("Location of point object")
