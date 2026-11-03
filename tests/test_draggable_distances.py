@@ -251,9 +251,11 @@ def test_offset_still_takes_typed_numbers(env):
 def test_shell_thickness_is_dragged_off_the_wall(env):
     """A 1 mm wall on a 10 mm box should be a 1 mm drag, so the drag starts
     at the surface being thickened, not at the middle of the solid."""
-    scene, sel, _hist, _ctx, proc = env
-    _box(scene, sel)
+    scene, _sel, _hist, _ctx, proc = env
+    obj = _box(scene)
     proc.run("shell")
+    proc.click_object(obj.id, at=(5, 5, 10))
+    proc.finish_selection()
     assert proc.request.number_from is not None
     base, _dir = proc.request.number_from
     assert math.dist(base, (10, 5, 5)) < 1e-6
@@ -263,13 +265,131 @@ def test_shell_thickness_is_dragged_off_the_wall(env):
 
 
 def test_shell_still_takes_typed_numbers(env):
+    scene, _sel, _hist, _ctx, proc = env
+    obj = _box(scene)
+    proc.run("shell")
+    proc.click_object(obj.id, at=(5, 5, 10))
+    proc.finish_selection()
+    proc.provide_text("1")
+    assert not proc.busy
+    # open at the top: a tray, its inside 8 x 8 and 9 deep
+    assert g.volume(scene.get(obj.id).shape) == pytest.approx(
+        1000 - 8 * 8 * 9, rel=0.01)
+
+
+def test_shell_opens_the_clicked_face(env):
+    """The face the solid was clicked on is the one taken away: click the
+    top of a box and it comes back a tray, open upward."""
+    scene, _sel, _hist, _ctx, proc = env
+    obj = _box(scene)
+    proc.run("shell")
+    proc.click_object(obj.id, at=(5, 5, 10))
+    proc.finish_selection()
+    proc.provide_text("1")
+    shape = scene.get(obj.id).shape
+    # 5 outer walls, 5 inner ones, and the rim where the top was
+    assert len(g.faces_of(shape)) == 11
+    # nothing sits across the top any more: the middle of it is open air
+    assert g.distance_point_to_shape(shape, (5, 5, 10)) == pytest.approx(
+        4.0, abs=1e-6)
+
+
+def test_shell_keeps_sharp_corners_sharp():
+    """A star shells to a star: the inner walls meet at points rather than
+    being rounded off, so every face of the result is still flat. Rounding
+    them is a fillet, a step of its own."""
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    pts = []
+    for i in range(10):
+        r = 10 if i % 2 == 0 else 4
+        a = math.pi / 2 + i * math.pi / 5
+        pts.append((r * math.cos(a), r * math.sin(a), 0))
+    star = g.extrude(g.make_polyline(pts, closed=True), (0, 0, 1), 5,
+                     cap=True)
+    top = g.face_index_near(star, (0, 0, 5))
+    shelled = g.shell_solid(star, 0.5, [top])
+    kinds = {BRepAdaptor_Surface(f).GetType() for f in g.faces_of(shelled)}
+    assert kinds == {GeomAbs_SurfaceType.GeomAbs_Plane}
+    assert g.volume(shelled) < g.volume(star)
+
+
+def _half_disc():
+    """A U arc closed by one flat edge across the top, extruded 10."""
+    return g.extrude(g.join_curves([
+        g.make_arc_3pt((-10, 0, 0), (0, -10, 0), (10, 0, 0)),
+        g.make_line((10, 0, 0), (-10, 0, 0))]), (0, 0, 1), 10, cap=True)
+
+
+def _square_u():
+    """20 wide, 20 tall, 5 thick arms and floor, extruded 10."""
+    return g.extrude(g.make_polyline(
+        [(0, 0, 0), (20, 0, 0), (20, 20, 0), (15, 20, 0), (15, 5, 0),
+         (5, 5, 0), (5, 20, 0), (0, 20, 0)], closed=True),
+        (0, 0, 1), 10, cap=True)
+
+
+def test_shell_hollows_every_face_of_an_arc_with_a_flat_edge():
+    """The kernel reports success here and returns the solid untouched, so
+    nothing is hollowed and nothing says why."""
+    solid = _half_disc()
+    for i in range(len(g.faces_of(solid))):
+        shelled = g.shell_solid(solid, 1, [i])
+        assert g.is_valid(shelled)
+        assert g.volume(shelled) < 0.5 * g.volume(solid)
+
+
+def test_shell_opens_a_cap_of_an_arc_with_a_flat_edge_to_the_right_depth():
+    solid = _half_disc()
+    top = g.face_index_near(solid, (0, -5, 10))
+    # the inside is the part of a radius 9 circle below y = -1, 9 deep
+    inside = 81 * math.acos(1 / 9) - math.sqrt(80)
+    assert g.volume(g.shell_solid(solid, 1, [top])) == pytest.approx(
+        g.volume(solid) - inside * 9, rel=1e-3)
+
+
+def test_shell_opens_the_inner_floor_of_a_u():
+    """The walls either side meet it at inside corners and keep their full
+    thickness: the opening is the floor, no wider."""
+    solid = _square_u()
+    floor = g.face_index_near(solid, (10, 5, 5))
+    shelled = g.shell_solid(solid, 1, [floor])
+    # the closed void, 144 x 8, plus the 10 x 1 x 8 slot through the floor
+    assert g.volume(shelled) == pytest.approx(2500 - 144 * 8 - 80, rel=1e-6)
+    assert g.distance_point_to_shape(shelled, (10, 5, 5)) > 0.9
+
+
+def test_shell_opens_a_flat_running_tangent_into_a_curve():
+    solid = g.extrude(g.join_curves([
+        g.make_line((-10, 20, 0), (-10, 0, 0)),
+        g.make_arc_3pt((-10, 0, 0), (0, -10, 0), (10, 0, 0)),
+        g.make_line((10, 0, 0), (10, 20, 0)),
+        g.make_line((10, 20, 0), (-10, 20, 0))]), (0, 0, 1), 10, cap=True)
+    side = g.face_index_near(solid, (-10, 10, 5))
+    shelled = g.shell_solid(solid, 1, [side])
+    assert g.is_valid(shelled)
+    assert g.volume(shelled) < 0.4 * g.volume(solid)
+
+
+def test_shell_says_so_when_the_wall_is_too_thick():
+    """It used to take the process down measuring a null offset."""
+    with pytest.raises(g.GeometryError):
+        g.shell_solid(_half_disc(), 50, [2])
+
+
+def test_shell_opens_every_held_face(env):
+    """Ctrl+Shift-clicked faces are all opened, with no prompt for one."""
     scene, sel, _hist, _ctx, proc = env
-    obj = _box(scene, sel)
+    obj = _box(scene)
+    top = g.face_index_near(obj.shape, (5, 5, 10))
+    bottom = g.face_index_near(obj.shape, (5, 5, 0))
+    sel.set_subobjects([(obj.id, "face", top), (obj.id, "face", bottom)])
     proc.run("shell")
     proc.provide_text("1")
     assert not proc.busy
+    # a square tube: 10 x 10 outside, 8 x 8 inside, 10 long
     assert g.volume(scene.get(obj.id).shape) == pytest.approx(
-        1000 - 8 ** 3, rel=0.05)
+        1000 - 8 * 8 * 10, rel=0.01)
 
 
 def test_fillet_reads_the_corner_off_the_two_picks(env):
