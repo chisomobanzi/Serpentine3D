@@ -74,6 +74,7 @@ def test_check_now_runs_the_manual_check(dlg):
 
 class _Main(QMainWindow):
     _on_update_available = MainWindow._on_update_available
+    _open_update_notice = MainWindow._open_update_notice
 
     def __init__(self):
         super().__init__()
@@ -95,6 +96,19 @@ def test_a_found_release_stays_in_the_status_bar():
     win._on_update_available({"version": "9.9.10", "url": "", "download": ""})
     assert len(win.statusBar().findChildren(QPushButton)) == 1
     assert "9.9.10" in win._update_button.text()
+
+
+def test_the_notice_goes_once_it_has_been_clicked():
+    """Clicked, it has done its job: the download dialog says the rest,
+    and a notice that stays would be one more thing in the window."""
+    win = _Main()
+    win._on_update_available({"version": "9.9.9", "url": "", "download": ""})
+    win._update_button.click()
+    assert win.manual_checks == 1
+    assert win._update_button.isHidden()
+    # a newer one found later is announced again
+    win._on_update_available({"version": "9.9.10", "url": "", "download": ""})
+    assert not win._update_button.isHidden()
 
 
 def test_installer_applies_a_ticked_task_to_an_existing_file():

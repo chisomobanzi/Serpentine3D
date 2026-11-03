@@ -2973,12 +2973,18 @@ class MainWindow(QMainWindow):
             self._update_button = QPushButton()
             self._update_button.setFlat(True)
             self._update_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._update_button.clicked.connect(self._check_updates_manual)
+            self._update_button.clicked.connect(self._open_update_notice)
             self.statusBar().addPermanentWidget(self._update_button)
         self._update_button.setText(
             f"Serpentine3D {rel['version']} is available")
         self._update_button.setToolTip("Download or read the release notes")
         self._update_button.show()
+
+    def _open_update_notice(self):
+        """The notice has done its job once clicked: the download dialog
+        says the rest, and it is not left standing in the status bar."""
+        self._update_button.hide()
+        self._check_updates_manual()
 
     def _check_updates_manual(self):
         """Help ▸ Check for Updates: synchronous, always reports back."""
