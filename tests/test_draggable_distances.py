@@ -370,6 +370,21 @@ def test_offsetsrf_is_dragged_along_the_surface_normal(env):
     assert lo[2] == pytest.approx(3, abs=1e-6)
 
 
+def test_offset_box_keeps_square_corners():
+    """A box offset outward is a bigger box: the faces are extended until
+    they meet, not joined by rounded edges and corners. Rounding them is a
+    fillet, a step of its own."""
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    box = g.make_box((0, 0, 0), 10, 10, 10)
+    grown = g.offset_surface(box, 2)
+    faces = g.faces_of(grown)
+    assert len(faces) == 6
+    assert {BRepAdaptor_Surface(f).GetType() for f in faces} == {
+        GeomAbs_SurfaceType.GeomAbs_Plane}
+    assert g.volume(grown) == pytest.approx(14 ** 3, rel=1e-6)
+
+
 def test_offsetsrf_still_takes_typed_numbers(env):
     scene, sel, _hist, _ctx, proc = env
     face = scene.add(g.planar_face(g.make_rectangle((0, 0, 0), (10, 10, 0))))
