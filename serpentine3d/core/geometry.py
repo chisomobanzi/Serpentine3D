@@ -2647,18 +2647,40 @@ def offset_surface(shape, distance: float) -> TopoDS_Shape:
 
     Corners stay sharp: the faces are extended until they meet rather than
     rounded off (the kernel's default), so a box offsets to a bigger box.
-    Rounding them is a fillet, done afterwards if wanted.
+    Rounding them is a fillet, done afterwards if wanted. Where the kernel
+    can't carry the faces on until they meet, as where an arc closed by a
+    flat side was extruded, it gives up, and the edges are rounded as they
+    were before rather than the offset failing.
     """
+    from OCP.GeomAbs import GeomAbs_JoinType
+    for join in (GeomAbs_JoinType.GeomAbs_Intersection,
+                 GeomAbs_JoinType.GeomAbs_Arc):
+        made = _offset_shape(shape, distance, join)
+        if made is not None:
+            return made
+    raise GeometryError("Offset surface failed")
+
+
+def _offset_shape(shape, distance: float, join):
+    """The kernel's offset of a surface or solid with edges joined by
+    `join`, or None where it gave up."""
     from OCP.BRepOffset import BRepOffset_Mode
     from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
     from OCP.GeomAbs import GeomAbs_JoinType
     mk = BRepOffsetAPI_MakeOffsetShape()
-    mk.PerformByJoin(shape, float(distance), tol(),
-                     BRepOffset_Mode.BRepOffset_Skin, False, False,
-                     GeomAbs_JoinType.GeomAbs_Intersection)
+    try:
+        mk.PerformByJoin(shape, float(distance), tol(),
+                         BRepOffset_Mode.BRepOffset_Skin, False, False, join)
+    except Exception:                     # noqa: BLE001 - the kernel's own
+        return None
     if not mk.IsDone() or mk.Shape().IsNull():
-        raise GeometryError("Offset surface failed")
-    return mk.Shape()
+        return None
+    made = mk.Shape()
+    # the round join is what this did before, unchecked; a sharp one that
+    # comes back broken is no better than none
+    if join == GeomAbs_JoinType.GeomAbs_Intersection and not is_valid(made):
+        return None
+    return made
 
 
 def shell_solid(shape, thickness: float) -> TopoDS_Shape:

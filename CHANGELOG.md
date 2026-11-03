@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **OffsetSrf keeps a solid's edges sharp (#139).** A box offset outward
+  came back with every edge and corner rounded, 26 faces where a box has
+  6. The faces now run on until they meet, so a box offsets to a bigger
+  box. Where they can't, as where an arc closed by a flat side was
+  extruded, the edges are rounded as before rather than the offset
+  failing. A filleted box offset inward comes back a solid, where it was
+  an open surface. Contributed by felixhudson (#138).
+
 ## 0.12.2 (2026-10-26)
 
 ### Added
