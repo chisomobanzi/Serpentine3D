@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Shell hollows the solid, open at the face you click (#121).** Shell
+  never hollowed anything. Given no face to open, OpenCascade hands back
+  the solid moved in by the wall, which is the inside of the shell rather
+  than the shell, so `box 0 10 10 10` with a 1 mm wall came back a solid
+  8 mm box. Shell now asks for the face to open, as Rhino's does: click
+  the solid on that face, and a box clicked on its top comes back a tray.
+  Ctrl+Shift-click faces first to open several. The walls meet at sharp
+  corners inside, so a star shells to a star, and a solid the kernel
+  says it shelled but left whole, such as an arc closed by a flat side,
+  is hollowed by cutting its inside out. A solid named at the prompt
+  rather than clicked is shelled closed: the same outside, hollow inside.
+  Contributed by felixhudson (#136).
+
 ## 0.12.2 (2026-10-26)
 
 ### Added

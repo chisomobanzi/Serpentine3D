@@ -2684,6 +2684,10 @@ def shell_solid(shape, thickness: float,
     face of an arc closed by a flat edge, the inner walls of a U, a flat
     running tangent into a curve. Whatever it returns is therefore measured,
     and when nothing was taken away the cavity is cut out instead.
+
+    With no face to open it is no use at all: it hands back the solid moved
+    in by the wall, which is the inside of the shell and not the shell, and
+    measures as hollowed, so a closed shell is always cut out (#121).
     """
     if shape_kind(shape) != "solid":
         raise GeometryError("Shell needs a closed solid")
@@ -2694,10 +2698,11 @@ def shell_solid(shape, thickness: float,
         if not 0 <= idx < len(faces):
             raise GeometryError("That face is not on the solid")
         picked.append(faces[idx])
-    result = _thick_solid(shape, picked, t)
-    if result is None or not _is_hollowed(shape, result):
-        result = _carved_shell(shape, picked, t)
-    return result
+    if picked:
+        result = _thick_solid(shape, picked, t)
+        if result is not None and _is_hollowed(shape, result):
+            return result
+    return _carved_shell(shape, picked, t)
 
 
 def _is_hollowed(shape, result) -> bool:
