@@ -11,6 +11,16 @@
   extruded, the edges are rounded as before rather than the offset
   failing. A filleted box offset inward comes back a solid, where it was
   an open surface. Contributed by felixhudson (#138).
+- **Offset keeps a curve's corners sharp (#137).** A rectangle offset
+  outward came back with its corners rounded off. The sides now run on
+  until they meet, as Rhino's Offset does unless told otherwise, so a
+  rectangle offsets to a rectangle, and `filletcorners` rounds them if
+  that is what you want. Where a corner can't be made sharp, as where a
+  spline meets another piece at an angle or at a corner of a few degrees,
+  it is rounded as before, rather than the curve coming back short, open
+  or empty. An offset that leaves nothing of the curve, such as a small
+  shape offset inward past its middle, now says so instead of adding an
+  empty object. Contributed by felixhudson (#140).
 
 ## 0.12.2 (2026-10-26)
 

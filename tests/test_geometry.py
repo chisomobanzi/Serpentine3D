@@ -244,6 +244,25 @@ def test_offset_open_curve():
     assert g.shape_kind(off) == "curve"
 
 
+@pytest.mark.parametrize("dist", [2.0, -2.0])
+def test_offset_rectangle_keeps_square_corners(dist):
+    """A rectangle offsets to a rectangle, either side: four straight
+    sides meeting at points, not joined by arcs. Rounding the corners is
+    a fillet, a step of its own."""
+    rect = g.make_rectangle((0, 0, 0), (10, 10, 0))
+    off = g.offset_curve(rect, dist)
+    assert len(g.edges_of(off)) == 4
+    assert g.curve_length(off) == pytest.approx(4 * (10 + 2 * dist),
+                                                rel=1e-6)
+
+
+def test_offset_open_corner_stays_sharp():
+    line = g.make_polyline([(0, 0, 0), (10, 0, 0), (10, 10, 0)])
+    off = g.offset_curve(line, 2.0)
+    assert len(g.edges_of(off)) == 2
+    assert g.curve_length(off) == pytest.approx(24.0, rel=1e-6)
+
+
 def test_fillet_curves():
     l1 = g.make_line((0, 0, 0), (10, 0, 0))
     l2 = g.make_line((10, 0, 0), (10, 10, 0))
