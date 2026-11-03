@@ -736,16 +736,65 @@ def planar_face(shape) -> TopoDS_Shape:
 
 
 def offset_curve(shape, distance: float) -> TopoDS_Shape:
-    """Offset a planar curve by a distance (sign picks the side)."""
-    from .occ import BRepOffsetAPI_MakeOffset, GeomAbs_JoinType
+    """Offset a planar curve by a distance (sign picks the side).
+
+    Corners stay sharp: the segments are extended until they meet rather
+    than joined by an arc, so a rectangle offsets to a rectangle. Rounding
+    them is a fillet, done afterwards if wanted.
+
+    The sharp join gives up where a spline meets another segment at an
+    angle, or at a corner too sharp to extend, and still says it is done:
+    it hands back nothing, an open curve for a closed one, or a piece of
+    the curve. A sharp corner is never shorter than an arc round the same
+    corner, so the offset with arcs is the yardstick, and the one used when
+    the sharp one comes back short.
+    """
+    from .occ import GeomAbs_JoinType
     wire = occ.to_wire(to_wire(shape))
-    open_result = not is_closed_curve(shape)
-    mk = BRepOffsetAPI_MakeOffset(wire, GeomAbs_JoinType.GeomAbs_Arc,
-                                  open_result)
-    mk.Perform(float(distance))
-    if not mk.IsDone() or mk.Shape().IsNull():
+    closed = is_closed_curve(shape)
+    sharp = _offset_wire(wire, distance, GeomAbs_JoinType.GeomAbs_Intersection,
+                         closed)
+    rounded = _offset_wire(wire, distance, GeomAbs_JoinType.GeomAbs_Arc,
+                           closed)
+    if sharp is None and rounded is None:
         raise GeometryError("Offset failed (curve must be planar)")
-    return mk.Shape()
+    nothing = "Offset leaves nothing of the curve at that distance"
+    # Offset in past its middle, a curve is gone, though a sharp join can
+    # still leave a speck of a corner there.
+    if rounded is not None and rounded[1] == 0:
+        raise GeometryError(nothing)
+    usable = [made for made in (sharp, rounded) if made is not None and made[1]]
+    if not usable:
+        raise GeometryError(nothing)
+    if len(usable) == 2 and sharp[1] < rounded[1] * (1 - 1e-6):
+        return rounded[0]
+    return usable[0][0]
+
+
+def _offset_wire(wire, distance: float, join, closed: bool):
+    """The kernel's offset with corners joined by `join`, or None if it
+    failed. As (shape, length): the length is 0 when what came back is
+    nothing, and None when it isn't the same kind of curve, every piece
+    closed for a closed curve and open for an open one."""
+    from .occ import BRepOffsetAPI_MakeOffset
+    try:
+        mk = BRepOffsetAPI_MakeOffset(wire, join, not closed)
+        mk.Perform(float(distance))
+    except Exception:                     # noqa: BLE001 - the kernel's own
+        return None
+    if not mk.IsDone() or mk.Shape().IsNull():
+        return None
+    made = mk.Shape()
+    pieces = []
+    exp = TopExp_Explorer(made, occ.WIRE)
+    while exp.More():
+        pieces.append(exp.Current())
+        exp.Next()
+    if not pieces:
+        return made, 0.0
+    if any(is_closed_curve(p) != closed for p in pieces):
+        return made, None
+    return made, curve_length(made)
 
 
 def _curve_plane_normal(ea, eb) -> Point | None:
@@ -2643,13 +2692,44 @@ def contour(shape, direction: Point = (0, 0, 1),
 
 
 def offset_surface(shape, distance: float) -> TopoDS_Shape:
-    """Offset a surface/shell by a distance along its normals."""
+    """Offset a surface/shell by a distance along its normals.
+
+    Corners stay sharp: the faces are extended until they meet rather than
+    rounded off (the kernel's default), so a box offsets to a bigger box.
+    Rounding them is a fillet, done afterwards if wanted. Where the kernel
+    can't carry the faces on until they meet, as where an arc closed by a
+    flat side was extruded, it gives up, and the edges are rounded as they
+    were before rather than the offset failing.
+    """
+    from OCP.GeomAbs import GeomAbs_JoinType
+    for join in (GeomAbs_JoinType.GeomAbs_Intersection,
+                 GeomAbs_JoinType.GeomAbs_Arc):
+        made = _offset_shape(shape, distance, join)
+        if made is not None:
+            return made
+    raise GeometryError("Offset surface failed")
+
+
+def _offset_shape(shape, distance: float, join):
+    """The kernel's offset of a surface or solid with edges joined by
+    `join`, or None where it gave up."""
+    from OCP.BRepOffset import BRepOffset_Mode
     from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffsetShape
+    from OCP.GeomAbs import GeomAbs_JoinType
     mk = BRepOffsetAPI_MakeOffsetShape()
-    mk.PerformByJoin(shape, float(distance), tol())
+    try:
+        mk.PerformByJoin(shape, float(distance), tol(),
+                         BRepOffset_Mode.BRepOffset_Skin, False, False, join)
+    except Exception:                     # noqa: BLE001 - the kernel's own
+        return None
     if not mk.IsDone() or mk.Shape().IsNull():
-        raise GeometryError("Offset surface failed")
-    return mk.Shape()
+        return None
+    made = mk.Shape()
+    # the round join is what this did before, unchecked; a sharp one that
+    # comes back broken is no better than none
+    if join == GeomAbs_JoinType.GeomAbs_Intersection and not is_valid(made):
+        return None
+    return made
 
 
 def face_index_near(shape, point: Point) -> int:
