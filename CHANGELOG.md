@@ -14,6 +14,25 @@
   or empty. An offset that leaves nothing of the curve, such as a small
   shape offset inward past its middle, now says so instead of adding an
   empty object. Contributed by felixhudson (#140).
+- **Checking for updates on startup works on Windows when it is ticked.**
+  Ticking the installer's update check did nothing once an earlier
+  install had cleared it, as the installer never touched an existing
+  settings file again. It now applies the choice either way, and changes
+  only that one setting. A release found at startup was announced in a
+  status message the next status refresh wiped, often before anyone saw
+  it, and now waits in the status bar until it is clicked. Settings has
+  an Updates page to turn the check on or off, and to check now.
+  Contributed by Jonas Pedrotti (#125).
+- **The rubber band and snap markers stay on the cursor at survey
+  coordinates.** Thousands of kilometres from the origin, the rubber
+  band, the crosses on picked points, the snap marker and a held axis
+  were placed on a grid half a metre apart, so a short leg's preview
+  vanished and the markers sat up to half a metre off the points they
+  marked. Contributed by Jonas Pedrotti (#128).
+- **A Ctrl+Shift click on a mesh no longer ends in an error.** It picks a
+  face or edge of the mesh, and the gumball then asked for faces of the
+  kind a solid has, which a mesh doesn't, so the click ended in an error
+  that could take the app down. Contributed by Jonas Pedrotti (#141).
 
 ## 0.12.2 (2026-10-26)
 
