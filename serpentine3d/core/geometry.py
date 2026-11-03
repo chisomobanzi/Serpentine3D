@@ -310,6 +310,11 @@ def make_control_curve(control_points: list[Point], degree: int = 3,
 # --- wires / joining --------------------------------------------------------
 
 def edges_of(shape) -> list:
+    """The shape's edges, each once. A mesh, a point cloud or a picture has
+    none of OpenCascade's, so it gives none: a mesh edge picked with
+    Ctrl+Shift is not one a Brep tool can take."""
+    if not isinstance(shape, TopoDS_Shape):
+        return []
     out, seen = [], set()
     exp = TopExp_Explorer(shape, occ.EDGE)
     while exp.More():
@@ -329,6 +334,10 @@ def edges_of(shape) -> list:
 
 
 def faces_of(shape) -> list:
+    """The shape's faces; none for a mesh, a point cloud or a picture, as
+    edges_of gives none."""
+    if not isinstance(shape, TopoDS_Shape):
+        return []
     out = []
     exp = TopExp_Explorer(shape, occ.FACE)
     while exp.More():
