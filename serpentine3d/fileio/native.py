@@ -629,7 +629,8 @@ def _load_doc(scene, doc: dict, blobs=None):
     from ..core.picture import PictureShape
     for plane in _image_planes_from_json(doc.get("image_planes", []), blobs):
         obj = scene.add(PictureShape(plane), name=plane.get("name"),
-                        layer_id=id_map.get(plane.get("layer"), "default"))
+                        layer_id=id_map.get(plane.get("layer"), "default"),
+                        obj_id=plane.get("id"))
         if plane.get("id"):
             object_id_map[plane["id"]] = obj.id
         scene.update(obj.id, visible=plane.get("visible", True),
@@ -677,7 +678,8 @@ def _load_doc(scene, doc: dict, blobs=None):
         else:
             shape = geometry.shape_from_bytes(base64.b64decode(od["brep"]))
         obj = scene.add(shape, name=od["name"],
-                        layer_id=id_map.get(od["layer"], "default"))
+                        layer_id=id_map.get(od["layer"], "default"),
+                        obj_id=od.get("id"))
         if od.get("id"):
             object_id_map[od["id"]] = obj.id
         updates = {}
@@ -730,7 +732,8 @@ def _load_doc(scene, doc: dict, blobs=None):
         if cloud is None:
             continue
         obj = scene.add(cloud, name=cd.get("name") or None,
-                        layer_id=id_map.get(cd.get("layer"), "default"))
+                        layer_id=id_map.get(cd.get("layer"), "default"),
+                        obj_id=cd.get("id"))
         if cd.get("id"):
             object_id_map[cd["id"]] = obj.id
         updates = {}
@@ -830,6 +833,8 @@ def _mesh_to_json(mesh) -> dict:
     }
     if origin is not None:
         out["o"] = [float(c) for c in origin]
+    if mesh.faceted:
+        out["f"] = 1             # drawn flat, every edge shown
     return out
 
 
@@ -843,4 +848,4 @@ def _mesh_from_json(data: dict):
     origin = data.get("o")
     if origin is not None:
         v = v + np.asarray(origin, float)
-    return MeshShape(v, t)
+    return MeshShape(v, t, faceted=bool(data.get("f")))

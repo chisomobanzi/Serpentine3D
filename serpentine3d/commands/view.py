@@ -402,6 +402,69 @@ def cmd_zoomwindow(ctx):
     vp.zoom_to_points(p1, p2)
 
 
+@command("hydra", aliases=("nodes",), mutates=False)
+def cmd_hydra(ctx):
+    """Open Hydra, the visual graph editor: wire components together to
+    make geometry, watch it preview in the model, then Bake it in."""
+    win = ctx.window
+    if win is None:
+        ctx.echo("Hydra needs the GUI.")
+        return
+        yield  # pragma: no cover
+    win.show_hydra()
+    return
+    yield  # pragma: no cover
+
+
+@command("hydraset", mutates=False, repeatable=False)
+def cmd_hydraset(ctx):
+    """Pick the model objects a Hydra component holds. Hydra starts this
+    from a component's Set Crv... (or Pt, Brep, Mesh), filtered to its
+    kind."""
+    editor = getattr(ctx.window, "hydra", None)
+    node = (editor.graph.nodes.get(editor.picking)
+            if editor is not None else None)
+    if node is None:
+        ctx.echo("Right-click a Hydra component and choose Set Crv..., "
+                 "Set Brep... or the like")
+        return
+        yield  # pragma: no cover
+    comp = node.component
+    objs = yield SelectReq(
+        f"Select {comp.plural} for Hydra, Enter when done",
+        kinds=comp.picks)
+    editor.set_references(node.id, [o.id for o in objs])
+    ctx.echo(f"Hydra {comp.title} set to {len(objs)} object"
+             + ("" if len(objs) == 1 else "s"))
+
+
+@command("hydravector", mutates=False, repeatable=False)
+def cmd_hydravector(ctx):
+    """Pick the two points a Hydra Vector runs between: where it starts,
+    then where its arrow points. Hydra starts this from Set Vector..."""
+    from ..core.hydra import arrow
+    editor = getattr(ctx.window, "hydra", None)
+    node = (editor.graph.nodes.get(editor.picking)
+            if editor is not None else None)
+    if node is None:
+        ctx.echo("Right-click a Hydra Vector and choose Set Vector...")
+        return
+        yield  # pragma: no cover
+    start = yield PointReq("Start of the vector")
+
+    def ghost(end):
+        try:
+            return arrow(start, end)
+        except Exception:                                  # noqa: BLE001
+            return None
+
+    end = yield PointReq("End of the vector, where the arrow points",
+                         rubber_from=start, rubber_band=False,
+                         preview_fn=ghost)
+    editor.set_inputs(node.id, {"A": tuple(start), "B": tuple(end)})
+    ctx.echo("Hydra Vector set")
+
+
 @command("newviewport", aliases=("newvp", "splitview"), mutates=False)
 def cmd_newviewport(ctx):
     """Open an extra live viewport in a dockable panel — drag its title

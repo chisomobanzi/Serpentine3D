@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import (
-    QBrush, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap,
+    QBrush, QColor, QIcon, QIconEngine, QPainter, QPainterPath, QPen,
+    QPixmap,
 )
 
 _STROKE = QColor("#c8c9cc")
@@ -17,12 +18,57 @@ _SCALE = 2  # draw at 2x for crisp hidpi
 
 def _painter(pix: QPixmap) -> QPainter:
     p = QPainter(pix)
+    _ready(p, 1.7)
+    return p
+
+
+def _ready(p: QPainter, width: float):
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(_STROKE, 1.7)
+    pen = QPen(_STROKE, width)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
-    return p
+
+
+class _Drawn(QIconEngine):
+    """An icon drawn afresh at whatever size it is shown, from the drawer
+    that makes it: as sharp in a 4K toolbar, or on a canvas zoomed in
+    three times, as at the size it was drawn for."""
+
+    def __init__(self, drawer, box: float, width: float):
+        super().__init__()
+        self.drawer, self.box, self.width = drawer, box, width
+
+    def paint(self, painter, rect, mode, state):
+        painter.save()
+        side = min(rect.width(), rect.height())
+        painter.translate(rect.x() + (rect.width() - side) / 2,
+                          rect.y() + (rect.height() - side) / 2)
+        painter.scale(side / self.box, side / self.box)
+        if mode == QIcon.Mode.Disabled:
+            painter.setOpacity(painter.opacity() * 0.4)
+        _ready(painter, self.width)
+        self.drawer(painter)
+        painter.restore()
+
+    def scaledPixmap(self, size, mode, state, scale):
+        pix = QPixmap(size * scale)
+        pix.setDevicePixelRatio(scale)
+        pix.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pix)
+        self.paint(painter, QRect(0, 0, size.width(), size.height()),
+                   mode, state)
+        painter.end()
+        return pix
+
+    def pixmap(self, size, mode, state):
+        return self.scaledPixmap(size, mode, state, 1.0)
+
+    def actualSize(self, size, mode, state):
+        return size
+
+    def clone(self):
+        return _Drawn(self.drawer, self.box, self.width)
 
 
 def _dot(p: QPainter, x, y, r=1.6, color=_ACCENT):
@@ -309,6 +355,105 @@ def _explode(p):
         p.drawLine(x0, y0, x1, y1)
 
 
+def _point(p):
+    p.drawLine(6, 11, 16, 11)
+    p.drawLine(11, 6, 11, 16)
+    _dot(p, 11, 11, r=2.6)
+
+
+def _mesh(p):
+    path = QPainterPath(QPointF(4, 17))
+    path.lineTo(9, 5)
+    path.lineTo(18, 7)
+    path.lineTo(16, 18)
+    path.closeSubpath()
+    p.fillPath(path, _FILL)
+    p.drawPath(path)
+    p.drawLine(9, 5, 16, 18)
+    p.drawLine(4, 17, 13, 12)
+    p.drawLine(13, 12, 18, 7)
+
+
+def _vector(p):
+    p.drawLine(4, 18, 17, 5)
+    p.drawLine(18, 4, 11, 5)
+    p.drawLine(18, 4, 17, 11)
+    _dot(p, 4, 18)
+
+
+def _list_item(p):
+    # three rows of a list, the middle one the item taken
+    for y in (6, 11, 16):
+        p.drawLine(8, y, 18, y)
+        _dot(p, 4.5, y, r=1.2, color=_STROKE)
+    _dot(p, 4.5, 11, r=2.2)
+
+
+def _list_remove(p):
+    # three rows of a list, the middle one crossed out
+    for y in (6, 11, 16):
+        p.drawLine(8, y, 18, y)
+        _dot(p, 4.5, y, r=1.2, color=_STROKE)
+    p.save()
+    p.setPen(QPen(_ACCENT, 1.7, Qt.PenStyle.SolidLine,
+                  Qt.PenCapStyle.RoundCap))
+    p.drawLine(2.5, 9, 6.5, 13)
+    p.drawLine(6.5, 9, 2.5, 13)
+    p.restore()
+
+
+def _toggle(p):
+    # a switch, its knob over to one side
+    p.drawRoundedRect(QRectF(3, 7, 16, 8), 4, 4)
+    _dot(p, 15, 11, r=2.6)
+
+
+def _pipeline(p):
+    # a funnel the model's objects pour through
+    path = QPainterPath(QPointF(3, 5))
+    path.lineTo(19, 5)
+    path.lineTo(13, 12)
+    path.lineTo(13, 18)
+    path.lineTo(9, 18)
+    path.lineTo(9, 12)
+    path.closeSubpath()
+    p.fillPath(path, _FILL)
+    p.drawPath(path)
+    for x in (7, 11, 15):
+        _dot(p, x, 2.5, r=1.2)
+
+
+def _panel(p):
+    # a note with lines of text on it
+    p.drawRoundedRect(QRectF(3, 3, 16, 16), 2, 2)
+    for y in (8, 11.5, 15):
+        p.drawLine(QPointF(6.5, y), QPointF(15.5, y))
+    _dot(p, 6.5, 8, r=1.3)
+
+
+def _delaunay(p):
+    # a few points joined into triangles
+    pts = [(4, 17), (11, 4), (18, 15), (11, 12), (16, 6)]
+    for a, b in ((0, 1), (1, 4), (4, 2), (2, 0), (0, 3), (1, 3), (3, 2),
+                 (3, 4)):
+        p.drawLine(QPointF(*pts[a]), QPointF(*pts[b]))
+    for x, y in pts:
+        _dot(p, x, y, r=1.5)
+
+
+def _hydra(p):
+    # one output fanning out into three wires, as on Hydra's canvas: each
+    # leaves level and arrives level, an S from the output to its input
+    start = QPointF(4, 18)
+    for y in (4.5, 10, 15.5):
+        wire = QPainterPath(start)
+        wire.cubicTo(QPointF(11, 18), QPointF(11, y), QPointF(18, y))
+        p.drawPath(wire)
+    for y in (4.5, 10, 15.5):
+        _dot(p, 18, y, r=2.1)
+    _dot(p, 4, 18, r=2.1)
+
+
 def _points(p):
     path = QPainterPath(QPointF(3, 17))
     path.cubicTo(8, 8, 14, 8, 19, 15)
@@ -325,6 +470,170 @@ def _points(p):
     _dot(p, 19, 15)
 
 
+def _sign(p, *strokes):
+    # a sign of arithmetic in a round badge, the badge in the accent
+    p.save()
+    p.setBrush(_FILL)
+    p.drawEllipse(QPointF(11, 11), 8.5, 8.5)
+    p.setPen(QPen(_ACCENT, 2.0, Qt.PenStyle.SolidLine,
+                  Qt.PenCapStyle.RoundCap))
+    for x0, y0, x1, y1 in strokes:
+        p.drawLine(QPointF(x0, y0), QPointF(x1, y1))
+    p.restore()
+
+
+def _addition(p):
+    _sign(p, (7, 11, 15, 11), (11, 7, 11, 15))
+
+
+def _subtraction(p):
+    _sign(p, (7, 11, 15, 11))
+
+
+def _multiplication(p):
+    _sign(p, (8, 8, 14, 14), (14, 8, 8, 14))
+
+
+def _division(p):
+    _sign(p, (7, 11, 15, 11))
+    _dot(p, 11, 7.3, r=1.3)
+    _dot(p, 11, 14.7, r=1.3)
+
+
+def _series(p):
+    # bars that each stand a step taller than the one before
+    for i, x in enumerate((4, 9, 14, 19)):
+        p.drawLine(QPointF(x, 19), QPointF(x, 15 - 3.5 * i))
+        _dot(p, x, 15 - 3.5 * i, r=1.4)
+
+
+def _range(p):
+    # a span from one end to the other, divided into equal steps
+    p.drawLine(QPointF(3, 13), QPointF(19, 13))
+    for x in (3, 7, 11, 15, 19):
+        p.drawLine(QPointF(x, 10), QPointF(x, 16))
+    _dot(p, 3, 7, r=1.6)
+    _dot(p, 19, 7, r=1.6)
+
+
+def _random(p):
+    # a die, its pips scattered
+    p.drawRoundedRect(QRectF(3, 3, 16, 16), 3, 3)
+    for x, y in ((7, 7), (15, 7), (11, 11), (7, 15), (15, 15)):
+        _dot(p, x, y, r=1.4)
+
+
+def _unit_drawer(tip):
+    """An arrow from the origin along one axis, the others faint behind."""
+    def draw(p):
+        origin = QPointF(6, 16)
+        axes = {"x": QPointF(19, 16), "y": QPointF(14, 8),
+                "z": QPointF(6, 3)}
+        p.save()
+        p.setPen(QPen(_STROKE, 1.0, Qt.PenStyle.DashLine))
+        for name, end in axes.items():
+            if name != tip:
+                p.drawLine(origin, end)
+        p.restore()
+        end = axes[tip]
+        p.drawLine(origin, end)
+        d = end - origin
+        length = (d.x() ** 2 + d.y() ** 2) ** 0.5
+        ux, uy = d.x() / length, d.y() / length
+        for k in (1, -1):
+            p.drawLine(end, QPointF(end.x() - 4 * ux + 2.5 * k * uy,
+                                    end.y() - 4 * uy - 2.5 * k * ux))
+        _dot(p, origin.x(), origin.y(), r=1.4)
+    return draw
+
+
+def _round(p):
+    # a number and its rounder neighbour, the step between them
+    p.drawLine(QPointF(3, 15), QPointF(19, 15))
+    for x in (5, 11, 17):
+        p.drawLine(QPointF(x, 13), QPointF(x, 17))
+    path = QPainterPath(QPointF(8, 15))
+    path.cubicTo(QPointF(8, 6), QPointF(11, 6), QPointF(11, 12))
+    p.drawPath(path)
+    _dot(p, 11, 15, r=1.8)
+
+
+def _concatenate(p):
+    # two pieces of text joined into one
+    p.drawRoundedRect(QRectF(2.5, 7, 7.5, 8), 1.5, 1.5)
+    p.drawRoundedRect(QRectF(12, 7, 7.5, 8), 1.5, 1.5)
+    p.save()
+    p.setPen(QPen(_ACCENT, 1.7, Qt.PenStyle.SolidLine,
+                  Qt.PenCapStyle.RoundCap))
+    p.drawLine(QPointF(9, 11), QPointF(13, 11))
+    p.restore()
+
+
+def _text_tag(p):
+    # a capital T on a dot, the place it stands
+    p.drawLine(QPointF(5, 4), QPointF(17, 4))
+    p.drawLine(QPointF(11, 4), QPointF(11, 15))
+    _dot(p, 11, 18.5, r=1.8)
+
+
+def _deconstruct_point(p):
+    # a point and the three axes it is measured along
+    origin = QPointF(5, 17)
+    p.save()
+    p.setPen(QPen(_STROKE, 1.0, Qt.PenStyle.DashLine))
+    p.drawLine(origin, QPointF(19, 17))
+    p.drawLine(origin, QPointF(5, 3))
+    p.drawLine(origin, QPointF(14, 9))
+    p.restore()
+    p.drawLine(QPointF(14, 9), QPointF(14, 17))
+    _dot(p, 14, 9, r=2.0)
+
+
+def _point_on_curve(p):
+    path = QPainterPath(QPointF(3, 17))
+    path.cubicTo(QPointF(7, 3), QPointF(15, 3), QPointF(19, 15))
+    p.drawPath(path)
+    p.save()
+    p.setPen(QPen(_ACCENT, 1.4, Qt.PenStyle.SolidLine,
+                  Qt.PenCapStyle.RoundCap))
+    p.drawLine(QPointF(11, 6.6), QPointF(17, 6.6))
+    p.restore()
+    _dot(p, 11, 6.6, r=2.0)
+
+
+def _group_shapes(p):
+    p.drawEllipse(QPointF(8, 9), 3.2, 3.2)
+    p.drawRect(QRectF(11.5, 11, 6, 6))
+    p.drawLine(QPointF(5, 17), QPointF(10, 13))
+
+
+def _group(p):
+    # shapes held in one dashed frame
+    _group_shapes(p)
+    p.save()
+    p.setPen(QPen(_ACCENT, 1.3, Qt.PenStyle.DashLine))
+    p.drawRoundedRect(QRectF(2.5, 3.5, 17, 16), 3, 3)
+    p.restore()
+
+
+def _ungroup(p):
+    # the frame opened, the shapes let out
+    _group_shapes(p)
+    p.save()
+    p.setPen(QPen(_ACCENT, 1.3, Qt.PenStyle.DashLine))
+    p.drawLine(QPointF(2.5, 3.5), QPointF(8, 3.5))
+    p.drawLine(QPointF(2.5, 3.5), QPointF(2.5, 9))
+    p.drawLine(QPointF(19.5, 19.5), QPointF(14, 19.5))
+    p.drawLine(QPointF(19.5, 19.5), QPointF(19.5, 14))
+    p.restore()
+
+
+def _contour(p):
+    # a hill cut into rings, the way a map draws it
+    for rx, ry in ((8.5, 6.5), (5.5, 4), (2.5, 1.8)):
+        p.drawEllipse(QPointF(11, 12), rx, ry)
+    _dot(p, 11, 12, r=1.2)
+
 _DRAWERS = {
     "line": _line, "polyline": _polyline, "curve": _curve, "circle": _circle,
     "arc": _arc, "rectangle": _rect, "extrude": _extrude, "revolve": _revolve,
@@ -335,21 +644,84 @@ _DRAWERS = {
     "booleandifference": _difference, "booleanintersection": _intersection,
     "join": _join, "delete": _delete, "trim": _trim, "split": _split,
     "offset": _offset, "fillet": _fillet, "explode": _explode,
-    "pointson": _points,
+    "pointson": _points, "point": _point, "mesh": _mesh, "vector": _vector,
+    "hydra": _hydra, "listitem": _list_item,
+    "listremove": _list_remove, "toggle": _toggle, "pipeline": _pipeline,
+    "panel": _panel, "delaunay": _delaunay, "addition": _addition,
+    "subtraction": _subtraction, "multiplication": _multiplication,
+    "division": _division, "series": _series, "range": _range,
+    "random": _random, "unitx": _unit_drawer("x"),
+    "unity": _unit_drawer("y"), "unitz": _unit_drawer("z"),
+    "contour": _contour, "round": _round, "concatenate": _concatenate,
+    "texttag": _text_tag, "deconstructpoint": _deconstruct_point,
+    "pointoncurve": _point_on_curve, "group": _group, "ungroup": _ungroup,
 }
+
+
+def _bars(p, rects):
+    p.save()
+    p.setBrush(_FILL)
+    for rect in rects:
+        p.drawRoundedRect(QRectF(*rect), 1.5, 1.5)
+    p.restore()
+
+
+def _align_drawer(how):
+    """Bars lined up on the accent line, or spaced evenly between two."""
+    def draw(p):
+        p.save()
+        p.setPen(QPen(_ACCENT, 1.7, Qt.PenStyle.SolidLine,
+                      Qt.PenCapStyle.RoundCap))
+        if how in ("left", "center", "right"):
+            x = {"left": 4, "center": 11, "right": 18}[how]
+            p.drawLine(QPointF(x, 2.5), QPointF(x, 19.5))
+        elif how in ("top", "middle", "bottom"):
+            y = {"top": 4, "middle": 11, "bottom": 18}[how]
+            p.drawLine(QPointF(2.5, y), QPointF(19.5, y))
+        elif how == "across":
+            p.drawLine(QPointF(2.5, 3), QPointF(2.5, 19))
+            p.drawLine(QPointF(19.5, 3), QPointF(19.5, 19))
+        else:
+            p.drawLine(QPointF(3, 2.5), QPointF(19, 2.5))
+            p.drawLine(QPointF(3, 19.5), QPointF(19, 19.5))
+        p.restore()
+        long, short = 13, 8
+        if how in ("left", "center", "right"):
+            start = {"left": lambda w: 4, "center": lambda w: 11 - w / 2,
+                     "right": lambda w: 18 - w}[how]
+            _bars(p, [(start(long), 5, long, 4.5),
+                      (start(short), 12.5, short, 4.5)])
+        elif how in ("top", "middle", "bottom"):
+            start = {"top": lambda h: 4, "middle": lambda h: 11 - h / 2,
+                     "bottom": lambda h: 18 - h}[how]
+            _bars(p, [(5, start(long), 4.5, long),
+                      (12.5, start(short), 4.5, short)])
+        elif how == "across":
+            _bars(p, [(5, 7, 3, 8), (9.5, 5, 3, 12), (14, 8, 3, 6)])
+        else:
+            _bars(p, [(7, 5, 8, 3), (5, 9.5, 12, 3), (8, 14, 6, 3)])
+    return draw
+
+
+def align_icon(how: str) -> QIcon:
+    """The mark of a button that aligns, or spaces evenly, what is chosen."""
+    return QIcon(_Drawn(_align_drawer(how), SIZE, 1.4))
+
+
+def hydra_icon() -> QIcon:
+    return command_icon("hydra")
 
 
 def command_icon(name: str) -> QIcon | None:
     drawer = _DRAWERS.get(name)
     if drawer is None:
         return None
-    pix = QPixmap(SIZE * _SCALE, SIZE * _SCALE)
-    pix.setDevicePixelRatio(_SCALE)
-    pix.fill(Qt.GlobalColor.transparent)
-    p = _painter(pix)
-    drawer(p)
-    p.end()
-    return QIcon(pix)
+    return QIcon(_Drawn(drawer, SIZE, 1.7))
+
+
+def sliders_icon() -> QIcon:
+    """The Properties panel's mark, values on rails, drawn to any size."""
+    return QIcon(_Drawn(_sliders, _MARK, 1.25))
 
 
 # -- panel marks ------------------------------------------------------------
