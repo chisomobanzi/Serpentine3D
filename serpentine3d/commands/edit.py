@@ -189,13 +189,16 @@ def cmd_delete(ctx):
 @command("join", aliases=("j",))
 def cmd_join(ctx):
     objs = yield SelectReq("Select curves or surfaces to join",
-                           kinds=("curve", "surface"), min_count=2)
+                           kinds=("curve", "surface"), min_count=2,
+                           too_few_ends=True)
     kinds = {o.kind for o in objs}
     if kinds == {"curve"}:
         joined = g.join_curves([o.shape for o in objs])
         for o in objs[1:]:
             ctx.scene.remove(o.id)
         new = ctx.scene.replace_shape(objs[0].id, joined)
+        ctx.select_result([new])
+        ctx.flash([new])
         ctx.echo(f"Joined {len(objs)} curves into {new.name}.")
         return
     if kinds != {"surface"}:
@@ -217,6 +220,7 @@ def cmd_join(ctx):
     for o in objs[1:]:
         ctx.scene.remove(o.id)
     ctx.select_result(made)
+    ctx.flash(made)
 
     if len(pieces) == 1:
         tail = (" into a closed solid" if new.kind == "solid"
@@ -405,18 +409,21 @@ def cmd_filletcorners(ctx):
 @command("explode", aliases=("x",))
 def cmd_explode(ctx):
     objs = yield SelectReq("Select objects to explode")
-    total = 0
+    made, whole = [], []
     for o in objs:
         parts = g.explode(o.shape)
         if not parts:
             ctx.echo(f"{o.name} cannot be exploded further.")
+            whole.append(o)
             continue
         for p in parts:
-            ctx.scene.add(p, layer_id=o.layer_id)
+            made.append(ctx.scene.add(p, layer_id=o.layer_id))
         ctx.scene.remove(o.id)
-        total += len(parts)
-    if total:
-        ctx.echo(f"Exploded into {total} object(s).")
+    # what could not be exploded stays picked beside what could
+    ctx.select_result(made + whole)
+    if made:
+        ctx.flash(made)
+        ctx.echo(f"Exploded into {len(made)} object(s).")
 
 
 def _add_split_piece(ctx, shape, target):

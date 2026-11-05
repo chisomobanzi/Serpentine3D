@@ -1248,6 +1248,7 @@ class Viewport(QOpenGLWidget):
         self._draw_span = None              # (from, to) of the open leg
         self._draw_frame = None             # (sides, corner) when it is a box
         self._choice_hover = None           # row the object chooser is on
+        self._flashes: dict[str, float] = {}    # object id -> when it lit
         self._chooser = None                # the open chooser, if there is one
         self._hold_mods = None              # modifiers it went down with
         self._hold_timer = QTimer(self)     # how long the button has been still
@@ -2587,6 +2588,10 @@ class Viewport(QOpenGLWidget):
             selected = self._looks_selected(obj.id)
             gold = self._selection_color(obj.id) if selected else None
             color = gold if selected else self.scene.color_of(obj)
+            lit = self._flash_amount(obj.id)
+            if lit:
+                color = tuple(c + (f - c) * lit
+                              for c, f in zip(color, theme.CHANGE_FLASH))
             locked = obj.locked or obj.layer_id in locked_layers
             if locked and not selected:
                 grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
@@ -2680,7 +2685,7 @@ class Viewport(QOpenGLWidget):
             # and switching them off would empty the drawing.
             if gpu.line_count and (selected or show_edges or not gpu.tri_count):
                 if selected:
-                    edge_color = (*gold, 1.0)
+                    edge_color = (*color, 1.0)    # gold, or lit by a flash
                 elif obj.kind in ("curve", "hatch"):
                     edge_color = (*line_color, 1.0)
                 else:
@@ -4525,6 +4530,32 @@ class Viewport(QOpenGLWidget):
         if self.selection.held and obj_id != self._choice_hover:
             return theme.HELD_SELECTION_COLOR
         return theme.SELECTION_COLOR
+
+    def flash(self, ids):
+        """Light these objects in the change colour for a moment, fading
+        back to their own: what Join or Explode made, so it is seen."""
+        now = time.monotonic()
+        self._flashes.update({obj_id: now for obj_id in ids})
+        self._flash_tick()
+
+    def _flash_tick(self):
+        now = time.monotonic()
+        self._flashes = {i: t for i, t in self._flashes.items()
+                         if now - t < theme.CHANGE_FLASH_SECONDS}
+        self.update()
+        if self._flashes:
+            QTimer.singleShot(16, self._flash_tick)
+
+    def _flash_amount(self, obj_id: str) -> float:
+        """1 while the flash holds, then fading to 0 when it is over."""
+        start = self._flashes.get(obj_id)
+        if start is None:
+            return 0.0
+        elapsed = time.monotonic() - start
+        if elapsed >= theme.CHANGE_FLASH_SECONDS:
+            return 0.0
+        fade = theme.CHANGE_FLASH_SECONDS - theme.CHANGE_FLASH_HOLD
+        return min(1.0, 1.0 - (elapsed - theme.CHANGE_FLASH_HOLD) / fade)
 
     def _looks_selected(self, obj_id: str) -> bool:
         """Drawn in the selection colour: either it is selected, or it is
