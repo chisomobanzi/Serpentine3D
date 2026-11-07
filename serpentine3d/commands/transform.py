@@ -69,6 +69,7 @@ def _preview_of(ctx, held, objs, fn, action=None):
     if not held:
         return _ghost(objs, fn)
     shapes = dict(ctx._moved_control_points(held.get("cv", {}), fn))
+    shapes.update(ctx.moved_mesh_parts(held.get("mesh", {}), fn))
     segments = held.get("segment") or {}
     at = _point_map(fn)
     for obj_id, idxs in segments.items():
@@ -97,7 +98,25 @@ def _preview_of(ctx, held, objs, fn, action=None):
                 edges.get(obj_id, []), fn, action)
         except g.GeometryError:
             continue
-    return g.make_compound(list(shapes.values())) if shapes else None
+    return _ghost_of(list(shapes.values()))
+
+
+def _ghost_of(shapes):
+    """One shape to ghost: a compound of Breps, or, with a mesh among them,
+    one mesh, since a mesh cannot go in a compound."""
+    from ..core.mesh import MeshShape, merge, mesh_from_brep
+    if not shapes:
+        return None
+    meshes = [s for s in shapes if isinstance(s, MeshShape)]
+    if not meshes:
+        return g.make_compound(shapes)
+    for shape in shapes:
+        if not isinstance(shape, MeshShape):
+            try:
+                meshes.append(mesh_from_brep(shape))
+            except Exception:                      # noqa: BLE001
+                continue       # a curve has nothing to mesh; the rest shows
+    return meshes[0] if len(meshes) == 1 else merge(meshes)
 
 
 def _point_map(fn):
@@ -138,6 +157,18 @@ def _do_to_parts(ctx, held, fn, verb, tail, action):
     if cvs:
         n = ctx.apply_to_control_points(cvs, fn)
         done.append(f"{n} control point(s)")
+
+    # a mesh's parts keep their numbers through any transform, so they stay
+    # held, to be nudged again
+    meshes = held.get("mesh")
+    if meshes:
+        n = 0
+        for obj_id, mesh in ctx.moved_mesh_parts(meshes, fn):
+            ctx.scene.replace_shape(obj_id, mesh)
+            n += len(meshes[obj_id])
+            keep += [(obj_id, kind, i) for kind, i in meshes[obj_id]]
+        if n:
+            done.append(f"{n} mesh part(s)")
 
     segments = held.get("segment")
     if segments:

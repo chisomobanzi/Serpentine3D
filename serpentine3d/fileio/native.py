@@ -830,6 +830,8 @@ def _mesh_to_json(mesh) -> dict:
     }
     if origin is not None:
         out["o"] = [float(c) for c in origin]
+    if mesh.faceted:
+        out["f"] = 1             # drawn flat, every edge shown
     return out
 
 
@@ -843,4 +845,4 @@ def _mesh_from_json(data: dict):
     origin = data.get("o")
     if origin is not None:
         v = v + np.asarray(origin, float)
-    return MeshShape(v, t)
+    return MeshShape(v, t, faceted=bool(data.get("f")))

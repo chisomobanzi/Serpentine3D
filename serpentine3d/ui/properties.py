@@ -1017,6 +1017,12 @@ class PropertiesPanel(QWidget):
         self.print_width_combo.textActivated.connect(self._change_print_width)
         self.print_width_combo.lineEdit().editingFinished.connect(
             self._change_print_width)
+        self.faceted_box = QCheckBox("Flat triangles, every edge shown")
+        self.faceted_box.setToolTip(
+            "Draw this mesh as flat triangles with all their edges, as a "
+            "terrain is drawn; off, it is shaded smooth across its gentler "
+            "folds, as a scan is")
+        self.faceted_box.toggled.connect(self._change_faceted)
         self.section_hatch = QComboBox()
         self.section_hatch.addItem(_BY_LAYER, "bylayer")
         _fill_patterns(self.section_hatch, SECTION_FILLS, keep=1)
@@ -1068,6 +1074,7 @@ class PropertiesPanel(QWidget):
         form.addRow("Layer", self.layer_combo)
         form.addRow("Colour", self.color_widget)
         form.addRow("Print width (mm)", self.print_width_combo)
+        form.addRow("Faceted", self.faceted_box)
         form.addRow("Section hatch", self.section_hatch)
         self.section_look.add_rows(form)
         form.addRow("Linetype", self.linetype_combo)
@@ -2323,6 +2330,7 @@ class PropertiesPanel(QWidget):
         self.form.setRowVisible(self.clip_views, False)
         # a model object's own, which _refresh_model shows when there is one
         self.form.setRowVisible(self.print_width_combo, False)
+        self.form.setRowVisible(self.faceted_box, False)
         self.form.setRowVisible(self.section_hatch, False)
         self.form.setRowVisible(self.user_text, False)
         self.section_look.hide()
@@ -2371,6 +2379,12 @@ class PropertiesPanel(QWidget):
             self.print_width_combo.setEditText(
                 f"{_BY_LAYER} ({text(layer.print_width)})"
                 if obj.print_width is None else text(obj.print_width))
+        mesh = obj.kind == "mesh" and hasattr(obj.shape, "faceted")
+        self.form.setRowVisible(self.faceted_box, mesh)
+        if mesh:
+            self.faceted_box.blockSignals(True)
+            self.faceted_box.setChecked(obj.shape.faceted)
+            self.faceted_box.blockSignals(False)
         cut = obj.kind in ("solid", "compound")
         self.form.setRowVisible(self.section_hatch, cut)
         own = obj.section_fill
@@ -2404,6 +2418,20 @@ class PropertiesPanel(QWidget):
             return
         self.history.checkpoint(label)
         self.scene.update(obj.id, user_text=text)
+
+    def _change_faceted(self, on):
+        """A mesh drawn flat with every edge, or smooth, as one undo step."""
+        if self._updating:
+            return
+        obj, paper = self._current()
+        if (obj is None or paper or obj.kind != "mesh"
+                or obj.shape.faceted == bool(on)):
+            return
+        from ..core.mesh import MeshShape
+        shape = obj.shape
+        self.history.checkpoint("Faceted" if on else "Smooth")
+        self.scene.replace_shape(obj.id, MeshShape(
+            shape.vertices, shape.triangles, shape.normals, faceted=on))
 
     def _change_print_width(self, *_args):
         if self._updating:

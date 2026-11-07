@@ -347,16 +347,29 @@ class Gumball:
         if not subs:
             return None
         held: dict = {}
-        at = []
         for oid, kind, idx in subs:
-            if kind != "cv" or oid not in self.vp.cv_enabled:
-                continue
             obj = self.vp.scene.get(oid)
-            pts = None if obj is None else self.vp._cv_points(obj)
-            if pts is None or not (0 <= idx < len(pts)):
+            if obj is None:
                 continue
-            held.setdefault(oid, []).append(int(idx))
-            at.append(np.asarray(pts[idx], float))
+            if obj.kind == "mesh" and kind in ("face", "edge"):
+                # a mesh's triangle or edge is held by its points
+                try:
+                    points = obj.shape.part_points(kind, idx)
+                except (IndexError, ValueError):
+                    continue
+            elif kind == "cv" and oid in self.vp.cv_enabled:
+                points = [int(idx)]
+            else:
+                continue
+            for i in points:
+                if i not in held.setdefault(oid, []):
+                    held[oid].append(i)
+        at = []
+        for oid, idxs in held.items():
+            pts = self.vp._cv_points(self.vp.scene.get(oid))
+            if pts is None:
+                continue
+            at += [np.asarray(pts[i], float) for i in idxs if 0 <= i < len(pts)]
         if not at:
             return None
         return held, np.mean(at, axis=0)
@@ -1567,7 +1580,47 @@ class Gumball:
             "typed": "", "armed": False, "moved": False,
         }
         vp.selection.rebuilding = self.rebuilding_id()
+        self.drag["snap"] = self._snap_context()
         return True
+
+    def _snap_context(self):
+        """(ids, points) for snapping while this drag lasts: the objects it
+        moves are left out, since a point cannot be snapped to itself, but
+        what a held part leaves where it was is put back in, so a mesh's
+        corner can be dragged onto its neighbour."""
+        from ..core.snaps import _static_snap_points
+        d = self.drag
+        extra = []
+        for oid, idxs in (d.get("cvs") or {}).items():
+            original = d["originals"].get(oid)
+            obj = self.vp.scene.get(oid)
+            if original is None or obj is None:
+                continue
+            try:
+                pts = (g.surface_control_points(original)[0]
+                       if obj.kind == "surface"
+                       else g.get_control_points(original))
+                moving = {tuple(np.round(pts[i], 6)) for i in idxs}
+                extra += [(p, kind) for p, kind
+                          in _static_snap_points(original)
+                          if tuple(np.round(p, 6)) not in moving]
+            except (g.GeometryError, IndexError):
+                continue
+        return set(d["originals"]), extra
+
+    def _snapped(self, px, py):
+        """The snap under the cursor while dragging, shown as the pane
+        shows any, or None."""
+        vp = self.vp
+        snaps = getattr(vp, "snaps", None)
+        context = self.drag.get("snap") if self.drag else None
+        if snaps is None or context is None:
+            return None
+        ids, extra = context
+        snap = snaps.find(vp._eye(), px, py, vp.width(), vp.height(),
+                          exclude_ids=ids, extra_points=extra)
+        vp._active_snap = snap
+        return None if snap is None else np.asarray(snap[0], float)
 
     def drag_to(self, px, py, modifiers) -> str:
         d = self.drag
@@ -1599,6 +1652,11 @@ class Gumball:
                 d["last_label"] = f"scale {factor:.3f} (in plane)"
                 return d["last_label"]
             delta = hit - d["ref"]
+            at = self._snapped(px, py)
+            if at is not None:
+                # what it holds goes to the snap, as near as the plane allows
+                reach = at - anchor
+                delta = reach - axes[i] * float(np.dot(reach, axes[i]))
             if d.get("pp"):                   # a held face: lift, then slide
                 oid, fidx = d["pp"]
                 orig = d["originals"].get(oid)
@@ -1622,7 +1680,11 @@ class Gumball:
             if t is None:
                 return d["last_label"]
             value = t - d["ref"]
-            if vp.grid_snap and vp.grid_snap_step > 0:
+            at = self._snapped(px, py) if kind == "move" else None
+            if at is not None:
+                # along the arrow to where the snap stands across from it
+                value = float(np.dot(at - anchor, axes[i]))
+            elif vp.grid_snap and vp.grid_snap_step > 0:
                 value = round(value / vp.grid_snap_step) * vp.grid_snap_step
         elif kind == "rot":
             hit = ray_plane_any(origin, direction, anchor, axes[i])
@@ -2008,6 +2070,11 @@ class Gumball:
             obj = vp.scene.get(obj_id)
             if original is None or obj is None:
                 continue
+            if obj.kind == "mesh":
+                # all its held points in one go, the mesh welded once
+                vp.scene.replace_shape(obj_id, original.points_moved(
+                    idxs, lambda p: at(np.asarray(p, float))))
+                continue
             surface = obj.kind == "surface"
             try:
                 was = (g.surface_control_points(original)[0] if surface
@@ -2114,6 +2181,7 @@ class Gumball:
         return None
 
     def end_drag(self):
+        self.vp._active_snap = None
         d = self.drag
         changed = d is not None and (
             float(np.linalg.norm(d["offset"])) > 1e-9
@@ -2299,6 +2367,7 @@ class Gumball:
             sel.toggle_subobject(oid, "edge", best_i)
 
     def cancel_drag(self):
+        self.vp._active_snap = None
         d = self.drag
         if d is None:
             return

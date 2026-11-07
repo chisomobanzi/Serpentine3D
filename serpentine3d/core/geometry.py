@@ -3589,6 +3589,10 @@ def _control_point_map(shape) -> tuple:
 
 
 def get_control_points(shape) -> list[Point]:
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        # a mesh's are its corners, each place counted once
+        return [tuple(float(c) for c in p) for p in shape.points()]
     return _control_point_map(shape)[1]
 
 
@@ -3673,7 +3677,13 @@ def _curve_from_splines(splines) -> TopoDS_Shape:
 
 
 def move_control_point(shape, index: int, new_point: Point) -> TopoDS_Shape:
-    """Return a new curve with control point `index` (0-based) moved."""
+    """Return a new curve with control point `index` (0-based) moved; a
+    mesh with that corner moved."""
+    from .mesh import MeshShape
+    if isinstance(shape, MeshShape):
+        if not 0 <= index < len(shape.points()):
+            raise GeometryError(f"Control point index {index} out of range")
+        return shape.points_moved([index], lambda _p: new_point)
     splines, pts, owners = _control_point_map(shape)
     if not (0 <= index < len(pts)):
         raise GeometryError(f"Control point index {index} out of range")
