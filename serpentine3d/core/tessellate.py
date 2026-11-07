@@ -461,14 +461,20 @@ def _face_isocurves(face) -> list[np.ndarray]:
 def _hatch_outline(shape):
     """The edges round a hatch's region, which are not drawn: a hatch is
     its fill, as in Rhino and AutoCAD, and its boundary is whatever curves
-    were drawn round it (#92). None for anything that is not a hatch."""
+    were drawn round it (#92). Editable text is drawn the same way, as its
+    filled glyphs. None for anything else."""
     from .hatch import HatchShape
-    if not isinstance(shape, HatchShape):
+    from .text_object import TextShape
+    if isinstance(shape, HatchShape):
+        region = shape.region
+    elif isinstance(shape, TextShape) and shape.fill() is not None:
+        region = shape.fill()
+    else:
         return None
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
     edges = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(shape.region, occ.EDGE, edges)
+    TopExp.MapShapes_s(region, occ.EDGE, edges)
     return edges
 
 
@@ -481,6 +487,10 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         return cloud_to_display(shape)
     if deflection is None:
         deflection = _deflection_for(shape)
+    outline = _hatch_outline(shape)
+    from .text_object import TextShape
+    if isinstance(shape, TextShape) and outline is not None:
+        shape = shape.fill()
     if geometry.shape_kind(shape) != "curve":
         BRepMesh_IncrementalMesh(shape, deflection, False, 0.35, True)
 
@@ -511,7 +521,6 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
 
     segments = []
     seg_edge_ids = []
-    outline = _hatch_outline(shape)
     for edge_index, edge in enumerate(geometry.edges_of(shape)):
         if outline is not None and outline.Contains(edge):
             continue

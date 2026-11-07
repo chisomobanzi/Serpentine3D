@@ -436,11 +436,17 @@ def cmd_exportpdf(ctx):
 
 @command("text", aliases=("note",), space="paper")
 def cmd_text(ctx):
+    """Place text: a note on a sheet, editable lettering in the model."""
     lay = _active_layout(ctx)
     if lay is None:
-        ctx.echo("Text notes go on layouts — switch to one first.")
-        return
-        yield  # pragma: no cover
+        from .surfaces2 import place_model_text
+        yield from place_model_text(ctx)
+    else:
+        yield from place_note(ctx, lay)
+
+
+def place_note(ctx, lay):
+    """The `text` command on a sheet: a note in paper millimetres."""
     pos = yield PointReq("Text position (baseline anchor)")
     if has_text_editor(ctx) or getattr(ctx, "replay_text_inline", False):
         answer = yield TextEditorReq(

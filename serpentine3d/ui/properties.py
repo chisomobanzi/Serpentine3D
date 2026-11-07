@@ -114,6 +114,29 @@ class Subject:
 _INSET = theme.PANEL_INSET
 
 
+class _FontFamilyBox(QFontComboBox):
+    """A font family picker whose list is exactly as wide as the box: a
+    click opens the list, and a long family name is cut short in it."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(False)
+        # Not editable, it would ask to be as wide as the longest family
+        # installed, and the panel widened by that the first time text was
+        # picked, shifting the view beside it.
+        self.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.setMinimumContentsLength(10)
+        self.view().setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.view().setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def resizeEvent(self, event):
+        # after Qt's own, which makes the list five thirds of the box
+        super().resizeEvent(event)
+        self.view().window().setFixedWidth(self.width())
+
+
 def _seam() -> QWidget:
     """The dark line that closes a page's header off from its fields."""
     seam = QWidget()
@@ -1090,7 +1113,7 @@ class PropertiesPanel(QWidget):
         self.text_content.textChanged.connect(self._change_text_content)
         form.addRow("Content", self.text_content)
 
-        self.text_font_family = QFontComboBox()
+        self.text_font_family = _FontFamilyBox()
         self.text_font_family.setObjectName("text_font_family")
         self.text_font_family.currentFontChanged.connect(
             self._text_family_changed)
@@ -1115,6 +1138,23 @@ class PropertiesPanel(QWidget):
         self.text_alignment.currentIndexChanged.connect(
             self._change_text_typography)
         form.addRow("Alignment", self.text_alignment)
+        self.text_background = QCheckBox("Hide what lies behind")
+        self.text_background.setObjectName("text_background")
+        self.text_background.setToolTip(
+            "Sit the text on a patch of the drawing's own colour")
+        self.text_background.toggled.connect(self._change_text_background)
+        form.addRow("Background", self.text_background)
+        self.text_margin = QDoubleSpinBox()
+        self.text_margin.setObjectName("text_margin")
+        self.text_margin.setDecimals(2)
+        self.text_margin.setRange(0.0, 10.0)
+        self.text_margin.setSingleStep(0.05)
+        self.text_margin.setSuffix(" × height")
+        self.text_margin.setToolTip(
+            "How far the background reaches past the text on every side, "
+            "in cap heights")
+        self.text_margin.valueChanged.connect(self._change_text_background)
+        form.addRow("Margin", self.text_margin)
 
         self.text_output = QComboBox()
         self.text_output.setObjectName("text_output")
@@ -1161,8 +1201,8 @@ class PropertiesPanel(QWidget):
         self.look_at_text.setObjectName("look_at_text")
         self.look_at_text.setToolTip(
             "Turn the camera square to the text plane so it reads upright "
-            "(Zoom Selected keeps the current angle); click again to "
-            "restore the view")
+            "(Zoom Selected keeps the current angle). Home goes back to the "
+            "view before.")
         self.look_at_text.clicked.connect(self.lookAtTextRequested)
         form.addRow(self.look_at_text)
 
@@ -2172,7 +2212,8 @@ class PropertiesPanel(QWidget):
 
     def _show_text_typography(self, editable):
         controls = (self.text_font_family, self.text_font_style,
-                    self.text_height, self.text_alignment)
+                    self.text_height, self.text_alignment,
+                    self.text_background, self.text_margin)
         visible = editable is not None
         for control in controls:
             self.form.setRowVisible(control, visible)
@@ -2193,6 +2234,9 @@ class PropertiesPanel(QWidget):
         self.text_height.setValue(self._text_height_of(editable) / per)
         index = self.text_alignment.findData(source.alignment)
         self.text_alignment.setCurrentIndex(max(0, index))
+        self.text_background.setChecked(source.background)
+        self.text_margin.setValue(source.margin)
+        self.text_margin.setEnabled(source.background)
 
     def _text_height_units(self, editable) -> tuple[str, float]:
         """The units the cap height box reads, and the millimetres in one
@@ -2236,7 +2280,7 @@ class PropertiesPanel(QWidget):
         del blocker
 
     def set_model_text_command_active(self, active: bool):
-        """Show the model-lettering controls while TextObject is running."""
+        """Show the model-lettering controls while Text places model text."""
         active = bool(active)
         if active == self._model_text_command_active:
             return
@@ -2639,6 +2683,29 @@ class PropertiesPanel(QWidget):
         self._populate_text_styles(font.family(),
                                    self.text_font_style.currentText())
         self._change_text_typography()
+
+    def _change_text_background(self, *_):
+        if self._updating:
+            return
+        obj = self._editable_text()
+        if obj is None:
+            return
+        background = self.text_background.isChecked()
+        margin = self.text_margin.value()
+        self.text_margin.setEnabled(background)
+        source = obj if isinstance(obj, TextNote) else obj.shape
+        if (source.background, source.margin) == (background, margin):
+            return
+        if (self._live_text_id != obj.id
+                and self._text_checkpoint_id != obj.id):
+            self.history.checkpoint("edit text")
+            self._text_checkpoint_id = obj.id
+        if isinstance(obj, TextNote):
+            obj.background, obj.margin = background, margin
+            self.scene.notify("layouts")
+        else:
+            self.scene.replace_shape(
+                obj.id, obj.shape.with_background(background, margin))
 
     def _change_text_typography(self, *_):
         if self._updating:

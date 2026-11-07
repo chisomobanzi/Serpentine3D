@@ -225,3 +225,23 @@ def test_paper_text_uses_the_same_controls_and_explicit_formatting_unstyles_it(
     assert (revised.style, revised.font_family, revised.font_style,
             revised.height, revised.alignment) == (
                 "", family, font_style, 7., "center")
+
+
+def test_clicking_the_font_family_opens_its_list(window, fonts):
+    """An editable family box takes a click as a cursor in its name."""
+    family = fonts[0]
+    obj = window.scene.add(TextShape("Label", 4., family), name="Label")
+    window.selection.set([obj.id])
+    QApplication.processEvents()
+    family_box = _control(window, QComboBox, "text_font_family")
+    assert not family_box.isEditable(), (
+        "A click on the family must open the list, not place a text cursor")
+    popup = family_box.view().window()
+    assert popup.maximumWidth() == family_box.width(), (
+        "The list must be the box's width before it first opens, or it "
+        "shows too wide for a moment")
+    family_box.showPopup()
+    QApplication.processEvents()
+    assert popup.width() == family_box.width(), (
+        "The family list must be exactly as wide as its box")
+    family_box.hidePopup()

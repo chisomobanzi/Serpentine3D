@@ -9,11 +9,14 @@ from .base import (
 def _ghost(objs, fn):
     """Compound preview of every object transformed by fn(shape)."""
     from ..core.picture import PictureShape
+    from ..core.text_object import TextPreview, TextShape
     shapes = [fn(o.shape) for o in objs]
-    if len(shapes) == 1 and isinstance(shapes[0], PictureShape):
+    if len(shapes) == 1 and isinstance(shapes[0], (PictureShape, TextShape)):
         return shapes[0]
-    return g.make_compound([s.face() if isinstance(s, PictureShape) else s
-                            for s in shapes])
+    compound = g.make_compound([s.face() if isinstance(s, PictureShape)
+                                else s for s in shapes])
+    texts = [s for s in shapes if isinstance(s, TextShape)]
+    return TextPreview(compound, texts) if texts else compound
 
 
 def _sheet_ghost(ctx, picks, matrix, size: float = 1.0):
@@ -55,7 +58,7 @@ def _what_to_transform(ctx, prompt, **kw):
     left the whole object transformed instead of the part (#29).
     """
     held = ctx.held_parts()
-    objs = [] if held else (yield SelectReq(prompt, **kw))
+    objs = [] if held else (yield SelectReq(prompt, keep=True, **kw))
     return held, objs
 
 
@@ -120,6 +123,7 @@ def _do(ctx, held, objs, fn, verb, tail="", action=None):
         return
     for o in objs:
         ctx.scene.replace_shape(o.id, fn(o.shape))
+    ctx.select_result(objs)
     ctx.echo(f"{verb} {len(objs)} object(s){tail}.")
 
 
@@ -349,7 +353,8 @@ def cmd_copy(ctx):
         yield from _copy_on_paper(ctx, lv)
         return
     choices = {"Vertical": ["No", "Yes"]}
-    objs = yield SelectReq("Select objects to copy", choices=choices)
+    objs = yield SelectReq("Select objects to copy", choices=choices,
+                           keep=True)
     p1 = yield PointReq("Point to copy from", choices=choices)
     normal = tuple(float(c) for c in ctx.cplane.normal)
 
@@ -382,6 +387,7 @@ def cmd_copy(ctx):
         for o in objs:
             ctx.scene.add_from(g.translate(o.shape, offset), o)
         count += 1
+    ctx.select_result(objs)
     ctx.echo(f"Copied {len(objs)} object(s) {count} time(s).")
 
 
@@ -727,6 +733,7 @@ def cmd_mirror(ctx):
             ctx.scene.add_from(mirrored, o)
         else:
             ctx.scene.replace_shape(o.id, mirrored)
+    ctx.select_result(objs)
     ctx.echo(f"Mirrored {len(objs)} object(s).")
 
 
@@ -963,7 +970,7 @@ def cmd_orient(ctx):
     import math
 
     import numpy as np
-    objs = yield SelectReq("Select objects to orient")
+    objs = yield SelectReq("Select objects to orient", keep=True)
     r1 = yield PointReq("First reference point")
     r2 = yield PointReq("Second reference point", rubber_from=r1)
     t1 = yield PointReq("First target point", rubber_from=r1,
@@ -981,10 +988,11 @@ def cmd_orient(ctx):
 
     def _preview(p):
         m = _matrix(p)
-        return g.make_compound([g.apply_matrix(o.shape, m) for o in objs])
+        return _ghost(objs, lambda s: g.apply_matrix(s, m))
 
     t2 = yield PointReq("Second target point", rubber_from=t1,
                         preview_fn=_preview)
+    ctx.select_result(objs)
     made = _place(ctx, objs, _matrix(t2), ctx.opt("Copy", "No") == "Yes")
     verb = "Oriented a copy of" if ctx.opt("Copy", "No") == "Yes" \
         else "Oriented"
@@ -997,7 +1005,7 @@ def cmd_orient(ctx):
 def cmd_orient3pt(ctx):
     """Remap objects from three reference points to three target points
     (full 3D reorientation)."""
-    objs = yield SelectReq("Select objects to orient")
+    objs = yield SelectReq("Select objects to orient", keep=True)
     r1 = yield PointReq("First reference point")
     r2 = yield PointReq("Second reference point", rubber_from=r1)
     r3 = yield PointReq("Third reference point", rubber_from=r2)
@@ -1006,7 +1014,7 @@ def cmd_orient3pt(ctx):
         # turn — so show them sliding across, and let the next two pick up
         # the rotation
         shift = tuple(a - b for a, b in zip(p, r1))
-        return g.make_compound([g.translate(o.shape, shift) for o in objs])
+        return _ghost(objs, lambda s: g.translate(s, shift))
 
     t1 = yield PointReq("First target point",
                         choices={"Copy": ["No", "Yes"]},
@@ -1019,10 +1027,11 @@ def cmd_orient3pt(ctx):
 
     def _preview(p):
         m = _matrix(p)
-        return g.make_compound([g.apply_matrix(o.shape, m) for o in objs])
+        return _ghost(objs, lambda s: g.apply_matrix(s, m))
 
     t3 = yield PointReq("Third target point", rubber_from=t2,
                         preview_fn=_preview)
+    ctx.select_result(objs)
     made = _place(ctx, objs, _matrix(t3), ctx.opt("Copy", "No") == "Yes")
     ctx.echo(f"Oriented {len(made)} object(s) onto the target frame.")
 

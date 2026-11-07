@@ -126,14 +126,10 @@ class Replayer:
         after = self.events[i + 2] if i + 2 < len(self.events) else {}
         after_value = after.get("v") if after.get("ev") == "val" else None
         anchor_first = isinstance(value, dict) and "p" in value
-        # Model text used to ask for its string before its anchor, so a point
-        # first identifies the inline form.  Paper text has always asked for
-        # its anchor first; only the new form follows it with editor data.
+        # The inline form is an anchor followed by the editor's data.
         self.ctx.replay_text_inline = (
-            (name == "textobject" and anchor_first)
-            or (name == "text" and anchor_first
-                and isinstance(after_value, dict)
-                and "data" in after_value))
+            name == "text" and anchor_first
+            and isinstance(after_value, dict) and "data" in after_value)
         self.proc.run(name)
 
     def _ev_val(self, e, i):

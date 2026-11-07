@@ -157,10 +157,28 @@ def test_an_ordinary_command_still_lets_go_when_it_is_done(env):
     scene, sel, proc = env
     box = _box(scene)
     sel.set([box.id])
-    proc.run("move")
-    proc.provide_text("0,0,0")
-    proc.provide_text("1,0,0")
+    proc.run("explode")
     assert sel.ids == []
+
+
+@pytest.mark.parametrize("command,answers", [
+    ("move", ("0,0,0", "1,0,0")),
+    ("rotate", ("0,0,0", "30")),
+    ("scale", ("0,0,0", "2")),
+    ("copy", ("0,0,0", "20,0,0", "")),
+])
+def test_a_transform_keeps_what_it_moves_selected(env, command, answers):
+    """What a transform is placing stays lit while you place it, and is
+    still in hand afterwards for the next move."""
+    scene, sel, proc = env
+    box = _box(scene)
+    sel.set([box.id])
+    proc.run(command)
+    assert sel.ids == [box.id]
+    for answer in answers:
+        proc.provide_text(answer)
+    assert not proc.busy
+    assert sel.ids == [box.id]
 
 
 def test_a_cancelled_boolean_claims_nothing(env):

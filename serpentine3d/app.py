@@ -178,7 +178,6 @@ class MainWindow(QMainWindow):
         self.properties.hatchPatternsRequested.connect(
             self._run_hatch_patterns)
         self._text_placement_choice = "CPlane"
-        self._look_at_text_restore = None
         self._prop_dock = QDockWidget("Properties", self)
         self._prop_dock.setObjectName("propertiesDock")
         self._prop_dock.setWidget(self.properties)
@@ -959,7 +958,8 @@ class MainWindow(QMainWindow):
         bar.setMovable(False)
         groups = [
             [("Line", "line"), ("Polyline", "polyline"), ("Curve", "curve"),
-             ("Circle", "circle"), ("Arc", "arc"), ("Rectangle", "rectangle")],
+             ("Circle", "circle"), ("Arc", "arc"), ("Rectangle", "rectangle"),
+             ("Text", "text")],
             [("Extrude", "extrude"), ("Revolve", "revolve"),
              ("Loft", "loft"), ("Planar surface", "planarsrf"),
              ("Sweep 1 rail", "sweep1"), ("Sweep 2 rails", "sweep2")],
@@ -975,7 +975,7 @@ class MainWindow(QMainWindow):
             [("Join", "join"), ("Explode", "explode"),
              ("Control points", "pointson"), ("Delete", "delete")],
         ]
-        # One widget rather than thirty-two actions: a toolbar hides the
+        # One widget rather than thirty-three actions: a toolbar hides the
         # actions it has no room for behind a chevron, where the palette
         # sizes the tools to the height it has and keeps them all in sight.
         bar.addWidget(tool_strip(groups, self.run_command, bar))
@@ -1087,7 +1087,7 @@ class MainWindow(QMainWindow):
                      lambda: self.run_command("layout"))
         self._action(m_draft, "Place Detail View...", None,
                      lambda: self.run_command("detail"))
-        self._action(m_draft, "Text Note...", None,
+        self._action(m_draft, "Text...", None,
                      lambda: self.run_command("text"))
         self._action(m_draft, "Linear Dimension...", None,
                      lambda: self.run_command("dim"))
@@ -1292,11 +1292,9 @@ class MainWindow(QMainWindow):
         if (self._cursor_preview is not None
                 and self._cursor_preview[0] is not req):
             self._cursor_preview = None
-        active = self.processor.active
-        self.properties.set_model_text_command_active(
-            active is not None and active.name == "textobject")
-        if (active is not None and active.name == "textobject"
-                and isinstance(req, PointReq)):
+        model_text = self._placing_model_text()
+        self.properties.set_model_text_command_active(model_text)
+        if model_text and isinstance(req, PointReq):
             if (self._text_placement_choice == "Selected face"
                     and self._selected_text_face() is None):
                 req.prompt = ("Select a planar face first, then pick the "
@@ -1412,12 +1410,17 @@ class MainWindow(QMainWindow):
                            xdir=current.xdir, name=current.name)
         return plane.basis_matrix()
 
+    def _placing_model_text(self) -> bool:
+        """Whether `text` is running and writes in the model, not on paper."""
+        active = self.processor.active
+        return (active is not None and active.name == "text"
+                and getattr(self.processor.ctx.viewport, "space",
+                            "model") == "model")
+
     def _text_placement_changed(self, choice):
         self._text_placement_choice = choice
         req = self.processor.request
-        active = self.processor.active
-        if active is not None and active.name == "textobject" \
-                and isinstance(req, PointReq):
+        if self._placing_model_text() and isinstance(req, PointReq):
             if choice == "Selected face" and self._selected_text_face() is None:
                 req.prompt = ("Select a planar face first, then pick the text "
                               "position")
@@ -1444,27 +1447,25 @@ class MainWindow(QMainWindow):
             obj.id, g.apply_matrix(TextShape(**values), frame))
 
     def _look_at_text(self):
-        """Temporarily face the selected label without editing the model."""
+        """Face the selected label without editing the model. Undo View
+        (Home) goes back to the view before, as after any other."""
         from .core.text import TextShape
         obj = self.properties._selected()
         if obj is None or not isinstance(obj.shape, TextShape):
             return
         pane = self.active_viewport
-        saved = self._look_at_text_restore
-        if saved is not None and saved[0] is pane and saved[1] == obj.id:
-            pane.camera.restore(saved[2])
-            self._look_at_text_restore = None
-            self.properties.look_at_text.setText("Look at text")
-            pane.update()
-            return
-
-        self._look_at_text_restore = (pane, obj.id, pane.camera.state())
         origin = np.asarray(obj.shape.origin, float)
         normal = np.asarray(obj.shape.plane_normal, float)
         pane.camera.target = origin.copy()
-        pane.camera.azimuth = float(np.arctan2(normal[1], normal[0]))
         pane.camera.elevation = float(np.arcsin(np.clip(normal[2], -1., 1.)))
-        self.properties.look_at_text.setText("Restore view")
+        if abs(normal[2]) > 0.999:
+            # Looking straight down (or up) the camera takes its up from
+            # its azimuth, which the normal leaves open: turn it so the
+            # lettering's own up is up on screen, and it reads level.
+            up = obj.shape.frame[:3, 1] * np.sign(normal[2])
+            pane.camera.azimuth = float(np.arctan2(-up[1], -up[0]))
+        else:
+            pane.camera.azimuth = float(np.arctan2(normal[1], normal[0]))
         pane.update()
 
     def _offer_text_editor(self, req):

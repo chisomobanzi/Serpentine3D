@@ -609,6 +609,22 @@ def view_anchor(target):
     return t
 
 
+# The dotted frame round picked text: each dot's length and the distance
+# from one dot to the next, in pixels.
+TEXT_FRAME_DOT_PX = 1.5
+TEXT_FRAME_DOT_GAP_PX = 6.0
+
+
+def _pick_bounds(obj):
+    """An object's bounds for picking: its mesh's, or for text the frame
+    a click inside picks it by."""
+    from ..core.text_object import TextShape
+    if isinstance(obj.shape, TextShape):
+        box = obj.shape.frame_box()
+        return box.min(axis=0), box.max(axis=0)
+    return obj.mesh.bounds()
+
+
 def rebased(pts, anchor):
     """Points minus the anchor, subtracted in float64, cast to float32."""
     if anchor is None:
@@ -2554,6 +2570,7 @@ class Viewport(QOpenGLWidget):
         GL.glUniform1f(self._uloc(self._mesh_prog, "uCurvRange"), curv_range)
         GL.glUniform1i(self._uloc(self._mesh_prog, "uRendered"),
                        1 if mode == "rendered" else 0)
+        from ..core.text_object import TextShape
         for obj in objects:
             if obj.clip_plane is not None and self._target is not None:
                 # A sheet shows what a plane cut, not the plane: it is a
@@ -2620,6 +2637,8 @@ class Viewport(QOpenGLWidget):
                 line_color = (min(color[0], 0.3), min(color[1], 0.3),
                               min(color[2], 0.33))
 
+            # editable text is filled like a solid hatch, in its colour
+            lettering = isinstance(obj.shape, TextShape)
             if obj.kind == "picture":
                 fill_alpha_obj = 0.0
             elif obj.kind == "hatch":
@@ -2629,17 +2648,22 @@ class Viewport(QOpenGLWidget):
                 solid_hatch = bool(getattr(obj.shape, "solid", False))
                 fill_alpha_obj = 1.0 if solid_hatch or (
                     hatch_ground is not None) else 0.0
+            elif lettering:
+                fill_alpha_obj = 1.0
             elif obj.clip_plane is not None:
                 fill_alpha_obj = 0.18
             else:
                 fill_alpha_obj = fill_alpha
+            if lettering and obj.shape.background:
+                self._draw_text_background(obj.shape, omvp, gpu.anchor,
+                                           light_background)
             if fill_alpha_obj > 0 and gpu.tri_count:
                 self._use(self._mesh_prog)
                 self._set_mvp(self._mesh_prog, omvp)
                 self._set_view(self._mesh_prog, oview)
                 # A solid hatch is a flat fill in its own colour, as a
                 # drawing shows one: lit, a flat disc read as a ball (#33).
-                flat_fill = obj.kind == "hatch"   # `flat` is the MVP here
+                flat_fill = obj.kind == "hatch" or lettering
                 GL.glUniform1i(self._uloc(self._mesh_prog, "uFlat"),
                                1 if flat_fill else 0)
                 face_color = (line_color if flat_fill else fill_color)
@@ -2667,7 +2691,10 @@ class Viewport(QOpenGLWidget):
                         or obj.clip_plane is not None:
                     GL.glDepthMask(False)
                 GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
-                GL.glPolygonOffset(1.0, 1.0)
+                # lettering in front of its background, which is in front
+                # of the plane it stands on
+                GL.glPolygonOffset(*((-2.0, -2.0) if lettering
+                                     else (1.0, 1.0)))
                 GL.glBindVertexArray(gpu.tri_vao)
                 GL.glDrawElements(GL.GL_TRIANGLES, gpu.tri_count,
                                   GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
@@ -2690,6 +2717,15 @@ class Viewport(QOpenGLWidget):
                 lw = self.scene.screen_width_of(obj)
                 self._draw_edges(gpu, omvp, edge_color,
                                  2.2 if selected else lw)
+            if lettering and selected:
+                dots = self._text_frame_dots(obj.shape.frame_box(), mvp)
+                if len(dots):
+                    # on its own background's edge, which stands in front
+                    if obj.shape.background:
+                        GL.glDisable(GL.GL_DEPTH_TEST)
+                    self._draw_thick_segments(rebased(dots, gpu.anchor),
+                                              omvp, (*gold, 1.0), 2.0)
+                    GL.glEnable(GL.GL_DEPTH_TEST)
 
             # A drag that rebuilds this object every move (fillet,
             # push/pull) leaves the picked indices pointing into the
@@ -3088,6 +3124,35 @@ class Viewport(QOpenGLWidget):
             GL.glDrawElements(GL.GL_TRIANGLES, gpu.tri_count,
                               GL.GL_UNSIGNED_INT, ctypes.c_void_p(0))
         GL.glDepthMask(True)
+
+    def _draw_text_background(self, text, mvp, anchor, light: bool):
+        """The patch of drawing colour text sits on, hiding what lies
+        behind it: pulled a hair towards the eye, so it covers the lines in
+        its own plane, with the lettering a hair further still."""
+        a, b, c, d = text.frame_box()
+        tris = rebased(np.array([a, b, c, a, c, d]), anchor)
+        colour = (1.0, 1.0, 1.0) if light else theme.TEXT_BACKGROUND
+        self._preview.update(tris)
+        self._set_line_uniforms(mvp, (*colour, 1.0))
+        GL.glEnable(GL.GL_POLYGON_OFFSET_FILL)
+        GL.glPolygonOffset(-1.0, -1.0)
+        GL.glBindVertexArray(self._preview.vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(tris))
+        GL.glDisable(GL.GL_POLYGON_OFFSET_FILL)
+
+    def _text_frame_dots(self, corners, mvp) -> np.ndarray:
+        """The dotted frame round picked text, through its frame's
+        `corners` as `mvp` takes them, its dots a fixed number of pixels
+        apart however far the view is zoomed."""
+        from ..core.text_object import dotted_frame
+        clip = np.c_[corners, np.ones(len(corners))] @ np.asarray(
+            mvp, float).T
+        if (clip[:, 3] <= 1e-12).any():
+            return np.zeros((0, 2, 3))    # a corner behind the eye
+        width, height = self._target_size()
+        screen = clip[:, :2] / clip[:, 3:] * (width / 2, height / 2)
+        return dotted_frame(corners, screen, TEXT_FRAME_DOT_GAP_PX,
+                            TEXT_FRAME_DOT_PX)
 
     def _draw_thick_segments(self, segments, mvp, color, width: float):
         """Fresh segments at an honest pixel width, capped drivers or not.
@@ -3554,6 +3619,9 @@ class Viewport(QOpenGLWidget):
         """
         from ..core.layout import DetailView, Hatch, TextNote
         from ..core.picture import PictureShape
+        from ..core.text_object import TextShape
+        self._ghost_texts = ([shape] if isinstance(shape, TextShape)
+                             else list(getattr(shape, "texts", ())))
         had_picture = (self._ghost_picture is not None
                        or self.layout_view._ghost_picture is not None)
         self._ghost_picture = None
@@ -3602,7 +3670,7 @@ class Viewport(QOpenGLWidget):
         # as the lines of any other, not as a tint: it is what it will be.
         from ..core.hatch import HatchGroup, HatchShape
         self._ghost_solid = (isinstance(shape, (HatchShape, HatchGroup))
-                             and shape.solid)
+                             and shape.solid) or isinstance(shape, TextShape)
         if isinstance(shape, (HatchShape, HatchGroup)) and not shape.solid:
             # only its lines: the face a line hatch carries is its
             # background, and a ghost of it read as a tint over the area
@@ -3750,6 +3818,12 @@ class Viewport(QOpenGLWidget):
             GL.glBindVertexArray(self._preview.vao)
             GL.glDrawArrays(GL.GL_LINES, 0, len(segs))
             self._line_width(1.0)
+        if not flat:
+            for text in getattr(self, "_ghost_texts", ()):
+                corners = rebased(text.frame_box(), self._frame_anchor)
+                dots = self._text_frame_dots(corners.astype(float), mvp)
+                if len(dots):
+                    self._draw_thick_segments(dots, mvp, (*gold, 1.0), 2.0)
         if len(points):
             # Free vertices have no face or edge to draw. Use the same marks
             # as placed point objects, after taking model points onto paper.
@@ -4454,7 +4528,7 @@ class Viewport(QOpenGLWidget):
         tessellates it, and one that can never be picked should not be made
         to pay for that.
         """
-        boxed = [(obj, obj.mesh.bounds()) for obj in objects]
+        boxed = [(obj, _pick_bounds(obj)) for obj in objects]
         boxed = [(obj, b) for obj, b in boxed if b is not None]
         if not boxed:
             return []
@@ -4617,6 +4691,7 @@ class Viewport(QOpenGLWidget):
         eye = self._eye()
         origin, direction = eye.ray_through(px, py, w, h)
         found: list[tuple[float, str]] = []
+        from ..core.text_object import TextShape
 
         r = PICK_RADIUS_PX
         selectable = [obj for obj in self.scene.visible_objects()
@@ -4653,6 +4728,15 @@ class Viewport(QOpenGLWidget):
                 tmin = t.min() if len(t) else np.inf
                 if np.isfinite(tmin):
                     depth = tmin
+                    hit = True
+            if not hit and isinstance(obj.shape, TextShape):
+                # text is picked anywhere inside its frame, not only on
+                # the letters
+                box = obj.shape.frame_box()
+                t = ray_triangle_hits(np.asarray(origin, float), direction,
+                                      box[[0, 0]], box[[1, 2]], box[[2, 3]])
+                if np.isfinite(t.min()):
+                    depth = float(t.min())
                     hit = True
             # A shaded object is clicked by its faces, but a flat one seen
             # edge on has none on screen: a clipping plane from the side

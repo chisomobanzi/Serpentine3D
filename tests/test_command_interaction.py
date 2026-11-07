@@ -85,22 +85,65 @@ NOTHING_TO_SHOW = {
     ("arc", "Start of arc"): _FIRST_OF_ITS_FLOW,
     ("ellipse", "Start of first axis"): _FIRST_OF_ITS_FLOW,
     ("sphere", "Start of diameter"): _FIRST_OF_ITS_FLOW,
-    ("textobject", "Position (baseline start)"):
+    ("text", "Position (baseline start)"):
         "the first spatial pick of the legacy scripted flow; the editor's "
         "placement pick is in an alternative branch that returns before "
         "this one, and scripted text height is chosen with a preview next",
 }
 
 
+def _requests(node, forms):
+    """A function's requests in source order."""
+    reqs = []
+    for sub in ast.walk(node):
+        if not isinstance(sub, ast.Yield) or sub.value is None:
+            continue
+        call = sub.value
+        if not isinstance(call, ast.Call):
+            continue
+        rtype = getattr(call.func, "id", None)
+        if not rtype or not rtype.endswith("Req"):
+            continue
+        prompt = ""
+        if call.args and isinstance(call.args[0], ast.Constant):
+            prompt = str(call.args[0].value)
+        kwargs = {k.arg for k in call.keywords if k.arg}
+        reqs.append((rtype, prompt, kwargs, sub.lineno))
+    reqs.extend(_form_fields(forms, node))
+    reqs.sort(key=lambda r: r[3])
+    return reqs
+
+
+def _handed_over(node, functions):
+    """The functions a command hands its whole flow to with `yield from`,
+    as `text` does to a note or to model lettering."""
+    return [functions[sub.value.func.id] for sub in ast.walk(node)
+            if isinstance(sub, ast.YieldFrom)
+            and isinstance(sub.value, ast.Call)
+            and isinstance(sub.value.func, ast.Name)
+            and sub.value.func.id in functions]
+
+
 def _commands():
-    """(file, command name, [(req type, prompt, kwargs, line)]) per command."""
+    """(file, command name, [(req type, prompt, kwargs, line)]) per flow:
+    a command, and each function it hands its flow to."""
     out = []
+    parsed = []
     for path in sorted(glob.glob(os.path.join(
             ROOT, "serpentine3d", "commands", "*.py"))):
         tree = ast.parse(open(path, encoding="utf-8").read())
         forms = {n.name: _form_requests(n) for n in ast.walk(tree)
                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                  and n.name.endswith("_form")}
+        parsed.append((path, tree, forms))
+    for path, tree, forms in parsed:
+        functions = {n.name: (other, n, other_forms)
+                     for other, other_tree, other_forms in parsed
+                     for n in other_tree.body
+                     if isinstance(n, ast.FunctionDef)
+                     and not any(getattr(d, "func", None) is not None
+                                 and getattr(d.func, "id", "") == "command"
+                                 for d in n.decorator_list)}
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -113,25 +156,13 @@ def _commands():
                     name = dec.args[0].value
             if name is None:
                 continue
-            reqs = []
-            for sub in ast.walk(node):
-                if not isinstance(sub, ast.Yield) or sub.value is None:
-                    continue
-                call = sub.value
-                if not isinstance(call, ast.Call):
-                    continue
-                rtype = getattr(call.func, "id", None)
-                if not rtype or not rtype.endswith("Req"):
-                    continue
-                prompt = ""
-                if call.args and isinstance(call.args[0], ast.Constant):
-                    prompt = str(call.args[0].value)
-                kwargs = {k.arg for k in call.keywords if k.arg}
-                reqs.append((rtype, prompt, kwargs, sub.lineno))
-            reqs.extend(_form_fields(forms, node))
-            reqs.sort(key=lambda r: r[3])
+            reqs = _requests(node, forms)
             if reqs:
                 out.append((os.path.basename(path), name, reqs))
+            for other, helper, other_forms in _handed_over(node, functions):
+                reqs = _requests(helper, other_forms)
+                if reqs:
+                    out.append((os.path.basename(other), name, reqs))
     return out
 
 

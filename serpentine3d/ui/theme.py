@@ -3,6 +3,10 @@
 # viewport colors (linear-ish RGB floats)
 VIEWPORT_BG_TOP = (0.16, 0.165, 0.18)
 VIEWPORT_BG_BOTTOM = (0.10, 0.105, 0.12)
+# A text background is the drawing's own colour, the middle of its gradient,
+# so it reads as a gap cut out of whatever lies behind the lettering.
+TEXT_BACKGROUND = tuple((a + b) / 2 for a, b in zip(VIEWPORT_BG_TOP,
+                                                    VIEWPORT_BG_BOTTOM))
 GRID_MINOR = (1.0, 1.0, 1.0, 0.055)
 GRID_MAJOR = (1.0, 1.0, 1.0, 0.11)
 GRID_AXIS_X = (0.75, 0.33, 0.32, 0.85)
