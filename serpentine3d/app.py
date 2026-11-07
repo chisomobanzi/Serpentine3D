@@ -33,6 +33,7 @@ from .ui.layers_panel import LayersPanel
 from .ui.properties import PropertiesPanel, SubjectTitleBar
 from .ui.dock_title import TabbedTitleBar
 from .ui.sheets_panel import SheetsPanel
+from .ui.view_strip import ViewStrip, strip_over
 from .ui.icons import panel_icon
 from .ui.viewport import Viewport, set_default_gl_format
 
@@ -41,6 +42,9 @@ _UNLIMITED = 16777215        # Qt's QWIDGETSIZE_MAX: "no maximum"
 PANEL_WIDTH = 280            # what a fresh window gives Properties/Layers
 PANEL_SHARE = 0.3            # ... and the most a restored one may hold
 _SETTLE_MS = 200             # how long a window resize keeps rearranging
+# what a button may run in the middle of another command's pick
+_TRANSPARENT = ("ortho", "gridsnap", "undoview", "redoview", "zoomextents",
+                "zoomselected")
 
 
 def clamp_panel_width(width, window_width):
@@ -211,8 +215,11 @@ class MainWindow(QMainWindow):
         # tab in its title for each subject once two are live.
         self.properties.follow_layers(self.layers_panel)
         self.properties.follow_sheets(self.sheets_panel)
+        # The view strip rides on top of the Properties title.
+        self._prop_title = SubjectTitleBar(self.properties, self._prop_dock)
+        self.view_strip = ViewStrip(self.run_command)
         self._prop_dock.setTitleBarWidget(
-            SubjectTitleBar(self.properties, self._prop_dock))
+            strip_over(self.view_strip, self._prop_title))
 
         # Display controls belong to the viewport title menu. Create their
         # modeless window only when requested, leaving this column for
@@ -1158,7 +1165,7 @@ class MainWindow(QMainWindow):
         # and replace its repeat target with the toggle.
         control = resolve(name)
         if (self.processor.busy and control is not None
-                and control.name in ("ortho", "gridsnap")):
+                and control.name in _TRANSPARENT):
             for _ in control.fn(self.ctx):
                 pass
             self.osnap_bar.refresh()

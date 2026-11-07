@@ -296,7 +296,7 @@ def test_both_panels_carry_their_icon_in_their_title():
     from serpentine3d.app import MainWindow
     win = MainWindow()
     try:
-        props_bar = win._prop_dock.titleBarWidget()
+        props_bar = win._prop_title
         layers_bar = win._layer_dock.titleBarWidget()
 
         assert not props_bar.icon.pixmap().isNull()
