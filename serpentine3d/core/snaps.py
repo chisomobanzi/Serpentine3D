@@ -32,6 +32,86 @@ _APPARENT_LIMIT = 160
 _APPARENT_GAP = 1e-6
 
 
+def _clip_slack(eq) -> float:
+    """How far on the cut side a point may sit and still count as on the
+    plane: a corner lying in it is kept, as the shader keeps it."""
+    return 1e-6 * (1.0 + abs(float(eq[3])))
+
+
+def in_sight(points, clip) -> np.ndarray:
+    """Which points the clipping planes leave in sight, as a mask.
+
+    `clip` holds the view's clip equations, each kept where it comes out
+    positive (`clip_equation` in ui/viewport.py)."""
+    pts = np.asarray(points, float).reshape(-1, 3)
+    keep = np.ones(len(pts), bool)
+    for eq in clip or ():
+        eq = np.asarray(eq, float)
+        keep &= pts @ eq[:3] + eq[3] >= -_clip_slack(eq)
+    return keep
+
+
+def _clipped_segments(a3, b3, clip):
+    """Segments cut back to the part the clipping planes leave in sight.
+
+    Returns the new ends and a mask of the segments with anything left."""
+    a3, b3 = np.array(a3, float), np.array(b3, float)
+    keep = np.ones(len(a3), bool)
+    for eq in clip or ():
+        eq = np.asarray(eq, float)
+        slack = _clip_slack(eq)
+        da = a3 @ eq[:3] + eq[3]
+        db = b3 @ eq[:3] + eq[3]
+        keep &= (da >= -slack) | (db >= -slack)
+        cross = (da < -slack) != (db < -slack)
+        t = np.where(cross, da / np.where(cross, da - db, 1.0), 0.0)
+        hit = a3 + (b3 - a3) * t[:, None]
+        a_out = cross & (da < -slack)
+        b_out = cross & (db < -slack)
+        a3[a_out] = hit[a_out]
+        b3[b_out] = hit[b_out]
+    return a3, b3, keep
+
+
+def _plane_crossings(obj, eq) -> list:
+    """Where a clipping plane cuts through an object's edges: the corners
+    of the section a solid shows, the points a curve pierces it at."""
+    from OCP.TopoDS import TopoDS_Shape
+    shape = obj.shape
+    eq = np.asarray(eq, float)
+    n = -eq[:3]
+    if isinstance(shape, TopoDS_Shape):
+        from OCP.BRepAlgoAPI import BRepAlgoAPI_Section
+        from .occ import gp_Dir, gp_Pln, gp_Pnt
+        o = n * eq[3] / float(n @ n)
+        try:
+            sec = BRepAlgoAPI_Section(shape, gp_Pln(gp_Pnt(*o), gp_Dir(*n)))
+            sec.Build()
+            if not sec.IsDone():
+                return []
+            from OCP.TopExp import TopExp_Explorer
+            out, exp = [], TopExp_Explorer(sec.Shape(), occ.VERTEX)
+            while exp.More():
+                out.append(geometry.point_coords(exp.Current()))
+                exp.Next()
+            return out
+        except Exception:                                  # noqa: BLE001
+            return []
+    # A mesh's edges are straight, so its own segments are exact.
+    edges = getattr(obj.mesh, "edge_segments", None)
+    if edges is None:
+        return []
+    e = np.asarray(edges, float)
+    if not len(e):
+        return []
+    da = e[:, 0] @ eq[:3] + eq[3]
+    db = e[:, 1] @ eq[:3] + eq[3]
+    cross = (da < 0) != (db < 0)
+    t = da[cross] / (da[cross] - db[cross])
+    a, b = e[cross, 0], e[cross, 1]
+    return [tuple(p) for p in a + (b - a) * t[:, None]]
+
+
 def _static_snap_points(shape) -> list[tuple[tuple, str]]:
     """point / end / mid / center / quad candidates for one shape."""
     # Cloud samples are queried spatially, never expanded into CAD features.
@@ -187,11 +267,13 @@ def _misses_the_cursor(mesh, camera, cursor, width, height, pad) -> bool:
                 or scr[:, 1].max() < cursor[1] - pad)
 
 
-def _cursor_segments(objects, camera, px, py, width, height, radius_px):
+def _cursor_segments(objects, camera, px, py, width, height, radius_px,
+                     clip=()):
     """Edges of visible objects passing within the pick radius, on screen.
 
     Solids come too. The edge of a box is not a curve object and it is still
-    a line you can see, so a rail passing over one crosses something.
+    a line you can see, so a rail passing over one crosses something. A
+    clipping plane cuts them back to what it leaves in sight.
     """
     cursor = np.array([float(px), float(py)])
     r2 = float(radius_px) ** 2
@@ -209,6 +291,9 @@ def _cursor_segments(objects, camera, px, py, width, height, radius_px):
             continue
         e = np.asarray(edges, float)
         a3, b3 = e[:, 0, :], e[:, 1, :]
+        if clip:
+            a3, b3, cut = _clipped_segments(a3, b3, clip)
+            a3, b3 = a3[cut], b3[cut]
         sa = camera.project(a3, width, height)
         sb = camera.project(b3, width, height)
         ab = sb[:, :2] - sa[:, :2]
@@ -227,7 +312,7 @@ def _cursor_segments(objects, camera, px, py, width, height, radius_px):
 
 
 def _apparent_crossings(objects, camera, px, py, width, height,
-                        radius_px) -> list[tuple]:
+                        radius_px, clip=()) -> list[tuple]:
     """Where two edges cross on screen without meeting in space.
 
     A rafter passing over a wall never touches it, so `int` has nothing at
@@ -238,7 +323,7 @@ def _apparent_crossings(objects, camera, px, py, width, height,
     the cursor is already on top of.
     """
     segs = _cursor_segments(objects, camera, px, py, width, height,
-                            radius_px)
+                            radius_px, clip)
     if len(segs) < 2:
         return []
     flat = getattr(camera, "projection", "perspective") == "parallel"
@@ -292,6 +377,7 @@ class SnapIndex:
         self._cache: dict[str, tuple[int, list]] = {}
         self._int_cache: tuple[int, list] | None = None
         self._cloud_cache = {}
+        self._cut_cache = {}
         self.enabled = True
         self.types = {t: t in ("end", "point", "mid", "center", "quad", "int")
                       for t in SNAP_TYPES}
@@ -318,7 +404,25 @@ class SnapIndex:
             self._int_cache = (rev, _intersections(objects))
         return self._int_cache[1]
 
-    def _cloud_point(self, obj, camera, px, py, width, height, radius_px):
+    def _cut_points(self, objects, clip) -> list:
+        """Where the clipping planes cut through the objects, kept per
+        object and plane until the object changes."""
+        cache, pts = {}, []
+        for obj in objects:
+            if obj.clip_plane or isinstance(obj.shape, PointCloudShape):
+                continue
+            for eq in clip:
+                key = (obj.id, tuple(float(c) for c in eq))
+                entry = self._cut_cache.get(key)
+                if entry is None or entry[0] != obj.mesh.uid:
+                    entry = (obj.mesh.uid, _plane_crossings(obj, eq))
+                cache[key] = entry
+                pts.extend(entry[1])
+        self._cut_cache = cache
+        return pts
+
+    def _cloud_point(self, obj, camera, px, py, width, height, radius_px,
+                     clip=()):
         """Nearest full-resolution sample, narrowing large scans by chunks.
 
         Keep only world-space bounds in the cache: every camera pose, zoom,
@@ -362,6 +466,8 @@ class SnapIndex:
         if not len(xyz):
             return None
         xyz = shape.to_world(xyz)
+        if clip:
+            xyz = xyz[in_sight(xyz, clip)]
         screen = camera.project(xyz, width, height)
         d2 = (screen[:, 0] - px) ** 2 + (screen[:, 1] - py) ** 2
         valid = np.flatnonzero((screen[:, 2] > 0) & (d2 < radius_px ** 2))
@@ -408,8 +514,11 @@ class SnapIndex:
 
     def find(self, camera, px: float, py: float, width: int, height: int,
              radius_px: float = 12.0, base_point=None, pending_points=None,
-             picked_points=None):
-        """Best snap near the pixel. Returns (point, kind) or None."""
+             picked_points=None, clip=()):
+        """Best snap near the pixel. Returns (point, kind) or None.
+
+        `clip` holds the clip equations of the planes cutting the view:
+        what they take away is out of sight, so nothing on it snaps."""
         if not self.enabled:
             return None
         objects = self.scene.visible_objects()
@@ -424,12 +533,13 @@ class SnapIndex:
             if self.types.get(kind):
                 pts.append(p)
                 kinds.append(kind)
+        pending = len(pts)
 
         for obj in objects:
             if isinstance(obj.shape, PointCloudShape):
                 if self.types.get("point"):
                     p = self._cloud_point(obj, camera, px, py, width, height,
-                                          radius_px)
+                                          radius_px, clip)
                     if p is not None:
                         pts.append(p)
                         kinds.append("point")
@@ -442,9 +552,14 @@ class SnapIndex:
             for p in self._intersection_points(objects):
                 pts.append(p)
                 kinds.append("int")
+            # a clipping plane is a surface too, and where it cuts through
+            # a curve, a solid or a mesh is as much an intersection
+            for p in self._cut_points(objects, clip):
+                pts.append(p)
+                kinds.append("int")
         if self.types.get("appint"):
             for p in _apparent_crossings(objects, camera, px, py, width,
-                                         height, radius_px):
+                                         height, radius_px, clip):
                 pts.append(p)
                 kinds.append("appint")
         if self.types.get("perp") and base_point is not None:
@@ -459,6 +574,8 @@ class SnapIndex:
             scr = camera.project(arr, width, height)
             d2 = (scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2
             d2[scr[:, 2] <= 0] = np.inf
+            if clip:
+                d2[pending:][~in_sight(arr[pending:], clip)] = np.inf
             in_range = d2 < radius_px ** 2
             for i in np.nonzero(in_range)[0]:
                 score = (_PRIORITY[kinds[i]], d2[i], scr[i, 2])
@@ -468,7 +585,7 @@ class SnapIndex:
 
         if best is None and self.types.get("near"):
             near = self._near(objects, camera, px, py, width, height,
-                              radius_px)
+                              radius_px, clip)
             if near is not None:
                 best = (near, "near")
         return best
@@ -493,7 +610,8 @@ class SnapIndex:
                 continue
         return feet
 
-    def _near(self, objects, camera, px, py, width, height, radius_px):
+    def _near(self, objects, camera, px, py, width, height, radius_px,
+              clip=()):
         """Closest point on any curve's tessellation, in screen space."""
         best = None
         best_d2 = radius_px ** 2
@@ -504,9 +622,12 @@ class SnapIndex:
                 continue
             seg = mesh.edge_segments
             a3, b3 = seg[:, 0, :].astype(float), seg[:, 1, :].astype(float)
+            cut = np.ones(len(a3), bool)
+            if clip:
+                a3, b3, cut = _clipped_segments(a3, b3, clip)
             sa = camera.project(a3, width, height)
             sb = camera.project(b3, width, height)
-            valid = (sa[:, 2] > 0) & (sb[:, 2] > 0)
+            valid = (sa[:, 2] > 0) & (sb[:, 2] > 0) & cut
             if not valid.any():
                 continue
             ab = sb[:, :2] - sa[:, :2]
