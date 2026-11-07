@@ -141,6 +141,13 @@ or enter a signed distance such as `-25mm`. Add `! _Move _Vertical` or
   nothing there, and **AppInt** gives you the point anyway, on whichever
   curve is nearer the camera. It belongs to the view you are looking
   through, so it moves when you orbit. Off until you switch it on.
+- **Project** puts every picked point at one height, the **Z** beside it on
+  the osnap bar, whatever it snapped to: snap to the top of a wall and the
+  line starts on the floor below it. Every launch starts with it off, at 0.
+  Before the first click the snap marker stays on the feature and a point
+  marker shows where the point will land. A height picked along an axis,
+  such as a box's, is left as it is. `osnap project toggle` switches it
+  from the command line.
 
 ## Control points & sub-objects
 

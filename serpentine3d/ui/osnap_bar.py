@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
+from PySide6.QtCore import QLocale, Qt, QTimer
+from PySide6.QtWidgets import (
+    QAbstractSpinBox, QDoubleSpinBox, QHBoxLayout, QLabel, QToolButton, QWidget,
+)
 
 from ..core.snaps import SNAP_TYPES
 
@@ -22,6 +24,26 @@ _TIPS = {
     "perp": "Snap perpendicular from the previous point",
     "near": "Snap to the nearest point on a curve",
 }
+
+
+class _HeightBox(QDoubleSpinBox):
+    """The Project height: a click in selects the number, ready to type
+    over, and the cursor never goes into the "Z " in front of it."""
+
+    def __init__(self):
+        super().__init__()
+        self.lineEdit().cursorPositionChanged.connect(self._keep_off_prefix)
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        # after the click has placed its cursor, or it undoes the selection
+        QTimer.singleShot(0, self.selectAll)
+
+    def _keep_off_prefix(self, _old: int, new: int):
+        edit = self.lineEdit()
+        start = len(self.prefix())
+        if new < start and not edit.hasSelectedText():
+            edit.setCursorPosition(start)
 
 
 class OsnapBar(QWidget):
@@ -61,6 +83,37 @@ class OsnapBar(QWidget):
         self._ortho.setChecked(viewport.ortho)
         self._ortho.toggled.connect(self._ortho_toggled)
         layout.addWidget(self._ortho)
+        self._project = self._button(
+            "Project", "Put every picked point at the height beside it")
+        self._project.setChecked(viewport.snaps.project_enabled)
+        self._project.toggled.connect(self._project_toggled)
+        layout.addWidget(self._project)
+        self._project_z = _HeightBox()
+        self._project_z.setRange(-1e9, 1e9)
+        self._project_z.setDecimals(2)
+        self._project_z.setLocale(QLocale.c())       # "0.00", not "0,00"
+        self._project_z.setPrefix("Z ")
+        self._project_z.setToolTip("Height Project puts picked points at")
+        self._project_z.setKeyboardTracking(False)
+        self._project_z.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._project_z.setButtonSymbols(
+            QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self._project_z.setStyleSheet(
+            "QDoubleSpinBox { font-size: 11px; padding: 1px 6px;"
+            " border: 1px solid #3a3b41; border-radius: 4px;"
+            " background: #1e1f22; color: #cfd0d2; }"
+            "QDoubleSpinBox:focus { border-color: #d9a441; }"
+            # without the origin the hidden arrows still take the width,
+            # and the text gets none of it
+            "QDoubleSpinBox::up-button, QDoubleSpinBox::down-button"
+            " { subcontrol-origin: border; width: 0px; }"
+            "QDoubleSpinBox:disabled { color: #5d5e63;"
+            " background: transparent; border-color: #2e2f34; }")
+        self._project_z.setValue(viewport.snaps.project_z)
+        self._project_z.setEnabled(viewport.snaps.project_enabled)
+        self._project_z.valueChanged.connect(self._project_z_changed)
+        self._fit_project_z()
+        layout.addWidget(self._project_z)
         layout.addStretch(1)
         # A type left set while snaps are off keeps its setting for when
         # they come back on, but must not look on: lit up as usual, the bar
@@ -112,6 +165,20 @@ class OsnapBar(QWidget):
         if self.config:
             self.config.set("ortho", on)
 
+    def _project_toggled(self, on: bool):
+        self.viewport.snaps.project_enabled = on
+        self._project_z.setEnabled(on)
+
+    def _fit_project_z(self):
+        """As wide as "Z 0.00" needs, not as wide as its range."""
+        box = self._project_z
+        text = box.prefix() + box.textFromValue(box.value())
+        box.setFixedWidth(box.fontMetrics().horizontalAdvance(text) + 18)
+
+    def _project_z_changed(self, z: float):
+        self._fit_project_z()
+        self.viewport.snaps.project_z = z
+
     def refresh(self):
         """Sync button states from viewport (after commands toggle them)."""
         self._master.setChecked(self.viewport.snaps.enabled)
@@ -120,3 +187,5 @@ class OsnapBar(QWidget):
             btn.setChecked(self.viewport.snaps.types.get(t, False))
         self._grid.setChecked(self.viewport.grid_snap)
         self._ortho.setChecked(self.viewport.ortho)
+        self._project.setChecked(self.viewport.snaps.project_enabled)
+        self._project_z.setValue(self.viewport.snaps.project_z)
