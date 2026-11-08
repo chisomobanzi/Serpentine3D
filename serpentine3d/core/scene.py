@@ -298,14 +298,20 @@ class Scene:
         return f"{kind.capitalize()} {n:02d}"
 
     def add(self, shape, name: str | None = None,
-            layer_id: str | None = None) -> SceneObject:
+            layer_id: str | None = None,
+            obj_id: str | None = None) -> SceneObject:
+        """`obj_id` keeps the id an object was saved under, for what refers
+        to it by id across a save and an open (a Hydra graph does); taken
+        already, the object gets a new one."""
         # A DeferredShape is geometry the file described and nothing has
         # converted. It answers for its own kind, because working the kind
         # out from the shape is exactly the conversion being put off.
         kind = (shape.kind if isinstance(shape, DeferredShape)
                 else geometry.shape_kind(shape))
+        if not obj_id or obj_id in self.objects:
+            obj_id = uuid.uuid4().hex[:8]
         obj = SceneObject(
-            id=uuid.uuid4().hex[:8],
+            id=obj_id,
             name=name or self._auto_name(kind),
             _shape=shape,
             kind=kind,
