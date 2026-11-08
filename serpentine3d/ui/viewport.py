@@ -1248,6 +1248,7 @@ class Viewport(QOpenGLWidget):
         self._draw_span = None              # (from, to) of the open leg
         self._draw_frame = None             # (sides, corner) when it is a box
         self._choice_hover = None           # row the object chooser is on
+        self._flashes: dict[str, float] = {}    # object id -> when it lit
         self._chooser = None                # the open chooser, if there is one
         self._hold_mods = None              # modifiers it went down with
         self._hold_timer = QTimer(self)     # how long the button has been still
@@ -2587,6 +2588,10 @@ class Viewport(QOpenGLWidget):
             selected = self._looks_selected(obj.id)
             gold = self._selection_color(obj.id) if selected else None
             color = gold if selected else self.scene.color_of(obj)
+            lit = self._flash_amount(obj.id)
+            if lit:
+                color = tuple(c + (f - c) * lit
+                              for c, f in zip(color, theme.CHANGE_FLASH))
             locked = obj.locked or obj.layer_id in locked_layers
             if locked and not selected:
                 grey = (color[0] + color[1] + color[2]) / 3 * 0.55 + 0.18
@@ -2680,7 +2685,7 @@ class Viewport(QOpenGLWidget):
             # and switching them off would empty the drawing.
             if gpu.line_count and (selected or show_edges or not gpu.tri_count):
                 if selected:
-                    edge_color = (*gold, 1.0)
+                    edge_color = (*color, 1.0)    # gold, or lit by a flash
                 elif obj.kind in ("curve", "hatch"):
                     edge_color = (*line_color, 1.0)
                 else:
@@ -4304,7 +4309,8 @@ class Viewport(QOpenGLWidget):
                     self._eye(), px, py, self.width(), self.height(),
                     base_point=self.snap_base,
                     pending_points=self.pending_points,
-                    picked_points=self.picked_points)
+                    picked_points=self.picked_points,
+                    clip=self._clip_vectors(entered.id))
                 if snap is not None:
                     self._active_snap = snap
                     return snap[0]
@@ -4352,7 +4358,8 @@ class Viewport(QOpenGLWidget):
             snap = self.snaps.find(self.camera, px, py, self.width(),
                                    self.height(), base_point=self.snap_base,
                                    pending_points=self.pending_points,
-                                   picked_points=self.picked_points)
+                                   picked_points=self.picked_points,
+                                   clip=self._clip_vectors(self.view_key))
             if snap is not None:
                 self._active_snap = snap
                 t = float(np.dot(np.asarray(snap[0], float) - base, unit))
@@ -4369,7 +4376,8 @@ class Viewport(QOpenGLWidget):
         snap = self.snaps.find(self.camera, px, py, self.width(),
                                self.height(), base_point=self.snap_base,
                                pending_points=self.pending_points,
-                               picked_points=self.picked_points)
+                               picked_points=self.picked_points,
+                               clip=self._clip_vectors(self.view_key))
         if snap is not None:
             self._active_snap = snap
             return snap[0]
@@ -4525,6 +4533,32 @@ class Viewport(QOpenGLWidget):
         if self.selection.held and obj_id != self._choice_hover:
             return theme.HELD_SELECTION_COLOR
         return theme.SELECTION_COLOR
+
+    def flash(self, ids):
+        """Light these objects in the change colour for a moment, fading
+        back to their own: what Join or Explode made, so it is seen."""
+        now = time.monotonic()
+        self._flashes.update({obj_id: now for obj_id in ids})
+        self._flash_tick()
+
+    def _flash_tick(self):
+        now = time.monotonic()
+        self._flashes = {i: t for i, t in self._flashes.items()
+                         if now - t < theme.CHANGE_FLASH_SECONDS}
+        self.update()
+        if self._flashes:
+            QTimer.singleShot(16, self._flash_tick)
+
+    def _flash_amount(self, obj_id: str) -> float:
+        """1 while the flash holds, then fading to 0 when it is over."""
+        start = self._flashes.get(obj_id)
+        if start is None:
+            return 0.0
+        elapsed = time.monotonic() - start
+        if elapsed >= theme.CHANGE_FLASH_SECONDS:
+            return 0.0
+        fade = theme.CHANGE_FLASH_SECONDS - theme.CHANGE_FLASH_HOLD
+        return min(1.0, 1.0 - (elapsed - theme.CHANGE_FLASH_HOLD) / fade)
 
     def _looks_selected(self, obj_id: str) -> bool:
         """Drawn in the selection colour: either it is selected, or it is
@@ -4708,11 +4742,18 @@ class Viewport(QOpenGLWidget):
         Thinned first and moved out afterwards: a scan is held as offsets
         from where it stands, and building the whole of it in doubles to
         take every two-hundredth point would be the expensive half of a
-        click.
+        click. Only the points the view's clipping planes leave in sight.
         """
         n = len(mesh.local)
         stride = max(1, n // self.PICK_CLOUD_SAMPLE)
-        return mesh.to_world(mesh.local[::stride]).astype(float)
+        pts = mesh.to_world(mesh.local[::stride]).astype(float)
+        # what a clipping plane cut away is not there to be picked
+        view = self.clip_view()
+        clip = self._clip_vectors(view) if view is not None else []
+        if clip:
+            from ..core.snaps import in_sight
+            pts = pts[in_sight(pts, clip)]
+        return pts
 
     def _nearest_cloud_point(self, mesh, eye, px, py, w, h):
         """Depth of the cloud point nearest the cursor within the pick

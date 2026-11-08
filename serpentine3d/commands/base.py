@@ -218,6 +218,9 @@ class SelectReq(Req):
     # trim takes the part that point is on (#31). A viewport click supplies
     # it; a typed, scripted or listed pick cannot, and leaves it out.
     want_point: bool = False
+    # Enter or a right-click with fewer than min_count picked ends the
+    # command rather than asking again: Join with one curve is done.
+    too_few_ends: bool = False
 
 
 def _is_length(text: str, units: str) -> bool:
@@ -435,6 +438,13 @@ class CommandContext:
         nowhere to be.
         """
         self.result_ids = [o if isinstance(o, str) else o.id for o in objs]
+
+    def flash(self, objs):
+        """Light what this command made for a moment, so a success that
+        changes nothing you can see is still seen. Nothing without a window."""
+        show = getattr(self.window, "flash_objects", None)
+        if show is not None:
+            show([o if isinstance(o, str) else o.id for o in objs])
 
     def opt(self, name: str, default: str) -> str:
         return getattr(self, "options", {}).get(name, default)
@@ -1343,6 +1353,12 @@ class CommandProcessor:
             self.cancel()                    # Enter on nothing: never mind
             return
         if len(self._select_buffer) < req.min_count:
+            if req.too_few_ends:
+                self.ctx.echo(
+                    f"Needs at least {req.min_count} objects, so nothing "
+                    "was done.")
+                self.cancel()
+                return
             self.ctx.echo(
                 f"Select at least {req.min_count} object(s) — "
                 f"{len(self._select_buffer)} selected.")
