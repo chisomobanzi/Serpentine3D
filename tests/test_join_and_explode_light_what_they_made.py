@@ -66,9 +66,10 @@ def test_the_flash_is_white():
 def test_the_flash_holds_white_before_it_fades(window, monkeypatch):
     line = window.scene.add(g.make_line((0, 0, 0), (5, 0, 0)))
     vp = window.viewport
+    now = [viewport_module.time.monotonic()]
+    monkeypatch.setattr(viewport_module.time, "monotonic", lambda: now[0])
     vp.flash([line.id])
-    held = viewport_module.time.monotonic() + theme.CHANGE_FLASH_HOLD * 0.9
-    monkeypatch.setattr(viewport_module.time, "monotonic", lambda: held)
+    now[0] += theme.CHANGE_FLASH_HOLD * 0.9
     assert vp._flash_amount(line.id) == 1.0
 
 
