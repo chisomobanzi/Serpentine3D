@@ -10,6 +10,19 @@
   snaps. The clipping tolerance stays the same at survey coordinates.
   Contributed by Jonas Pedrotti (#128).
 
+### Changed
+
+- **Join and Explode keep their results selected and briefly light them
+  white.** Explode also keeps objects it cannot split selected beside the
+  new pieces, without flashing the unchanged objects. Contributed by Jonas
+  Pedrotti (#143).
+- **Enter or right-click ends Join with a single picked curve.** Nothing
+  changes, instead of the command repeatedly asking for a second object.
+  Commands such as Loft still wait for their minimum selection (#143).
+- **Join and Explode lead the middle-click popup**, with paired icons.
+  The popup keeps its twelve distinct recent commands, staples and command
+  palette (#143).
+
 ## 0.12.3 (2026-11-03)
 
 ### Fixed
