@@ -4304,7 +4304,8 @@ class Viewport(QOpenGLWidget):
                     self._eye(), px, py, self.width(), self.height(),
                     base_point=self.snap_base,
                     pending_points=self.pending_points,
-                    picked_points=self.picked_points)
+                    picked_points=self.picked_points,
+                    clip=self._clip_vectors(entered.id))
                 if snap is not None:
                     self._active_snap = snap
                     return snap[0]
@@ -4352,7 +4353,8 @@ class Viewport(QOpenGLWidget):
             snap = self.snaps.find(self.camera, px, py, self.width(),
                                    self.height(), base_point=self.snap_base,
                                    pending_points=self.pending_points,
-                                   picked_points=self.picked_points)
+                                   picked_points=self.picked_points,
+                                   clip=self._clip_vectors(self.view_key))
             if snap is not None:
                 self._active_snap = snap
                 t = float(np.dot(np.asarray(snap[0], float) - base, unit))
@@ -4369,7 +4371,8 @@ class Viewport(QOpenGLWidget):
         snap = self.snaps.find(self.camera, px, py, self.width(),
                                self.height(), base_point=self.snap_base,
                                pending_points=self.pending_points,
-                               picked_points=self.picked_points)
+                               picked_points=self.picked_points,
+                               clip=self._clip_vectors(self.view_key))
         if snap is not None:
             self._active_snap = snap
             return snap[0]
@@ -4708,11 +4711,18 @@ class Viewport(QOpenGLWidget):
         Thinned first and moved out afterwards: a scan is held as offsets
         from where it stands, and building the whole of it in doubles to
         take every two-hundredth point would be the expensive half of a
-        click.
+        click. Only the points the view's clipping planes leave in sight.
         """
         n = len(mesh.local)
         stride = max(1, n // self.PICK_CLOUD_SAMPLE)
-        return mesh.to_world(mesh.local[::stride]).astype(float)
+        pts = mesh.to_world(mesh.local[::stride]).astype(float)
+        # what a clipping plane cut away is not there to be picked
+        view = self.clip_view()
+        clip = self._clip_vectors(view) if view is not None else []
+        if clip:
+            from ..core.snaps import in_sight
+            pts = pts[in_sight(pts, clip)]
+        return pts
 
     def _nearest_cloud_point(self, mesh, eye, px, py, w, h):
         """Depth of the cloud point nearest the cursor within the pick
