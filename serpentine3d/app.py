@@ -2966,9 +2966,25 @@ class MainWindow(QMainWindow):
     def _on_update_available(self, rel):
         """Main-thread slot: a newer release was found on launch."""
         self._pending_update = rel
-        self.statusBar().showMessage(
-            f"Serpentine3D {rel['version']} is available — "
-            f"Help ▸ Check for Updates to download.", 12000)
+        # A permanent widget: a timed message is wiped by the next status
+        # refresh or menu hover, so the notice was gone before anyone saw it.
+        if getattr(self, "_update_button", None) is None:
+            from PySide6.QtWidgets import QPushButton
+            self._update_button = QPushButton()
+            self._update_button.setFlat(True)
+            self._update_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._update_button.clicked.connect(self._open_update_notice)
+            self.statusBar().addPermanentWidget(self._update_button)
+        self._update_button.setText(
+            f"Serpentine3D {rel['version']} is available")
+        self._update_button.setToolTip("Download or read the release notes")
+        self._update_button.show()
+
+    def _open_update_notice(self):
+        """The notice has done its job once clicked: the download dialog
+        says the rest, and it is not left standing in the status bar."""
+        self._update_button.hide()
+        self._check_updates_manual()
 
     def _check_updates_manual(self):
         """Help ▸ Check for Updates: synchronous, always reports back."""
