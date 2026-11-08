@@ -34,8 +34,12 @@ _APPARENT_GAP = 1e-6
 
 def _clip_slack(eq) -> float:
     """How far on the cut side a point may sit and still count as on the
-    plane: a corner lying in it is kept, as the shader keeps it."""
-    return 1e-6 * (1.0 + abs(float(eq[3])))
+    plane: a corner lying in it is kept, as the shader keeps it.
+
+    Scale the world-distance tolerance by the normal, so translating a
+    drawing to survey coordinates never widens the visible half-space.
+    """
+    return 1e-6 * float(np.linalg.norm(eq[:3]))
 
 
 def in_sight(points, clip) -> np.ndarray:

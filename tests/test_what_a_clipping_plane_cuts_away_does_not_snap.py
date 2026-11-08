@@ -174,6 +174,47 @@ def test_a_cut_cut_away_by_another_plane_does_not_snap():
     assert _find(index, cam, (6, 0, 0), clip=[*CUT_ABOVE, cut_right]) is None
 
 
+# A translation must not widen the invisible strip behind a cut. In particular,
+# the plane equation's constant is a coordinate, not a modelling tolerance.
+@pytest.mark.parametrize("origin", [(0.0, 0.0, 0.0),
+                                    (5_000_000.0, 5_000_000.0, 5_000_000.0)])
+@pytest.mark.parametrize("behind", [1.0, 0.001])
+@pytest.mark.parametrize("kind", ["point", "scan"])
+def test_a_survey_translation_does_not_make_a_hidden_point_snap(
+        origin, behind, kind):
+    origin = np.asarray(origin, dtype=np.float64)
+    point = origin + np.array((20.0, 0.0, behind), dtype=np.float64)
+    scene, cam = Scene(), _front()
+    cam.target = origin.copy()
+    shape = (g.make_point(tuple(point)) if kind == "point"
+             else PointCloudShape([point]))
+    scene.add(shape)
+    index = SnapIndex(scene)
+    index.types = _only("point")
+    clips = [clip_equation(origin, (0, 0, 1))]
+    assert _find(index, cam, point, clip=())[1] == "point"
+    assert _find(index, cam, point, clip=clips) is None
+
+
+@pytest.mark.parametrize("origin", [(0.0, 0.0, 0.0),
+                                    (5_000_000.0, 5_000_000.0, 5_000_000.0)])
+@pytest.mark.parametrize("kind", ["point", "scan"])
+def test_a_survey_point_on_the_cut_remains_a_snap_target(origin, kind):
+    origin = np.asarray(origin, dtype=np.float64)
+    point = origin + np.array((20.0, 0.0, 0.0), dtype=np.float64)
+    scene, cam = Scene(), _front()
+    cam.target = origin.copy()
+    shape = (g.make_point(tuple(point)) if kind == "point"
+             else PointCloudShape([point]))
+    scene.add(shape)
+    index = SnapIndex(scene)
+    index.types = _only("point")
+    hit = _find(index, cam, point,
+                clip=[clip_equation(origin, (0, 0, 1))])
+    assert hit is not None and hit[1] == "point"
+    assert hit[0] == pytest.approx(point, rel=0, abs=1e-8)
+
+
 # --- in a pane ---------------------------------------------------------------
 
 def _plane(scene, **clip):
@@ -197,8 +238,8 @@ def pane(_qapp):
 
 
 def _pick(vp, point):
-    px, py = vp.camera.project(np.asarray([point], float), vp.width(),
-                               vp.height())[0, :2]
+    px, py = vp._eye().project(np.asarray([point], float), vp.width(),
+                              vp.height())[0, :2]
     vp.world_point_at(px, py)
     return vp._active_snap
 
@@ -219,4 +260,30 @@ def test_a_pane_a_plane_cuts_does_not_snap_to_what_it_cut_away(pane):
 def test_a_plane_switched_off_in_the_pane_leaves_it_snapping(pane):
     pane.scene.add(g.make_line((20, 0, -10), (20, 0, 10)))
     _plane(pane.scene, off_in=[pane.view_key])
+    assert _pick(pane, (20, 0, 10))[1] == "end"
+
+
+def test_an_entered_detail_snaps_according_to_its_own_plane_switch(pane):
+    from serpentine3d.core import clipping
+    from serpentine3d.core.layout import DetailView, Layout
+    from serpentine3d.ui.camera import STANDARD_VIEWS
+
+    pane.scene.add(g.make_line((20, 0, -10), (20, 0, 10)))
+    az, el = STANDARD_VIEWS["front"]
+    detail = DetailView(x=20, y=40, w=180, h=150, azimuth=az,
+                        elevation=el, target=[0.0, 0.0, 0.0], scale_denom=1)
+    layout = Layout(name="Sheet")
+    layout.details.append(detail)
+    pane.scene.layouts.append(layout)
+    pane.set_space(layout.id)
+    pane.layout_view.fit()
+    pane.layout_view.entered_detail = detail.id
+    pane.point_space = "model"
+
+    assert _pick(pane, (20, 0, 10))[1] == "end"
+    plane = _plane(pane.scene, off_in=[pane.view_key])
+    assert _pick(pane, (20, 0, 10)) is None, \
+        "switching the plane off in the model pane must not switch it off in the detail"
+    assert _pick(pane, (20, 0, -10))[1] == "end"
+    clipping.switch(pane.scene, plane.id, detail.id, False)
     assert _pick(pane, (20, 0, 10))[1] == "end"

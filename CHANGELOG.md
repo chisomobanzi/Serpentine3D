@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Snapping and scan picking respect clipping planes.** Geometry cut away
+  no longer catches the cursor, including inside a sheet detail. Visible
+  curve portions still offer Near snaps, and the cut itself offers Int
+  snaps. The clipping tolerance stays the same at survey coordinates.
+  Contributed by Jonas Pedrotti (#128).
+
 ## 0.12.3 (2026-11-03)
 
 ### Fixed
