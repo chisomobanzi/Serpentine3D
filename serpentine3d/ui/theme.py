@@ -237,6 +237,7 @@ QPushButton {
 QPushButton:hover { background: #3f4047; border-color: #55565e; }
 QPushButton:pressed { background: #2b2c30; }
 QPushButton:default { border-color: #d9a441; }
+
 /* A tool button that reads as a button before the pointer reaches it,
    like Join and Explode at the top of the middle-click popup. */
 QToolButton[framed="true"] {

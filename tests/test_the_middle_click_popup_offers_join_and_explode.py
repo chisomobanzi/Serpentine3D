@@ -1,5 +1,5 @@
 """A middle click offers Join and Explode side by side above what the popup
-always held: the last three commands, the staples and the palette."""
+always held: up to twelve recent commands, the staples and the palette."""
 
 import pytest
 from PySide6.QtWidgets import QApplication, QToolButton, QWidgetAction
@@ -49,10 +49,10 @@ def test_join_and_explode_sit_side_by_side_above_the_recent_commands(window):
         "Both read as buttons before the pointer reaches them")
     assert isinstance(menu.actions()[0], QWidgetAction), (
         "The two buttons come first")
-    recent = ["copy", "box", "circle"]
+    recent = ["copy", "box", "circle", "sphere"]
     assert _entries(menu) == (
         recent + [s for s in STAPLES if s not in recent]
-        + ["Command palette…"]), "only the last three commands are listed"
+        + ["Command palette…"]), "all four recent commands are retained"
 
 
 def test_each_button_is_as_wide_as_what_it_shows(window):
@@ -64,16 +64,30 @@ def test_each_button_is_as_wide_as_what_it_shows(window):
     assert join.width() == join.sizeHint().width()
     assert explode.width() == explode.sizeHint().width()
     assert join.width() < explode.width()
+    assert join.y() == explode.y()
+    assert join.x() + join.width() <= explode.x()
     menu.close()
 
 
-def test_a_popup_button_runs_its_command(window):
+@pytest.mark.parametrize("index, name", [(0, "join"), (1, "explode")])
+def test_a_popup_button_runs_its_command(window, index, name):
     menu = window._mmb_menu()
-    join, _explode = _buttons(menu)
-    join.click()
+    _buttons(menu)[index].click()
     assert window.processor.active is not None
-    assert window.processor.active.name == "join"
+    assert window.processor.active.name == name
 
 
 def test_with_no_history_the_staples_still_show(window):
     assert _entries(window._mmb_menu()) == STAPLES + ["Command palette…"]
+
+
+def test_recent_commands_keep_twelve_distinct_names_most_recent_first(window):
+    _run(window, "sphere", "circle", "box", "copy", "line", "polyline",
+         "curve", "interpcrv", "arc", "ellipse", "rectangle", "point",
+         "extrude", "move", "sphere", "circle")
+    recent = ["circle", "sphere", "move", "extrude", "point", "rectangle",
+              "ellipse", "arc", "interpcrv", "curve", "polyline", "line"]
+    assert window.command_line.recent_commands() == recent
+    assert _entries(window._mmb_menu()) == (
+        recent + [s for s in STAPLES if s not in recent]
+        + ["Command palette…"])

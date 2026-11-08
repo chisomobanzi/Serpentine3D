@@ -419,7 +419,7 @@ def cmd_explode(ctx):
         for p in parts:
             made.append(ctx.scene.add(p, layer_id=o.layer_id))
         ctx.scene.remove(o.id)
-    # what could not be exploded stays picked beside what could
+    # What could not be exploded stays picked beside what could.
     ctx.select_result(made + whole)
     if made:
         ctx.flash(made)

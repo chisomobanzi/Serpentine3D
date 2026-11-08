@@ -48,6 +48,17 @@ def test_exploded_pieces_light_up(window):
         assert all(amount > 0.5 for amount in _lit(window, piece.id))
 
 
+def test_joined_surfaces_light_up(window):
+    faces = [window.scene.add(face)
+             for face in g.explode(g.make_box((0, 0, 0), 5, 5, 5))]
+    window.selection.set([face.id for face in faces])
+    window.processor.run("join")
+    QApplication.processEvents()
+    joined, = window.scene.all()
+    assert window.selection.ids == [joined.id]
+    assert all(amount > 0.5 for amount in _lit(window, joined.id))
+
+
 def test_the_flash_is_white():
     assert theme.CHANGE_FLASH == (1.0, 1.0, 1.0)
 
@@ -96,6 +107,10 @@ def test_explode_keeps_the_pieces_and_what_stayed_whole_selected(window):
     ids = sorted(o.id for o in window.scene.all())
     assert len(ids) == 3 and line.id in ids
     assert sorted(window.selection.ids) == ids
+    assert _lit(window, line.id) == [0.0] * len(window.all_viewports())
+    for piece in window.scene.all():
+        if piece.id != line.id:
+            assert all(amount > 0.5 for amount in _lit(window, piece.id))
 
 
 def test_a_picked_result_shows_the_flash_and_settles_back_to_gold(
@@ -103,6 +118,8 @@ def test_a_picked_result_shows_the_flash_and_settles_back_to_gold(
     """A joined curve stays selected, and a selected curve is drawn in the
     selection colour: the flash has to reach that colour too."""
     import numpy as np
+    if QApplication.platformName() == "offscreen":
+        pytest.skip("the pixel assertion needs a visible GL window")
     window.set_view_layout("single")
     window.resize(900, 700)
     window.show()

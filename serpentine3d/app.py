@@ -772,8 +772,8 @@ class MainWindow(QMainWindow):
         self._mmb_menu().exec(QCursor.pos())
 
     def _mmb_menu(self) -> QMenu:
-        """Middle-click popup: Join and Explode side by side, then the last
-        three commands and the staples (Rhino-style)."""
+        """Middle-click popup: Join and Explode side by side, then up to
+        twelve recent commands and the staples (Rhino-style)."""
         from PySide6.QtWidgets import QHBoxLayout, QToolButton, QWidgetAction
         from .ui.icons import command_icon
         menu = QMenu(self)
@@ -802,7 +802,7 @@ class MainWindow(QMainWindow):
         pair.setDefaultWidget(row)
         menu.addAction(pair)
         menu.addSeparator()
-        recent = self.command_line.recent_commands(limit=3)
+        recent = self.command_line.recent_commands()
         for name in recent:
             menu.addAction(name, lambda n=name: run(n))
         if recent:
