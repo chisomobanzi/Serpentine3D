@@ -1,5 +1,68 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Snapping and scan picking respect clipping planes.** Geometry cut away
+  no longer catches the cursor, including inside a sheet detail. Visible
+  curve portions still offer Near snaps, and the cut itself offers Int
+  snaps. The clipping tolerance stays the same at survey coordinates.
+  Contributed by Jonas Pedrotti (#128).
+
+## 0.12.3 (2026-11-03)
+
+### Fixed
+
+- **Shell hollows the solid, open at the face you click (#121).** Shell
+  never hollowed anything. Given no face to open, OpenCascade hands back
+  the solid moved in by the wall, which is the inside of the shell rather
+  than the shell, so `box 0 10 10 10` with a 1 mm wall came back a solid
+  8 mm box. Shell now asks for the face to open, as Rhino's does: click
+  the solid on that face, and a box clicked on its top comes back a tray.
+  Ctrl+Shift-click faces first to open several. The walls meet at sharp
+  corners inside, so a star shells to a star, and a solid the kernel
+  says it shelled but left whole, such as an arc closed by a flat side,
+  is hollowed by cutting its inside out. A solid named at the prompt
+  rather than clicked is shelled closed: the same outside, hollow inside.
+  Contributed by felixhudson (#136).
+- **OffsetSrf keeps a solid's edges sharp (#139).** A box offset outward
+  came back with every edge and corner rounded, 26 faces where a box has
+  6. The faces now run on until they meet, so a box offsets to a bigger
+  box. Where they can't, as where an arc closed by a flat side was
+  extruded, the edges are rounded as before rather than the offset
+  failing. A filleted box offset inward comes back a solid, where it was
+  an open surface. Contributed by felixhudson (#138).
+- **Offset keeps a curve's corners sharp (#137).** A rectangle offset
+  outward came back with its corners rounded off. The sides now run on
+  until they meet, as Rhino's Offset does unless told otherwise, so a
+  rectangle offsets to a rectangle, and `filletcorners` rounds them if
+  that is what you want. Where a corner can't be made sharp, as where a
+  spline meets another piece at an angle or at a corner of a few degrees,
+  it is rounded as before, rather than the curve coming back short, open
+  or empty. An offset that leaves nothing of the curve, such as a small
+  shape offset inward past its middle, now says so instead of adding an
+  empty object. Contributed by felixhudson (#140).
+- **Checking for updates on startup works on Windows when it is ticked.**
+  Ticking the installer's update check did nothing once an earlier
+  install had cleared it, as the installer never touched an existing
+  settings file again. It now applies the choice either way, and changes
+  only that one setting. A release found at startup was announced in a
+  status message the next status refresh wiped, often before anyone saw
+  it, and now waits in the status bar until it is clicked. Settings has
+  an Updates page to turn the check on or off, and to check now.
+  Contributed by Jonas Pedrotti (#125).
+- **The rubber band and snap markers stay on the cursor at survey
+  coordinates.** Thousands of kilometres from the origin, the rubber
+  band, the crosses on picked points, the snap marker and a held axis
+  were placed on a grid half a metre apart, so a short leg's preview
+  vanished and the markers sat up to half a metre off the points they
+  marked. Contributed by Jonas Pedrotti (#128).
+- **A Ctrl+Shift click on a mesh no longer ends in an error.** It picks a
+  face or edge of the mesh, and the gumball then asked for faces of the
+  kind a solid has, which a mesh doesn't, so the click ended in an error
+  that could take the app down. Contributed by Jonas Pedrotti (#141).
+
 ## 0.12.2 (2026-10-26)
 
 ### Added

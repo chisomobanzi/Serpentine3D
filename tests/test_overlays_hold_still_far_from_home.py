@@ -90,6 +90,33 @@ def test_the_rubber_band_goes_up_camera_relative(view):
         f"rubber band uploaded absolute coordinates ({_worst(view):.0f})"
 
 
+def test_a_short_leg_at_survey_millimetres_keeps_its_length(view):
+    # 5,233 km in millimetres, where float32 rounds to half a metre: a
+    # cast before the anchor collapsed a 300mm leg to nothing on screen.
+    far = np.array([512345678.123, 5233758492.903, 420000.0])
+    view.camera.target = far.copy()
+    view._frame_anchor = vp_mod.view_anchor(view.camera.target)
+    leg = (300.0, 40.0, 0.0)
+    view.set_preview(np.array([[far, far + leg]]), markers=[far])
+    view._draw_preview(np.eye(4, dtype=np.float32))
+    band = view._preview.uploads[0][:2]
+    assert np.allclose(band[1] - band[0], leg, atol=1e-3)
+    assert np.allclose(band[0], 0.0, atol=1e-3)
+    assert view._draw_span is not None
+    assert np.allclose(view._draw_span[1] - view._draw_span[0], leg)
+
+
+def test_the_snap_marker_sits_on_the_snap_at_survey_millimetres(view):
+    far = np.array([512345678.123, 5233758492.903, 420000.0])
+    view.camera.target = far.copy()
+    view._frame_anchor = vp_mod.view_anchor(view.camera.target)
+    view.point_mode = True
+    view._active_snap = (tuple(far + (0.25, 0.25, 0.0)), "end")
+    view._draw_preview(np.eye(4, dtype=np.float32))
+    square = view._preview.uploads[-1]
+    assert np.allclose(square.mean(axis=0), (0.25, 0.25, 0.0), atol=1e-3)
+
+
 def test_near_home_the_rubber_band_is_untouched(view):
     view.camera.target = np.zeros(3)
     view._frame_anchor = vp_mod.view_anchor(view.camera.target)

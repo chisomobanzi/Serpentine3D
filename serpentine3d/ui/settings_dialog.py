@@ -133,6 +133,7 @@ class SettingsDialog(QDialog):
             ("Object Snaps", self._osnap_page),
             ("Display", self._display_page),
             ("Assistant", self._assistant_page),
+            ("Updates", self._updates_page),
         ]:
             self.sidebar.addItem(name)
             self.pages.addWidget(builder())
@@ -885,6 +886,28 @@ class SettingsDialog(QDialog):
                      self.sp_transition.value())
         self.window.viewport.set_grid_params(self.sp_extent.value(),
                                              self.sp_major.value())
+
+    # ----------------------------------------------------------- updates
+
+    def _updates_page(self) -> QWidget:
+        w, layout = _page("Updates",
+                          "Serpentine3D can ask GitHub for a newer release "
+                          "when it starts. Nothing but that one request "
+                          "leaves the computer.")
+        self.cb_check_updates = QCheckBox("Check for updates on startup")
+        self.cb_check_updates.setChecked(
+            self.cfg.get("check_updates", default=True) is not False)
+        self.cb_check_updates.toggled.connect(
+            lambda on: self.cfg.set("check_updates", on))
+        layout.addWidget(self.cb_check_updates)
+        btn_now = QPushButton("Check Now")
+        btn_now.clicked.connect(lambda: self.window._check_updates_manual())
+        row = QHBoxLayout()
+        row.addWidget(btn_now)
+        row.addStretch(1)
+        layout.addLayout(row)
+        layout.addStretch(1)
+        return w
 
     # ------------------------------------------------------------ shared
 
