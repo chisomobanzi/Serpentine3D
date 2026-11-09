@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- When sketching the user can turn on auto cplane and have the cplane match the
+  nearby face.
+
 ## 0.12.4 (2026-11-08)
 
 ### Fixed
