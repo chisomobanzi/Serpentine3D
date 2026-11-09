@@ -8,7 +8,7 @@ import sys
 
 import numpy as np
 from PySide6.QtCore import QEvent, QObject, QProcess, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QCursor, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QDialog, QDockWidget, QFileDialog, QInputDialog, QMainWindow,
     QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QProgressDialog,
@@ -27,6 +27,7 @@ from .core.scene import Scene
 from .core.selection import SelectionManager
 from .ui import theme
 from .ui.command_line import CommandLine
+from .ui.ctrl_tap import CtrlTap
 from .ui.dialogs import untether
 from .ui.display_panel import DisplaySettingsDialog
 from .ui.layers_panel import LayersPanel
@@ -248,6 +249,8 @@ class MainWindow(QMainWindow):
         self._offered_form = None
         self.ctx.add_echo_listener(self.command_line.echo)
         self.processor.add_listener(self._sync_command_state)
+        QApplication.instance().installEventFilter(
+            CtrlTap(self._tap_guide, self))
         self.processor.add_listener(self._resume_dropped_imports)
         self.processor.add_listener(self._after_hatch_patterns)
 
@@ -1285,6 +1288,23 @@ class MainWindow(QMainWindow):
             self.command_line.echo("Direction released")
         vp.update()
 
+    def _tap_guide(self):
+        """A tap of Ctrl drops a guide in the pane the cursor is over.
+
+        The cursor and not the active pane, which is only the last one
+        clicked: a tap with the mouse over a panel is nobody's guide.
+        """
+        if QApplication.activeModalWidget() is not None:
+            return
+        at = QCursor.pos()
+        for vp in self.all_viewports():
+            here = vp.mapFromGlobal(at)
+            if vp.isVisible() and vp.rect().contains(here):
+                if vp.tap_guide(here.x(), here.y()):
+                    for pane in self.all_viewports():
+                        pane.update()
+                return
+
     def _standing_ghost(self):
         """The ghost a question shows before anything is typed, or None.
 
@@ -1376,6 +1396,9 @@ class MainWindow(QMainWindow):
                 vp.point_space = space
             self._refresh_rubber(None)
         else:
+            if not busy:
+                # scaffolding for the drawing under way, gone when it is
+                self.viewport.snaps.guides.clear()
             for vp in self.all_viewports():
                 vp.set_point_mode(False)
                 vp.snap_base = None

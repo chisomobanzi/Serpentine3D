@@ -156,6 +156,7 @@ or enter a signed distance such as `-25mm`. Add `! _Move _Vertical` or
 | ++ctrl+shift++ + click | Pick a **face** (push/pull) or **edge** (fillet) of a solid |
 | ++tab++ | While a command wants a point: lock the direction you're aiming in, then type the distance. ++tab++ again releases it |
 | ++ctrl++ + click | While a command wants a point: stand a vertical up from the point you clicked, then type the height (Rhino's elevator mode) |
+| Tap ++ctrl++ | While a command wants a point: drop a temporary guide at the cursor, which the cursor snaps to and lines up with along the construction plane's axes. Tap on a guide to remove it. Guides go when the command ends |
 | ++ctrl+m++ | Give the viewport you're in the whole window; again puts the layout back. Double-clicking a viewport's title does the same |
 | Arrow keys | Nudge the selection along the construction plane (++shift++ ×10, ++ctrl++ ×0.1) |
 

@@ -31,6 +31,11 @@ _APPARENT_LIMIT = 160
 # it is also what every corner of a polyline looks like from here.
 _APPARENT_GAP = 1e-6
 
+# How close to a guide's line the cursor has to come to be drawn onto it.
+# Tighter than the pick radius: a rail runs the whole width of the view, so
+# a wide one would catch the cursor everywhere it went.
+GUIDE_ALIGN_PX = 8.0
+
 
 def _clip_slack(eq) -> float:
     """How far on the cut side a point may sit and still count as on the
@@ -385,12 +390,18 @@ class SnapIndex:
         self.enabled = True
         self.types = {t: t in ("end", "point", "mid", "center", "quad", "int")
                       for t in SNAP_TYPES}
+        # Temporary points dropped with a tap of Ctrl while drawing, in world
+        # coordinates. They are here because this index is the one thing
+        # every pane shares, and a guide dropped in Top is wanted in Front.
+        self.guides: list[tuple] = []
+        self.tracking = True
         if config is not None:
             osnaps = config.get("osnaps", default={}) or {}
             self.enabled = bool(osnaps.get("enabled", True))
             for t in SNAP_TYPES:
                 if t in osnaps:
                     self.types[t] = bool(osnaps[t])
+            self.tracking = bool(config.get("smart_track", default=True))
 
     # -- caches --
 
@@ -593,6 +604,84 @@ class SnapIndex:
             if near is not None:
                 best = (near, "near")
         return best
+
+    def near_guide(self, camera, px: float, py: float, width: int,
+                   height: int, radius_px: float = 12.0):
+        """Index of the guide under the pixel, or None.
+
+        Apart from `find`, because a guide is something you put there for
+        this drawing: it answers even with the object snaps switched off.
+        """
+        if not self.tracking or not self.guides:
+            return None
+        scr = camera.project(np.asarray(self.guides, float), width, height)
+        d2 = (scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2
+        d2[scr[:, 2] <= 0] = np.inf
+        i = int(np.argmin(d2))
+        return i if d2[i] < radius_px ** 2 else None
+
+    def align(self, cplane, camera, cursor, hit, px: float, py: float,
+              width: int, height: int, axes=(True, True),
+              radius_px: float = GUIDE_ALIGN_PX):
+        """Line a free point up with the guides. Returns (point, rails).
+
+        `cursor` is where the mouse really is and `hit` where the grid and
+        ortho put it, so a grid step can't hide a rail the mouse is on. `axes`
+        says which CPlane coordinates are still free to move: ortho has
+        already spent one. Only those coordinates change, so the point stays
+        at the height it was going to land at, and on a rail from each of two
+        guides it lands where the rails cross. Each rail comes back as a
+        (guide, point) pair for the viewport to draw.
+        """
+        if not self.tracking or not self.guides:
+            return hit, []
+        ru, rv, rw = cplane.from_world(cursor)
+        coords = [cplane.from_world(g) for g in self.guides]
+        landed = list(cplane.from_world(hit))
+        held = []
+        for axis in (0, 1):
+            if not axes[axis]:
+                continue
+            on_rail = [(c[0], rv, rw) if axis == 0 else (ru, c[1], rw)
+                       for c in coords]
+            scr = camera.project(
+                np.array([cplane.to_world(*p) for p in on_rail], float),
+                width, height)
+            d2 = (scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2
+            d2[scr[:, 2] <= 0] = np.inf
+            i = int(np.argmin(d2))
+            if d2[i] < radius_px ** 2:
+                landed[axis] = coords[i][axis]
+                held.append(i)
+        if not held:
+            return hit, []
+        point = cplane.to_world(*landed)
+        return point, [(self.guides[i], point) for i in held]
+
+    def align_on_axis(self, camera, cursor, base, unit, px: float, py: float,
+                      width: int, height: int,
+                      radius_px: float = GUIDE_ALIGN_PX):
+        """Where a held direction draws level with a guide, or (None, []).
+
+        A pick held to an axis can't go to a guide, so what's on offer is the
+        spot on the axis square to it. `cursor` is the mouse on a plane the
+        axis lies in, so the test is the mouse being on the guide's rail
+        however far off the axis it has wandered. The answer is the distance
+        along the axis, with the rail as `align` gives them.
+        """
+        if not self.tracking or not self.guides:
+            return None, []
+        guides = np.asarray(self.guides, float)
+        along = (guides - base) @ unit
+        rail = cursor + (along - float((cursor - base) @ unit))[:, None] * unit
+        scr = camera.project(rail, width, height)
+        d2 = (scr[:, 0] - px) ** 2 + (scr[:, 1] - py) ** 2
+        d2[scr[:, 2] <= 0] = np.inf
+        i = int(np.argmin(d2))
+        if d2[i] >= radius_px ** 2:
+            return None, []
+        point = tuple(float(c) for c in base + along[i] * unit)
+        return float(along[i]), [(self.guides[i], point)]
 
     def _perp_feet(self, objects, base_point) -> list:
         """Feet of perpendiculars from base_point onto visible curves."""

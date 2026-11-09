@@ -28,6 +28,10 @@ page maps your habits over and is honest about the gaps.
 - **++ctrl++-click elevator.** Click a point on the construction plane with
   ++ctrl++ held to stand a vertical up from it, then set the height with the
   mouse or by typing it — the way you place a point off the CPlane in Rhino.
+- **Tap ++ctrl++ for a guide.** SmartTrack's temporary points: tap ++ctrl++
+  while picking and the cursor snaps to that spot and lines up with it along
+  the CPlane axes. Tap on a guide to remove it. They go when the command
+  ends, and *Guides* on the osnap bar turns them off.
 - **Maximised viewports.** ++ctrl+m++, or a double-click on a viewport's
   title, gives the pane you're in the whole window and puts your layout back
   on the second press. `max` does it from the command line.
