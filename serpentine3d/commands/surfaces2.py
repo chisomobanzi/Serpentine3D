@@ -3,8 +3,8 @@ unroll."""
 
 from ..core import geometry as g
 from .base import (
-    NumberReq, OptionReq, PointReq, SelectReq, TextReq, TextEditorReq,
-    command, has_text_editor,
+    LengthReq, NumberReq, OptionReq, PointReq, SelectReq, TextReq,
+    TextEditorReq, command, has_text_editor,
 )
 
 
@@ -470,6 +470,90 @@ def cmd_extractsrf(ctx):
     ctx.select_result(made)
     ctx.echo(f"Extracted {len(made)} surface(s)"
              + (" as copies." if copy == "Yes" else "."))
+
+
+def _held_faces(ctx) -> dict:
+    """{obj_id: [face indices]} of the Ctrl+Shift-picked faces to divide."""
+    picked: dict = {}
+    for (obj_id, kind, idx) in ctx.selection.subobjects:
+        if kind != "face":
+            continue
+        obj = ctx.scene.get(obj_id)
+        if (obj is None or obj.kind not in ("surface", "solid")
+                or not (0 <= idx < len(g.faces_of(obj.shape)))):
+            continue
+        picked.setdefault(obj_id, []).append(idx)
+    return picked
+
+
+def _divide_held(ctx, picked: dict, divide) -> int:
+    """Run `divide(shape, indices)` on each object; the faces that added."""
+    added = 0
+    for obj_id, indices in picked.items():
+        obj = ctx.scene.get(obj_id)
+        try:
+            shape = divide(obj.shape, indices)
+        except g.GeometryError as exc:
+            ctx.echo(f"{obj.name}: {exc}")
+            continue
+        added += len(g.faces_of(shape)) - len(g.faces_of(obj.shape))
+        ctx.scene.replace_shape(obj_id, shape)
+    return added
+
+
+@command("splitface")
+def cmd_splitface(ctx):
+    """Divide Ctrl+Shift-picked faces along curves, keeping the object whole.
+
+    `split` takes a solid apart. This leaves it one solid with more faces,
+    so part of a face can be pushed, pulled or moved on its own.
+    """
+    picked = _held_faces(ctx)
+    if not picked:
+        ctx.echo("Ctrl+Shift-click one or more faces first, "
+                 "then run SplitFace.")
+        yield from ()
+        return
+    cutters = yield SelectReq("Select cutting curves or surfaces",
+                              kinds=("curve", "surface", "solid"),
+                              allow_preselected=False,
+                              accept=lambda o: o.id not in picked)
+    shapes = [c.shape for c in cutters]
+    direction = tuple(ctx.cplane.normal)
+    added = _divide_held(ctx, picked, lambda shape, indices: g.split_faces(
+        shape, indices, shapes, direction=direction))
+    if added:
+        ctx.echo(f"Split faces, adding {added} new face(s).")
+
+
+@command("insetface", aliases=("inset",))
+def cmd_insetface(ctx):
+    """Split Ctrl+Shift-picked flat faces along their boundary offset inward.
+
+    What is left is a rim and an inner face, in one object, so the inner
+    face can be pushed or pulled into a recess or a panel.
+    """
+    picked = _held_faces(ctx)
+    if not picked:
+        ctx.echo("Ctrl+Shift-click one or more flat faces first, "
+                 "then run InsetFace.")
+        yield from ()
+        return
+
+    def _inset_to(distance):
+        loops = []
+        for obj_id, indices in picked.items():
+            faces = g.faces_of(ctx.scene.get(obj_id).shape)
+            for i in indices:
+                loops.extend(g.inset_loops(faces[i], distance))
+        return g.make_compound(loops)
+
+    distance = yield LengthReq("Inset distance", minimum=1e-9,
+                               preview_fn=_inset_to)
+    added = _divide_held(ctx, picked, lambda shape, indices: g.inset_faces(
+        shape, indices, distance))
+    if added:
+        ctx.echo(f"Inset faces, adding {added} new face(s).")
 
 
 def _picked_face_edges(ctx):

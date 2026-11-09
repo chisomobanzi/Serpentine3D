@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`splitface`.** Ctrl+Shift-click faces, run it and pick the curves or
+  surfaces to cut them with: each face is divided and the object stays in
+  one piece, so a solid is the same solid with more faces, and part of a
+  face can then be pushed, pulled or moved on its own. A curve is projected
+  along the face, so it need not be drawn on it.
+- **`insetface` (`inset`).** Ctrl+Shift-click flat faces, run it and give a
+  distance: each face's boundary is offset inward and the face is split
+  along it, leaving a rim and an inner face in one object, ready to push
+  into a recess or pull into a panel. Corners stay corners, a hole keeps a
+  rim of its own, and the prompt shows the loops as you type. A curved
+  face, or a distance too wide for the face, is refused and changes nothing.
+
 ## 0.12.4 (2026-11-08)
 
 ### Fixed

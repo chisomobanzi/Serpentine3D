@@ -3358,6 +3358,97 @@ def split_shape(target, cutters: list, direction=(0.0, 0.0, 1.0)) -> list:
     return pieces
 
 
+def _split_one_face(face, cutters: list, direction) -> list:
+    """The pieces cutters leave of a face; [] if they never reach it."""
+    for d in (face_point_normal(face)[1], direction):
+        try:
+            return split_shape(face, cutters, direction=d)
+        except GeometryError:
+            pass
+    return []
+
+
+def _resewn(shape, pieces: dict) -> TopoDS_Shape:
+    """`shape` with faces swapped for pieces, {face index: pieces}, sewn up.
+
+    A face with no pieces stays as it was. Sewing also breaks a neighbour's
+    edge wherever a cut reaches it, so a solid comes back closed.
+    """
+    kept = []
+    for i, face in enumerate(faces_of(shape)):
+        kept.extend(pieces.get(i) or [face])
+    joined = join_surfaces(kept)
+    if shape_kind(shape) == "solid" and shape_kind(joined) != "solid":
+        raise GeometryError("Splitting these faces would open the solid")
+    return joined
+
+
+def split_faces(shape, indices, cutters: list,
+                direction=(0.0, 0.0, 1.0)) -> TopoDS_Shape:
+    """Divide faces of a polysurface in place, leaving it one object.
+
+    `split_shape` takes a solid apart. This cuts each face on its own and
+    sews it back among the others, so a solid stays the same solid with
+    more faces.
+
+    A curve is swept along the face's own normal, so it lands on the face
+    however far off it was drawn. One running along that normal sweeps into
+    nothing, and then `direction` is the sweep: the normal of the plane the
+    command is drawing on, as for `split_shape`.
+    """
+    faces = faces_of(shape)
+    pieces = {i: _split_one_face(faces[i], cutters, direction)
+              for i in set(indices)}
+    if not any(pieces.values()):
+        raise GeometryError("Objects do not intersect — nothing to split")
+    return _resewn(shape, pieces)
+
+
+def inset_loops(face, distance: float) -> list:
+    """The boundary of a flat face offset inward: one wire per loop it makes.
+
+    A hole counts as boundary, so its loop grows away from it and the rim
+    left around it is as wide as the one inside the outer edge. A corner
+    stays a corner, turning in or out. An inset too wide for the face has no
+    loops left to give, and that is the error here.
+    """
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+
+    from .occ import BRepOffsetAPI_MakeOffset, GeomAbs_JoinType
+    # Checked first because it cannot be caught afterwards: on a curved face
+    # the offset dies with an access violation and takes the program with it.
+    if (BRepAdaptor_Surface(face).GetType()
+            != GeomAbs_SurfaceType.GeomAbs_Plane):
+        raise GeometryError("Only a flat face can be inset")
+    mk = BRepOffsetAPI_MakeOffset(occ.to_face(face),
+                                  GeomAbs_JoinType.GeomAbs_Intersection, False)
+    mk.Perform(-float(distance))
+    loops = []
+    if mk.IsDone() and not mk.Shape().IsNull():
+        exp = TopExp_Explorer(mk.Shape(), occ.WIRE)
+        while exp.More():
+            loops.append(exp.Current())
+            exp.Next()
+    if not loops:
+        raise GeometryError("The inset is too large for this face")
+    return loops
+
+
+def inset_faces(shape, indices, distance: float) -> TopoDS_Shape:
+    """Split flat faces of a polysurface along their inset boundaries.
+
+    `split_faces` with cutters made from each face itself, so the object
+    stays one object. A face that cannot be inset stops the whole edit:
+    half a set of faces inset is not what was asked for.
+    """
+    faces = faces_of(shape)
+    pieces = {i: split_shape(faces[i], inset_loops(faces[i], distance),
+                             direction=face_point_normal(faces[i])[1])
+              for i in set(indices)}
+    return _resewn(shape, pieces)
+
+
 # --- control points ---------------------------------------------------------
 
 def _adaptor_with_a_3d_curve(edge):
