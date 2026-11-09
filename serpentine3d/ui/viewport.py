@@ -1282,6 +1282,11 @@ class Viewport(QOpenGLWidget):
                                                 default=1.0))
                                if config else 1.0)
         self.ortho = bool(config.get("ortho")) if config else False
+        self.auto_cplane = (bool(config.get("auto_cplane", default=True))
+                            if config else True)
+        self.follow_faces = False           # waiting for a first point on one
+        self.face_plane = None              # (CPlane, outline) drawn on now
+        self._face_seen = None              # (mesh, face, what it came to)
         self.comb_enabled: set[str] = set() # curvature combs on curves
         self.draft_angle = 3.0              # draft analysis threshold (deg)
         self._cv_cache: dict = {}
@@ -2102,8 +2107,9 @@ class Viewport(QOpenGLWidget):
         # construction plane out at survey coordinates swims like the
         # meshes used to.
         mvp = np.asarray(mvp, np.float64)
-        if not self.cplane.is_world_xy():
-            mvp = mvp @ self.cplane.basis_matrix()
+        plane = self._working_cplane()
+        if not plane.is_world_xy():
+            mvp = mvp @ plane.basis_matrix()
         mvp = mvp.astype(np.float32)
         # Drawn first, on a cleared buffer, and writing no depth, so testing
         # depth could only ever turn it away, as it did a grid clamped to
@@ -3161,9 +3167,50 @@ class Viewport(QOpenGLWidget):
         """
         detail = self._drawing_through()
         if detail is None:
-            return self.cplane
+            return self._working_cplane()
         from .layout_view import detail_plane
         return detail_plane(detail)
+
+    def _working_cplane(self):
+        """The face being drawn on, or the construction plane you set.
+
+        Kept apart from `cplane`, which is yours: a face lends its plane to
+        one command and leaves nothing behind to put back.
+        """
+        return self.cplane if self.face_plane is None else self.face_plane[0]
+
+    def set_face_plane(self, face_plane):
+        """Hold the plane a command has settled on, or None to let go."""
+        self._face_seen = None
+        if face_plane is not self.face_plane:
+            self.face_plane = face_plane
+            self.update()
+
+    def _follow_face(self, px: float, py: float):
+        """Put the plane on the flat face under the pixel, or take it off."""
+        w, h = self.width(), self.height()
+        origin, direction = self.camera.ray_through(px, py, w, h)
+        r = PICK_RADIUS_PX
+        near_cursor = self._pick_candidates(self.scene.visible_objects(),
+                                            px - r, py - r, px + r, py + r,
+                                            w, h)
+        hit = self._nearest_face(origin, direction, near_cursor, px, py, w, h)
+        found = None
+        if hit is not None:
+            _t, obj, index = hit
+            mesh, seen = obj.mesh, self._face_seen
+            if (seen is None or seen[0] is not mesh or seen[1] != index
+                    or (seen[2] is not None
+                        and np.dot(seen[2][0].normal, direction) > 0)):
+                from ..core.cplane import on_face
+                tris = mesh.triangles[mesh.face_of_triangle == index]
+                seen = (mesh, index, on_face(mesh.vertices, tris, -direction,
+                                             self.cplane))
+                self._face_seen = seen
+            found = seen[2]
+        if found is not self.face_plane:
+            self.face_plane = found
+            self.update()
 
     def _detail_eye(self):
         """The detail everything is being seen through, as a camera, or None.
@@ -3239,7 +3286,12 @@ class Viewport(QOpenGLWidget):
         # it did nothing at all.
         held = (self._locked_axis()
                 if self.point_mode and self.space == "model" else None)
-        if len(pts) == 0 and not markers and snap is None and held is None:
+        # The grid is drawn behind everything, so on a solid's face this is
+        # all there is to say which face the plane has gone to.
+        face = (self.face_plane[1]
+                if self.point_mode and self.face_plane is not None else None)
+        if (len(pts) == 0 and not markers and snap is None and held is None
+                and face is None):
             return
         segs = [pts] if len(pts) else []
         # screen-scaled cross markers at picked points
@@ -3260,6 +3312,11 @@ class Viewport(QOpenGLWidget):
                 self._frame_anchor))
             self._draw_lines(self._preview, mvp,
                              (*theme.SELECTION_COLOR, 0.35), 1.0)
+        if face is not None:
+            self._preview.update(rebased(face.reshape(-1, 3),
+                                         self._frame_anchor))
+            self._draw_lines(self._preview, mvp,
+                             (*theme.SELECTION_COLOR, 0.6), 2.0)
         if segs:
             allpts = np.concatenate(segs)
             self._preview.update(rebased(allpts, self._frame_anchor))
@@ -3954,7 +4011,8 @@ class Viewport(QOpenGLWidget):
         if base is None:
             self.dir_lock = held
             return False
-        self.dir_lock = (tuple(base), tuple(normalize(self.cplane.normal)))
+        self.dir_lock = (tuple(base),
+                         tuple(normalize(self._working_cplane().normal)))
         self._lock_owner = self.snap_base
         self.update()
         return True
@@ -4348,6 +4406,8 @@ class Viewport(QOpenGLWidget):
                     x = bx
             return (float(x), float(y), 0.0)
         locked = self._locked_axis() or self.point_axis
+        if self.follow_faces and locked is None:
+            self._follow_face(px, py)
         if locked is not None:
             base, axis = (np.asarray(v, float) for v in locked)
             unit = normalize(axis)
@@ -4384,20 +4444,19 @@ class Viewport(QOpenGLWidget):
         self._active_snap = None
         origin, direction = self.camera.ray_through(px, py, self.width(),
                                                     self.height())
-        hit = ray_plane(origin, direction, self.cplane.origin,
-                        self.cplane.normal)
+        plane = self._working_cplane()
+        hit = ray_plane(origin, direction, plane.origin, plane.normal)
         if hit is None:
             return None
         if self.grid_snap:
-            hit = np.asarray(
-                self.cplane.snap_to_grid(hit, self.grid_snap_step))
+            hit = np.asarray(plane.snap_to_grid(hit, self.grid_snap_step))
         # ortho constrains to the dominant CPlane axis from the base point;
         # Shift is the momentary override (toggles the persistent setting)
         shift = bool(QApplication.queryKeyboardModifiers()
                      & Qt.KeyboardModifier.ShiftModifier)
         if self.snap_base is not None and (self.ortho != shift):
-            bu, bv, bw = self.cplane.from_world(self.snap_base)
-            u, v, _w = self.cplane.from_world(hit)
+            bu, bv, bw = plane.from_world(self.snap_base)
+            u, v, _w = plane.from_world(hit)
             # the constrained point lies on an axis THROUGH the base, so
             # every coordinate but the driven one is the base's — `bw`,
             # not the hit's, or a line started on a snapped corner off
@@ -4406,12 +4465,12 @@ class Viewport(QOpenGLWidget):
                 # A frame's corner on an axis through its first one is a
                 # frame with no width, a line. Square for a frame is equal
                 # sides, as Shift gives in any drawing program.
-                hit = np.asarray(self.cplane.to_world(
+                hit = np.asarray(plane.to_world(
                     *square_corner(bu, bv, u, v), bw))
             elif abs(u - bu) >= abs(v - bv):
-                hit = np.asarray(self.cplane.to_world(u, bv, bw))
+                hit = np.asarray(plane.to_world(u, bv, bw))
             else:
-                hit = np.asarray(self.cplane.to_world(bu, v, bw))
+                hit = np.asarray(plane.to_world(bu, v, bw))
         return tuple(round(float(c), 9) for c in hit)
 
     def _reject_boxes(self, boxes: list, x0, y0, x1, y1, w, h) -> np.ndarray:
@@ -4770,6 +4829,38 @@ class Viewport(QOpenGLWidget):
             return None
         return float(scr[near, 2].min())
 
+    def _nearest_face(self, origin, direction, candidates, px, py, w, h):
+        """(distance along the ray, object, face index) first struck, or None.
+
+        Faces by nearest ray-triangle hit. A wireframe view draws none, so
+        there is nothing there to take the click, and nothing for an edge to
+        be hidden behind either.
+        """
+        if self._pick_mode() == "wireframe":
+            return None
+        r = PICK_RADIUS_PX
+        best, best_t = None, np.inf
+        for obj in candidates:              # same rect, already narrowed
+            mesh = obj.mesh
+            if not mesh.has_faces or not len(mesh.face_of_triangle):
+                continue
+            tris, sub = self._near_triangles(mesh, px - r, py - r,
+                                             px + r, py + r, w, h)
+            if not len(tris):
+                continue
+            t = ray_triangle_hits(
+                origin, direction,
+                mesh.vertices[tris[:, 0]].astype(float),
+                mesh.vertices[tris[:, 1]].astype(float),
+                mesh.vertices[tris[:, 2]].astype(float))
+            i = int(np.argmin(t))
+            if np.isfinite(t[i]) and t[i] < best_t:
+                best_t = t[i]
+                if sub is not None:
+                    i = int(sub[i])          # back to the mesh's own numbering
+                best = (best_t, obj, int(mesh.face_of_triangle[i]))
+        return best
+
     def pick_subobject(self, px: float, py: float):
         """(obj_id, "edge"|"face", index) under the pixel, or None."""
         w, h = self.width(), self.height()
@@ -4823,32 +4914,12 @@ class Viewport(QOpenGLWidget):
                     best_edge_depth = float(depth[seg])
                     best_edge = (obj.id, "edge",
                                  int(mesh.edge_of_segment[i]))
-        # Faces by nearest ray-triangle hit. A wireframe view draws none, so
-        # there is nothing there to take the click, and nothing for an edge
-        # to be hidden behind either.
-        best_face = None
-        best_t = np.inf
-        if self._pick_mode() != "wireframe":
-            for obj in near_cursor:         # same rect, already narrowed
-                mesh = obj.mesh
-                if not mesh.has_faces or not len(mesh.face_of_triangle):
-                    continue
-                tris, sub = self._near_triangles(mesh, px - r, py - r,
-                                                 px + r, py + r, w, h)
-                if not len(tris):
-                    continue
-                t = ray_triangle_hits(
-                    origin, direction,
-                    mesh.vertices[tris[:, 0]].astype(float),
-                    mesh.vertices[tris[:, 1]].astype(float),
-                    mesh.vertices[tris[:, 2]].astype(float))
-                i = int(np.argmin(t))
-                if np.isfinite(t[i]) and t[i] < best_t:
-                    best_t = t[i]
-                    if sub is not None:
-                        i = int(sub[i])      # back to the mesh's own numbering
-                    best_face = (obj.id, "face",
-                                 int(mesh.face_of_triangle[i]))
+        hit_face = self._nearest_face(origin, direction, near_cursor,
+                                      px, py, w, h)
+        best_face, best_t = None, np.inf
+        if hit_face is not None:
+            best_t, obj, index = hit_face
+            best_face = (obj.id, "face", index)
         if best_edge is None:
             return best_face
         if best_face is None:

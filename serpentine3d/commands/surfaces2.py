@@ -66,7 +66,7 @@ def cmd_pull(ctx):
     ctx.echo(f"Pulled {n} curve(s) onto {targets[0].name}.")
 
 
-@command("helix")
+@command("helix", on_faces=True)
 def cmd_helix(ctx):
     import math
     DEFAULT_TURNS = 5.0

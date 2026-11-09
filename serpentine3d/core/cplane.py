@@ -61,6 +61,61 @@ class CPlane:
                 np.allclose(self.xdir, (1, 0, 0)))
 
 
+def face_outline(vertices, triangles) -> np.ndarray:
+    """The (K, 2, 3) boundary of a patch: the edges only one triangle has."""
+    ends = np.sort(triangles[:, [[0, 1], [1, 2], [2, 0]]].reshape(-1, 2),
+                   axis=1)
+    edges, counts = np.unique(ends, axis=0, return_counts=True)
+    return vertices[edges[counts == 1]]
+
+
+def on_face(vertices, triangles, toward, like: CPlane):
+    """(plane, outline) for a flat patch of triangles; None if it is not flat.
+
+    The normal comes out on the `toward` side, so a height drawn up from the
+    face leaves it on the side you are looking at. The axes are taken from
+    `like` so the plane reads the way the one you were on did: up stays up on
+    a wall, and a roof keeps its X. Then they are squared to the face's
+    longest straight edge, because a rectangle drawn on a turned box should
+    lie along that box and not along the world.
+    """
+    a, b, c = (vertices[triangles[:, i]] for i in range(3))
+    areas = np.cross(b - a, c - a)
+    sizes = np.linalg.norm(areas, axis=1)
+    keep = sizes > 1e-12
+    total = areas[keep].sum(axis=0)
+    length = np.linalg.norm(total)
+    if length < 1e-12:
+        return None
+    normal = total / length
+    if (areas[keep] / sizes[keep, None] @ normal).min() < 1.0 - 1e-4:
+        return None
+    centre = (sizes[keep, None] * (a + b + c)[keep]).sum(axis=0)
+    origin = centre / (3.0 * sizes[keep].sum())
+    if np.dot(normal, toward) < 0:
+        normal = -normal
+
+    if abs(np.dot(normal, like.normal)) > 0.9:
+        want = like.xdir - np.dot(like.xdir, normal) * normal
+    else:
+        up = like.normal - np.dot(like.normal, normal) * normal
+        want = np.cross(up, normal)
+    want = want / np.linalg.norm(want)
+
+    outline = face_outline(vertices, triangles)
+    spans = outline[:, 1] - outline[:, 0]
+    lengths = np.linalg.norm(spans, axis=1)
+    longest = int(np.argmax(lengths))
+    # A curve's outline is all short chords, and the longest of them is a
+    # direction nobody chose: only a side of the shape is worth squaring to.
+    if lengths[longest] > lengths.sum() / 8.0:
+        along = spans[longest] / lengths[longest]
+        across = np.cross(normal, along)
+        want = max((along, -along, across, -across),
+                   key=lambda axis: float(np.dot(axis, want)))
+    return CPlane(origin, normal, want, name="Face"), outline
+
+
 PRESETS = {
     "world": lambda: CPlane(),
     "top": lambda: CPlane(),

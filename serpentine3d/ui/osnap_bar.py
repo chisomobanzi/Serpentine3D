@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
 
 from ..core.snaps import SNAP_TYPES
@@ -25,6 +25,8 @@ _TIPS = {
 
 
 class OsnapBar(QWidget):
+    autoCplaneToggled = Signal()
+
     def __init__(self, viewport, config, parent=None):
         super().__init__(parent)
         self.viewport = viewport
@@ -61,6 +63,12 @@ class OsnapBar(QWidget):
         self._ortho.setChecked(viewport.ortho)
         self._ortho.toggled.connect(self._ortho_toggled)
         layout.addWidget(self._ortho)
+        self._auto_cplane = self._button(
+            "AutoCPlane", "Draw on the flat face under the first point: the "
+            "plane follows it for that command, then goes back")
+        self._auto_cplane.setChecked(viewport.auto_cplane)
+        self._auto_cplane.toggled.connect(self._auto_cplane_toggled)
+        layout.addWidget(self._auto_cplane)
         layout.addStretch(1)
         # A type left set while snaps are off keeps its setting for when
         # they come back on, but must not look on: lit up as usual, the bar
@@ -112,6 +120,12 @@ class OsnapBar(QWidget):
         if self.config:
             self.config.set("ortho", on)
 
+    def _auto_cplane_toggled(self, on: bool):
+        self.viewport.auto_cplane = on
+        if self.config:
+            self.config.set("auto_cplane", on)
+        self.autoCplaneToggled.emit()
+
     def refresh(self):
         """Sync button states from viewport (after commands toggle them)."""
         self._master.setChecked(self.viewport.snaps.enabled)
@@ -120,3 +134,4 @@ class OsnapBar(QWidget):
             btn.setChecked(self.viewport.snaps.types.get(t, False))
         self._grid.setChecked(self.viewport.grid_snap)
         self._ortho.setChecked(self.viewport.ortho)
+        self._auto_cplane.setChecked(self.viewport.auto_cplane)

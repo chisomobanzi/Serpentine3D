@@ -149,6 +149,7 @@ class MainWindow(QMainWindow):
         from .ui.command_workspace import CommandWorkspace
         self.command_line = CommandLine()
         self.osnap_bar = OsnapBar(self.viewport, self.cfg)
+        self.osnap_bar.autoCplaneToggled.connect(self._sync_face_plane)
         self.command_workspace = CommandWorkspace(
             self, self.command_line, self._build_space_tab_row(), self.osnap_bar)
         self._cmd_dock = QDockWidget("Command", self)
@@ -1137,6 +1138,9 @@ class MainWindow(QMainWindow):
                      lambda: self.run_command("ortho"), binding="ortho")
         self._action(m_draft, "Toggle Grid Snap", None,
                      lambda: self.run_command("gridsnap"), binding="gridsnap")
+        self._action(m_draft, "Toggle AutoCPlane", None,
+                     lambda: self.run_command("autocplane"),
+                     binding="autocplane")
 
         m_tools = mb.addMenu("&Tools")
         self._action(m_tools, "Command Palette...", "Ctrl+Shift+P",
@@ -1191,10 +1195,11 @@ class MainWindow(QMainWindow):
         # and replace its repeat target with the toggle.
         control = resolve(name)
         if (self.processor.busy and control is not None
-                and control.name in ("ortho", "gridsnap")):
+                and control.name in ("ortho", "gridsnap", "autocplane")):
             for _ in control.fn(self.ctx):
                 pass
             self.osnap_bar.refresh()
+            self._sync_face_plane()
             self._refresh_rubber(None)
             self._repaint_panes()
             self.command_line.focus()
@@ -1353,6 +1358,7 @@ class MainWindow(QMainWindow):
         # Only guess at command names at the "Command" prompt; mid-command the
         # words belong to the command, not to the registry.
         self.command_line.awaiting_command = not busy
+        self._sync_face_plane()
         if isinstance(req, PointReq):
             base = req.rubber_from
             if base is None and req.rubber_pts:
@@ -1410,6 +1416,29 @@ class MainWindow(QMainWindow):
                 continue
             return face
         return None
+
+    def _sync_face_plane(self):
+        """Who is on a face's plane, for the state the command has reached.
+
+        A drawing command's panes follow the cursor up to its first point.
+        That point settles it: every pane takes the plane the pick landed on,
+        so the next point can be clicked in a different view and still land
+        on the face, and they all keep it to the end of the command. Going
+        back is then only letting go, so a cancel or an error is the same as
+        finishing.
+        """
+        req, active = self.processor.request, self.processor.active
+        follow, held = False, None
+        if self.processor.busy:
+            if self.processor.picked_points:
+                held = self.active_viewport.face_plane
+            else:
+                follow = (self.viewport.auto_cplane and active is not None
+                          and active.on_faces and isinstance(req, PointReq))
+        for vp in self.all_viewports():
+            vp.follow_faces = follow
+            if not follow:
+                vp.set_face_plane(held)
 
     def model_text_frame(self, anchor):
         """Placement frame chosen by the model-text contextual controls."""

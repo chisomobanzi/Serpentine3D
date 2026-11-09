@@ -62,6 +62,7 @@ Commands that need a file open a filtered chooser by default. Append
 | Command | Does |
 |---|---|
 | `1view` (`oneview`, `singleview`) | 1view |
+| `autocplane` | Toggle drawing on faces: a drawing command's first point takes the plane of the flat face under it, for that command only. |
 | `4view` (`fourview`, `quadview`) | Split the model area into Top / Front / Right / Perspective. |
 | `ai` (`assistant`) | Open the AI assistant panel — model by describing what you want. |
 | `angle` | Angle at a vertex point between two directions. |
