@@ -10,6 +10,13 @@
   triangle, is refused instead of crashing. An offset that would scatter
   a shape into pieces is refused, and a holed solid stays a solid instead
   of coming back as a shell.
+- **Ctrl+Z while drawing a polyline takes back the last point.** It used
+  to end the polyline and undo the object drawn before it, so a slip on
+  the fifth point cost all five points and the object behind them. Each
+  press takes back one more point; with none left it says so and the
+  polyline keeps going. Typing `u` at the prompt does the same, and a
+  Rhino-style `!_Undo` shortcut works like plain Ctrl+Z. Contributed by
+  felixhudson (#158).
 
 ## 0.12.4 (2026-11-08)
 

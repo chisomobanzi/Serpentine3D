@@ -54,6 +54,14 @@ class PointReq(Req):
                                           # base+10*dir / number_from(10.0)
     allow_number: bool = False            # bare number returns the float
     option_changed: object = None         # update constraints before notifying
+    # This prompt is one of a run of points, which Ctrl+Z walks back one at a
+    # time rather than ending the command. The command offers the UNDO_POINT
+    # keyword whenever it has a point to give up, and takes it off its list.
+    steps_back: bool = False
+
+
+# The keyword a steps_back prompt answers with to give up its last point.
+UNDO_POINT = "Undo"
 
 
 def frame_sides(corner, cplane):
@@ -825,6 +833,9 @@ class CommandProcessor:
         # every point the running command has taken, so the UI can offer
         # them as snaps: what you are drawing is not in the scene yet
         self.picked_points: list = []
+        # where a relative point measured from when the command started, for
+        # when the command gives up the first point it took
+        self._last_point_at_start = None
         # the session journal, when one is attached (core/journal.py); the
         # priming flag keeps the generator's start-up advance — which is
         # nobody's answer to anything — out of the recording
@@ -846,6 +857,13 @@ class CommandProcessor:
     # -- lifecycle --
     def run(self, name: str) -> bool:
         if self.busy:
+            # Undo at a run of points takes back the last one. Anywhere else
+            # it ends the command, as every other command does.
+            # A Rhino preset binds Ctrl+Z to !_Undo; read it as below.
+            control = resolve(name.strip().removeprefix("!").removeprefix("_"))
+            if (control is not None and control.name == "undo"
+                    and self.undo_point()):
+                return True
             self.cancel()
         # macro form: 'osnap mid toggle' — first token is the command,
         # the rest answer its prompts; aliases may expand to macros too
@@ -868,6 +886,7 @@ class CommandProcessor:
             return False
         self.active = cd
         self.picked_points = []
+        self._last_point_at_start = self.ctx.last_point
         if cd.repeatable:
             # A command that is never repeated does not disturb the repeat
             # target either: after delete, Enter still repeats whatever you
@@ -1130,7 +1149,31 @@ class CommandProcessor:
                         tuple(float(c) for c in value)[:3])
                 except (TypeError, ValueError):
                     pass
+            elif value == UNDO_POINT and self.request.steps_back:
+                # or an @ typed next would measure from the point just
+                # taken back, and it would still be offered as a snap
+                if self.picked_points:
+                    self.picked_points.pop()
+                self.ctx.last_point = (self.picked_points[-1]
+                                       if self.picked_points
+                                       else self._last_point_at_start)
         self._advance(value)
+
+    def undo_point(self) -> bool:
+        """Take back the last point of a run, for Ctrl+Z.
+
+        True if the prompt is one that steps back, even with nothing left
+        to take back: the key is pressed repeatedly, and one press too many
+        must not fall through to undoing the drawing behind the command.
+        """
+        req = self.request
+        if not isinstance(req, PointReq) or not req.steps_back:
+            return False
+        if UNDO_POINT in req.extra_options:
+            self.provide(UNDO_POINT)
+        else:
+            self.ctx.echo("No point to undo.")
+        return True
 
     def set_option(self, name: str, value: str | None = None):
         """Set (or cycle) a persistent option of the running command."""
