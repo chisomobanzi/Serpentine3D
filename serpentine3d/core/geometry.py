@@ -1870,6 +1870,9 @@ def offset_faces(shape, offsets: dict) -> TopoDS_Shape:
     from OCP.BRepCheck import BRepCheck_Analyzer
     from OCP.BRepOffset import BRepOffset_MakeOffset, BRepOffset_Mode
     from OCP.GeomAbs import GeomAbs_JoinType
+    # A boolean hands its solid back in a compound, which the kernel takes
+    # for loose faces and offsets into a shell (#160).
+    shape = unwrap_compound(shape)
     faces = faces_of(shape)
     if not offsets:
         raise GeometryError("No faces to offset")
@@ -1878,13 +1881,21 @@ def offset_faces(shape, offsets: dict) -> TopoDS_Shape:
             raise GeometryError("Face index out of range")
         if abs(float(dist)) < tight():
             raise GeometryError("Distance is zero")
+    # The kernel faults on these rather than failing, and a fault takes
+    # the whole app with it (#160), so they never reach it.
+    if any(_closes_to_a_point(f) for f in faces):
+        raise GeometryError("A face here closes to a point, where it has no "
+                            "normal, so it cannot be offset")
     mko = BRepOffset_MakeOffset()
     mko.Initialize(shape, 0.0, tol(), BRepOffset_Mode.BRepOffset_Skin,
                    True, False, GeomAbs_JoinType.GeomAbs_Intersection,
                    False, False)
     for idx, dist in offsets.items():
         mko.SetOffsetOnFace(faces[idx], float(dist))
-    mko.MakeOffsetShape()
+    try:
+        mko.MakeOffsetShape()
+    except Exception as exc:                 # noqa: BLE001
+        raise GeometryError("Face offset failed") from exc
     out = mko.Shape()
     if not mko.IsDone() or out is None or out.IsNull():
         raise GeometryError("Face offset failed — a distance is probably too "
@@ -1892,7 +1903,56 @@ def offset_faces(shape, offsets: dict) -> TopoDS_Shape:
     out = unwrap_compound(out)
     if abs(volume(out)) < tight() or not BRepCheck_Analyzer(out).IsValid():
         raise GeometryError("Face offset produced an invalid solid")
+    # One piece in, pieces out: the faces beside ran past each other and
+    # the kernel kept what it could, scattered far beyond the shape (#160).
+    if out.ShapeType() == occ.COMPOUND and shape.ShapeType() != occ.COMPOUND:
+        raise GeometryError("Face offset broke the shape apart, so the "
+                            "distance is probably too large")
     return out
+
+
+def _closes_to_a_point(face) -> bool:
+    """A freeform face with one side shrunk to a point, the way EdgeSrf
+    makes a triangle. It has no normal at that point, and the offset
+    kernel faults there instead of failing."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    if BRepAdaptor_Surface(face).GetType() not in (
+            GeomAbs_SurfaceType.GeomAbs_BSplineSurface,
+            GeomAbs_SurfaceType.GeomAbs_BezierSurface):
+        return False
+    return any(BRep_Tool.Degenerated_s(e) for e in edges_of(face))
+
+
+def _walls_stand_square(shape, face, normal) -> bool:
+    """Whether every face beside a planar `face` stands square to it all
+    along their shared edge, so that moving the face along `normal` only
+    lengthens or shortens them."""
+    from OCP.BRepAdaptor import BRepAdaptor_Curve2d, BRepAdaptor_Surface
+    from OCP.BRepLProp import BRepLProp_SLProps
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+    amap = TopTools_IndexedDataMapOfShapeListOfShape()
+    TopExp.MapShapesAndAncestors_s(shape, occ.EDGE, occ.FACE, amap)
+    for edge in edges_of(face):
+        beside = [f for f in amap.FindFromKey(edge) if not f.IsSame(face)]
+        if len(beside) != 1:
+            return False
+        other = occ.to_face(beside[0])
+        on_other = BRepAdaptor_Curve2d(edge, other)
+        surface = BRepAdaptor_Surface(other)
+        t0, t1 = on_other.FirstParameter(), on_other.LastParameter()
+        for s in (0.1, 0.5, 0.9):
+            uv = on_other.Value(t0 + s * (t1 - t0))
+            props = BRepLProp_SLProps(surface, uv.X(), uv.Y(), 1, tight())
+            if not props.IsNormalDefined():
+                return False
+            n = props.Normal()
+            if abs(n.X() * normal[0] + n.Y() * normal[1]
+                   + n.Z() * normal[2]) > 1e-6:
+                return False
+    return True
 
 
 def offset_face(shape, face_index: int, distance: float) -> TopoDS_Shape:
@@ -1919,6 +1979,15 @@ def offset_face(shape, face_index: int, distance: float) -> TopoDS_Shape:
             shape, face_index,
             lambda p: tuple(p[k] + delta[k] for k in range(3)))
     except GeometryError:
+        # An outline with a curve in it, a hole say, among walls that all
+        # stand square: they need only lengthen or shorten, which is a push
+        # or a pull. The kernel's offset can fault on these (#160).
+        from OCP.GeomAbs import GeomAbs_CurveType
+        if (any(occ.edge_adaptor(occ.to_edge(e)).GetType()
+                != GeomAbs_CurveType.GeomAbs_Line
+                for e in edges_of(faces[face_index]))
+                and _walls_stand_square(shape, faces[face_index], normal)):
+            return push_pull(shape, face_index, d)
         return offset_faces(shape, {face_index: d})
     held = _face_on_plane(adapted, normal, point, near=point)
     adapted_faces = faces_of(adapted)
