@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from ..core import clipping as _clipping
 from ..core import linetype as _lt
 from ..core import spatial
+from ..core.tessellate import box_segments as _bbox_segments
 from ..utils import config as _cfg
 from ..utils import units as _units
 # Lives in utils so the launcher can set it without importing this
@@ -640,8 +641,29 @@ def _ghost_mesh(shape):
 
 def _forget_ghost_mesh():
     """Let go of the last ghost: it should not outlive the command."""
-    global _ghost_memo
+    global _ghost_memo, _corners_memo
     _ghost_memo = (None, None)
+    _corners_memo = (None, None)
+
+
+# The last ghost's triangles as corners and its lines as point pairs, by
+# the ghost's serial number. Every pane paints the one ghost whenever
+# anything moves, and an array's ghost is hundreds of thousands of
+# triangles; it only changes when the mouse does.
+_corners_memo = (None, None)
+
+
+def _ghost_corners(dm):
+    """A ghost's triangle corners and line ends, world coordinates, either
+    one None if it has none. The panes only read them."""
+    global _corners_memo
+    if _corners_memo[0] != dm.uid:
+        tris = (dm.vertices[dm.triangles.ravel()]
+                if dm.has_faces and len(dm.triangles) else None)
+        segs = (dm.edge_segments.reshape(-1, 3)
+                if len(dm.edge_segments) else None)
+        _corners_memo = (dm.uid, (tris, segs))
+    return _corners_memo[1]
 
 
 def rebased(pts, anchor):
@@ -3740,10 +3762,7 @@ class Viewport(QOpenGLWidget):
         dm = self._ghost
         if dm is None:
             return None, None
-        tris = (dm.vertices[dm.triangles.ravel()]
-                if dm.has_faces and len(dm.triangles) else None)
-        segs = (dm.edge_segments.reshape(-1, 3)
-                if len(dm.edge_segments) else None)
+        tris, segs = _ghost_corners(dm)
         if self.space != "model" and self._drawing_through() is not None:
             tris = None if tris is None else self._on_paper(tris)
             segs = None if segs is None else self._on_paper(segs)
@@ -6059,22 +6078,6 @@ class Viewport(QOpenGLWidget):
             self.escapePressed.emit()
         else:
             super().keyPressEvent(ev)
-
-
-def _bbox_segments(mn, mx) -> np.ndarray:
-    """12 AABB edges as GL_LINES vertices (24, 3)."""
-    xs = (mn[0], mx[0])
-    ys = (mn[1], mx[1])
-    zs = (mn[2], mx[2])
-    c = [(x, y, z) for x in xs for y in ys for z in zs]
-    pairs = [(0, 1), (2, 3), (4, 5), (6, 7),      # z edges
-             (0, 2), (1, 3), (4, 6), (5, 7),      # y edges
-             (0, 4), (1, 5), (2, 6), (3, 7)]      # x edges
-    out = []
-    for a, b in pairs:
-        out.append(c[a])
-        out.append(c[b])
-    return np.asarray(out, np.float32)
 
 
 def _axis_guide(base, direction, reach: float) -> np.ndarray:

@@ -9,7 +9,10 @@
   the four-pane layout, and takes about five milliseconds now. The copies
   were built and tessellated from nothing to draw the ghost, once for each
   pane; the ghost is now the object's own mesh repeated at each spacing. Any
-  other preview is also tessellated once rather than once a pane.
+  other preview is also tessellated once rather than once a pane. Copies
+  past half a million triangles, such as a scan arrayed a few times over,
+  are ghosted as the box each one fills, and the panes no longer rebuild
+  the ghost on every repaint.
 
 ## 0.12.4 (2026-11-08)
 

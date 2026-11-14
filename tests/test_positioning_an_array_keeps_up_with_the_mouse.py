@@ -259,3 +259,93 @@ def test_the_original_mesh_is_left_as_it_was():
     tess.copies_of([dm], [(7.0, 0.0, 0.0)])
     assert np.array_equal(dm.local, before[0])
     assert np.array_equal(dm.triangles, before[1])
+
+# -- a ghost too heavy to draw --
+
+def _grid(n):
+    """A wavy sheet of 2(n-1)^2 triangles, an imported mesh standing in
+    for a scan."""
+    xs, ys = np.meshgrid(np.arange(n, dtype=float), np.arange(n, dtype=float))
+    verts = np.column_stack([xs.ravel(), ys.ravel(), np.sin(xs.ravel() / 3)])
+    a = np.arange(n - 1)
+    i, j = np.meshgrid(a, a)
+    k = (j * n + i).ravel()
+    tris = np.concatenate([np.column_stack([k, k + 1, k + n]),
+                           np.column_stack([k + 1, k + n + 1, k + n])])
+    return MeshShape(verts, tris.astype(np.uint32))
+
+
+def test_copies_past_the_budget_are_their_boxes():
+    """A scan of millions of triangles 24 times over is gigabytes, built on
+    every move of the mouse. What does not fit is drawn as the box each copy
+    fills, the heaviest first, so a light part beside it keeps its faces."""
+    light = tess.tessellate(g.make_box((0, 0, 0), 1, 1, 1))
+    heavy = tess.tessellate(_grid(20))
+    offsets = [(50.0, 0.0, 0.0), (100.0, 0.0, 0.0)]
+    weight = len(light.triangles) + len(light.local_edges)
+    made = tess.copies_of([heavy, light], offsets, budget=weight * 2)
+    assert len(made.triangles) == len(light.triangles) * 2
+    boxes = made.edge_segments[len(light.local_edges) * 2:]
+    assert len(boxes) == 12 * 2
+    lo, hi = heavy.bounds()
+    assert boxes.reshape(-1, 3).min(axis=0) == pytest.approx(lo + (50, 0, 0))
+    assert boxes.reshape(-1, 3).max(axis=0) == pytest.approx(hi + (100, 0, 0))
+
+
+def test_within_the_budget_nothing_is_boxed():
+    heavy = tess.tessellate(_grid(20))
+    made = tess.copies_of([heavy], [(50.0, 0.0, 0.0)])
+    assert len(made.triangles) == len(heavy.triangles)
+    assert len(made.edge_segments) == len(heavy.local_edges)
+
+
+def test_an_array_too_heavy_to_ghost_shows_where_each_copy_lands(
+        window, monkeypatch):
+    o = window.scene.add(_grid(30))
+    monkeypatch.setattr(tess, "GHOST_BUDGET", 1000)
+    req = _array(window, [o], 3, 1)
+    _hover(window, _along(req, 50.0))
+    tris, segs = window.viewport._ghost_geometry()
+    assert tris is None
+    assert len(segs) == 12 * 2 * 2
+    lo, hi = o.mesh.bounds()
+    assert segs.min(axis=0) == pytest.approx(lo + (50, 0, 0))
+    assert segs.max(axis=0) == pytest.approx(hi + (100, 0, 0))
+    window.processor.provide(_along(req, 50.0))
+    assert not window.processor.busy
+    copies = [c for c in window.scene.all() if c.id != o.id]
+    assert len(copies) == 2            # the array itself is not cut down
+
+
+def test_a_ghost_is_turned_into_corners_once_however_often_it_is_painted(
+        window):
+    """Four panes, each painting whenever anything moves: the ghost only
+    changes when the mouse does."""
+    o = _box_at(window)
+    req = _array(window, [o], 5, 5)
+    _hover(window, _along(req, 20.0))
+    panes = window.all_viewports()
+    tris, segs = panes[0]._ghost_geometry()
+    for p in panes:
+        for _ in range(3):
+            again = p._ghost_geometry()
+            assert again[0] is tris and again[1] is segs
+
+
+def test_the_next_mouse_position_gets_corners_of_its_own(window):
+    o = _box_at(window)
+    req = _array(window, [o], 2, 1)
+    _hover(window, _along(req, 20.0))
+    before, _segs = window.viewport._ghost_geometry()
+    _hover(window, _along(req, 30.0))
+    after, _segs = window.viewport._ghost_geometry()
+    assert after[:, 0].min() == pytest.approx(before[:, 0].min() + 10.0)
+
+
+def test_corners_are_let_go_with_the_ghost(window):
+    o = _box_at(window)
+    req = _array(window, [o], 2, 1)
+    _hover(window, _along(req, 20.0))
+    window.viewport._ghost_geometry()
+    window.viewport.set_ghost(None)
+    assert vp_mod._corners_memo == (None, None)
