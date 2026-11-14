@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Moving a held face with the Gumball no longer closes Serpentine3D**
+  (#160). A floor whose hole runs up through a curved roof now moves as a
+  push or pull. A face that closes to a point, such as an EdgeSrf
+  triangle, is refused instead of crashing. An offset that would scatter
+  a shape into pieces is refused, and a holed solid stays a solid instead
+  of coming back as a shell.
 - **Ctrl+Z while drawing a polyline takes back the last point.** It used
   to end the polyline and undo the object drawn before it, so a slip on
   the fifth point cost all five points and the object behind them. Each
