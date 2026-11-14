@@ -4,7 +4,7 @@ import numpy as np
 
 from ..core import geometry as g
 from .base import (
-    IntReq, PointReq, SelectReq, command, frame_sides, quadrant)
+    UNDO_POINT, IntReq, PointReq, SelectReq, command, frame_sides, quadrant)
 
 
 def _back_at_the_start(p, pts) -> bool:
@@ -52,16 +52,27 @@ def cmd_line(ctx):
 
 @command("polyline", aliases=("pl", "pline"), space="any")
 def cmd_polyline(ctx):
-    pts = [(yield PointReq("Start of polyline"))]
+    pts = []
     while True:
-        prompt = ("Next point" if len(pts) < 2
-                  else "Next point (Enter to finish)")
-        req = PointReq(prompt, rubber_pts=list(pts),
-                       allow_empty=len(pts) >= 2,
-                       extra_options=("Close",) if len(pts) >= 3 else ())
-        p = yield req
+        if not pts:
+            prompt = "Start of polyline"
+        elif len(pts) < 2:
+            prompt = "Next point"
+        else:
+            prompt = "Next point (Enter to finish)"
+        opts = []
+        if pts:
+            opts.append(UNDO_POINT)
+        if len(pts) >= 3:
+            opts.append("Close")
+        p = yield PointReq(prompt, rubber_pts=list(pts),
+                           allow_empty=len(pts) >= 2,
+                           extra_options=tuple(opts), steps_back=True)
         if p is None:
             break
+        if p == UNDO_POINT:
+            pts.pop()
+            continue
         if p == "Close" or _back_at_the_start(p, pts):
             obj = ctx.add(g.make_polyline(pts, closed=True))
             ctx.echo(f"Created closed {obj.name}.")

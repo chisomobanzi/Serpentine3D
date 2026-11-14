@@ -4,6 +4,19 @@
 
 ### Fixed
 
+- **Moving a held face with the Gumball no longer closes Serpentine3D**
+  (#160). A floor whose hole runs up through a curved roof now moves as a
+  push or pull. A face that closes to a point, such as an EdgeSrf
+  triangle, is refused instead of crashing. An offset that would scatter
+  a shape into pieces is refused, and a holed solid stays a solid instead
+  of coming back as a shell.
+- **Ctrl+Z while drawing a polyline takes back the last point.** It used
+  to end the polyline and undo the object drawn before it, so a slip on
+  the fifth point cost all five points and the object behind them. Each
+  press takes back one more point; with none left it says so and the
+  polyline keeps going. Typing `u` at the prompt does the same, and a
+  Rhino-style `!_Undo` shortcut works like plain Ctrl+Z. Contributed by
+  felixhudson (#158).
 - **Positioning an `array` keeps up with the mouse.** Dragging the spacing of
   a 5 x 5 array of a filleted plate took ten seconds for every mouse move in
   the four-pane layout, and takes about five milliseconds now. The copies
@@ -12,7 +25,7 @@
   other preview is also tessellated once rather than once a pane. Copies
   past half a million triangles, such as a scan arrayed a few times over,
   are ghosted as the box each one fills, and the panes no longer rebuild
-  the ghost on every repaint.
+  the ghost on every repaint. Contributed by felixhudson (#155).
 
 ## 0.12.4 (2026-11-08)
 
