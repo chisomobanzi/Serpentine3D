@@ -26,6 +26,13 @@
   past half a million triangles, such as a scan arrayed a few times over,
   are ghosted as the box each one fills, and the panes no longer rebuild
   the ghost on every repaint. Contributed by felixhudson (#155).
+- **Thousands of small objects draw ten times faster.** Neighbouring objects
+  that look the same now share a draw call: 4,000 chamfered cubes went from
+  210 ms a frame to 20 ms in one pane, and 1,000 from 210 ms to 22 ms across
+  four. Picked objects, hatches, dashed lines, objects with a material, and
+  translucent, clipped or rendered views draw as they did. Those batches
+  hold a second copy of the objects' vertices on the graphics card.
+  Contributed by felixhudson (#154).
 
 ## 0.12.4 (2026-11-08)
 
