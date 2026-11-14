@@ -859,7 +859,8 @@ class CommandProcessor:
         if self.busy:
             # Undo at a run of points takes back the last one. Anywhere else
             # it ends the command, as every other command does.
-            control = resolve(name.strip().removeprefix("!"))
+            # A Rhino preset binds Ctrl+Z to !_Undo; read it as below.
+            control = resolve(name.strip().removeprefix("!").removeprefix("_"))
             if (control is not None and control.name == "undo"
                     and self.undo_point()):
                 return True

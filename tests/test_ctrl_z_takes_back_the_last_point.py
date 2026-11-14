@@ -151,3 +151,15 @@ def test_a_taken_back_point_replays(tmp_path):
     r.run()
     assert len(r.scene.all()) == 1
     assert g.curve_length(r.scene.all()[0].shape) == pytest.approx(20.0)
+
+
+@pytest.mark.parametrize("spelling", ["_undo", "!_undo", "_Undo", " !_undo "])
+def test_a_rhino_spelled_undo_takes_back_the_point_too(env, spelling):
+    # A Rhino shortcut preset binds Ctrl+Z to !_Undo; it has to step back
+    # through the points like the plain word does, not end the polyline.
+    scene, _ctx, proc = env
+    _polyline_through(proc, "0,0,0", "10,0,0", "10,10,0")
+    proc.run(spelling)
+    assert proc.busy, "the polyline should still be going"
+    assert proc.request.rubber_pts == [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0)]
+    assert scene.all() == []
