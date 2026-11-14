@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Moving a held face with the Gumball no longer closes Serpentine3D**
+  (#160). A floor whose hole runs up through a curved roof now moves as a
+  push or pull. A face that closes to a point, such as an EdgeSrf
+  triangle, is refused instead of crashing. An offset that would scatter
+  a shape into pieces is refused, and a holed solid stays a solid instead
+  of coming back as a shell.
+
 ## 0.12.4 (2026-11-08)
 
 ### Fixed
