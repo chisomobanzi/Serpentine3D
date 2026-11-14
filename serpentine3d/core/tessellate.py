@@ -241,6 +241,84 @@ def default_deflection(shape) -> float:
     return _deflection_for(shape)
 
 
+GHOST_BUDGET = 500_000
+"""The most triangles, lines and points the copies in a ghost carry.
+
+Building a ghost and turning it into corners costs about 0.14 us a
+triangle (qa/pr-triage-2026-11-14/155/probe_cap_cost.py), so this is
+about 70 ms a move of the mouse and 18 MB a pane sends the card on each
+paint. A 5 x 5 array of a filleted plate is under half of it; a scan
+copied a few times is well past it."""
+
+
+def _weight(dm) -> int:
+    return len(dm.triangles) + len(dm.local_edges) + len(dm.local_points)
+
+
+def box_segments(mn, mx) -> np.ndarray:
+    """12 AABB edges as GL_LINES vertices (24, 3), in doubles so a box far
+    from home lands where its object is."""
+    xs = (mn[0], mx[0])
+    ys = (mn[1], mx[1])
+    zs = (mn[2], mx[2])
+    c = [(x, y, z) for x in xs for y in ys for z in zs]
+    pairs = [(0, 1), (2, 3), (4, 5), (6, 7),      # z edges
+             (0, 2), (1, 3), (4, 6), (5, 7),      # y edges
+             (0, 4), (1, 5), (2, 6), (3, 7)]      # x edges
+    return np.asarray([c[i] for pair in pairs for i in pair], np.float64)
+
+
+def copies_of(meshes, offsets, budget=None) -> DisplayMesh | None:
+    """`meshes` repeated at every offset, as one mesh for a ghost to draw.
+
+    A copy that has only moved is the same triangles somewhere else, and
+    the original's are already here. Tessellating 24 copies to show them is
+    seconds of work a frame, and a ghost is built again each time the mouse
+    moves; adding an offset to arrays that exist takes about a millisecond.
+
+    Only what a ghost draws comes across: positions, triangles, edges and
+    free points. None if there are no offsets to put anything at.
+
+    Copies past `budget` (GHOST_BUDGET unless given) are the box each one
+    fills instead, the heaviest meshes first: a scan copied 24 times over
+    is gigabytes, rebuilt with every move of the mouse.
+    """
+    shifts = np.asarray(offsets, np.float64).reshape(-1, 1, 3)
+    if not len(shifts):
+        return None
+    budget = GHOST_BUDGET if budget is None else budget
+    whole, boxed = [], []
+    for dm in sorted(meshes, key=_weight):
+        budget -= _weight(dm) * len(shifts)
+        (whole if budget >= 0 else boxed).append(dm)
+    verts, tris, edges, points = [], [], [], []
+    base = 0
+    for dm in whole:
+        if dm.has_faces:
+            n = len(dm.local)
+            verts.append((dm.vertices + shifts).reshape(-1, 3))
+            starts = base + n * np.arange(len(shifts), dtype=np.uint32)
+            tris.append((dm.triangles + starts[:, None, None]).reshape(-1, 3))
+            base += n * len(shifts)
+        if len(dm.local_edges):
+            edges.append((dm.edge_segments.reshape(-1, 3) + shifts)
+                         .reshape(-1, 2, 3))
+        if len(dm.local_points):
+            points.append((dm.points + shifts).reshape(-1, 3))
+    for dm in boxed:
+        if dm.bounds() is not None:
+            edges.append((box_segments(*dm.bounds()) + shifts)
+                         .reshape(-1, 2, 3))
+    mesh = DisplayMesh()
+    mesh.place(
+        vertices=np.concatenate(verts) if verts else None,
+        edge_segments=np.concatenate(edges) if edges else None,
+        points=np.concatenate(points) if points else None)
+    if tris:
+        mesh.triangles = np.concatenate(tris)
+    return mesh
+
+
 def _face_mesh(face) -> tuple | None:
     loc = TopLoc_Location()
     tri = occ.triangulation(face, loc)

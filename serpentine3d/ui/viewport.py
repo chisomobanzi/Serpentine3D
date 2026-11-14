@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from ..core import clipping as _clipping
 from ..core import linetype as _lt
 from ..core import spatial
+from ..core.tessellate import box_segments as _bbox_segments
 from ..utils import config as _cfg
 from ..utils import units as _units
 # Lives in utils so the launcher can set it without importing this
@@ -607,6 +608,62 @@ def view_anchor(target):
     if float(np.abs(t).max()) <= ANCHOR_NEAR:
         return None
     return t
+
+
+# The last shape ghosted and what it tessellated to. A ghost is one shape
+# handed to every pane in turn, and four panes tessellating it for themselves
+# is four times the wait for four identical meshes, on every mouse move.
+_ghost_memo = (None, None)
+
+
+def _ghost_mesh(shape):
+    """What a pane draws for a ghost of `shape`, or None if it will not
+    tessellate. The panes only read it, so they can all have the one."""
+    global _ghost_memo
+    from ..core.hatch import HatchGroup, HatchShape
+    from ..core.tessellate import DisplayMesh, tessellate
+    if isinstance(shape, DisplayMesh):
+        return shape                # already what a pane draws
+    if _ghost_memo[0] is shape:     # held here, so `is` cannot be a new shape
+        return _ghost_memo[1]
+    drawn = shape
+    if isinstance(shape, (HatchShape, HatchGroup)) and not shape.solid:
+        # only its lines: the face a line hatch carries is its
+        # background, and a ghost of it read as a tint over the area
+        drawn = shape.drawn()
+    try:
+        mesh = tessellate(drawn)
+    except Exception:                                      # noqa: BLE001
+        mesh = None
+    _ghost_memo = (shape, mesh)
+    return mesh
+
+
+def _forget_ghost_mesh():
+    """Let go of the last ghost: it should not outlive the command."""
+    global _ghost_memo, _corners_memo
+    _ghost_memo = (None, None)
+    _corners_memo = (None, None)
+
+
+# The last ghost's triangles as corners and its lines as point pairs, by
+# the ghost's serial number. Every pane paints the one ghost whenever
+# anything moves, and an array's ghost is hundreds of thousands of
+# triangles; it only changes when the mouse does.
+_corners_memo = (None, None)
+
+
+def _ghost_corners(dm):
+    """A ghost's triangle corners and line ends, world coordinates, either
+    one None if it has none. The panes only read them."""
+    global _corners_memo
+    if _corners_memo[0] != dm.uid:
+        tris = (dm.vertices[dm.triangles.ravel()]
+                if dm.has_faces and len(dm.triangles) else None)
+        segs = (dm.edge_segments.reshape(-1, 3)
+                if len(dm.edge_segments) else None)
+        _corners_memo = (dm.uid, (tris, segs))
+    return _corners_memo[1]
 
 
 def rebased(pts, anchor):
@@ -3599,6 +3656,7 @@ class Viewport(QOpenGLWidget):
             self.update()
             return
         if shape is None:
+            _forget_ghost_mesh()
             if self._ghost is not None or had_picture or had_note:
                 self._ghost = None
                 self.update()
@@ -3608,15 +3666,7 @@ class Viewport(QOpenGLWidget):
         from ..core.hatch import HatchGroup, HatchShape
         self._ghost_solid = (isinstance(shape, (HatchShape, HatchGroup))
                              and shape.solid)
-        if isinstance(shape, (HatchShape, HatchGroup)) and not shape.solid:
-            # only its lines: the face a line hatch carries is its
-            # background, and a ghost of it read as a tint over the area
-            shape = shape.drawn()
-        try:
-            from ..core.tessellate import tessellate
-            self._ghost = tessellate(shape)
-        except Exception:                                  # noqa: BLE001
-            self._ghost = None
+        self._ghost = _ghost_mesh(shape)
         self.update()
 
     def _clip_frames(self, view: str | None = None, shown: bool = False):
@@ -3712,10 +3762,7 @@ class Viewport(QOpenGLWidget):
         dm = self._ghost
         if dm is None:
             return None, None
-        tris = (dm.vertices[dm.triangles.ravel()]
-                if dm.has_faces and len(dm.triangles) else None)
-        segs = (dm.edge_segments.reshape(-1, 3)
-                if len(dm.edge_segments) else None)
+        tris, segs = _ghost_corners(dm)
         if self.space != "model" and self._drawing_through() is not None:
             tris = None if tris is None else self._on_paper(tris)
             segs = None if segs is None else self._on_paper(segs)
@@ -6031,22 +6078,6 @@ class Viewport(QOpenGLWidget):
             self.escapePressed.emit()
         else:
             super().keyPressEvent(ev)
-
-
-def _bbox_segments(mn, mx) -> np.ndarray:
-    """12 AABB edges as GL_LINES vertices (24, 3)."""
-    xs = (mn[0], mx[0])
-    ys = (mn[1], mx[1])
-    zs = (mn[2], mx[2])
-    c = [(x, y, z) for x in xs for y in ys for z in zs]
-    pairs = [(0, 1), (2, 3), (4, 5), (6, 7),      # z edges
-             (0, 2), (1, 3), (4, 6), (5, 7),      # y edges
-             (0, 4), (1, 5), (2, 6), (3, 7)]      # x edges
-    out = []
-    for a, b in pairs:
-        out.append(c[a])
-        out.append(c[b])
-    return np.asarray(out, np.float32)
 
 
 def _axis_guide(base, direction, reach: float) -> np.ndarray:

@@ -1,6 +1,7 @@
 """Transform commands: move, copy, rotate, scale, mirror, array."""
 
 from ..core import geometry as g
+from ..core.tessellate import copies_of
 from .base import (
     IntReq, NumberReq, OptionReq, PointReq, SelectReq, command,
 )
@@ -848,10 +849,14 @@ def cmd_array(ctx):
     ny = yield IntReq("Count Y", default=1, minimum=1)
 
     def _grid(dx, dy):
-        shapes = [g.translate(o.shape, (i * dx, j * dy, 0))
-                  for i in range(nx) for j in range(ny)
-                  if (i, j) != (0, 0) for o in objs]
-        return g.make_compound(shapes) if shapes else None
+        # The objects' own meshes moved into place, not the copies built:
+        # this runs every time the mouse moves. With one spacing still to
+        # come the rows or columns fall on top of each other, and on the
+        # original, so each place is only drawn once.
+        offsets = dict.fromkeys((i * dx, j * dy, 0.0)
+                                for i in range(nx) for j in range(ny))
+        offsets.pop((0.0, 0.0, 0.0), None)
+        return copies_of([o.mesh for o in objs], list(offsets))
 
     from . import dragging
     from .base import PointReq

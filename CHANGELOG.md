@@ -17,6 +17,15 @@
   polyline keeps going. Typing `u` at the prompt does the same, and a
   Rhino-style `!_Undo` shortcut works like plain Ctrl+Z. Contributed by
   felixhudson (#158).
+- **Positioning an `array` keeps up with the mouse.** Dragging the spacing of
+  a 5 x 5 array of a filleted plate took ten seconds for every mouse move in
+  the four-pane layout, and takes about five milliseconds now. The copies
+  were built and tessellated from nothing to draw the ghost, once for each
+  pane; the ghost is now the object's own mesh repeated at each spacing. Any
+  other preview is also tessellated once rather than once a pane. Copies
+  past half a million triangles, such as a scan arrayed a few times over,
+  are ghosted as the box each one fills, and the panes no longer rebuild
+  the ghost on every repaint. Contributed by felixhudson (#155).
 
 ## 0.12.4 (2026-11-08)
 
