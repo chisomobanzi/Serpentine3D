@@ -505,7 +505,7 @@ def test_a_linear_dimension_comes_in_as_a_dimension(tmp_path):
             base=(0, 20), p1=(0, 0), p2=(100, 0),
             dxfattribs={"layer": "Dims"},
             override={"dimtxt": 5.0, "dimasz": 4.0, "dimdec": 1,
-                      "dimpost": "<> mm"}).render()
+                      "dimzin": 0, "dimpost": "<> mm"}).render()
 
     scene = _imported(tmp_path, build)
     (obj,) = scene.all()
@@ -555,7 +555,7 @@ def test_a_dimension_in_metres_still_says_what_it_said(tmp_path):
     doc = ezdxf.new("R2010", units=ezdxf.units.M)
     doc.modelspace().add_linear_dim(
         base=(0, 1), p1=(0, 0), p2=(2.5, 0),
-        override={"dimtxt": 0.1, "dimdec": 2}).render()
+        override={"dimtxt": 0.1, "dimdec": 2, "dimzin": 0}).render()
     path = tmp_path / "metres.dxf"
     doc.saveas(path)
     scene = Scene()
@@ -634,6 +634,37 @@ def test_a_model_dimension_goes_out_as_a_dimension_and_back(tmp_path):
     assert first.arrow == "tick"
     assert first.arrow_size == pytest.approx(2.0)
     assert second.label == "50.00 long"
+
+
+def test_a_dimension_says_its_trailing_zeros_as_the_file_does(tmp_path):
+    """AutoCAD's metric styles drop trailing zeros (DIMZIN 8), so 60 at two
+    decimals reads 60 there and must read 60 here."""
+    def build(doc):
+        msp = doc.modelspace()
+        msp.add_linear_dim(base=(0, 10), p1=(0, 0), p2=(60, 0),
+                           override={"dimdec": 2, "dimzin": 8}).render()
+        msp.add_linear_dim(base=(0, 30), p1=(0, 20), p2=(72.111, 20),
+                           override={"dimdec": 2, "dimzin": 8}).render()
+        msp.add_linear_dim(base=(0, 50), p1=(0, 40), p2=(60, 40),
+                           override={"dimdec": 2, "dimzin": 0}).render()
+
+    labels = sorted(o.shape.label for o in _dims(_imported(tmp_path, build)))
+    assert labels == ["60", "60.00", "72.11"]
+
+
+def test_a_model_dimension_goes_out_reading_as_it_does_here(tmp_path):
+    from serpentine3d.core.dimension import DimensionShape
+    from serpentine3d.fileio import dxf as dxf_mod
+
+    scene = Scene()
+    scene.add(DimensionShape((0, 0, 0), (60, 0, 0), (0, 10, 0)))
+    path = tmp_path / "out.dxf"
+    dxf_mod.export_dxf(scene, str(path))
+
+    (dim,) = ezdxf.readfile(path).modelspace().query("DIMENSION")
+    drawn = [t.plain_text() for t in dim.get_geometry_block()
+             if t.dxftype() == "MTEXT"]
+    assert drawn == ["60.00"], "what AutoCAD shows is what it said here"
 
 
 def test_a_drawn_dimension_inside_a_block_comes_in_where_the_block_puts_it(

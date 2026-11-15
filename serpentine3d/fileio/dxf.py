@@ -146,7 +146,7 @@ def _write_dimension(msp, dim, attribs):
     override = {"dimtxt": dim.text_height, "dimasz": dim.arrow_size,
                 "dimdec": int(dim.decimals), "dimlfac": dim.length_factor,
                 "dimpost": "<> " + dim.suffix if dim.suffix else "",
-                "dimtad": 1, "dimzin": 8 if dim.decimals else 0,
+                "dimtad": 1, "dimzin": 0 if dim.trailing_zeros else 8,
                 "dimexo": dim.sizes()[2], "dimexe": dim.sizes()[3],
                 "dimgap": dim.sizes()[4], "dimdsep": ord(".")}
     if dim.arrow == "tick":
@@ -519,6 +519,7 @@ def _dimension_of(e):
                     if float(get("dimtsz", 0.0) or 0.0) > 0 else arrow),
         arrow="tick" if tick else "arrow",
         decimals=int(get("dimdec", 2)), suffix=suffix, text=typed,
+        trailing_zeros=not int(get("dimzin", 0) or 0) & 8,
         font_family=_dim_font(e, str(get("dimtxsty", "Standard"))),
         length_factor=float(get("dimlfac", 1.0) or 1.0),
         extension_offset=float(get("dimexo", 0.625)) * scale,

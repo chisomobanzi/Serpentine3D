@@ -25,6 +25,7 @@ STYLE_DEFAULTS = {
     "arrow_size": 2.5,
     "arrow": "arrow",
     "decimals": 2,
+    "trailing_zeros": True,  # 60.00 at two decimals; False says 60
     "suffix": "",
     "text": "",              # empty: the measurement; "<>" stands for it
     "font_family": "sans",
@@ -153,6 +154,8 @@ class DimensionShape(TopoDS_Compound):
         value = self.measured
         decimals = int(self._style["decimals"])
         number = f"{value:.{decimals}f}"
+        if not self._style["trailing_zeros"] and "." in number:
+            number = number.rstrip("0").rstrip(".")
         if number.startswith("-") and float(number) == 0:
             number = number[1:]
         suffix = self._style["suffix"]
