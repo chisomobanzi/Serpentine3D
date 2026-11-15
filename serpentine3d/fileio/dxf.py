@@ -297,7 +297,9 @@ def import_dxf(scene, path: str, progress=None, units: str | None = None,
     looks.factor = _unit_factor(doc, units or scene.units, notes)
     convert = report.part(0.15, 1.0)
     total = len(entities) or 1
-    n = 0
+    # Converted before the scene is touched, as a Rhino file is: Cancel
+    # throws the lot away and leaves the scene and its layers as they were.
+    pending = []
     for index, entity in enumerate(entities):
         if index % 250 == 0:
             convert(index / total,
@@ -308,10 +310,14 @@ def import_dxf(scene, path: str, progress=None, units: str | None = None,
             group = uuid.uuid4().hex[:12]
             name = str(entity.dxf.name) if kind == "INSERT" else "Dimension"
             for member, look in _exploded(entity, looks.of(entity), looks):
-                n += _add_entity(scene, member, look, looks, name=name,
-                                 group=group)
+                pending.append((member, look, _parts_of(member, looks),
+                                name, group))
         else:
-            n += _add_entity(scene, entity, looks.of(entity), looks)
+            pending.append((entity, looks.of(entity),
+                            _parts_of(entity, looks), "", None))
+    n = 0
+    for entity, look, parts, name, group in pending:
+        n += _add_parts(scene, entity, look, looks, parts, name, group)
     convert.done()
     return n
 
@@ -320,26 +326,31 @@ def import_dxf(scene, path: str, progress=None, units: str | None = None,
 _DIMENSIONS = ("DIMENSION", "ARC_DIMENSION", "LARGE_RADIAL_DIMENSION")
 
 
-def _add_entity(scene, entity, look, looks, name: str = "",
-                group: str | None = None) -> int:
-    """Put what one entity converts to into the scene, looking as `look`
-    says. Returns how many objects it made."""
-    from . import adopt_hatch_pattern
+def _parts_of(entity, looks) -> list:
+    """What one entity converts to, at the scene's size."""
     try:
         shape = _shape_of(entity)
     except (geometry.GeometryError, ValueError, AttributeError):
-        return 0
+        return []
     parts = shape if isinstance(shape, list) else \
         [] if shape is None else [shape]
-    if not parts:
-        return 0
-    if looks.factor != 1.0:
+    if parts and looks.factor != 1.0:
         size = np.diag([looks.factor] * 3 + [1.0])
         parts = [geometry.apply_matrix(part, size) for part in parts]
         # a dimension still says what it said in the file's unit
         parts = [part.edited(length_factor=part.length_factor / looks.factor)
                  if isinstance(part, DimensionShape) else part
                  for part in parts]
+    return parts
+
+
+def _add_parts(scene, entity, look, looks, parts, name: str = "",
+               group: str | None = None) -> int:
+    """Put what one entity converted to into the scene, looking as `look`
+    says. Returns how many objects it made."""
+    from . import adopt_hatch_pattern
+    if not parts:
+        return 0
     layer_id = looks.layer_id(look.layer)
     for part in parts:
         adopt_hatch_pattern(scene, part)
@@ -621,12 +632,25 @@ def _text_of(e):
         x_dir = None
     else:
         height = float(e.dxf.height or 1.0)
-        halign = _TEXT_HALIGN.get(int(e.dxf.get("halign", 0)), "left")
+        code = int(e.dxf.get("halign", 0))
+        halign = _TEXT_HALIGN.get(code, "left")
         valign = _TEXT_VALIGN.get(int(e.dxf.get("valign", 0)), "baseline")
+        if code == 4:                      # Middle: centred both ways
+            valign = "middle"
         normal = np.asarray(tuple(e.dxf.extrusion), float)
         turn = math.radians(float(e.dxf.get("rotation", 0.0)))
         anchored = (e.dxf.get("halign", 0) or e.dxf.get("valign", 0)) \
             and e.dxf.hasattr("align_point")
+        # Aligned and Fit run from the insertion point to the alignment
+        # point, Aligned growing to fill the gap and Fit stretching to it.
+        span = None
+        if code in (3, 5) and e.dxf.hasattr("align_point"):
+            gap = np.subtract(tuple(e.dxf.align_point)[:2],
+                              tuple(e.dxf.insert)[:2])
+            if np.hypot(*gap) > 1e-9:
+                span = float(np.hypot(*gap))
+                turn = math.atan2(gap[1], gap[0])
+                anchored, valign = False, "baseline"
         ocs = e.ocs()
         at = np.asarray(tuple(ocs.to_wcs(
             e.dxf.align_point if anchored else e.dxf.insert)), float)
@@ -636,9 +660,17 @@ def _text_of(e):
         x_dir -= np.asarray(tuple(ocs.to_wcs((0.0, 0.0, 0.0))), float)
     try:
         lettering = TextShape(text, height, font, alignment=halign)
+        (x0, y0, _), (x1, y1, _) = geometry.bbox(lettering)
+        if kind != "MTEXT" and span is not None and x1 - x0 > 1e-9:
+            fill = span / ((x1 - x0) * stretch)
+            if int(e.dxf.get("halign", 0)) == 5:
+                stretch *= fill
+            else:
+                lettering = TextShape(text, height * fill, font,
+                                      alignment=halign)
+                (x0, y0, _), (x1, y1, _) = geometry.bbox(lettering)
     except Exception:                                      # noqa: BLE001
         return None
-    (x0, y0, _), (x1, y1, _) = geometry.bbox(lettering)
     dx = {"left": -x0, "center": -(x0 + x1) / 2, "right": -x1}[halign]
     dy = {"baseline": 0.0, "bottom": -y0, "middle": -(y0 + y1) / 2,
           "top": -y1}[valign]
@@ -652,9 +684,12 @@ def _text_of(e):
         x_dir = math.cos(turn) * ux + math.sin(turn) * uy
     x_dir = x_dir / (np.linalg.norm(x_dir) or 1.0)
     y_dir = np.cross(n, x_dir)
+    # TEXT written backwards (2) or upside down (4), mirrored about its point
+    flags = int(e.dxf.get("text_generation_flag", 0)) if kind != "MTEXT" \
+        else 0
     place = np.eye(4)
-    place[:3, 0] = x_dir * stretch
-    place[:3, 1] = y_dir
+    place[:3, 0] = x_dir * stretch * (-1.0 if flags & 2 else 1.0)
+    place[:3, 1] = y_dir * (-1.0 if flags & 4 else 1.0)
     place[:3, 2] = n
     place[:3, 3] = at
     shift = np.eye(4)
@@ -791,16 +826,20 @@ def _exploded(insert, look: _Look, looks: _Looks, depth: int = 0):
     leaves to the block from the reference that placed it."""
     if depth > 16:                         # a block that holds itself
         return
-    if insert.dxftype() in _DIMENSIONS and \
-            insert.get_geometry_block() is None:
-        try:                               # one written without its drawing
-            insert.render()
-        except Exception:                                  # noqa: BLE001
-            return
     try:
         pieces = list(insert.virtual_entities())
     except Exception:                                      # noqa: BLE001
-        return
+        pieces = []
+    # One written without its drawing is drawn here. A block's dimension
+    # comes as a copy that has lost its drawing's name yet still has the
+    # drawing, and a copy cannot be drawn anyway.
+    if not pieces and insert.dxftype() in _DIMENSIONS and \
+            not insert.is_virtual and insert.get_geometry_block() is None:
+        try:
+            insert.render()
+            pieces = list(insert.virtual_entities())
+        except Exception:                                  # noqa: BLE001
+            return
     for piece in pieces:
         piece_look = looks.of(piece, look)
         if piece.dxftype() == "INSERT" or (piece.dxftype() in _DIMENSIONS

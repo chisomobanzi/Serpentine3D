@@ -10,40 +10,47 @@
   as well as AutoCAD's index), lineweight and linetype where it overrides
   its layer's; a hatch its colour and background colour. A linetype is
   read by what its name says, so VERDECKT comes in as Hidden and MITTE
-  as Center. Until now everything came in grey on bare layers.
+  as Center. Until now everything came in grey on bare layers. Contributed
+  by Jonas Pedrotti (#123).
 - **DXF block references come in.** Each one as the pieces its block is
   made of, where the reference puts them, grouped so a click takes the
   lot, as a Rhino block comes in; blocks inside blocks are opened up
   too. A piece that leaves its look to the block (BYBLOCK, or layer 0)
   takes the reference's colour, lineweight, linetype and layer.
+  Contributed by Jonas Pedrotti (#123).
 - **DXF text comes in as editable text.** TEXT, MTEXT and a block's
   attribute values keep their words, line breaks, height, font, turn,
-  width factor and the point they hang from. Wrapping at an MTEXT's
-  frame width and inline formatting are not read yet.
-- **Linear dimensions in the model.** `dim` on a sheet works as it
-  did; in the model it places a dimension on the construction plane:
-  two points, then where its line goes. Auto measures along the plane's
-  x or y, whichever way the line is pulled out, as Rhino's Dim does;
-  Aligned measures between the points. A dimension is one object that
-  measures: moved, turned or scaled, its number follows, and mirrored
-  or turned over its text still reads. Properties edits its text height,
-  decimal places, suffix (set off by a space), arrowheads or ticks, arrow
-  size, and text typed over the number, where <> stands for it. A new
-  dimension looks like the last one drawn. Drawings with one need
-  0.12.3 to open.
-- **DXF and Rhino dimensions come in as dimensions.** A linear or
-  aligned DIMENSION keeps the points it measures, its line, text height,
-  arrows or ticks, decimals, suffix, typed text and overall scale, and
-  goes back out to DXF as a DIMENSION. A rotated or aligned dimension in
-  a .3dm comes in the same way, in its dimension style's look. Both say
-  what they said in their file's unit after the drawing is converted to
-  the document's. Other DXF dimensions come in as the lines, arrows and
-  text the file draws them with, grouped; a filled SOLID, the usual
-  arrowhead, now comes in as a solid hatch.
+  width factor and the point they hang from. Aligned and Fit text runs
+  from its first point to its second, and text written backwards or
+  upside down stays that way. Wrapping at an MTEXT's frame width and
+  inline formatting are not read yet. Contributed by Jonas Pedrotti
+  (#123).
+- **Linear dimensions in the model.** `dim` on a sheet works as it did; in
+  the model it places a dimension on the construction plane: two points,
+  then where its line goes. Auto measures along the plane's x or y,
+  whichever way the line is pulled out, as Rhino's Dim does; Aligned
+  measures between the points. A dimension is one object that measures:
+  moved, turned or scaled, its number follows, and mirrored or turned over
+  its text still reads. Properties edits its text height, decimal places,
+  suffix (set off by a space), arrowheads or ticks, arrow size, and text
+  typed over the number, where <> stands for it. A new dimension looks
+  like the last one drawn. Drawings with one need 0.12.3 to open.
+  Contributed by Jonas Pedrotti (#124).
+- **DXF and Rhino dimensions come in as dimensions.** A linear or aligned
+  DIMENSION keeps the points it measures, its line, text height, arrows or
+  ticks, decimals, suffix, typed text and overall scale, and goes back out
+  to DXF as a DIMENSION. A rotated or aligned dimension in a .3dm comes in
+  the same way, in its dimension style's look. Both say what they said in
+  their file's unit after the drawing is converted to the document's.
+  Other DXF dimensions come in as the lines, arrows and text the file
+  draws them with, grouped; a filled SOLID, the usual arrowhead, now comes
+  in as a solid hatch. Contributed by Jonas Pedrotti (#124).
 - **A DXF comes in at its real size.** A file that says its unit
   ($INSUNITS) is converted to the document's, as STEP and Rhino files
-  are, and the import says so.
-- **A DXF import says how far it has got,** and can be cancelled.
+  are, and the import says so. Contributed by Jonas Pedrotti (#123).
+- **A DXF import says how far it has got,** and can be cancelled,
+  which leaves the drawing as it was. Contributed by Jonas Pedrotti
+  (#123).
 
 ### Fixed
 
@@ -52,15 +59,128 @@
   temporary file apiece, while the progress bar was still moving: a DXF
   of twenty thousand lines took minutes. An import is now one journal
   entry, as opening a file is, and replay imports the file again.
+  Contributed by Jonas Pedrotti (#123).
 - **A DXF's mirrored arcs, circles and polylines land where they were
   drawn, and a filleted polyline keeps its rounds.** These are written in
   their own plane's coordinates, and one AutoCAD mirrored has that plane
   facing down; read as world coordinates every such fillet arc landed
   mirrored, far away from its lines. The arcs inside a polyline (its
   bulges) were left out altogether, so its fillets came in as corners.
+  Contributed by Jonas Pedrotti (#123).
 - **A DXF export keeps colours and lineweights.** Layer colours were never
   written, and neither were an object's own colour, lineweight and
-  linetype, nor a hatch's colour and background.
+  linetype, nor a hatch's colour and background. Contributed by Jonas
+  Pedrotti (#123).
+
+## 0.12.5 (2026-11-15)
+
+### Fixed
+
+- **Moving a held face with the Gumball no longer closes Serpentine3D**
+  (#160). A floor whose hole runs up through a curved roof now moves as a
+  push or pull. A face that closes to a point, such as an EdgeSrf
+  triangle, is refused instead of crashing. An offset that would scatter
+  a shape into pieces is refused, and a holed solid stays a solid instead
+  of coming back as a shell.
+- **Ctrl+Z while drawing a polyline takes back the last point.** It used
+  to end the polyline and undo the object drawn before it, so a slip on
+  the fifth point cost all five points and the object behind them. Each
+  press takes back one more point; with none left it says so and the
+  polyline keeps going. Typing `u` at the prompt does the same, and a
+  Rhino-style `!_Undo` shortcut works like plain Ctrl+Z. Contributed by
+  felixhudson (#158).
+- **Positioning an `array` keeps up with the mouse.** Dragging the spacing of
+  a 5 x 5 array of a filleted plate took ten seconds for every mouse move in
+  the four-pane layout, and takes about five milliseconds now. The copies
+  were built and tessellated from nothing to draw the ghost, once for each
+  pane; the ghost is now the object's own mesh repeated at each spacing. Any
+  other preview is also tessellated once rather than once a pane. Copies
+  past half a million triangles, such as a scan arrayed a few times over,
+  are ghosted as the box each one fills, and the panes no longer rebuild
+  the ghost on every repaint. Contributed by felixhudson (#155).
+- **Thousands of small objects draw ten times faster.** Neighbouring objects
+  that look the same now share a draw call: 4,000 chamfered cubes went from
+  210 ms a frame to 20 ms in one pane, and 1,000 from 210 ms to 22 ms across
+  four. Picked objects, hatches, dashed lines, objects with a material, and
+  translucent, clipped or rendered views draw as they did. Those batches
+  hold a second copy of the objects' vertices on the graphics card.
+  Contributed by felixhudson (#154).
+
+## 0.12.4 (2026-11-08)
+
+### Fixed
+
+- **Snapping and scan picking respect clipping planes.** Geometry cut away
+  no longer catches the cursor, including inside a sheet detail. Visible
+  curve portions still offer Near snaps, and the cut itself offers Int
+  snaps. The clipping tolerance stays the same at survey coordinates.
+  Contributed by Jonas Pedrotti (#128).
+
+### Changed
+
+- **Join and Explode keep their results selected and briefly light them
+  white.** Explode also keeps objects it cannot split selected beside the
+  new pieces, without flashing the unchanged objects. Contributed by Jonas
+  Pedrotti (#143).
+- **Enter or right-click ends Join with a single picked curve.** Nothing
+  changes, instead of the command repeatedly asking for a second object.
+  Commands such as Loft still wait for their minimum selection (#143).
+- **Join and Explode lead the middle-click popup**, with paired icons.
+  The popup keeps its twelve distinct recent commands, staples and command
+  palette (#143).
+
+## 0.12.3 (2026-11-03)
+
+### Fixed
+
+- **Shell hollows the solid, open at the face you click (#121).** Shell
+  never hollowed anything. Given no face to open, OpenCascade hands back
+  the solid moved in by the wall, which is the inside of the shell rather
+  than the shell, so `box 0 10 10 10` with a 1 mm wall came back a solid
+  8 mm box. Shell now asks for the face to open, as Rhino's does: click
+  the solid on that face, and a box clicked on its top comes back a tray.
+  Ctrl+Shift-click faces first to open several. The walls meet at sharp
+  corners inside, so a star shells to a star, and a solid the kernel
+  says it shelled but left whole, such as an arc closed by a flat side,
+  is hollowed by cutting its inside out. A solid named at the prompt
+  rather than clicked is shelled closed: the same outside, hollow inside.
+  Contributed by felixhudson (#136).
+- **OffsetSrf keeps a solid's edges sharp (#139).** A box offset outward
+  came back with every edge and corner rounded, 26 faces where a box has
+  6. The faces now run on until they meet, so a box offsets to a bigger
+  box. Where they can't, as where an arc closed by a flat side was
+  extruded, the edges are rounded as before rather than the offset
+  failing. A filleted box offset inward comes back a solid, where it was
+  an open surface. Contributed by felixhudson (#138).
+- **Offset keeps a curve's corners sharp (#137).** A rectangle offset
+  outward came back with its corners rounded off. The sides now run on
+  until they meet, as Rhino's Offset does unless told otherwise, so a
+  rectangle offsets to a rectangle, and `filletcorners` rounds them if
+  that is what you want. Where a corner can't be made sharp, as where a
+  spline meets another piece at an angle or at a corner of a few degrees,
+  it is rounded as before, rather than the curve coming back short, open
+  or empty. An offset that leaves nothing of the curve, such as a small
+  shape offset inward past its middle, now says so instead of adding an
+  empty object. Contributed by felixhudson (#140).
+- **Checking for updates on startup works on Windows when it is ticked.**
+  Ticking the installer's update check did nothing once an earlier
+  install had cleared it, as the installer never touched an existing
+  settings file again. It now applies the choice either way, and changes
+  only that one setting. A release found at startup was announced in a
+  status message the next status refresh wiped, often before anyone saw
+  it, and now waits in the status bar until it is clicked. Settings has
+  an Updates page to turn the check on or off, and to check now.
+  Contributed by Jonas Pedrotti (#125).
+- **The rubber band and snap markers stay on the cursor at survey
+  coordinates.** Thousands of kilometres from the origin, the rubber
+  band, the crosses on picked points, the snap marker and a held axis
+  were placed on a grid half a metre apart, so a short leg's preview
+  vanished and the markers sat up to half a metre off the points they
+  marked. Contributed by Jonas Pedrotti (#128).
+- **A Ctrl+Shift click on a mesh no longer ends in an error.** It picks a
+  face or edge of the mesh, and the gumball then asked for faces of the
+  kind a solid has, which a mesh doesn't, so the click ended in an error
+  that could take the app down. Contributed by Jonas Pedrotti (#141).
 
 ## 0.12.2 (2026-10-26)
 

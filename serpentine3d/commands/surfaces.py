@@ -146,9 +146,38 @@ def cmd_offsetsrf(ctx):
     ctx.echo(f"Offset {len(made)} surface(s).")
 
 
+def _held_solid_faces(ctx) -> dict:
+    """{obj_id: [face index, ...]} for Ctrl+Shift-clicked faces of solids."""
+    held = ctx.held_parts().get("face", {})
+    return {oid: idxs for oid, idxs in held.items()
+            if ctx.scene.get(oid).kind == "solid"}
+
+
 @command("shell")
 def cmd_shell(ctx):
-    objs = yield SelectReq("Select solids to shell", kinds=("solid",))
+    """Hollow a solid, leaving it open at the face(s) you pick.
+
+    Click a solid on the face to take away, or Ctrl+Shift-click several
+    faces first (before or during the prompt) to open more than one."""
+    # read before asking: a select prompt clears the selection
+    open_faces = _held_solid_faces(ctx)
+    if open_faces:
+        objs = [ctx.scene.get(oid) for oid in open_faces]
+    else:
+        objs = yield SelectReq(
+            "Select the face to open (click it on the solid; Ctrl+Shift-"
+            "click for several)", kinds=("solid",), want_point=True,
+            allow_preselected=False)
+        open_faces = _held_solid_faces(ctx)
+        for o in objs:
+            at = ctx.pick_points.get(o.id)
+            if o.id not in open_faces and at is not None:
+                open_faces[o.id] = [g.face_index_near(o.shape, at)]
+        objs = list({o.id: o for o in objs
+                     + [ctx.scene.get(oid) for oid in open_faces]}.values())
+        if not open_faces:
+            ctx.echo("No face picked — click the solid on the face to open. "
+                     "Shelling closed (sealed void inside).")
     from . import dragging
     from .base import PointReq
     # measured off the wall being thickened, so a 1 mm wall is a 1 mm drag
@@ -161,7 +190,9 @@ def cmd_shell(ctx):
         if t < 1e-9:
             return None
         try:
-            return g.make_compound([g.shell_solid(o.shape, t) for o in objs])
+            return g.make_compound([
+                g.shell_solid(o.shape, t, open_faces.get(o.id, ()))
+                for o in objs])
         except g.GeometryError:
             return None
 
@@ -173,7 +204,10 @@ def cmd_shell(ctx):
         ctx.echo("Zero thickness — nothing shelled.")
         return
     for o in objs:
-        ctx.scene.replace_shape(o.id, g.shell_solid(o.shape, thickness))
+        ctx.scene.replace_shape(o.id, g.shell_solid(
+            o.shape, thickness, open_faces.get(o.id, ())))
+    # the face indices belong to the old shapes
+    ctx.selection.clear()
     ctx.echo(f"Shelled {len(objs)} solid(s) with wall {thickness:g}.")
 
 

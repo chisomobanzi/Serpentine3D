@@ -31,6 +31,12 @@ CONTROL_NET = (0.34, 0.44, 0.56, 0.6)
 # both have to stand out against a drawing that is already white, gold and
 # control point blue.
 DIRECTION_ARROW = (0.40, 0.95, 0.50, 0.95)
+# What a command such as Join or Explode just made lights up white for a
+# moment and settles back to gold, so a change that looks like nothing on
+# screen is still seen.
+CHANGE_FLASH = (1.0, 1.0, 1.0)
+CHANGE_FLASH_HOLD = 0.06          # fully white this long
+CHANGE_FLASH_SECONDS = 0.19       # back to gold by then
 
 # The arrow on a clipping plane, pointing at the half of the model it takes
 # away. Magenta because it is the one colour left: the drawing is white, the
@@ -231,6 +237,18 @@ QPushButton {
 QPushButton:hover { background: #3f4047; border-color: #55565e; }
 QPushButton:pressed { background: #2b2c30; }
 QPushButton:default { border-color: #d9a441; }
+
+/* A tool button that reads as a button before the pointer reaches it,
+   like Join and Explode at the top of the middle-click popup. */
+QToolButton[framed="true"] {
+    background: #35363c;
+    border: 1px solid #45464d;
+    padding: 4px 8px;
+}
+/* The row Join and Explode sit in is the menu itself, not a strip on it. */
+QWidget#popupButtons { background: transparent; }
+QToolButton[framed="true"]:hover { background: #3f4047; border-color: #55565e; }
+QToolButton[framed="true"]:pressed { background: #4a3f28; border-color: #d9a441; }
 
 /* Styled here so a slider looks the same everywhere: left to the platform,
    macOS drew no track on this dark theme and Linux filled it with the
