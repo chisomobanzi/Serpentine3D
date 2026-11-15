@@ -1882,7 +1882,8 @@ def in_units(items: list, file_units: str | None, units: str,
 
 
 def import_3dm(path: str, progress=None, units: str = "mm",
-               notes: list | None = None) -> list[tuple[str, object, dict]]:
+               notes: list | None = None, pages: list | None = None
+               ) -> list[tuple[str, object, dict]]:
     """Returns [(name, shape, {layer, color})], scaled into `units`.
 
     A shape is either geometry or, for an object the file keeps out of
@@ -1894,7 +1895,7 @@ def import_3dm(path: str, progress=None, units: str = "mm",
     if _worth_parallelising(path):
         try:
             return import_3dm_parallel(path, report, units=units,
-                                       notes=notes)
+                                       notes=notes, pages=pages)
         except Cancelled:
             raise
         except Exception as exc:                                # noqa: BLE001
@@ -1914,6 +1915,9 @@ def import_3dm(path: str, progress=None, units: str = "mm",
     layers = read_layers(model)
     materials = read_materials(model)
     blocks = read_blocks(model)
+    if pages is not None:
+        from .rhino_pages import read_pages
+        pages.extend(read_pages(model, units, path))
 
     out = []
     counter = 0

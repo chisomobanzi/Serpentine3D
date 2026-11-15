@@ -170,6 +170,26 @@ def import_file(scene, path: str, progress=None, *, replace: bool = False,
     return n
 
 
+def _add_sheets(scene, sheets: list, notes: list | None):
+    """A file's layout pages added as sheets, each named as it was there
+    unless the drawing already has a sheet by that name."""
+    if not sheets:
+        return
+    taken = {lay.name for lay in scene.layouts}
+    for sheet in sheets:
+        name, n = sheet.name, 2
+        while sheet.name in taken:
+            sheet.name = f"{name} ({n})"
+            n += 1
+        taken.add(sheet.name)
+        scene.layouts.append(sheet)
+    scene.notify("layouts")
+    if notes is not None:
+        k = len(sheets)
+        notes.append(f"{k} layout page{'s' if k != 1 else ''} as "
+                     f"sheet{'s' if k != 1 else ''}")
+
+
 def _import_file(scene, path: str, ext: str, report, replace: bool = False,
                  notes: list | None = None) -> int:
     if ext == ".serp":
@@ -227,9 +247,12 @@ def _import_file(scene, path: str, ext: str, report, replace: bool = False,
         return len(named)
     if ext == ".3dm":
         from . import rhino
+        pages = []
         items = rhino.import_3dm(path, progress=report.part(0.0, 0.95),
-                                 units=scene.units, notes=notes)
-        return _add_items(scene, items, report.part(0.95, 1.0))
+                                 units=scene.units, notes=notes, pages=pages)
+        n = _add_items(scene, items, report.part(0.95, 1.0))
+        _add_sheets(scene, pages, notes)
+        return n
     if ext == ".skp":
         from . import skp
         items = skp.import_skp(path, units=scene.units,

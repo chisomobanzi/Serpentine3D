@@ -11,9 +11,9 @@ rhino_linear_dimensions_v8.3dm. Added on Page 1, in paper millimetres:
 
 - a border line from (5, 5) to (210.9, 5), red
 - a polyline box (150, 15)-(200, 35), a title box
-- the text, moved to (155, 25)
+- the text, its origin moved to (155, 25)
 - the hatch, moved to sit near (40, 220)
-- the dimension, moved so its first point is at (20, 240)
+- the dimension, moved so its first point is at (20, 200)
 """
 from pathlib import Path
 
@@ -33,10 +33,15 @@ def on_page(layer=0):
 
 
 def moved(geo, x, y):
-    """`geo` duplicated with its bounding box's corner moved to (x, y)."""
+    """`geo` duplicated with its bounding box's corner moved to (x, y); a
+    text, whose box rhino3dm cannot measure without its font, by its
+    plane's origin."""
     copy = geo.Duplicate()
-    box = copy.GetBoundingBox()
-    copy.Translate(r3.Vector3d(x - box.Min.X, y - box.Min.Y, -box.Min.Z))
+    if isinstance(copy, r3.Text):
+        at = copy.Plane.Origin
+    else:
+        at = copy.GetBoundingBox().Min
+    copy.Translate(r3.Vector3d(x - at.X, y - at.Y, -at.Z))
     return copy
 
 
@@ -56,7 +61,7 @@ hatch = next(o for o in hatches.Objects if isinstance(o.Geometry, r3.Hatch))
 model.Objects.Add(moved(hatch.Geometry, 40, 220), on_page())
 dims = r3.File3dm.Read(str(HERE / "rhino_linear_dimensions_v8.3dm"))
 dim = next(o for o in dims.Objects if o.Geometry.PlainText == "40.00")
-model.Objects.Add(moved(dim.Geometry, 20, 240), on_page())
+model.Objects.Add(moved(dim.Geometry, 20, 200), on_page())
 path = HERE / "rhino_layout_page.3dm"
 assert model.Write(str(path), 7)
 back = r3.File3dm.Read(str(path))

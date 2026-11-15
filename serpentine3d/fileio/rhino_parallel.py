@@ -405,7 +405,8 @@ def _convert_piece(job):
     return ("brep", *_brep_piece(job[1:]))
 
 
-def _convert_in_pool(path: str, workers: int, cancel=None):
+def _convert_in_pool(path: str, workers: int, cancel=None,
+                     pages_in: str | None = None):
     """Read the file, convert it across `workers` processes, yield as it goes.
 
     Messages are ("status", fraction, text), ("total", n) and
@@ -449,6 +450,14 @@ def _convert_in_pool(path: str, workers: int, cancel=None):
             yield ("batch", done, total, rows)
         if deferred:
             yield from _share_out(pool, deferred, done, total, workers, cancel)
+    if pages_in is not None:
+        # the layout pages, as sheets in `pages_in` units, which travel as
+        # a saved drawing's sheets do: a shape will not pickle
+        from . import rhino
+        from .rhino_pages import read_pages
+        from ..core.layout import layouts_to_json
+        rhino._HATCH_PATTERNS = rhino.read_hatch_patterns(path)
+        yield ("pages", layouts_to_json(read_pages(_MODEL, pages_in, path)))
 
 
 def _share_out(pool, deferred, done, total, workers, cancel):
@@ -512,13 +521,14 @@ def _share_out(pool, deferred, done, total, workers, cancel):
                    [(index, [(name, meta, encoded)])])
 
 
-def _read_file(path: str, workers: int, conn, cancel):
+def _read_file(path: str, workers: int, conn, cancel,
+               pages_in: str | None = None):
     """The spawned reader: forward the conversion down the pipe.
 
     Errors travel too. A file that will not open has to raise in the caller,
     not come back as an import that found nothing.
     """
-    stream = _convert_in_pool(path, workers, cancel)
+    stream = _convert_in_pool(path, workers, cancel, pages_in)
     try:
         for message in stream:
             conn.send(message)
@@ -560,8 +570,8 @@ def _is_deferred(payload) -> bool:
 
 
 def _assemble(messages, report, opening: str = "", path: str = "",
-              units: str = "mm",
-              notes: list | None = None) -> list[tuple[str, object, dict]]:
+              units: str = "mm", notes: list | None = None,
+              pages: list | None = None) -> list[tuple[str, object, dict]]:
     """Turn the reader's message stream into what import_3dm returns.
 
     Shapes are decoded as they land rather than at the end, so the bytes are
@@ -600,6 +610,10 @@ def _assemble(messages, report, opening: str = "", path: str = "",
             total = message[1]
         elif kind == "units":
             file_units = message[1]
+        elif kind == "pages":
+            if pages is not None:
+                from ..core.layout import layouts_from_json
+                pages.extend(layouts_from_json(message[1]))
         elif kind == "error":
             exc, text = message[1], message[2]
             raise exc if isinstance(exc, BaseException) else RuntimeError(text)
@@ -642,7 +656,8 @@ def rhino_module():
 
 def import_3dm_parallel(path: str, progress=None,
                         workers: int | None = None, units: str = "mm",
-                        notes: list | None = None
+                        notes: list | None = None,
+                        pages: list | None = None
                         ) -> list[tuple[str, object, dict]]:
     """import_3dm's answer, converted across processes.
 
@@ -662,7 +677,8 @@ def import_3dm_parallel(path: str, progress=None,
     # job is to fork some. The `finally` below stops it instead, and if the
     # app dies outright the pipe breaks under the reader's next send.
     proc = ctx.Process(target=_read_file,
-                       args=(path, worker_count(workers), sender, cancel))
+                       args=(path, worker_count(workers), sender, cancel,
+                             units if pages is not None else None))
     proc.start()
     sender.close()          # or the parent never sees the pipe close
     finished = False
@@ -671,7 +687,7 @@ def import_3dm_parallel(path: str, progress=None,
         # reader closing the pipe — so a normal return means it got to the end.
         items = _assemble(_messages(receiver), report,
                           f"Reading {os.path.basename(path)}…", path,
-                          units, notes)
+                          units, notes, pages)
         finished = True
         return items
     finally:
