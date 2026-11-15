@@ -1760,6 +1760,14 @@ def hatch_to_shapes(geo, patterns: dict) -> list:
 
 # --------------------------------------------------- what to put off doing
 
+def on_a_page(attrs) -> bool:
+    """Whether an object is on one of the file's layout pages rather than
+    in the model: a title block, a note, a detail viewport, in paper
+    millimetres. Those come in as sheets (`read_pages`), never into the
+    model, where they would sit at paper coordinates."""
+    return attrs.ActiveSpace == r3.ActiveSpace.PageSpace
+
+
 def worth_deferring(geo, meta: dict) -> bool:
     """Whether this object can be read now and converted later (#5).
 
@@ -1874,7 +1882,8 @@ def in_units(items: list, file_units: str | None, units: str,
 
 
 def import_3dm(path: str, progress=None, units: str = "mm",
-               notes: list | None = None) -> list[tuple[str, object, dict]]:
+               notes: list | None = None, pages: list | None = None
+               ) -> list[tuple[str, object, dict]]:
     """Returns [(name, shape, {layer, color})], scaled into `units`.
 
     A shape is either geometry or, for an object the file keeps out of
@@ -1886,7 +1895,7 @@ def import_3dm(path: str, progress=None, units: str = "mm",
     if _worth_parallelising(path):
         try:
             return import_3dm_parallel(path, report, units=units,
-                                       notes=notes)
+                                       notes=notes, pages=pages)
         except Cancelled:
             raise
         except Exception as exc:                                # noqa: BLE001
@@ -1906,6 +1915,9 @@ def import_3dm(path: str, progress=None, units: str = "mm",
     layers = read_layers(model)
     materials = read_materials(model)
     blocks = read_blocks(model)
+    if pages is not None:
+        from .rhino_pages import read_pages
+        pages.extend(read_pages(model, units, path))
 
     out = []
     counter = 0
@@ -1921,6 +1933,8 @@ def import_3dm(path: str, progress=None, units: str = "mm",
             # A definition's content is not in the drawing; only the
             # instances that place it are. Importing it too put a ghost copy
             # of every block at the origin.
+            continue
+        if on_a_page(attrs):
             continue
         meta = object_appearance(attrs, layers, materials)
         if isinstance(obj.Geometry, r3.InstanceReference):
