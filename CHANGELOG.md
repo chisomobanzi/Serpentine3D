@@ -22,6 +22,14 @@
   ticks that detail's view, and greys the views out when there is no
   detail to turn or it is locked. A locked detail keeps its view and says
   so. Details can be Isometric too, when placed and in Properties.
+- **Locking a detail locks its view, not its frame** (#130). A locked
+  detail keeps its camera and scale through panning, zooming, named views
+  and `detailscale`, and its frame now moves, resizes, scales, turns and
+  mirrors like any other, as in Rhino. Cropping a locked detail by a corner
+  shows more or less of the model without shifting what is drawn, so notes
+  beside it still point at the right place. The lock is a box in the
+  detail's Properties as well as the `detaillock` command, and a locked
+  detail's View and Scale are greyed there.
 - **Curves and edges are drawn smooth (#168).** A curve is drawn as short
   straight pieces, and each could turn 14 degrees from the next, so a gentle
   curve showed its corners once zoomed in. Now each turns at most 1 degree:

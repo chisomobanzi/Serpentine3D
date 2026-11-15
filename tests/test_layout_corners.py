@@ -214,7 +214,8 @@ def test_a_stale_corner_is_dropped(sheet):
     assert lv.corners == []
 
 
-def test_a_corner_of_a_locked_detail_is_pickable_but_does_not_move(sheet):
+def test_a_corner_of_a_locked_detail_resizes_it(sheet):
+    """The lock keeps the view, not the frame (#130)."""
     _, lv, lay = sheet
     det = lay.details[0]
     det.locked = True
@@ -223,7 +224,7 @@ def test_a_corner_of_a_locked_detail_is_pickable_but_does_not_move(sheet):
     _drag_to(lv, det.x - 20, det.y - 20)
     lv.release_drag()
     assert lv.corners == [(det, 0)]
-    assert (det.x, det.w) == pytest.approx((A["x"], A["w"]))
+    assert (det.x, det.w) == pytest.approx((A["x"] - 20, A["w"] + 20))
 
 
 def test_escape_lets_go_of_the_corner_before_the_detail(sheet):

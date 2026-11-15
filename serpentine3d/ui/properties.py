@@ -1108,6 +1108,15 @@ class PropertiesPanel(QWidget):
         form.addRow("Lineweight", self.lineweight_edit)
         form.addRow("View", self.detail_view_combo)
         form.addRow("Scale", self.scale_combo)
+        # a detail only: its lock, which keeps the view and the scale while
+        # the frame still moves and resizes (#130)
+        self.detail_locked = QCheckBox("Keep the view and scale")
+        self.detail_locked.setObjectName("detail_locked")
+        self.detail_locked.setToolTip(
+            "Panning, zooming and named views leave a locked detail as it "
+            "is. Its frame still moves and resizes.")
+        self.detail_locked.clicked.connect(self._change_detail_lock)
+        form.addRow("Lock", self.detail_locked)
         # a detail only: the layers it leaves out (#38)
         self.detail_layers = _DetailLayers(self._set_detail_layers)
         form.addRow("Hidden here", self.detail_layers)
@@ -1432,6 +1441,7 @@ class PropertiesPanel(QWidget):
         if detail is not None:
             self._show_scale(detail)
             self._show_detail_view(detail)
+            self._show_detail_lock(detail)
             self._show_detail_layers(detail)
             self._show_detail_clips(detail)
         self._show_hatch()
@@ -2417,6 +2427,7 @@ class PropertiesPanel(QWidget):
         self.form.setRowVisible(self.lineweight_edit, paper)
         self.form.setRowVisible(self.scale_combo, detail)
         self.form.setRowVisible(self.detail_view_combo, detail)
+        self.form.setRowVisible(self.detail_locked, detail)
         # one detail's own; refresh shows it again for a single detail
         self.form.setRowVisible(self.detail_layers, False)
         self.form.setRowVisible(self.detail_clips, False)
@@ -2640,6 +2651,20 @@ class PropertiesPanel(QWidget):
 
     def _show_detail_view(self, detail: DetailView):
         self.detail_view_combo.setCurrentText(self._detail_view_name(detail))
+
+    def _show_detail_lock(self, detail: DetailView):
+        """Ticked when locked, and then the view and scale it keeps are
+        shown but not offered."""
+        with QSignalBlocker(self.detail_locked):
+            self.detail_locked.setChecked(detail.locked)
+        self.detail_view_combo.setEnabled(not detail.locked)
+        self.scale_combo.setEnabled(not detail.locked)
+
+    def _change_detail_lock(self, on: bool):
+        detail = self._detail_pick()
+        if self._updating or detail is None or detail.locked == bool(on):
+            return
+        self._paper_edit("detail lock", detail, locked=bool(on))
 
     def _detail_view_name(self, detail: DetailView) -> str:
         """The standard view a detail looks along, or Custom."""

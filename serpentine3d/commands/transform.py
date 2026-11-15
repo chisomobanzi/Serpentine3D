@@ -40,7 +40,7 @@ def _sheet_ghost(ctx, picks, matrix, size: float = 1.0):
                           else shape)
             continue
         dup = copy.deepcopy(obj)
-        transform_sheet_item(kind, dup, matrix, size, ctx.scene, force=True)
+        transform_sheet_item(kind, dup, matrix, size, ctx.scene)
         for points, closed in sheet_item_linework(kind, dup, ctx.scene):
             pts = [(float(p[0]), float(p[1]), 0.0) for p in points]
             if len(pts) > 1:
@@ -275,9 +275,6 @@ def _move_on_paper(ctx, lv):
     dx, dy = p2[0] - p1[0], p2[1] - p1[1]
     moved = lv.move_corners(dx, dy) if lv.corners else \
         lv.move_selected(dx, dy)
-    if not moved:
-        ctx.echo("Nothing moved — the detail is locked.")
-        return
     ctx.echo(f"Moved {moved} {what}(s) by {dx:g}, {dy:g} mm on the sheet.")
 
 
@@ -449,17 +446,10 @@ def cmd_rotate(ctx):
         matrix = np.eye(3)
         matrix[:2, :2] = turn
         matrix[:2, 2] = pivot - turn @ pivot
-        done = kept = 0
         for kind, obj in picks:
-            if transform_sheet_item(kind, obj, matrix, 1.0, ctx.scene):
-                done += 1
-            else:
-                kept += 1
+            transform_sheet_item(kind, obj, matrix, 1.0, ctx.scene)
         ctx.scene.notify("layouts")
-        msg = f"Rotated {done} sheet item(s) by {angle:g} degrees."
-        if kept:
-            msg += f" {kept} locked detail(s) left as they were."
-        ctx.echo(msg)
+        ctx.echo(f"Rotated {len(picks)} sheet item(s) by {angle:g} degrees.")
     else:
         _do(ctx, held, objs, lambda s: g.rotate(s, center, axis, angle),
             "Rotated", f" by {angle:g} degrees",
@@ -472,7 +462,8 @@ def _scale_on_paper(ctx, lv, one_way: bool):
     `scale` and `scale2d` are the same thing on paper, the sheet being a
     plane: a uniform scale, text and offsets growing with it. `scale1d`
     stretches along one direction and leaves text and dimensions their
-    size. A locked detail is left alone and said so, as for move.
+    size. A detail's frame scales and its drawing scale stays, locked or
+    not.
     """
     import math
 
@@ -521,18 +512,11 @@ def _scale_on_paper(ctx, lv, one_way: bool):
     matrix = np.eye(3)
     matrix[:2, :2] = linear
     matrix[:2, 2] = np.array([bx, by]) - linear @ np.array([bx, by])
-    done = kept = 0
     for kind, obj in picks:
-        if transform_sheet_item(kind, obj, matrix, size, ctx.scene):
-            done += 1
-        else:
-            kept += 1
+        transform_sheet_item(kind, obj, matrix, size, ctx.scene)
     ctx.scene.notify("layouts")
     how = " along one direction" if one_way else ""
-    msg = f"Scaled {done} sheet item(s) by {factor:g}{how}."
-    if kept:
-        msg += f" {kept} locked detail(s) left as they were."
-    ctx.echo(msg)
+    ctx.echo(f"Scaled {len(picks)} sheet item(s) by {factor:g}{how}.")
 
 
 @command("scale", aliases=("sc",), space="any")
@@ -633,8 +617,7 @@ def _mirror_on_paper(ctx, lv):
     """Mirror what is picked on a sheet across a line on the paper (#36).
 
     Kept or not, as in the model. A kept original stays exactly where it
-    was and the mirror is a copy, so a locked frame can be mirrored that
-    way: the lock is about the frame not being disturbed, and it is not.
+    was and the mirror is a copy.
     """
     import math
 
@@ -674,23 +657,16 @@ def _mirror_on_paper(ctx, lv):
                            default="Yes",
                            preview_fn=lambda _keep: _preview(p2))
     lay = lv.layout
-    done = kept = 0
+    done = 0
     for kind, obj in picks:
         if keep == "Yes":
-            dup = copy_sheet_item(lay, kind, obj)
-            if dup is None:
+            obj = copy_sheet_item(lay, kind, obj)
+            if obj is None:
                 continue
-            transform_sheet_item(kind, dup, matrix, 1.0, ctx.scene, force=True)
-            done += 1
-        elif transform_sheet_item(kind, obj, matrix, 1.0, ctx.scene):
-            done += 1
-        else:
-            kept += 1
+        transform_sheet_item(kind, obj, matrix, 1.0, ctx.scene)
+        done += 1
     ctx.scene.notify("layouts")
-    msg = f"Mirrored {done} sheet item(s)."
-    if kept:
-        msg += f" {kept} locked detail(s) left as they were."
-    ctx.echo(msg)
+    ctx.echo(f"Mirrored {done} sheet item(s).")
 
 
 @command("mirror", aliases=("mi",), space="any")

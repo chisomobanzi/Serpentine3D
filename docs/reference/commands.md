@@ -130,7 +130,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `detail` | Detail |
 | `detailborder` | Detailborder |
 | `detaildelete` | Detaildelete |
-| `detaillock` | Detaillock |
+| `detaillock` | Lock or unlock a detail's view and scale; its frame still moves |
 | `detailmode` | Detailmode |
 | `detailscale` | Detailscale |
 | `detailsection` | Detailsection |

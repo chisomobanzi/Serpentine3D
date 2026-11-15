@@ -1024,13 +1024,12 @@ def move_sheet_item(kind: str, obj, dx: float, dy: float):
 
     Three kinds each knew how to move themselves; what was missing was one
     question that could be asked of a mixed handful, which is what a selection
-    on a sheet is. A locked detail is left where it is — that is what the lock
-    is for — so a caller can hand over the whole selection without sorting it.
+    on a sheet is. A locked detail moves too: its lock keeps its view, and
+    the view travels with the frame (#130).
     """
     if kind == "detail":
-        if not obj.locked:
-            obj.x += dx
-            obj.y += dy
+        obj.x += dx
+        obj.y += dy
     elif kind == "object":
         move_paper_object(obj, dx, dy)
     else:
@@ -1038,7 +1037,7 @@ def move_sheet_item(kind: str, obj, dx: float, dy: float):
 
 
 def transform_sheet_item(kind: str, obj, matrix, size: float = 1.0,
-                         scene=None, force: bool = False) -> bool:
+                         scene=None) -> bool:
     """Put anything a sheet holds through an affine map of the paper.
 
     `matrix` is a 3x3 map of paper millimetres, (x, y, 1) in and out; it
@@ -1048,10 +1047,9 @@ def transform_sheet_item(kind: str, obj, matrix, size: float = 1.0,
     passes 1, which moves text and dimensions without distorting them.
 
     A detail's frame is mapped and its drawing scale kept, so a 1:50 detail
-    stays 1:50 and shows more or less of the model. A locked detail is left
-    alone, as it is by `move_sheet_item`, unless `force` says the caller
-    means it (a copy of a locked frame is not the frame the lock protects);
-    the return says whether the item was changed.
+    stays 1:50 and shows more or less of the model. A locked one too: the
+    lock keeps the view, not the frame (#130). The return says whether the
+    item was changed.
 
     A turn or a reflection is drawn the way a drawing wants it rather than
     literally. A note is always drawn level and reading forwards, so its
@@ -1079,8 +1077,6 @@ def transform_sheet_item(kind: str, obj, matrix, size: float = 1.0,
 
     grow = abs(float(size) - 1.0) > 1e-12
     if kind == "detail":
-        if obj.locked and not force:
-            return False
         if turns:
             cx, cy = at(obj.x + obj.w / 2, obj.y + obj.h / 2)
             obj.w = max(obj.w * scale, MIN_DETAIL_MM)
@@ -1171,6 +1167,12 @@ def nudge_detail_corners(det, indices, dx: float, dy: float):
     A corner is where two edges meet, so moving one on its own stretches the
     frame in both directions. Take the two corners of an edge and that edge
     travels; take all four and the whole detail does.
+
+    A locked detail keeps its picture where it is on the page while its
+    frame is cropped, so the notes drawn beside it still point at what they
+    did (#130). Its view is drawn about the frame's middle, which a crop
+    moves, so the target moves to make up for it. Only a parallel view can
+    be held still that way; a perspective one is aimed at its middle.
     """
     idx = set(indices)
     x0, y0 = det.x, det.y
@@ -1183,8 +1185,28 @@ def nudge_detail_corners(det, indices, dx: float, dy: float):
         y0 += dy
     if idx & {2, 3}:
         y1 += dy
+    middle = (det.x + det.w / 2, det.y + det.h / 2)
     det.x, det.w = min(x0, x1), max(abs(x1 - x0), MIN_DETAIL_MM)
     det.y, det.h = min(y0, y1), max(abs(y1 - y0), MIN_DETAIL_MM)
+    if det.locked and not det.perspective:
+        # The picture goes with the frame along an axis only when both of
+        # that axis's edges went, which is a move rather than a crop.
+        across = bool(idx & {0, 3}) and bool(idx & {1, 2})
+        along = bool(idx & {0, 1}) and bool(idx & {2, 3})
+        _draw_target_at(det, (middle[0] + (dx if across else 0.0),
+                              middle[1] + (dy if along else 0.0)))
+
+
+def _draw_target_at(det, at):
+    """Move a detail's target so that the point it was aimed at is drawn at
+    `at` on the paper, not at the frame's middle, without turning or scaling
+    the view."""
+    import numpy as np
+    _d, right, up = detail_basis(det)
+    du = det.x + det.w / 2 - at[0]
+    dv = det.y + det.h / 2 - at[1]
+    det.target = [float(c) for c in np.asarray(det.target, float)
+                  + (du * right + dv * up) * det.scale_denom]
 
 
 def sheet_pools(layout) -> dict:

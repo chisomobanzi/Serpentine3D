@@ -1437,7 +1437,7 @@ class LayoutView:
             for i, (gx, gy) in enumerate(self._corners(det)):
                 if abs(px - gx) <= tol and abs(py - gy) <= tol:
                     self._take_corner((det, i), add)
-                    if det.locked or (det, i) not in self.corners:
+                    if (det, i) not in self.corners:
                         return True
                     self._press_corner = None if add else (det, i)
                     self._drag_checkpoint = "resize detail"
@@ -1459,12 +1459,10 @@ class LayoutView:
             hit = ("detail", det) if det is not None else None
         if hit is not None:
             self._take(hit, add)
-            movable = [(k, o) for k, o in self.selected
-                       if k != "detail" or not o.locked]
-            if movable and hit in self.selected:
+            if hit in self.selected:
                 self._press_hit = None if add else hit
                 self._drag_checkpoint = "move sheet item"
-                self._drag = ("move", -1, movable)
+                self._drag = ("move", -1, list(self.selected))
                 self._drag_last = (px, py)
             return True
         # Empty paper: sweep a band out of it.
@@ -1588,8 +1586,6 @@ class LayoutView:
         if not self.corners:
             return 0
         det = self.corners[0][0]
-        if det.locked:
-            return 0
         from ..core.layout import nudge_detail_corners
         nudge_detail_corners(det, [i for _, i in self.corners], dx, dy)
         self._hlr_cache.pop(det.id, None)
@@ -1603,8 +1599,6 @@ class LayoutView:
         moved = 0
         for kind, obj in self.selected:
             if kind == "detail":
-                if obj.locked:
-                    continue
                 obj.x += dx
                 obj.y += dy
                 self._hlr_cache.pop(obj.id, None)
@@ -1620,11 +1614,10 @@ class LayoutView:
     def copy_selected(self, dx: float, dy: float) -> int:
         """Duplicate every picked sheet item, the copy offset by millimetres.
 
-        It is the copy that moves and the original that is left alone, which
-        is what lets a locked frame be copied: the lock is about the frame not
-        being disturbed, and it is not. It also leaves the picked items still
-        picked, so a second copy is measured from the same place as the first
-        instead of walking away from it.
+        It is the copy that moves and the original that is left alone. It
+        also leaves the picked items still picked, so a second copy is
+        measured from the same place as the first instead of walking away
+        from it.
         """
         lay = self.layout
         self._prune()

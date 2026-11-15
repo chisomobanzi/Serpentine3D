@@ -260,6 +260,10 @@ def cmd_detailscale(ctx):
         ctx.echo("Enter a detail first (double-click it).")
         return
         yield  # pragma: no cover
+    if detail.locked:
+        ctx.echo("The detail is locked, so its scale stays. "
+                 "Run detaillock to unlock it.")
+        return
     units = ctx.scene.units
     text = yield TextReq("New scale (e.g. 1:20)",
                          default=detail.scale_text(units))
@@ -292,6 +296,7 @@ def cmd_detailmode(ctx):
 
 @command("detaillock")
 def cmd_detaillock(ctx):
+    """Lock or unlock a detail's view and scale; its frame still moves."""
     lay, detail = _entered_or_only_detail(ctx)
     if detail is None:
         ctx.echo("Enter a detail first (double-click it).")
