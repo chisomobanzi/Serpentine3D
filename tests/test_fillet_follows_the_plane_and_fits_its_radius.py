@@ -67,10 +67,15 @@ def test_parallel_lines_without_a_corner_fail_cleanly():
         g.fillet_curves(l1, l2, 2.0, (5.0, 1.0, 0.0), plane=(0, 0, 1))
 
 
+def _rounded_rectangle():
+    """24 x 14 with radius-1 arc corners: what offsetting a 22 x 12 one by 1
+    used to make, before offsets kept their corners sharp."""
+    rect = g.make_rectangle((-1, -1, 0), (23, 13, 0))
+    return g.fillet_corners(rect, 1.0)
+
+
 def _rounded_prism():
-    rect = g.make_rectangle((0, 0, 0), (22, 12, 0))
-    rounded = g.offset_curve(rect, 1.0)
-    return g.extrude(rounded, (0, 0, 1), 5.0, cap=True)
+    return g.extrude(_rounded_rectangle(), (0, 0, 1), 5.0, cap=True)
 
 
 def _a_top_line_edge(prism):
@@ -198,8 +203,7 @@ def test_fillet_corners_handles_left_and_right_turns():
 
 
 def test_fillet_corners_skips_corners_that_are_already_smooth():
-    rect = g.make_rectangle((0, 0, 0), (22, 12, 0))
-    rounded = g.offset_curve(rect, 1.0)     # every corner is an arc joint
+    rounded = _rounded_rectangle()          # every corner is an arc joint
     out = g.fillet_corners(rounded, 2.0)
     assert g.curve_length(out) == pytest.approx(
         g.curve_length(rounded), rel=1e-6)

@@ -769,23 +769,56 @@ class MainWindow(QMainWindow):
         CommandPalette.popup(self, self.command_line.run_command)
 
     def _show_mmb_popup(self):
-        """Middle-click popup: recent commands + staples (Rhino-style)."""
         from PySide6.QtGui import QCursor
-        from PySide6.QtWidgets import QMenu
+        self._mmb_menu().exec(QCursor.pos())
+
+    def _mmb_menu(self) -> QMenu:
+        """Middle-click popup: Join and Explode side by side, then up to
+        twelve recent commands and the staples (Rhino-style)."""
+        from PySide6.QtWidgets import QHBoxLayout, QToolButton, QWidgetAction
+        from .ui.icons import command_icon
         menu = QMenu(self)
+
+        def run(name):
+            menu.close()
+            self.command_line.run_command(name)
+
+        row = QWidget(menu)
+        row.setObjectName("popupButtons")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+        for label, name in (("Join", "join"), ("Explode", "explode")):
+            button = QToolButton(row)
+            button.setObjectName(f"popup_{name}")
+            button.setText(label)
+            button.setIcon(command_icon(name))
+            button.setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+            button.setProperty("framed", True)
+            button.clicked.connect(lambda _=False, n=name: run(n))
+            layout.addWidget(button)
+        layout.addStretch(1)
+        pair = QWidgetAction(menu)
+        pair.setDefaultWidget(row)
+        menu.addAction(pair)
+        menu.addSeparator()
         recent = self.command_line.recent_commands()
         for name in recent:
-            menu.addAction(name, lambda n=name:
-                           self.command_line.run_command(n))
+            menu.addAction(name, lambda n=name: run(n))
         if recent:
             menu.addSeparator()
         for name in ("line", "circle", "extrude", "move", "zoomextents"):
             if name not in recent:
-                menu.addAction(name, lambda n=name:
-                               self.command_line.run_command(n))
+                menu.addAction(name, lambda n=name: run(n))
         menu.addSeparator()
         menu.addAction("Command palette…", self._show_palette)
-        menu.exec(QCursor.pos())
+        return menu
+
+    def flash_objects(self, ids):
+        """Light what a command just made, in every pane that shows it."""
+        for vp in self.all_viewports():
+            vp.flash(ids)
 
     def all_viewports(self) -> list:
         """Every pane you can see. The primary is asked the same question
@@ -2974,9 +3007,25 @@ class MainWindow(QMainWindow):
     def _on_update_available(self, rel):
         """Main-thread slot: a newer release was found on launch."""
         self._pending_update = rel
-        self.statusBar().showMessage(
-            f"Serpentine3D {rel['version']} is available — "
-            f"Help ▸ Check for Updates to download.", 12000)
+        # A permanent widget: a timed message is wiped by the next status
+        # refresh or menu hover, so the notice was gone before anyone saw it.
+        if getattr(self, "_update_button", None) is None:
+            from PySide6.QtWidgets import QPushButton
+            self._update_button = QPushButton()
+            self._update_button.setFlat(True)
+            self._update_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._update_button.clicked.connect(self._open_update_notice)
+            self.statusBar().addPermanentWidget(self._update_button)
+        self._update_button.setText(
+            f"Serpentine3D {rel['version']} is available")
+        self._update_button.setToolTip("Download or read the release notes")
+        self._update_button.show()
+
+    def _open_update_notice(self):
+        """The notice has done its job once clicked: the download dialog
+        says the rest, and it is not left standing in the status bar."""
+        self._update_button.hide()
+        self._check_updates_manual()
 
     def _check_updates_manual(self):
         """Help ▸ Check for Updates: synchronous, always reports back."""
