@@ -119,9 +119,9 @@ def cmd_helix(ctx):
     ctx.echo(f"Created {obj.name} ({turns:g} turns).")
 
 
-@command("textobject", aliases=("textcurves",))
-def cmd_textobject(ctx):
-    """Place editable model text or grouped letter outline curves."""
+def place_model_text(ctx):
+    """The `text` command in the model: editable lettering, or its letter
+    outlines as curves, surfaces or solids."""
     from ..core.text import TextShape, text_curves
     from ..core.text_object import output_shapes
     from . import dragging

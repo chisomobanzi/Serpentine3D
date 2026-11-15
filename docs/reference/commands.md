@@ -155,7 +155,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `sheetindex` | Place an index of all sheets as a note on the current layout. |
 | `showindetail` | Inside a detail, show every object it has hidden. |
 | `showselectedindetail` | Inside a detail, show the objects you pick of those it has hidden. |
-| `text` (`note`) | Text |
+| `text` (`note`) | Place text: a note on a sheet, editable lettering in the model. |
 | `titleblock` | Titleblock |
 
 ## Editing
@@ -311,7 +311,6 @@ Commands that need a file open a filtered chooser by default. Append
 | `shell` | Hollow a solid out, keeping its outside. Click the solid on the face to open, or Ctrl+Shift-click faces first to open several; a solid named rather than clicked is shelled closed, hollow inside. |
 | `sweep1` (`sweep`) | Sweep1 |
 | `sweep2` | Sweep2 |
-| `textobject` (`textcurves`) | Place editable model text or grouped letter outline curves. |
 | `unrollsrf` (`unroll`) | Unrollsrf |
 | `untrim` | Untrim |
 

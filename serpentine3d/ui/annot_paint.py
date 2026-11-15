@@ -63,6 +63,13 @@ def _arrow(painter, to_dev, tip, direction, size=2.2):
 
 def draw_note(painter, to_dev, k, note, scene=None):
     height = note_text_height(note, scene)
+    if note.background:
+        from PySide6.QtCore import QPointF, QRectF
+        from ..core.layout import annotation_bounds
+        x0, y0, x1, y1 = annotation_bounds("note", note, scene)
+        painter.fillRect(QRectF(QPointF(*to_dev(x0, y1)),
+                                QPointF(*to_dev(x1, y0))).normalized(),
+                         QColor(255, 255, 255))
     if note.font_family:
         from ..core.text import text_path
         path = text_path(note.text, height, note.font_family,

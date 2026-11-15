@@ -23,7 +23,7 @@ from serpentine3d.core.layout import (
     annotation_at,
     annotation_bounds,
 )
-from serpentine3d.ui.text_editor import TextEditorDialog
+from serpentine3d.ui.text_editor import InlineTextEditor, TextEditorDialog
 
 
 @pytest.fixture
@@ -64,7 +64,11 @@ def _replace_text(editor, lines):
     QTest.keyClick(editor, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
     for index, line in enumerate(lines):
         if index:
-            QTest.keyClick(editor, Qt.Key.Key_Return)
+            # the viewport popup closes on Enter and breaks on Ctrl+Enter
+            QTest.keyClick(editor, Qt.Key.Key_Return,
+                           Qt.KeyboardModifier.ControlModifier
+                           if isinstance(editor, InlineTextEditor)
+                           else Qt.KeyboardModifier.NoModifier)
         QTest.keyClicks(editor, line)
     QApplication.processEvents()
 

@@ -51,6 +51,17 @@
 - **A DXF import says how far it has got,** and can be cancelled,
   which leaves the drawing as it was. Contributed by Jonas Pedrotti
   (#123).
+- **Editable text is drawn filled.** Its letters are solid with their
+  counters open, and no outline, in the model in every display mode, in
+  details on sheets and in PDFs. Picked text shows a dotted frame, and a
+  click anywhere inside it picks the text. Contributed by Jonas Pedrotti
+  (#142).
+- **Text can sit on a background.** A patch of the drawing's own colour
+  hides what lies behind it, reaching a margin past the lettering (a
+  quarter of its capital height unless changed). Properties sets it for
+  model text and sheet notes, and snaps, picking and the frame follow it.
+  A drawing that uses one needs 0.13.0 to open. Contributed by Jonas
+  Pedrotti (#142).
 - **Show the hidden objects you pick.** `show` brings back everything
   hidden at once. As in Rhino, `showselected` (`unhideselected`) puts the
   hidden objects on show while it waits, with everything else stepped
@@ -67,6 +78,22 @@
   hides cannot be picked, and nor, now, can what is on a layer it leaves
   out. A drawing that uses this needs 0.13.0 to open: 0.12.5 would show
   those objects in the detail again and lose the choice on a save.
+
+### Changed
+
+- **One Text command.** `text` places a note on a sheet and editable
+  lettering in the model, and the Drafting menu says Text....
+  `textobject` and `textcurves` still run it, so scripts and recovered
+  sessions from before keep their text. In the text popup Enter finishes
+  and Ctrl+Enter starts a new line. Contributed by Jonas Pedrotti (#142).
+- **Look at text turns flat text so it reads level,** and Home goes back
+  to the view before, as after any other view change. Contributed by
+  Jonas Pedrotti (#142).
+- **A move, rotate, scale or copy keeps what it moves selected,** while
+  you place it and afterwards. Contributed by Jonas Pedrotti (#142).
+- **Dragging text is smooth.** A moved, turned or scaled text carries its
+  letters along instead of rebuilding them, about 30 ms a step instead of
+  225 ms. Contributed by Jonas Pedrotti (#142).
 
 ### Fixed
 

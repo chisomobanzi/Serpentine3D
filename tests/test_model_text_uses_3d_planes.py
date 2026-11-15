@@ -77,7 +77,7 @@ def test_new_model_text_uses_the_plane_chosen_in_the_contextual_ui(
     camera.target = np.asarray((8., 9., 10.))
     camera.distance = 140.
 
-    window.processor.run("textobject")
+    window.processor.run("text")
     combo = _placement_control(window)
     _choose(combo, placement)
     if placement == "CPlane":
@@ -98,7 +98,7 @@ def test_new_model_text_uses_the_plane_chosen_in_the_contextual_ui(
 
 def test_selected_face_placement_uses_a_held_planar_face_and_asks_when_missing(
         window):
-    window.processor.run("textobject")
+    window.processor.run("text")
     combo = _placement_control(window)
     _choose(combo, "Selected face")
     assert "face" in window.processor.request.prompt.lower(), (
@@ -113,7 +113,7 @@ def test_selected_face_placement_uses_a_held_planar_face_and_asks_when_missing(
     window.selection.set([box.id])
     window.selection.toggle_subobject(box.id, "face", face_index)
 
-    window.processor.run("textobject")
+    window.processor.run("text")
     combo = _placement_control(window)
     _choose(combo, "Selected face")
     anchor = (4., 6., 10.)
@@ -138,6 +138,7 @@ def test_look_at_text_is_a_reversible_camera_only_action(window):
     camera.set_standard_view("front")
     camera.target = np.asarray((-10., 4., 2.))
     camera.distance = 175.
+    window.viewport.note_view_change(now=0.)
     before_camera = camera.state()
     before_shape = obj.shape.to_bytes()
     before_scene = fingerprint(window.scene.snapshot())
@@ -153,6 +154,8 @@ def test_look_at_text_is_a_reversible_camera_only_action(window):
     QTest.mouseClick(button, Qt.MouseButton.LeftButton)
     QApplication.processEvents()
     assert camera.state() != before_camera
+    assert button.text() == "Look at text", "it does one thing"
+    window.viewport.note_view_change(now=100.)
     text_origin = _text_frame(obj)[:3, 3]
     toward_camera = camera.position - text_origin
     toward_camera /= np.linalg.norm(toward_camera)
@@ -162,10 +165,37 @@ def test_look_at_text_is_a_reversible_camera_only_action(window):
     assert fingerprint(window.scene.snapshot()) == before_scene
     assert window.history._undo == before_history
 
-    QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+    window.processor.run("undoview")
     QApplication.processEvents()
     assert camera.state() == before_camera, (
-        "The same contextual action must restore the previous view")
+        "Undo View goes back to the view before, as after any other")
     assert window.scene.get(obj.id).shape.to_bytes() == before_shape
     assert fingerprint(window.scene.snapshot()) == before_scene
     assert window.history._undo == before_history
+
+
+@pytest.mark.parametrize("turn,face_up", [(0., True), (30., True),
+                                         (120., True), (0., False)])
+def test_looking_at_flat_text_reads_it_level(window, turn, face_up):
+    """Straight down on lettering lying flat, the view still turns so the
+    text reads across the screen, not up it."""
+    angle = np.radians(turn)
+    basis = np.eye(4)
+    basis[:3, 0] = (np.cos(angle), np.sin(angle), 0.)
+    basis[:3, 1] = (-np.sin(angle), np.cos(angle), 0.)
+    if not face_up:
+        basis[:3, 1] *= -1.
+        basis[:3, 2] = (0., 0., -1.)
+    obj = window.scene.add(g.apply_matrix(TextShape("Flat label", 6.), basis))
+    window.selection.set([obj.id])
+    QApplication.processEvents()
+    window._look_at_text()
+    vp = window.active_viewport
+    frame = _text_frame(obj)
+    origin = frame[:3, 3]
+    o, up, across = vp.camera.project(
+        np.asarray([origin, origin + frame[:3, 1], origin + frame[:3, 0]]),
+        vp.width(), vp.height())
+    assert abs(up[0] - o[0]) < 1e-6 and up[1] < o[1], "its up is up"
+    assert abs(across[1] - o[1]) < 1e-6 and across[0] > o[0], (
+        "and it runs left to right")

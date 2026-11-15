@@ -58,10 +58,10 @@ def _new_sheet(proc):
     return sheet
 
 
-def _place_text(window, values, position, *, command="textobject", curves=False):
-    if command == "textobject":
+def _place_text(window, values, position, *, on_sheet=False, curves=False):
+    if not on_sheet:
         if curves:
-            window.processor.run(command)
+            window.processor.run("text")
             assert isinstance(window.processor.request, PointReq)
             window.processor.provide(position)
             QApplication.processEvents()
@@ -71,7 +71,7 @@ def _place_text(window, values, position, *, command="textobject", curves=False)
             return
         editor._place_model(window, values, position=position)
         return
-    window.processor.run(command)
+    window.processor.run("text")
     assert isinstance(window.processor.request, PointReq)
     window.processor.provide(position)
     QApplication.processEvents()
@@ -150,7 +150,7 @@ def test_formatted_notes_recover_on_their_sheet(
     editor._forbid_modal(monkeypatch)
     sheet = _new_sheet(w.processor)
     assert w.viewport.space == sheet.id
-    _place_text(w, typography, (50., 70., 0.), command="text")
+    _place_text(w, typography, (50., 70., 0.), on_sheet=True)
     note, = sheet.notes
     expected = typography
     if edit_after_placement:
@@ -170,18 +170,18 @@ def test_formatted_notes_recover_on_their_sheet(
     assert not recovered.all(), "Paper text must remain on the sheet"
 
 
-@pytest.mark.parametrize("command", ["textobject", "text"])
+@pytest.mark.parametrize("where", ["model", "sheet"])
 @pytest.mark.parametrize("stage", ["anchor", "inline"])
 def test_cancelled_text_does_not_return_during_recovery(
-        recording_window, monkeypatch, typography, command, stage):
+        recording_window, monkeypatch, typography, where, stage):
     w = recording_window
     editor._forbid_modal(monkeypatch)
     # Keep a real preceding command, so even an entirely cancelled editor
     # session has a journal and a useful object that must survive recovery.
     w.processor.run("line 0,0,0 10,0,0")
-    if command == "text":
+    if where == "sheet":
         _new_sheet(w.processor)
-    w.processor.run(command)
+    w.processor.run("text")
     assert isinstance(w.processor.request, PointReq)
     if stage == "anchor":
         w.processor.cancel()
@@ -200,7 +200,7 @@ def test_existing_scripted_text_sequences_remain_recoverable(env, tmp_path, monk
     scene, _selection, history, ctx, proc = env
     journal = SessionJournal(str(tmp_path / "scripted.jsonl"))
     journal.attach(proc, scene, history)
-    proc.run("textobject")
+    proc.run("text")
     for answer in ("BOR", "10,20,0", "7"):
         proc.provide_text(answer)
     assert not proc.busy

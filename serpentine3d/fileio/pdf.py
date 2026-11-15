@@ -148,17 +148,16 @@ def _paint_detail_vector(painter, layout_view, detail, layout, k):
                 qpoly.append(QPointF(x, y))
             painter.drawPolyline(qpoly)
 
-    # Hatches under everything else, each on its background and in its
-    # colour, as the sheet shows them (#91).
-    hatches = data.get("hatches") or []
-    looks = getattr(layout_view, "hatch_looks", None)
-    if hatches and looks is not None:
+    def paint_fills(key):
+        hatches = data.get(key) or []
+        looks = getattr(layout_view, "hatch_looks", None)
+        if not hatches or looks is None:
+            return
         from PySide6.QtCore import QPointF
-        from PySide6.QtGui import QPolygonF
 
         from ..core.layout import detail_hatches
         from ..ui.annot_paint import HATCH_INK, SOLID_FILL
-        floods, lines = detail_hatches(hatches, looks(data), cx, cy, s)
+        floods, lines = detail_hatches(hatches, looks(data, key), cx, cy, s)
         painter.setPen(Qt.PenStyle.NoPen)
         for color, tris in floods:
             painter.setBrush(SOLID_FILL if color is None
@@ -173,6 +172,10 @@ def _paint_detail_vector(painter, layout_view, detail, layout, k):
                 painter.drawLine(
                     QPointF(a[0] * k, (layout.paper_h - a[1]) * k),
                     QPointF(b[0] * k, (layout.paper_h - b[1]) * k))
+
+    # Hatches under everything else, each on its background and in its
+    # colour, as the sheet shows them (#91).
+    paint_fills("hatches")
 
     if detail.display_mode == "hidden":
         pen_h = QPen(QColor(110, 110, 120), 0.18 * k)
@@ -232,6 +235,8 @@ def _paint_detail_vector(painter, layout_view, detail, layout, k):
                 painter.drawPolyline(QPolygonF(
                     [QPointF(x * k, (layout.paper_h - y) * k)
                      for x, y in ring]))
+    # Text over all of it, its background hiding what lies behind it.
+    paint_fills("texts")
     painter.restore()
 
 

@@ -242,6 +242,15 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                    for d in lay.details)):
         doc["version"] = 9
         doc["requires"] = "0.13.0"
+    # A release before text backgrounds opens a drawing with one and drops
+    # it without a word, so a save there would lose it.
+    from ..core.text import TextShape
+    if (any(isinstance(shape, TextShape) and shape.background
+            for shape in new_shapes)
+            or any(note.background for lay in scene.layouts
+                   for note in lay.notes)):
+        doc["version"] = 9
+        doc["requires"] = "0.13.0"
     _write_container(doc, path, thumbnail, blobs)
 
 
