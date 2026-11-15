@@ -52,6 +52,11 @@ class _GLRecorder:
 def gl(monkeypatch):
     rec = _GLRecorder()
     monkeypatch.setattr(vp_mod, "GL", rec)
+    # No real context here, so no context group either. Left to ask, a
+    # test that ran a real window before this one can leave its context
+    # current, and its group in some share keys and not others once it
+    # is deleted: the second pane then uploaded batches the first had.
+    monkeypatch.setattr(vp_mod, "_current_share_group", lambda: None)
     gpu_share.reset()
     yield rec
     gpu_share.reset()
@@ -250,10 +255,45 @@ def test_letting_go_of_an_object_gives_the_same_batches_back(gl):
     assert {id(b) for b in _batches(_items(view))} == before
 
 
-def test_a_translucent_frame_is_drawn_an_object_at_a_time(gl):
+def _drawn_order(gl, view, **kw):
+    """What a frame draws, in order, batches and all: the list it culls."""
+    seen = []
+    cull = view._cull
+
+    def catch(mvp, objects):
+        seen.append(list(objects))
+        return cull(mvp, objects)
+    view._cull = catch
+    _frame_draws(gl, view, **kw)
+    return seen[0]
+
+
+def test_one_see_through_object_leaves_the_rest_batched(gl):
+    """The cave has one surface at 28% opacity among thousands of curves,
+    and it used to send the whole frame down the one-at-a-time path."""
     view = _view(40)
-    view.scene.all()[0].material = {"opacity": 0.5}
-    assert _frame_draws(gl, view) >= 40
+    view.scene.all()[7].material = {"opacity": 0.5}
+    assert _frame_draws(gl, view) <= 12
+
+
+def test_see_through_objects_are_drawn_last_back_to_front(gl):
+    """They blend over what is behind them, so everything opaque goes
+    down first, and the farther of two see-through ones before the nearer."""
+    view = _view(40)
+    objs = view.scene.all()
+    near, far = sorted((objs[3], objs[30]), key=lambda o: np.linalg.norm(
+        np.mean(o.bbox(), axis=0) - np.asarray(view.camera.position)))
+    for o in (near, far):
+        o.material = {"opacity": 0.5}
+    order = _drawn_order(gl, view)
+    assert order[-2:] == [far, near]
+    assert _batches(order[:-2]), "the opaque ones still batch"
+    assert not any(o in (near, far) for o in order[:-2])
+
+
+def test_a_ghosted_frame_is_still_drawn_an_object_at_a_time(gl):
+    view = _view(40)
+    assert _frame_draws(gl, view, mode_override="ghosted") >= 40
 
 
 @pytest.mark.parametrize("mode", ["ghosted", "rendered"])

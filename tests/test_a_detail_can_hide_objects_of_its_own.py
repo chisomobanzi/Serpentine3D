@@ -592,6 +592,7 @@ def gl(monkeypatch):
     from tests.test_alike_objects_share_a_draw_call import _GLRecorder
 
     monkeypatch.setattr(vp_mod, "GL", _GLRecorder())
+    monkeypatch.setattr(vp_mod, "_current_share_group", lambda: None)
     gpu_share.reset()
     yield
     gpu_share.reset()
