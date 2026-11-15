@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- **A Rhino file's layout pages come in as sheets.** Each page becomes a
+  sheet named after it, on the paper it was set up on, with its notes,
+  linework, leaders, hatches, dimensions and blocks, and detail views
+  looking where Rhino's do at the same scale. Title-block fields for the
+  page name and the document's text are filled in. Until now everything
+  on a layout page was dropped into the model at paper coordinates: a
+  film set of 379 model objects came in as more than 10,000.
+
 ### Fixed
 
 - **A see-through object no longer slows the whole view down.** One
