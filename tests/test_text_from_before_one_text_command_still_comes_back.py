@@ -50,5 +50,6 @@ def _scripted(name):
 @pytest.mark.parametrize("name", ["textobject", "textcurves"])
 def test_the_old_names_make_what_text_makes(name):
     made = _scripted(name)
-    assert len(made) == 7, "B, O and R as their outlines"
-    assert made == _scripted("text")
+    # how many outlines B, O and R make is the font's business (seven
+    # here, six on macOS); that the old name makes the same is the test's
+    assert made and made == _scripted("text")
