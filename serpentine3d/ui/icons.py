@@ -239,14 +239,25 @@ def _intersection(p):
     p.drawPath(inter)
 
 
+# Join and Explode are the same four lines from the corners and a gold X in
+# the middle: the lines run into it, or are blown back from it.
+_SPOKES = ((-1, -1), (1, -1), (-1, 1), (1, 1))
+
+
+def _gold_x(p, arm, width):
+    pen = QPen(_ACCENT, width)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.save()
+    p.setPen(pen)
+    p.drawLine(QPointF(11 - arm, 11 - arm), QPointF(11 + arm, 11 + arm))
+    p.drawLine(QPointF(11 + arm, 11 - arm), QPointF(11 - arm, 11 + arm))
+    p.restore()
+
+
 def _join(p):
-    path = QPainterPath(QPointF(4, 18))
-    path.lineTo(11, 11)
-    p.drawPath(path)
-    path2 = QPainterPath(QPointF(11, 11))
-    path2.quadTo(14, 8, 18, 4)
-    p.drawPath(path2)
-    _dot(p, 11, 11)
+    for dx, dy in _SPOKES:
+        p.drawLine(QPointF(11 + 7 * dx, 11 + 7 * dy), QPointF(11, 11))
+    _gold_x(p, 2, 3.4)
 
 
 def _delete(p):
@@ -303,10 +314,10 @@ def _fillet(p):
 
 
 def _explode(p):
-    p.drawRect(QRectF(8, 8, 6, 6))
-    for (x0, y0, x1, y1) in [(8, 8, 4, 4), (14, 8, 18, 4),
-                             (8, 14, 4, 18), (14, 14, 18, 18)]:
-        p.drawLine(x0, y0, x1, y1)
+    for dx, dy in _SPOKES:
+        p.drawLine(QPointF(11 + 4.2 * dx, 11 + 4.2 * dy),
+                   QPointF(11 + 8 * dx, 11 + 8 * dy))
+    _gold_x(p, 1.6, 2.2)
 
 
 def _points(p):

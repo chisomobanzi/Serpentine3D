@@ -1,0 +1,235 @@
+{
+  "source_commit": "eb92af3ba1806b0a34a99aba0d3bda83e3d46083",
+  "sources": [
+    "V7/v7_rhino_logo_annotations.3dm",
+    "V6/V6_annotation.3dm"
+  ],
+  "writer": "rhino3dm 8.32.0",
+  "units": "mm",
+  "dimensions": [
+    {
+      "name": "V7_Linear_18",
+      "source": "V7/v7_rhino_logo_annotations.3dm",
+      "annotation_type": "AnnotationTypes.Rotated",
+      "text": "26.34",
+      "measurement": 26.340699049920854,
+      "points": {
+        "defpt1": [
+          -4.336030136946263,
+          0.0,
+          13.249750772815583
+        ],
+        "defpt2": [
+          8.539498466033232,
+          0.0,
+          -13.090948277105271
+        ],
+        "arrowpt1": [
+          25.663969863053737,
+          0.0,
+          13.249750772815583
+        ],
+        "arrowpt2": [
+          25.663969863053737,
+          0.0,
+          -13.090948277105271
+        ],
+        "dimline": [
+          25.663969863053737,
+          0.0,
+          -7.750249227184417
+        ],
+        "textpt": [
+          25.663969863053737,
+          0.0,
+          0.07940124785515579
+        ]
+      },
+      "plane_origin": [
+        -4.336030136946263,
+        0.0,
+        13.249750772815583
+      ],
+      "plane_x": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "plane_y": [
+        -1.0,
+        0.0,
+        0.0
+      ],
+      "style_id": "090a3f53-504a-42fb-89fa-626118cc9064"
+    },
+    {
+      "name": "V7_Linear_19",
+      "source": "V7/v7_rhino_logo_annotations.3dm",
+      "annotation_type": "AnnotationTypes.Rotated",
+      "text": "35.21",
+      "measurement": 35.20838015720577,
+      "points": {
+        "defpt1": [
+          20.706146080544922,
+          0.0,
+          1.1890327352801697
+        ],
+        "defpt2": [
+          -14.502234076660844,
+          0.0,
+          0.5300117604372656
+        ],
+        "arrowpt1": [
+          20.706146080544922,
+          0.0,
+          -17.81096726471983
+        ],
+        "arrowpt2": [
+          -14.502234076660844,
+          0.0,
+          -17.81096726471983
+        ],
+        "dimline": [
+          -11.293853919455078,
+          0.0,
+          -17.81096726471983
+        ],
+        "textpt": [
+          3.101956001942039,
+          0.0,
+          -17.81096726471983
+        ]
+      },
+      "plane_origin": [
+        20.706146080544922,
+        0.0,
+        1.1890327352801697
+      ],
+      "plane_x": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "plane_y": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "style_id": "090a3f53-504a-42fb-89fa-626118cc9064"
+    },
+    {
+      "name": "V6_Linear_4",
+      "source": "V6/V6_annotation.3dm",
+      "annotation_type": "AnnotationTypes.Rotated",
+      "text": "40.00",
+      "measurement": 40.0,
+      "points": {
+        "defpt1": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "defpt2": [
+          0.0,
+          40.0,
+          0.0
+        ],
+        "arrowpt1": [
+          -6.0,
+          0.0,
+          0.0
+        ],
+        "arrowpt2": [
+          -6.0,
+          40.0,
+          0.0
+        ],
+        "dimline": [
+          -6.0,
+          38.0,
+          0.0
+        ],
+        "textpt": [
+          -6.0,
+          20.0,
+          0.0
+        ]
+      },
+      "plane_origin": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "plane_x": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "plane_y": [
+        -1.0,
+        0.0,
+        0.0
+      ],
+      "style_id": "6d104644-18b4-464c-a49c-dd4892fcbe39"
+    },
+    {
+      "name": "V6_Linear_5",
+      "source": "V6/V6_annotation.3dm",
+      "annotation_type": "AnnotationTypes.Rotated",
+      "text": "60.00",
+      "measurement": 60.0,
+      "points": {
+        "defpt1": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "defpt2": [
+          60.0,
+          0.0,
+          0.0
+        ],
+        "arrowpt1": [
+          0.0,
+          -6.0,
+          0.0
+        ],
+        "arrowpt2": [
+          60.0,
+          -6.0,
+          0.0
+        ],
+        "dimline": [
+          59.0,
+          -6.0,
+          0.0
+        ],
+        "textpt": [
+          30.0,
+          -6.0,
+          0.0
+        ]
+      },
+      "plane_origin": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "plane_x": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "plane_y": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "style_id": "6d104644-18b4-464c-a49c-dd4892fcbe39"
+    }
+  ],
+  "files": [
+    "rhino_linear_dimensions_v7.3dm",
+    "rhino_linear_dimensions_v8.3dm"
+  ]
+}

@@ -44,9 +44,9 @@ STUB_GRACE = 86400.0
 # never opened to find out; the scan only ever spares files
 _STUB_MAX_BYTES = 4096
 
-# the events that mean somebody built something: a command they ran, or
-# an edit they made by hand outside any command
-_WORK = ("cmd", "edit")
+# the events that mean somebody built something: a command they ran, an
+# edit they made by hand outside any command, or a file they brought in
+_WORK = ("cmd", "edit", "import")
 
 
 def _safe(fn):
@@ -120,6 +120,7 @@ class SessionJournal:
         self._note_shadow: dict = {}
         self._dirty = False
         self._flushing = False
+        self._paused = 0                 # see pause
         self._in_command = False
         self._recorded = False       # has anybody built anything yet?
         self._cmd_ids_at_start: set = set()
@@ -273,14 +274,50 @@ class SessionJournal:
         self._dirty = False
 
     @_safe
+    def note_import(self, path: str):
+        """A file was imported outside any command (menu, drop).
+
+        One named event, as an open is: replay imports the file again.
+        Written out as a delta, every object in it went into the journal
+        as an exact BREP, one temporary file apiece, and a drawing of
+        twenty thousand lines held the window up for minutes.
+        """
+        if self._pending_ckpts:
+            self._pending_ckpts.pop()    # the import's own checkpoint
+        made = [oid for oid in self.scene._order if oid not in self._shadow]
+        self._write({"ev": "import", "path": path, "made": made})
+        self._refresh_shadow()
+        self._dirty = False
+
+    def pause(self):
+        """A context in which nothing is flushed: a file being read in.
+
+        Reading pumps the event loop to keep its progress bar moving, and
+        the quiet-period timer would otherwise catch the drawing half in
+        and write what it had so far as edits. `note_import` or
+        `note_load` says what came in once it has.
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def paused():
+            self._paused += 1
+            try:
+                yield
+            finally:
+                self._paused -= 1
+
+        return paused()
+
+    @_safe
     def flush(self):
         """Write the settled idle delta, if there is one.
 
         Called when a command starts, when a new checkpoint arrives, on a
         UI quiet-period timer, and on close — never per mouse move, so a
-        drag lands as one delta, not four hundred.
+        drag lands as one delta, not four hundred. Never while `pause`d.
         """
-        if self._flushing or not self._dirty:
+        if self._flushing or not self._dirty or self._paused:
             return
         self._flushing = True
         try:

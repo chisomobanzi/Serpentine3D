@@ -248,6 +248,9 @@ class Gumball:
                             np.asarray(shape.plane_normal, float))
         if isinstance(shape, HatchShape):
             return "axes", tuple(shape.frame[:3, i] for i in range(3))
+        from ..core.dimension import DimensionShape
+        if isinstance(shape, DimensionShape):
+            return "axes", shape.frame()[1:]
         if isinstance(shape, PictureShape):
             x = np.asarray(shape.plane["u"], float)
             z = np.cross(x, np.asarray(shape.plane["v"], float))

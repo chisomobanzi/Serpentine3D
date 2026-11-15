@@ -31,7 +31,7 @@ HOLE_AREA = math.pi * 4          # the round hole of radius 2
 @pytest.fixture
 def imported(tmp_path):
     def go(build):
-        doc = ezdxf.new("R2010")
+        doc = ezdxf.new("R2010", units=ezdxf.units.MM)
         build(doc.modelspace())
         path = tmp_path / "h.dxf"
         doc.saveas(path)
@@ -132,7 +132,7 @@ def test_a_hatch_in_a_flipped_plane_lands_where_it_was_drawn(imported):
 
 
 def test_other_entities_still_come_in_beside_it(tmp_path):
-    doc = ezdxf.new("R2010")
+    doc = ezdxf.new("R2010", units=ezdxf.units.MM)
     m = doc.modelspace()
     m.add_line((0, 0), (5, 5))
     h = m.add_hatch()
