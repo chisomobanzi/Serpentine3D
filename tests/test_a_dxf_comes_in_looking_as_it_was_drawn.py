@@ -418,10 +418,21 @@ def test_aligned_and_fit_text_run_from_their_first_point_to_their_second(
     lo, hi = texts["FIT"].bbox()
     assert hi[1] - lo[1] < 3.0, "Fit keeps its height"
     assert lo[1] == pytest.approx(20.0, abs=0.3)
-    lo, hi = texts["SLOPE"].bbox()
-    assert lo[1] == pytest.approx(0.0, abs=1.0), "starts at its first point"
-    assert hi[0] == pytest.approx(130.0, abs=1.0), "ends at its second"
-    assert hi[1] > 40.0
+    # Turned back level about its first point, it runs the 50 between the
+    # points along x. Its corners on the slope would hang on the font's
+    # side bearing, which Windows' sans has more of.
+    turn = -math.atan2(40.0, 30.0)
+    level = [[math.cos(turn), -math.sin(turn), 0.0, 0.0],
+             [math.sin(turn), math.cos(turn), 0.0, 0.0],
+             [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+    at = (100.0, 0.0)
+    level[0][3] = at[0] - level[0][0] * at[0] - level[0][1] * at[1]
+    level[1][3] = at[1] - level[1][0] * at[0] - level[1][1] * at[1]
+    import numpy as np
+    lo, hi = g.bbox(g.apply_matrix(texts["SLOPE"].shape, np.array(level)))
+    assert lo[0] == pytest.approx(100.0, abs=0.6), "starts at its first point"
+    assert hi[0] == pytest.approx(150.0, abs=0.6), "ends at its second"
+    assert lo[1] > -1.0 and hi[1] > 4.0, "on the line, grown to fill it"
 
 
 def test_backwards_and_upside_down_text_stay_that_way(tmp_path):
