@@ -25,13 +25,26 @@
   upside down stays that way. Wrapping at an MTEXT's frame width and
   inline formatting are not read yet. Contributed by Jonas Pedrotti
   (#123).
-- **DXF dimensions come in.** Linear, aligned and the other kinds come
-  in as the lines, arrows and text the file draws them with, grouped so
-  a click takes the lot, in the dimension's layer and colour, and so
-  does a dimension inside a block. They are not measuring dimensions
-  here yet, the app has those only on sheets. A filled SOLID, the usual
-  arrowhead, now comes in as a solid hatch. Contributed by Jonas
-  Pedrotti (#123).
+- **Linear dimensions in the model.** `dim` on a sheet works as it did; in
+  the model it places a dimension on the construction plane: two points,
+  then where its line goes. Auto measures along the plane's x or y,
+  whichever way the line is pulled out, as Rhino's Dim does; Aligned
+  measures between the points. A dimension is one object that measures:
+  moved, turned or scaled, its number follows, and mirrored or turned over
+  its text still reads. Properties edits its text height, decimal places,
+  suffix (set off by a space), arrowheads or ticks, arrow size, and text
+  typed over the number, where <> stands for it. A new dimension looks
+  like the last one drawn. Drawings with one need 0.13.0 to open.
+  Contributed by Jonas Pedrotti (#124).
+- **DXF and Rhino dimensions come in as dimensions.** A linear or aligned
+  DIMENSION keeps the points it measures, its line, text height, arrows or
+  ticks, decimals, suffix, typed text and overall scale, and goes back out
+  to DXF as a DIMENSION. A rotated or aligned dimension in a .3dm comes in
+  the same way, in its dimension style's look. Both say what they said in
+  their file's unit after the drawing is converted to the document's.
+  Other DXF dimensions come in as the lines, arrows and text the file
+  draws them with, grouped; a filled SOLID, the usual arrowhead, now comes
+  in as a solid hatch. Contributed by Jonas Pedrotti (#124).
 - **A DXF comes in at its real size.** A file that says its unit
   ($INSUNITS) is converted to the document's, as STEP and Rhino files
   are, and the import says so. Contributed by Jonas Pedrotti (#123).

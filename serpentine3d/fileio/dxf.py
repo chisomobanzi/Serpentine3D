@@ -17,6 +17,7 @@ from ezdxf import units as ezdxf_units
 import numpy as np
 
 from ..core import geometry, linetype
+from ..core.dimension import DimensionShape
 from ..core.layout import measured_text
 from ..core.tessellate import tessellate
 
@@ -108,6 +109,9 @@ def export_dxf(scene, path: str, only_ids: list | None = None):
             out = _write_hatch(msp, obj.shape, attribs)
             _hatch_look_out(scene, obj, out)
             continue
+        if isinstance(obj.shape, DimensionShape):
+            _write_dimension(msp, obj.shape, attribs)
+            continue
         if obj.kind == "curve":
             for edge in geometry.edges_of(obj.shape):
                 pts = geometry.sample_curve(edge, 64)
@@ -129,6 +133,30 @@ def export_dxf(scene, path: str, only_ids: list | None = None):
                 data.faces = [tuple(int(i) for i in t)
                               for t in mesh.triangles]
     doc.saveas(path)
+
+
+def _write_dimension(msp, dim, attribs):
+    """A model dimension as a DXF linear DIMENSION, measuring the same
+    points along the same direction and looking as it does here."""
+    from ezdxf.math import OCS
+    _origin, along, _across, normal = dim.frame()
+    ocs = OCS(tuple(normal))
+    x = np.asarray(tuple(ocs.from_wcs(tuple(dim.direction))), float)
+    angle = math.degrees(math.atan2(x[1], x[0]))
+    override = {"dimtxt": dim.text_height, "dimasz": dim.arrow_size,
+                "dimdec": int(dim.decimals), "dimlfac": dim.length_factor,
+                "dimpost": "<> " + dim.suffix if dim.suffix else "",
+                "dimtad": 1, "dimzin": 0 if dim.trailing_zeros else 8,
+                "dimexo": dim.sizes()[2], "dimexe": dim.sizes()[3],
+                "dimgap": dim.sizes()[4], "dimdsep": ord(".")}
+    if dim.arrow == "tick":
+        override["dimtsz"] = dim.arrow_size / 2
+    out = msp.add_linear_dim(
+        base=tuple(ocs.from_wcs(dim.at)), p1=tuple(ocs.from_wcs(dim.p1)),
+        p2=tuple(ocs.from_wcs(dim.p2)), angle=angle, text=dim.text or "<>",
+        dxfattribs=dict(attribs, extrusion=tuple(normal)), override=override)
+    out.render()
+    return out.dimension
 
 
 def _write_hatch(msp, hatch, attribs):
@@ -277,7 +305,8 @@ def import_dxf(scene, path: str, progress=None, units: str | None = None,
             convert(index / total,
                     f"Converting object {index + 1} of {total}")
         kind = entity.dxftype()
-        if kind in ("INSERT", *_DIMENSIONS):
+        if kind == "INSERT" or (kind in _DIMENSIONS
+                                and not _is_linear(entity)):
             group = uuid.uuid4().hex[:12]
             name = str(entity.dxf.name) if kind == "INSERT" else "Dimension"
             for member, look in _exploded(entity, looks.of(entity), looks):
@@ -308,6 +337,10 @@ def _parts_of(entity, looks) -> list:
     if parts and looks.factor != 1.0:
         size = np.diag([looks.factor] * 3 + [1.0])
         parts = [geometry.apply_matrix(part, size) for part in parts]
+        # a dimension still says what it said in the file's unit
+        parts = [part.edited(length_factor=part.length_factor / looks.factor)
+                 if isinstance(part, DimensionShape) else part
+                 for part in parts]
     return parts
 
 
@@ -424,7 +457,84 @@ def _shape_of(e):
         return _text_of(e)
     if kind in ("SOLID", "TRACE"):
         return _filled_of(e)
+    if kind == "DIMENSION" and _is_linear(e):
+        return _dimension_of(e)
     return None
+
+
+def _is_linear(e) -> bool:
+    """A DIMENSION that measures a length along a direction: rotated,
+    horizontal and vertical (type 0) or aligned (type 1)."""
+    try:
+        return e.dxftype() == "DIMENSION" and (int(e.dimtype) & 7) in (0, 1)
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
+# AutoCAD's names for a tick, rather than an arrow, at a dimension's ends
+_TICKS = {"ARCHTICK", "_ARCHTICK", "OBLIQUE", "_OBLIQUE", "INTEGRAL",
+          "_INTEGRAL"}
+
+
+def _dimension_of(e):
+    """A linear DIMENSION as a model dimension: the points it measures, the
+    direction it measures along, where its line is, and its look from its
+    dimension style and the overrides it carries."""
+    from ezdxf.math import OCS
+    style = e.override()
+
+    def get(name, default):
+        try:
+            value = style.get(name, default)
+        except Exception:                                  # noqa: BLE001
+            value = default
+        return default if value is None else value
+
+    scale = float(get("dimscale", 1.0) or 1.0)
+    normal = np.asarray(tuple(e.dxf.extrusion), float)
+    if (int(e.dimtype) & 7) == 1:
+        direction = np.subtract(tuple(e.dxf.defpoint3), tuple(e.dxf.defpoint2))
+    else:
+        turn = math.radians(float(e.dxf.get("angle", 0.0)))
+        ocs = OCS(tuple(normal))
+        direction = np.asarray(tuple(ocs.to_wcs(
+            (math.cos(turn), math.sin(turn), 0.0))), float)
+    post = str(get("dimpost", "") or "")
+    prefix, _, suffix = post.partition("<>") if "<>" in post else ("", "", "")
+    typed = str(e.dxf.get("text", "") or "")
+    if typed == "<>":
+        typed = ""
+    if prefix and not typed:
+        typed = prefix + "<>"
+    blocks = {str(get(name, "") or "").upper()
+              for name in ("dimblk", "dimblk1", "dimblk2")}
+    tick = float(get("dimtsz", 0.0) or 0.0) > 0 or bool(blocks & _TICKS)
+    height = float(get("dimtxt", 2.5)) * scale
+    arrow = float(get("dimasz", 2.5)) * scale
+    return DimensionShape(
+        tuple(e.dxf.defpoint2), tuple(e.dxf.defpoint3), tuple(e.dxf.defpoint),
+        direction=tuple(direction), normal=tuple(normal),
+        text_height=height,
+        arrow_size=(float(get("dimtsz", 0.0)) * scale * 2
+                    if float(get("dimtsz", 0.0) or 0.0) > 0 else arrow),
+        arrow="tick" if tick else "arrow",
+        decimals=int(get("dimdec", 2)), suffix=suffix, text=typed,
+        trailing_zeros=not int(get("dimzin", 0) or 0) & 8,
+        font_family=_dim_font(e, str(get("dimtxsty", "Standard"))),
+        length_factor=float(get("dimlfac", 1.0) or 1.0),
+        extension_offset=float(get("dimexo", 0.625)) * scale,
+        extension_beyond=float(get("dimexe", 1.25)) * scale,
+        text_gap=abs(float(get("dimgap", 0.625))) * scale)
+
+
+def _dim_font(e, style_name: str) -> str:
+    try:
+        font = str(e.doc.styles.get(style_name).dxf.font or "")
+    except Exception:                                      # noqa: BLE001
+        return "sans"
+    name, ext = os.path.splitext(os.path.basename(font))
+    return name if name and ext.lower() in (".ttf", ".otf", ".ttc") \
+        else "sans"
 
 
 def _polyline_of(vertices, closed: bool, ocs):
@@ -733,7 +843,8 @@ def _exploded(insert, look: _Look, looks: _Looks, depth: int = 0):
             return
     for piece in pieces:
         piece_look = looks.of(piece, look)
-        if piece.dxftype() in ("INSERT", *_DIMENSIONS):
+        if piece.dxftype() == "INSERT" or (piece.dxftype() in _DIMENSIONS
+                                           and not _is_linear(piece)):
             yield from _exploded(piece, piece_look, looks, depth + 1)
         else:
             yield piece, piece_look

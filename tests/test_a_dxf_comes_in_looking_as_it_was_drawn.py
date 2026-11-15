@@ -493,92 +493,201 @@ def test_a_drawing_in_metres_comes_in_at_its_real_size(tmp_path):
 
 # --- dimensions -----------------------------------------------------------------
 
-def test_a_linear_dimension_comes_in_as_it_is_drawn(tmp_path):
+def _dims(scene):
+    from serpentine3d.core.dimension import DimensionShape
+    return [o for o in scene.all() if isinstance(o.shape, DimensionShape)]
+
+
+def test_a_linear_dimension_comes_in_as_a_dimension(tmp_path):
+    def build(doc):
+        doc.layers.add("Dims", color=3)
+        doc.modelspace().add_linear_dim(
+            base=(0, 20), p1=(0, 0), p2=(100, 0),
+            dxfattribs={"layer": "Dims"},
+            override={"dimtxt": 5.0, "dimasz": 4.0, "dimdec": 1,
+                      "dimzin": 0, "dimpost": "<> mm"}).render()
+
+    scene = _imported(tmp_path, build)
+    (obj,) = scene.all()
+    (dim,) = _dims(scene)
+    assert dim is obj, "one object, measuring, not its lines and text"
+    assert scene.layers.get(obj.layer_id).name == "Dims"
+    d = obj.shape
+    assert d.label == "100.0 mm"
+    assert d.text_height == pytest.approx(5.0)
+    assert d.arrow_size == pytest.approx(4.0)
+    assert d.p1 == pytest.approx((0, 0, 0)) and d.p2 == pytest.approx((100, 0, 0))
+    assert d.at[1] == pytest.approx(20.0)
+
+
+def test_a_vertical_and_an_aligned_dimension_measure_as_they_did(tmp_path):
+    def build(doc):
+        msp = doc.modelspace()
+        msp.add_linear_dim(base=(-10, 0), p1=(0, 0), p2=(30, 40),
+                           angle=90).render()
+        msp.add_aligned_dim(p1=(0, 0), p2=(30, 40), distance=10).render()
+
+    scene = _imported(tmp_path, build)
+    measured = sorted(o.shape.measured for o in _dims(scene))
+    assert measured == pytest.approx([40.0, 50.0])
+
+
+def test_typed_text_scale_and_ticks_come_through(tmp_path):
+    def build(doc):
+        dim = doc.modelspace().add_linear_dim(
+            base=(0, 20), p1=(0, 0), p2=(80, 0),
+            text="Clear <>",
+            override={"dimscale": 10.0, "dimtxt": 2.5, "dimblk": "ARCHTICK",
+                      "dimlfac": 0.5, "dimdec": 0})
+        dim.render()
+
+    scene = _imported(tmp_path, build)
+    (obj,) = _dims(scene)
+    d = obj.shape
+    assert d.label == "Clear 40"
+    assert d.text_height == pytest.approx(25.0), "drawn at its overall scale"
+    assert d.arrow == "tick"
+
+
+def test_a_dimension_in_metres_still_says_what_it_said(tmp_path):
+    from serpentine3d import fileio
+
+    doc = ezdxf.new("R2010", units=ezdxf.units.M)
+    doc.modelspace().add_linear_dim(
+        base=(0, 1), p1=(0, 0), p2=(2.5, 0),
+        override={"dimtxt": 0.1, "dimdec": 2, "dimzin": 0}).render()
+    path = tmp_path / "metres.dxf"
+    doc.saveas(path)
+    scene = Scene()
+    fileio.import_file(scene, str(path))
+    (obj,) = _dims(scene)
+    assert obj.shape.label == "2.50"
+    assert obj.shape.p2[0] == pytest.approx(2500.0)
+    assert obj.shape.text_height == pytest.approx(100.0)
+
+
+def test_a_dimension_inside_a_block_is_a_dimension_where_the_block_is(tmp_path):
+    def build(doc):
+        block = doc.blocks.new("DIMMED")
+        block.add_line((0, 0), (10, 0))
+        block.add_linear_dim(base=(0, 5), p1=(0, 0), p2=(10, 0)).render()
+        doc.modelspace().add_blockref("DIMMED", (100, 0))
+
+    scene = _imported(tmp_path, build)
+    (obj,) = _dims(scene)
+    assert obj.group_id is not None, "it belongs to its block"
+    assert obj.shape.p1[0] == pytest.approx(100.0)
+    assert obj.shape.measured == pytest.approx(10.0)
+
+
+def test_other_dimensions_come_in_as_they_are_drawn(tmp_path):
     from serpentine3d.core.hatch import HatchShape
 
     def build(doc):
-        doc.layers.add("Dims", color=3)
-        dim = doc.modelspace().add_linear_dim(
-            base=(0, 20), p1=(0, 0), p2=(100, 0),
-            dxfattribs={"layer": "Dims"},
-            override={"dimtxt": 5.0, "dimasz": 4.0})
-        dim.render()
+        doc.modelspace().add_radius_dim(
+            center=(0, 0), radius=10, angle=45,
+            override={"dimtxt": 2.0}).render()
 
     scene = _imported(tmp_path, build)
     pieces = list(scene.all())
-    assert {o.group_id for o in pieces} != {None}
-    assert len({o.group_id for o in pieces}) == 1, "one dimension, one group"
-    assert all(o.name == "Dimension" for o in pieces)
-    assert all(scene.layers.get(o.layer_id).name == "Dims" for o in pieces)
-    (label,) = _texts(scene)
-    assert label.shape.text == "100"
-    assert label.shape.height == pytest.approx(5.0)
-    lo, hi = label.bbox()
-    assert (lo[0] + hi[0]) / 2 == pytest.approx(50.0, abs=0.5)
-    assert (lo[1] + hi[1]) / 2 == pytest.approx(20.0, abs=0.5), \
-        "in the gap of its dimension line, as this style has it"
-    assert "Defpoints" not in [layer.name for layer in scene.layers.all()]
-    arrows = [o for o in pieces if isinstance(o.shape, HatchShape)]
-    assert len(arrows) == 2 and all(a.shape.solid for a in arrows)
-    lines = [o for o in pieces if o.kind == "curve" and o not in _texts(scene)]
-    spans = [o.bbox() for o in lines]
-    level = [(lo[0], hi[0]) for lo, hi in spans
-             if lo[1] == pytest.approx(20.0) and hi[1] == pytest.approx(20.0)]
-    assert len(level) == 2, "the dimension line, either side of its text"
-    assert min(a for a, _ in level) == pytest.approx(4.0)   # from the arrows
-    assert max(b for _, b in level) == pytest.approx(96.0)
+    assert not _dims(scene)
+    assert len(pieces) > 1 and {o.name for o in pieces} == {"Dimension"}
+    assert len({o.group_id for o in pieces}) == 1
+    assert any(isinstance(o.shape, HatchShape) for o in pieces), \
+        "its filled arrowhead"
 
 
-def test_a_turned_dimension_with_ticks_keeps_its_turn(tmp_path):
+def test_a_dimension_written_without_its_drawing_still_comes_in(tmp_path):
     def build(doc):
-        dim = doc.modelspace().add_linear_dim(
-            base=(0, 10), p1=(0, 0), p2=(0, 50), angle=90,
-            override={"dimtxt": 2.5, "dimblk": "ARCHTICK"})
-        dim.render()
-
-    scene = _imported(tmp_path, build)
-    (label,) = _texts(scene)
-    assert label.shape.text == "50"
-    lo, hi = label.bbox()
-    assert (hi[1] - lo[1]) > (hi[0] - lo[0]), "it reads up the page"
-    assert len({o.group_id for o in scene.all()}) == 1, \
-        "the ticks, blocks themselves, stay in the dimension's group"
-    assert len(list(scene.all())) >= 5
-
-
-def test_a_dimension_written_without_its_drawing_is_drawn(tmp_path):
-    def build(doc):
-        dim = doc.modelspace().add_linear_dim(
-            base=(0, 20), p1=(0, 0), p2=(80, 0))
+        dim = doc.modelspace().add_radius_dim(center=(0, 0), radius=10,
+                                              angle=45)
         dim.render()
         geometry = dim.dimension.dxf.geometry
         dim.dimension.dxf.discard("geometry")
         doc.blocks.delete_block(geometry, safe=False)
 
     scene = _imported(tmp_path, build)
-    (label,) = _texts(scene)
-    assert label.shape.text == "80"
+    assert _texts(scene), "drawn first, then brought in"
 
 
-def test_a_dimension_inside_a_block_comes_in_where_the_block_puts_it(
+def test_a_model_dimension_goes_out_as_a_dimension_and_back(tmp_path):
+    from serpentine3d.core.dimension import DimensionShape
+    from serpentine3d.fileio import dxf as dxf_mod
+
+    scene = Scene()
+    scene.add(DimensionShape((0, 0, 0), (30, 40, 0), (0, 60, 0),
+                             direction=(1, 0, 0), text_height=3.0,
+                             arrow_size=2.0, decimals=1, suffix=" mm",
+                             arrow="tick"))
+    scene.add(DimensionShape((0, 0, 0), (30, 40, 0), (-5, 5, 0),
+                             text="<> long"))
+    path = tmp_path / "out.dxf"
+    dxf_mod.export_dxf(scene, str(path))
+
+    doc = ezdxf.readfile(path)
+    assert len(doc.modelspace().query("DIMENSION")) == 2
+    back = Scene()
+    dxf_mod.import_dxf(back, str(path))
+    first, second = (o.shape for o in _dims(back))
+    assert first.label == "30.0 mm"
+    assert first.text_height == pytest.approx(3.0)
+    assert first.arrow == "tick"
+    assert first.arrow_size == pytest.approx(2.0)
+    assert second.label == "50.00 long"
+
+
+def test_a_dimension_says_its_trailing_zeros_as_the_file_does(tmp_path):
+    """AutoCAD's metric styles drop trailing zeros (DIMZIN 8), so 60 at two
+    decimals reads 60 there and must read 60 here."""
+    def build(doc):
+        msp = doc.modelspace()
+        msp.add_linear_dim(base=(0, 10), p1=(0, 0), p2=(60, 0),
+                           override={"dimdec": 2, "dimzin": 8}).render()
+        msp.add_linear_dim(base=(0, 30), p1=(0, 20), p2=(72.111, 20),
+                           override={"dimdec": 2, "dimzin": 8}).render()
+        msp.add_linear_dim(base=(0, 50), p1=(0, 40), p2=(60, 40),
+                           override={"dimdec": 2, "dimzin": 0}).render()
+
+    labels = sorted(o.shape.label for o in _dims(_imported(tmp_path, build)))
+    assert labels == ["60", "60.00", "72.11"]
+
+
+def test_a_model_dimension_goes_out_reading_as_it_does_here(tmp_path):
+    from serpentine3d.core.dimension import DimensionShape
+    from serpentine3d.fileio import dxf as dxf_mod
+
+    scene = Scene()
+    scene.add(DimensionShape((0, 0, 0), (60, 0, 0), (0, 10, 0)))
+    path = tmp_path / "out.dxf"
+    dxf_mod.export_dxf(scene, str(path))
+
+    (dim,) = ezdxf.readfile(path).modelspace().query("DIMENSION")
+    drawn = [t.plain_text() for t in dim.get_geometry_block()
+             if t.dxftype() == "MTEXT"]
+    assert drawn == ["60.00"], "what AutoCAD shows is what it said here"
+
+
+def test_a_drawn_dimension_inside_a_block_comes_in_where_the_block_puts_it(
         tmp_path):
     """A block's dimension is handed over as a copy that has lost the name
-    of its drawing, which is still there to be had."""
+    of its drawing, which is still there to be had. A radius dimension is
+    one that comes in as its drawing."""
     def build(doc):
         block = doc.blocks.new("PART")
-        block.add_line((0, 0), (40, 0))
-        block.add_linear_dim(base=(0, 10), p1=(0, 0), p2=(40, 0),
-                             override={"dimtxt": 3.0}).render()
+        block.add_circle((0, 0), 10)
+        block.add_radius_dim(center=(0, 0), radius=10, angle=45,
+                             override={"dimtxt": 2.0}).render()
         doc.modelspace().add_blockref("PART", (100, 50))
 
     scene = _imported(tmp_path, build)
     (label,) = _texts(scene)
-    assert label.shape.text == "40"
+    assert label.shape.text.startswith("R10")
     lo, hi = label.bbox()
-    assert (lo[0] + hi[0]) / 2 == pytest.approx(120.0, abs=0.5)
+    assert 100.0 < (lo[0] + hi[0]) / 2 < 120.0
+    assert 50.0 < (lo[1] + hi[1]) / 2 < 70.0
     assert len({o.group_id for o in scene.all()}) == 1, \
         "the dimension stays in its block's group"
-    assert len(list(scene.all())) >= 6, "measured line, dimension, arrows"
+    assert len(list(scene.all())) >= 4, "circle, dimension line, arrow, text"
 
 
 # --- curves in their own plane --------------------------------------------------
