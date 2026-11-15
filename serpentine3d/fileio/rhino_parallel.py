@@ -432,7 +432,11 @@ def _convert_in_pool(path: str, workers: int, cancel=None,
     deferred = {}
     with ctx.Pool(min(workers, len(batches)),
                   initializer=_init_worker, initargs=(path,)) as pool:
-        for results in pool.imap_unordered(_convert, batches):
+        converted = pool.imap_unordered(_convert, batches)
+        if pages_in is not None:
+            # while the workers convert the model: this process only waits
+            yield ("pages", _pages_as_json(path, pages_in))
+        for results in converted:
             if cancel is not None and cancel.is_set():
                 pool.terminate()
                 return
@@ -450,14 +454,17 @@ def _convert_in_pool(path: str, workers: int, cancel=None,
             yield ("batch", done, total, rows)
         if deferred:
             yield from _share_out(pool, deferred, done, total, workers, cancel)
-    if pages_in is not None:
-        # the layout pages, as sheets in `pages_in` units, which travel as
-        # a saved drawing's sheets do: a shape will not pickle
-        from . import rhino
-        from .rhino_pages import read_pages
-        from ..core.layout import layouts_to_json
-        rhino._HATCH_PATTERNS = rhino.read_hatch_patterns(path)
-        yield ("pages", layouts_to_json(read_pages(_MODEL, pages_in, path)))
+
+
+def _pages_as_json(path: str, units: str) -> list:
+    """The file's layout pages as sheets in `units`, as a saved drawing
+    keeps them: a shape will not pickle down the pipe, a sheet's JSON
+    will."""
+    from . import rhino
+    from .rhino_pages import read_pages
+    from ..core.layout import layouts_to_json
+    rhino._HATCH_PATTERNS = rhino.read_hatch_patterns(path)
+    return layouts_to_json(read_pages(_MODEL, units, path))
 
 
 def _share_out(pool, deferred, done, total, workers, cancel):

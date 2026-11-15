@@ -418,20 +418,31 @@ class _PageReader:
         sheet.dims.append(dim)
 
     def hatch(self, sheet, geo, meta):
-        from . import rhino
-        for shape in rhino.hatch_to_shapes(geo, self.patterns):
-            for face in geometry.faces_of(shape.region):
-                rings = _rings(face, self.mm)
-                if not rings or len(rings[0]) < 3:
-                    continue
-                name = shape.pattern.lower()
-                pattern = ("solid" if shape.solid else name
-                           if name in HATCH_PATTERNS else "lines")
-                sheet.hatches.append(Hatch(
-                    points=rings[0], holes=rings[1:], pattern=pattern,
-                    angle=float(shape.angle),
-                    spacing=max(float(shape.spacing) * self.mm, 0.2),
-                    color=_colour_list(meta)))
+        from ..core.hatch_patterns import import_name
+        brep = r3.Brep.TryConvertBrep(geo)
+        if brep is None:
+            return
+        rhino_pattern = self.patterns.get(geo.PatternIndex)
+        scale = float(geo.PatternScale) or 1.0
+        angle = math.degrees(float(geo.PatternRotation))
+        if rhino_pattern is None:
+            pattern, spacing = "lines", scale
+        else:
+            name, definition = import_name(rhino_pattern, "3dm")
+            spacing = (1.0 if rhino_pattern.solid
+                       else scale * rhino_pattern.row_spacing)
+            name = name.lower()
+            pattern = ("solid" if rhino_pattern.solid
+                       or getattr(definition, "solid", False)
+                       else name if name in HATCH_PATTERNS else "lines")
+        for fi in range(len(brep.Faces)):
+            rings = _loop_rings(brep, brep.Faces[fi], self.mm)
+            if not rings or len(rings[0]) < 3:
+                continue
+            sheet.hatches.append(Hatch(
+                points=rings[0], holes=rings[1:], pattern=pattern,
+                angle=float(angle), spacing=max(float(spacing) * self.mm, 0.2),
+                color=_colour_list(meta)))
 
     def curve(self, sheet, geo, meta):
         from . import rhino
@@ -492,42 +503,35 @@ def _lineweight(meta) -> float:
     return 0.25
 
 
-def _rings(face, scale: float) -> list:
-    """A face's boundary as [[x, y], ...] rings, the outer one first, each
-    edge followed in the wire's order and its curved ones sampled."""
-    from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
-    from OCP.GeomAbs import GeomAbs_Line
-    from OCP.TopAbs import TopAbs_REVERSED, TopAbs_WIRE
-    from OCP.TopExp import TopExp_Explorer
-
-    from ..core import occ
-    outer = BRepTools.OuterWire_s(face)
-    wires = [outer]
-    ex = TopExp_Explorer(face, TopAbs_WIRE)
-    while ex.More():
-        wire = occ.to_wire(ex.Current())
-        if not wire.IsSame(outer):
-            wires.append(wire)
-        ex.Next()
+def _loop_rings(brep, face, scale: float) -> list:
+    """A Rhino brep face's boundary as [[x, y], ...] rings, the outer loop
+    first, walked by rhino3dm along Rhino's own trims: a page's hatches
+    are many and flat, and building each as a kernel face cost seconds."""
+    loops = face.Loops
+    order = sorted(range(len(loops)),
+                   key=lambda i: 0 if "Outer" in str(loops[i].LoopType)
+                   else 1)
     rings = []
-    for wire in wires:
+    for li in order:
+        loop = loops[li]
         pts = []
-        walk = BRepTools_WireExplorer(wire)
-        while walk.More():
-            edge = walk.Current()
-            curve = occ.edge_adaptor(edge)
-            n = 2 if curve.GetType() == GeomAbs_Line else 17
-            t0, t1 = curve.FirstParameter(), curve.LastParameter()
-            ts = [t0 + (t1 - t0) * i / (n - 1) for i in range(n)]
-            if edge.Orientation() == TopAbs_REVERSED:
+        for ti in range(loop.TrimCount):
+            trim = loop.Trims[ti]
+            if trim.EdgeIndex < 0:
+                continue
+            curve = brep.Edges[trim.EdgeIndex]
+            lo, hi = curve.Domain.T0, curve.Domain.T1
+            n = 2 if curve.IsLinear() else 17
+            ts = [lo + (hi - lo) * i / (n - 1) for i in range(n)]
+            if trim.IsReversed:
                 ts.reverse()
-            for t in ts[:-1]:
-                p = curve.Value(t)
-                pts.append([p.X() * scale, p.Y() * scale])
-            walk.Next()
+            for u in ts[:-1]:
+                p = curve.PointAt(u)
+                pts.append([p.X * scale, p.Y * scale])
         if len(pts) >= 3:
             rings.append(pts)
     return rings
+
 
 
 def _paper_for(sheet) -> tuple:
