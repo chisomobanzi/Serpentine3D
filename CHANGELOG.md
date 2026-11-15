@@ -20,20 +20,24 @@
   Contributed by Jonas Pedrotti (#123).
 - **DXF text comes in as editable text.** TEXT, MTEXT and a block's
   attribute values keep their words, line breaks, height, font, turn,
-  width factor and the point they hang from. Wrapping at an MTEXT's
-  frame width and inline formatting are not read yet. Contributed by Jonas
-  Pedrotti (#123).
+  width factor and the point they hang from. Aligned and Fit text runs
+  from its first point to its second, and text written backwards or
+  upside down stays that way. Wrapping at an MTEXT's frame width and
+  inline formatting are not read yet. Contributed by Jonas Pedrotti
+  (#123).
 - **DXF dimensions come in.** Linear, aligned and the other kinds come
   in as the lines, arrows and text the file draws them with, grouped so
-  a click takes the lot, in the dimension's layer and colour. They are
-  not measuring dimensions here yet, the app has those only on sheets.
-  A filled SOLID, the usual arrowhead, now comes in as a solid hatch.
-  Contributed by Jonas Pedrotti (#123).
+  a click takes the lot, in the dimension's layer and colour, and so
+  does a dimension inside a block. They are not measuring dimensions
+  here yet, the app has those only on sheets. A filled SOLID, the usual
+  arrowhead, now comes in as a solid hatch. Contributed by Jonas
+  Pedrotti (#123).
 - **A DXF comes in at its real size.** A file that says its unit
   ($INSUNITS) is converted to the document's, as STEP and Rhino files
   are, and the import says so. Contributed by Jonas Pedrotti (#123).
-- **A DXF import says how far it has got,** and can be cancelled.
-  Contributed by Jonas Pedrotti (#123).
+- **A DXF import says how far it has got,** and can be cancelled,
+  which leaves the drawing as it was. Contributed by Jonas Pedrotti
+  (#123).
 
 ### Fixed
 

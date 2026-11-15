@@ -353,7 +353,7 @@ def test_text_and_mtext_come_in_as_editable_text(tmp_path):
         msp = doc.modelspace()
         msp.add_text("Kitchen", height=2.5, dxfattribs={
             "layer": "Notes", "style": "ARIAL", "insert": (10, 20)})
-        msp.add_mtext("Room 1\PFloor 24 m2", dxfattribs={
+        msp.add_mtext("Room 1\\PFloor 24 m2", dxfattribs={
             "char_height": 3.0, "insert": (50, 60), "attachment_point": 1,
             "color": 1})
 
@@ -392,6 +392,64 @@ def test_a_text_is_turned_and_anchored_as_the_file_says(tmp_path):
     lo, hi = right.bbox()
     assert hi[0] == pytest.approx(40.0, abs=0.3), "ends at its insertion"
     assert lo[1] == pytest.approx(0.0, abs=0.3), "sits on it"
+
+
+def test_aligned_and_fit_text_run_from_their_first_point_to_their_second(
+        tmp_path):
+    """Aligned grows the text to fill the gap, Fit stretches it; both run
+    the way the second point lies from the first."""
+    def build(doc):
+        msp = doc.modelspace()
+        align = ezdxf.enums.TextEntityAlignment
+        msp.add_text("ALIGNED", height=2.5).set_placement(
+            (10, 0), (70, 0), align=align.ALIGNED)
+        msp.add_text("FIT", height=2.5).set_placement(
+            (10, 20), (70, 20), align=align.FIT)
+        msp.add_text("SLOPE", height=2.5).set_placement(
+            (100, 0), (130, 40), align=align.ALIGNED)
+
+    scene = _imported(tmp_path, build)
+    texts = {o.shape.text: o for o in _texts(scene)}
+    for word in ("ALIGNED", "FIT"):
+        lo, hi = texts[word].bbox()
+        assert lo[0] == pytest.approx(10.0, abs=0.6), word
+        assert hi[0] == pytest.approx(70.0, abs=0.6), word
+    assert texts["ALIGNED"].shape.height > 4.0, "grown to fill the gap"
+    lo, hi = texts["FIT"].bbox()
+    assert hi[1] - lo[1] < 3.0, "Fit keeps its height"
+    assert lo[1] == pytest.approx(20.0, abs=0.3)
+    lo, hi = texts["SLOPE"].bbox()
+    assert lo[1] == pytest.approx(0.0, abs=1.0), "starts at its first point"
+    assert hi[0] == pytest.approx(130.0, abs=1.0), "ends at its second"
+    assert hi[1] > 40.0
+
+
+def test_backwards_and_upside_down_text_stay_that_way(tmp_path):
+    def build(doc):
+        msp = doc.modelspace()
+        msp.add_text("BACK", height=2.5, dxfattribs={
+            "insert": (50, 0), "text_generation_flag": 2})
+        msp.add_text("DOWN", height=2.5, dxfattribs={
+            "insert": (0, 50), "text_generation_flag": 4})
+
+    scene = _imported(tmp_path, build)
+    texts = {o.shape.text: o for o in _texts(scene)}
+    lo, hi = texts["BACK"].bbox()
+    assert hi[0] == pytest.approx(50.0, abs=0.3), "runs to the left"
+    assert lo[1] == pytest.approx(0.0, abs=0.3)
+    lo, hi = texts["DOWN"].bbox()
+    assert hi[1] == pytest.approx(50.0, abs=0.3), "hangs below"
+    assert lo[0] == pytest.approx(0.0, abs=0.3)
+
+
+def test_middle_text_is_centred_on_its_point_both_ways(tmp_path):
+    def build(doc):
+        doc.modelspace().add_text("MIDDLE", height=4.0).set_placement(
+            (20, 20), align=ezdxf.enums.TextEntityAlignment.MIDDLE)
+
+    lo, hi = _texts(_imported(tmp_path, build))[0].bbox()
+    assert (lo[0] + hi[0]) / 2 == pytest.approx(20.0, abs=0.3)
+    assert (lo[1] + hi[1]) / 2 == pytest.approx(20.0, abs=0.3)
 
 
 def test_a_block_s_attributes_come_in_as_its_text(tmp_path):
@@ -500,6 +558,27 @@ def test_a_dimension_written_without_its_drawing_is_drawn(tmp_path):
     scene = _imported(tmp_path, build)
     (label,) = _texts(scene)
     assert label.shape.text == "80"
+
+
+def test_a_dimension_inside_a_block_comes_in_where_the_block_puts_it(
+        tmp_path):
+    """A block's dimension is handed over as a copy that has lost the name
+    of its drawing, which is still there to be had."""
+    def build(doc):
+        block = doc.blocks.new("PART")
+        block.add_line((0, 0), (40, 0))
+        block.add_linear_dim(base=(0, 10), p1=(0, 0), p2=(40, 0),
+                             override={"dimtxt": 3.0}).render()
+        doc.modelspace().add_blockref("PART", (100, 50))
+
+    scene = _imported(tmp_path, build)
+    (label,) = _texts(scene)
+    assert label.shape.text == "40"
+    lo, hi = label.bbox()
+    assert (lo[0] + hi[0]) / 2 == pytest.approx(120.0, abs=0.5)
+    assert len({o.group_id for o in scene.all()}) == 1, \
+        "the dimension stays in its block's group"
+    assert len(list(scene.all())) >= 6, "measured line, dimension, arrows"
 
 
 # --- curves in their own plane --------------------------------------------------
