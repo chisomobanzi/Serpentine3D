@@ -636,25 +636,27 @@ def test_a_model_dimension_goes_out_as_a_dimension_and_back(tmp_path):
     assert second.label == "50.00 long"
 
 
-def test_a_dimension_inside_a_block_comes_in_where_the_block_puts_it(
+def test_a_drawn_dimension_inside_a_block_comes_in_where_the_block_puts_it(
         tmp_path):
     """A block's dimension is handed over as a copy that has lost the name
-    of its drawing, which is still there to be had."""
+    of its drawing, which is still there to be had. A radius dimension is
+    one that comes in as its drawing."""
     def build(doc):
         block = doc.blocks.new("PART")
-        block.add_line((0, 0), (40, 0))
-        block.add_linear_dim(base=(0, 10), p1=(0, 0), p2=(40, 0),
-                             override={"dimtxt": 3.0}).render()
+        block.add_circle((0, 0), 10)
+        block.add_radius_dim(center=(0, 0), radius=10, angle=45,
+                             override={"dimtxt": 2.0}).render()
         doc.modelspace().add_blockref("PART", (100, 50))
 
     scene = _imported(tmp_path, build)
     (label,) = _texts(scene)
-    assert label.shape.text == "40"
+    assert label.shape.text.startswith("R10")
     lo, hi = label.bbox()
-    assert (lo[0] + hi[0]) / 2 == pytest.approx(120.0, abs=0.5)
+    assert 100.0 < (lo[0] + hi[0]) / 2 < 120.0
+    assert 50.0 < (lo[1] + hi[1]) / 2 < 70.0
     assert len({o.group_id for o in scene.all()}) == 1, \
         "the dimension stays in its block's group"
-    assert len(list(scene.all())) >= 6, "measured line, dimension, arrows"
+    assert len(list(scene.all())) >= 4, "circle, dimension line, arrow, text"
 
 
 # --- curves in their own plane --------------------------------------------------

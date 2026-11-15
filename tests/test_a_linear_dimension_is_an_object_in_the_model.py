@@ -321,6 +321,6 @@ def test_a_drawing_with_a_dimension_says_which_reader_it_needs(
     path = str(tmp_path / "dims.serp")
     native.save_scene(scene, path)
     monkeypatch.setattr(native, "FORMAT_VERSION", 8)
-    with pytest.raises(ValueError, match="0.12.3"):
+    with pytest.raises(ValueError, match=r"0\.13\.0"):
         native.load_scene(Scene(), path)
 

@@ -34,7 +34,7 @@
   its text still reads. Properties edits its text height, decimal places,
   suffix (set off by a space), arrowheads or ticks, arrow size, and text
   typed over the number, where <> stands for it. A new dimension looks
-  like the last one drawn. Drawings with one need 0.12.3 to open.
+  like the last one drawn. Drawings with one need 0.13.0 to open.
   Contributed by Jonas Pedrotti (#124).
 - **DXF and Rhino dimensions come in as dimensions.** A linear or aligned
   DIMENSION keeps the points it measures, its line, text height, arrows or

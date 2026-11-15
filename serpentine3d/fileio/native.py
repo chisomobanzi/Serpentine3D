@@ -238,7 +238,7 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
     from ..core.dimension import DimensionShape
     if any(isinstance(shape, DimensionShape) for shape in new_shapes):
         doc["version"] = 9
-        doc["requires"] = "0.12.3"
+        doc["requires"] = "0.13.0"
     _write_container(doc, path, thumbnail, blobs)
 
 
