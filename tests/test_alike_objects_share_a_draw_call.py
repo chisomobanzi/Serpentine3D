@@ -203,6 +203,19 @@ def test_something_special_about_an_object_keeps_it_out(gl, mark):
     assert any(i is odd for i in _items(view))
 
 
+def test_text_keeps_out_so_it_is_drawn_as_text(gl):
+    """Text is filled flat in its ink colour and may sit on a background
+    (#142). A batch draws a run as a lit surface and knows neither, so on a
+    shaded detail's paper text came out white on white."""
+    from serpentine3d.core.text import TextShape
+    view = _view(0)
+    texts = [view.scene.add(TextShape("TEXT", 5.0)) for _ in range(6)]
+    _sync(view)
+    items = _items(view, light=True)
+    assert not _batches(items)
+    assert all(t in items for t in texts)
+
+
 def test_a_picked_face_keeps_its_object_out(gl):
     view = _view(9)
     odd = view.scene.all()[4]

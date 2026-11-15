@@ -13,6 +13,8 @@ from . import geometry, occ
 
 
 TEXT_TAG = b"STXT\x01"
+# The background reaches this far past the lettering, in cap heights.
+DEFAULT_MARGIN = 0.25
 
 
 class TextShape(TopoDS_Compound):
@@ -38,7 +40,7 @@ class TextShape(TopoDS_Compound):
                          frame, brep)
 
     def _initialize(self, text, height, font_family, font_style, alignment,
-                    frame, brep):
+                    frame, brep, background=False, margin=DEFAULT_MARGIN):
         super().__init__()
         self.TShape(brep.TShape())
         self.Location(brep.Location())
@@ -50,11 +52,13 @@ class TextShape(TopoDS_Compound):
         self._alignment = str(alignment)
         self._frame = tuple(tuple(float(v) for v in row) for row in frame)
         self._brep = brep
+        self._background = bool(background)
+        self._margin = max(0., float(margin))
 
     @classmethod
-    def _from_geometry(cls, typography, frame, brep):
+    def _from_geometry(cls, typography, frame, brep, look=None):
         result = cls.__new__(cls)
-        result._initialize(**typography, frame=frame, brep=brep)
+        result._initialize(**typography, frame=frame, brep=brep, **(look or {}))
         return result
 
     @property
@@ -76,6 +80,31 @@ class TextShape(TopoDS_Compound):
     @property
     def alignment(self):
         return self._alignment
+
+    @property
+    def background(self) -> bool:
+        """Whether the text sits on a patch of the drawing's own colour,
+        hiding what lies behind it."""
+        return self._background
+
+    @property
+    def margin(self) -> float:
+        """How far the background reaches past the lettering on every
+        side, as a fraction of the cap height."""
+        return self._margin
+
+    def _look(self):
+        return dict(background=self._background, margin=self._margin)
+
+    def with_background(self, background=None, margin=None):
+        """The same lettering with its background switched or widened."""
+        look = self._look()
+        if background is not None:
+            look["background"] = bool(background)
+        if margin is not None:
+            look["margin"] = float(margin)
+        return self._from_geometry(self._typography(), self._frame,
+                                   self._brep, look)
 
     @property
     def origin(self):
@@ -112,7 +141,7 @@ class TextShape(TopoDS_Compound):
         values.update(typography)
         curves = text_curves(**values)
         brep = geometry.apply_matrix(geometry.make_compound(curves), self._frame)
-        return self._from_geometry(values, self._frame, brep)
+        return self._from_geometry(values, self._frame, brep, self._look())
 
     def transformed(self, matrix):
         """Transform cached geometry and its typography frame together."""
@@ -127,23 +156,47 @@ class TextShape(TopoDS_Compound):
         values = self._typography()
         values["height"] *= height_scale
         brep = geometry.apply_matrix(self._brep, matrix)
-        return self._from_geometry(values, frame, brep)
+        result = self._from_geometry(values, frame, brep, self._look())
+        # The shape of the lettering has not changed, only where it is:
+        # carry what was worked out from it rather than work it out again,
+        # which made dragging text stutter.
+        if getattr(self, "_fill", None) is not None:
+            result._fill = _carried(self._fill, matrix)
+        if hasattr(self, "_frame_box"):
+            box = np.c_[self._frame_box, np.ones(len(self._frame_box))]
+            result._frame_box = (box @ matrix.T)[:, :3]
+        return result
 
     def copy(self):
         return self._from_geometry(self._typography(), self._frame,
-                                   geometry.copy_shape(self._brep))
+                                   geometry.copy_shape(self._brep),
+                                   self._look())
+
+    def _local_box(self):
+        frame = np.asarray(self._frame, dtype=float)
+        local = geometry.apply_matrix(self._brep, np.linalg.inv(frame))
+        lo, hi = geometry.bbox(local)
+        grow = self._margin * self._height if self._background else 0.
+        x0, y0 = lo[0] - grow, lo[1] - grow
+        x1, y1 = hi[0] + grow, hi[1] + grow
+        return np.array([
+            [x0, y0, 0., 1.], [x1, y0, 0., 1.],
+            [x1, y1, 0., 1.], [x0, y1, 0., 1.],
+        ])
+
+    def frame_box(self):
+        """The four corners of the oriented visible bounds in world space,
+        its background's when it has one: the ones the text snaps to, the
+        area a click picks it by, and where its selection frame is drawn."""
+        if not hasattr(self, "_frame_box"):
+            frame = np.asarray(self._frame, dtype=float)
+            self._frame_box = (self._local_box() @ frame.T)[:, :3]
+        return self._frame_box
 
     def snap_points(self):
         """Insertion point and oriented visible bounds in world space."""
         frame = np.asarray(self._frame, dtype=float)
-        local = geometry.apply_matrix(self._brep, np.linalg.inv(frame))
-        lo, hi = geometry.bbox(local)
-        x0, y0 = lo[:2]
-        x1, y1 = hi[:2]
-        corners = np.array([
-            [x0, y0, 0., 1.], [x1, y0, 0., 1.],
-            [x1, y1, 0., 1.], [x0, y1, 0., 1.],
-        ])
+        corners = self._local_box()
         mids = (corners + np.roll(corners, -1, axis=0)) / 2.
         center = corners.mean(axis=0)
 
@@ -164,8 +217,21 @@ class TextShape(TopoDS_Compound):
             explorer.Next()
         return wires
 
+    def fill(self):
+        """The glyphs as planar faces, counters left open: what is drawn of
+        the text, like a solid hatch. None when the outlines do not close
+        into regions."""
+        if not hasattr(self, "_fill"):
+            try:
+                faces = geometry.planar_regions(self.to_curves())
+                self._fill = geometry.make_compound(faces) if faces else None
+            except Exception:                              # noqa: BLE001
+                self._fill = None
+        return self._fill
+
     def to_bytes(self):
-        header = json.dumps(dict(typography=self._typography(), frame=self._frame),
+        header = json.dumps(dict(typography=self._typography(), frame=self._frame,
+                                 look=self._look()),
                             ensure_ascii=False).encode("utf-8")
         return (TEXT_TAG + struct.pack("<I", len(header)) + header
                 + geometry.shape_to_bytes(self._brep))
@@ -177,7 +243,58 @@ class TextShape(TopoDS_Compound):
         start += 4
         header = json.loads(data[start:start + size])
         brep = geometry.shape_from_bytes(data[start + size:])
-        return cls._from_geometry(header["typography"], header["frame"], brep)
+        return cls._from_geometry(header["typography"], header["frame"], brep,
+                                  header.get("look"))
+
+
+class TextPreview(TopoDS_Compound):
+    """A preview of several shapes that remembers which were text, so a
+    ghost can draw their dotted frames as their selection shows them."""
+
+    def __init__(self, compound, texts):
+        super().__init__()
+        self.TShape(compound.TShape())
+        self.Location(compound.Location())
+        self.Orientation(compound.Orientation())
+        self.texts = list(texts)
+
+
+def _carried(shape, matrix):
+    """`shape` put through `matrix`: a move or turn only relocates it, which
+    keeps the triangulation it already has; anything else rebuilds it."""
+    a = matrix[:3, :3]
+    if not (np.allclose(a @ a.T, np.eye(3), atol=1e-9)
+            and np.linalg.det(a) > 0):
+        return geometry.apply_matrix(shape, matrix)
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.gp import gp_Trsf
+    trsf = gp_Trsf()
+    trsf.SetValues(*matrix[0], *matrix[1], *matrix[2])
+    return shape.Moved(TopLoc_Location(trsf))
+
+
+def dotted_frame(corners, screen, spacing: float, dot: float) -> np.ndarray:
+    """The dots of a dotted frame through `corners`, a closed ring of
+    points in 2D or 3D, as (K, 2, D) short segments: one on every corner,
+    the rest spread evenly between. `screen` is the same ring where it is
+    seen, in pixels, and `spacing` and `dot` are measured there, so an
+    edge seen end on gets few dots however long it really is.
+    What marks picked text, which as a fill has no outline of its own."""
+    corners = np.asarray(corners, float)
+    screen = np.asarray(screen, float)
+    out = []
+    for i, (a, b) in enumerate(zip(corners, np.roll(corners, -1, axis=0))):
+        seen = float(np.linalg.norm(screen[(i + 1) % len(screen)]
+                                    - screen[i]))
+        if seen < 1e-9:
+            continue
+        count = min(max(1, round(seen / spacing)), 128)
+        starts = a + np.outer(np.arange(count) / count, b - a)
+        out.append(np.stack([starts, starts + (b - a) * min(dot / seen, 1.)],
+                            1))
+    if not out:
+        return np.zeros((0, 2, corners.shape[1]))
+    return np.concatenate(out)
 
 
 def output_shapes(text: TextShape, output: str, depth: float = 1.) -> list:

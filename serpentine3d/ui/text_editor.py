@@ -51,7 +51,19 @@ class InlineTextEditor(QPlainTextEdit):
         return self.textCursor().blockFormat().alignment()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Escape:
+        """Enter or Escape closes the editor; Ctrl+Enter (or Shift+Enter)
+        starts a new line."""
+        key = event.key()
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if event.modifiers() & (Qt.KeyboardModifier.ControlModifier
+                                    | Qt.KeyboardModifier.ShiftModifier):
+                self.textCursor().insertBlock()
+                self.ensureCursorVisible()
+            else:
+                self.finished.emit()
+            event.accept()
+            return
+        if key == Qt.Key.Key_Escape:
             self.finished.emit()
             event.accept()
             return

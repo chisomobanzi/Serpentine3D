@@ -351,7 +351,8 @@ def _plot_hatch(tris, dots=(), ground=(0.2, 0.4, 0.9), px_per_mm=4.0):
             "hatches": [("h", tris, [], list(dots))]}
     view = SimpleNamespace(
         _detail_hlr=lambda d: data,
-        hatch_looks=lambda d: [((0.8, 0.1, 0.1), ground, False, 0.0)])
+        hatch_looks=lambda d, key="hatches": [
+            ((0.8, 0.1, 0.1), ground, False, 0.0)] * len(d.get(key) or []))
     size = int(100 * px_per_mm)
     image = QImage(size, size, QImage.Format.Format_RGB32)
     image.fill(QColor("white"))

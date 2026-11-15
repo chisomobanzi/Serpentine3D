@@ -98,9 +98,10 @@ and 1/4". Lettering keeps its sizes when the document's units change.
 
 ## Text and lettering
 
-Use `text` for a layout note or `textobject` for lettering in the model.
-Click the baseline position, then type multiple lines directly beside the text
-in the drawing. Press Escape or click back in the drawing to finish.
+Use `text`, or the Text tool in the toolbar: on a layout it places a note,
+in the model editable lettering. Click the baseline position, then type
+directly beside the text in the drawing. Ctrl+Enter starts a new line; Enter,
+Escape or a click back in the drawing finishes.
 Double-click existing text to edit it in place, or use the live **Content**
 field in Properties. Font family and style, letter height and left, centre or
 right alignment are available there without opening another window. Text edits

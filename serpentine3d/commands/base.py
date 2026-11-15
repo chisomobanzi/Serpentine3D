@@ -226,6 +226,9 @@ class SelectReq(Req):
     # trim takes the part that point is on (#31). A viewport click supplies
     # it; a typed, scripted or listed pick cannot, and leaves it out.
     want_point: bool = False
+    # Leave the answer selected rather than letting go of it: what a
+    # transform moves stays lit while you place it.
+    keep: bool = False
     # Enter or a right-click with fewer than min_count picked ends the
     # command rather than asking again: Join with one curve is done.
     too_few_ends: bool = False
@@ -1075,7 +1078,10 @@ class CommandProcessor:
                     pre = pre[:req.max_count]
                 if len(pre) >= req.min_count:
                     # consume pre-selection immediately
-                    self.ctx.selection.clear()
+                    if req.keep:
+                        self.ctx.selection.set(pre)
+                    else:
+                        self.ctx.selection.clear()
                     self._advance(
                         [self.ctx.scene.objects[i] for i in pre])
                     return
@@ -1413,6 +1419,8 @@ class CommandProcessor:
         # the answer: the command reads them after the yield returns
         held = list(self.ctx.selection.subobjects)
         self.ctx.selection.clear()
+        if req.keep:
+            self.ctx.selection.set(list(self._select_buffer))
         if held:
             self.ctx.selection.set_subobjects(held)
         self._advance(objs)
