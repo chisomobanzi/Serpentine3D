@@ -701,6 +701,55 @@ def _on_axis(v, tol: float = 5e-3):
     return out / n if n > 1e-12 else np.asarray(v, float)
 
 
+# The views a detail is offered, in the order Properties lists them. Named as
+# the commands name them, and read off the same table the model's camera is.
+DETAIL_VIEWS = ("Top", "Front", "Right", "Left", "Back", "Bottom",
+                "Isometric", "Perspective")
+
+
+def detail_view_name(detail) -> str | None:
+    """The named view a detail looks along, or None when it was aimed by
+    hand."""
+    from ..ui.camera import STANDARD_VIEWS
+    for name in DETAIL_VIEWS:
+        azimuth, elevation = STANDARD_VIEWS[name.lower()]
+        delta = (detail.azimuth - azimuth + math.pi) % (2 * math.pi) - math.pi
+        if (detail.perspective == (name == "Perspective")
+                and math.isclose(delta, 0, abs_tol=1e-7)
+                and math.isclose(detail.elevation, elevation, abs_tol=1e-7)):
+            return name
+    return None
+
+
+def detail_aimed_at(detail, name: str, bounds) -> dict:
+    """The camera fields that turn `detail` to a named view; empty when it
+    already looks that way.
+
+    Frame, scale and target stay: a detail turned is the same window onto
+    the same place, from another side. `bounds` is the model's box, which a
+    turn to perspective has to stand back far enough to see all of.
+    """
+    from ..ui.camera import STANDARD_VIEWS
+    azimuth, elevation = STANDARD_VIEWS[name.lower()]
+    perspective = name.lower() == "perspective"
+    fields = {"azimuth": azimuth, "elevation": elevation,
+              "perspective": perspective}
+    if all(getattr(detail, key) == value for key, value in fields.items()):
+        return {}
+    if perspective and not detail.perspective and bounds is not None:
+        from itertools import product
+        # Enclose the model about the existing target in a sphere, then stand
+        # back beyond both the horizontal and the vertical field of view.
+        radius = max(math.dist(point, detail.target)
+                     for point in product(*zip(*bounds)))
+        aspect = max(detail.w, 1e-6) / max(detail.h, 1e-6)
+        half_angle = math.atan(math.tan(math.pi / 8) * min(aspect, 1.0))
+        fields["perspective_distance"] = max(
+            detail.perspective_distance,
+            radius * 1.1 / math.sin(half_angle))
+    return fields
+
+
 def detail_basis(detail):
     """The basis a detail's geometry is measured in: view dir, right, up.
 

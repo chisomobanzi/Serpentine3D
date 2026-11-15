@@ -5843,9 +5843,18 @@ class Viewport(QOpenGLWidget):
             start, end, eased(t))
         self.update()
 
-    def go_to_view(self, name: str):
-        """A named view, turned to. `set_view` is the same view, arrived at."""
+    def go_to_view(self, name: str) -> str | None:
+        """A named view, turned to. `set_view` is the same view, arrived at.
+
+        On a sheet the camera turned is a detail's, as with zooming, and what
+        happened comes back to be said: the model camera is out of sight
+        there, so turning it looked like nothing at all (#131).
+        """
+        lv = self._zooms_the_sheet()
+        if lv is not None:
+            return lv.go_to_view(name)
         self.fly_to(STANDARD_VIEWS[name], name)
+        return None
 
     def land_flight(self):
         """Get there now, so the next thing you do happens in that view."""

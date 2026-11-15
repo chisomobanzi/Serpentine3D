@@ -57,6 +57,11 @@ Double-click a detail to *enter* it (pan/zoom acts on the model);
 click outside to leave. Selected details show corner grips for
 resizing; drag the body to move it.
 
+Inside a detail, `top`, `front`, `isometric`, `perspective` and the other
+views turn the detail, as do the views in the pane's title menu. On bare
+paper they turn the one detail you have picked. A locked detail keeps its
+view.
+
 Anything picked on a sheet also gets a gumball: an X arrow, a Y arrow
 and a pad that takes both at once. Drag a handle to move everything
 picked, or type a distance to move it exactly that far. Hold Alt while

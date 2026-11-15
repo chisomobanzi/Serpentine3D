@@ -7,9 +7,9 @@ import numpy as np
 from ..core import clipping
 from ..core import geometry as g
 from ..core.layout import (
-    PAPER_SIZES, DetailView, Layout, LinearDim, TextNote, annotation_style,
-    default_note_height, format_scale, hatch_patterns_of, parse_scale,
-    pattern_label, pattern_named, unique_layout_name,
+    DETAIL_VIEWS, PAPER_SIZES, DetailView, Layout, LinearDim, TextNote,
+    annotation_style, default_note_height, format_scale, hatch_patterns_of,
+    parse_scale, pattern_label, pattern_named, unique_layout_name,
 )
 from ..utils.units import TO_MM, format_paper_size, paper_units
 # a detail view named "front" should look where the front view looks
@@ -214,9 +214,7 @@ def cmd_detail(ctx):
             preview_fn=_frame_to if c1 is not None else None)
         if isinstance(value, str) and value == "View":
             view = yield OptionReq(
-                "View direction",
-                options=["Top", "Front", "Right", "Left", "Back", "Bottom",
-                         "Perspective"], default=view)
+                "View direction", options=list(DETAIL_VIEWS), default=view)
             detail.azimuth, detail.elevation = _VIEW_ANGLES[view.lower()]
             detail.perspective = view == "Perspective"
         elif isinstance(value, str) and value == "Scale":

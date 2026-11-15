@@ -404,6 +404,41 @@ class LayoutView:
         self.vp.update()
         return ok
 
+    def view_target(self):
+        """The detail a named view turns: the one you are inside, else the
+        one detail picked on the sheet, else None.
+
+        The sheet itself has no camera, and the pane's model camera is out
+        of sight behind it, so there is nothing else for Top or Perspective
+        to mean here (#131). Two picked details are not a choice between
+        them, as in Properties.
+        """
+        det = self._entered()
+        if det is not None:
+            return det
+        self._prune()
+        picked = [o for k, o in self.selected if k == "detail"]
+        return picked[0] if len(self.selected) == len(picked) == 1 else None
+
+    def go_to_view(self, name: str) -> str:
+        """Turn `view_target` to a named view, one undo step as in
+        Properties, and say what happened for the command line."""
+        from ..core.layout import detail_aimed_at
+        det = self.view_target()
+        label = name.capitalize()
+        if det is None:
+            return "Double-click a detail, or pick one, to turn its view."
+        if det.locked:
+            return ("The detail is locked, so its view stays. "
+                    "Run detaillock to unlock it.")
+        fields = detail_aimed_at(det, name, self.vp.scene.bbox())
+        if fields:
+            self.vp.window_checkpoint("detail view")
+            for key, value in fields.items():
+                setattr(det, key, value)
+            self.vp.scene.notify("layouts")
+        return f"{label} view in the detail."
+
     def _zoom_detail_rect(self, det, x0: float, y0: float,
                           x1: float, y1: float) -> bool:
         """Aim and scale a detail so that piece of its paper fills the frame.

@@ -14,6 +14,14 @@
 
 ### Fixed
 
+- **Top, Front, Perspective and the other views turn the detail you are
+  in** (#131). On a sheet they used to turn the model's camera, which the
+  sheet hides, so they seemed to do nothing. Typed, chosen from the pane's
+  menu or pressed as F1 to F5, a view now turns the detail you are inside,
+  or the one detail picked on the sheet, as one undo step. The pane's menu
+  ticks that detail's view, and greys the views out when there is no
+  detail to turn or it is locked. A locked detail keeps its view and says
+  so. Details can be Isometric too, when placed and in Properties.
 - **Curves and edges are drawn smooth (#168).** A curve is drawn as short
   straight pieces, and each could turn 14 degrees from the next, so a gentle
   curve showed its corners once zoomed in. Now each turns at most 1 degree:
