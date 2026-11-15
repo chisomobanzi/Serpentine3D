@@ -2949,12 +2949,16 @@ class Viewport(QOpenGLWidget):
                 items.append(self._batch_of(run, run_look, built))
             run.clear()
 
+        # Text is filled in its ink colour and may sit on a background,
+        # neither of which a batch draws.
+        from ..core.text_object import TextShape
         for obj in objects:
             gpu = self._gpu.get(obj.id)
             look = None
             if (gpu is not None and getattr(gpu, "plain", False)
                     and obj.kind in BATCH_KINDS and not obj.material
                     and obj.clip_plane is None and not obj.annotation
+                    and not isinstance(obj.shape, TextShape)
                     and obj.id not in picked
                     and obj.id not in self._flashes
                     and not self._looks_selected(obj.id)):
