@@ -294,9 +294,10 @@ def _convert(indices: list[int]):
         obj = _MODEL.Objects[i]
         geo = obj.Geometry
         attrs = obj.Attributes
-        if attrs.IsInstanceDefinitionObject:
+        if attrs.IsInstanceDefinitionObject or rhino.on_a_page(attrs):
             # Kept in the object table but not in the drawing: only the
-            # instances that place it put it anywhere.
+            # instances that place it put it anywhere. A layout page's
+            # content comes in as a sheet instead.
             out.append((i, [], None))
             continue
         meta = rhino.object_appearance(attrs, _LAYERS, _MATERIALS)

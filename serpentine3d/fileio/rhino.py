@@ -1760,6 +1760,14 @@ def hatch_to_shapes(geo, patterns: dict) -> list:
 
 # --------------------------------------------------- what to put off doing
 
+def on_a_page(attrs) -> bool:
+    """Whether an object is on one of the file's layout pages rather than
+    in the model: a title block, a note, a detail viewport, in paper
+    millimetres. Those come in as sheets (`read_pages`), never into the
+    model, where they would sit at paper coordinates."""
+    return attrs.ActiveSpace == r3.ActiveSpace.PageSpace
+
+
 def worth_deferring(geo, meta: dict) -> bool:
     """Whether this object can be read now and converted later (#5).
 
@@ -1921,6 +1929,8 @@ def import_3dm(path: str, progress=None, units: str = "mm",
             # A definition's content is not in the drawing; only the
             # instances that place it are. Importing it too put a ghost copy
             # of every block at the origin.
+            continue
+        if on_a_page(attrs):
             continue
         meta = object_appearance(attrs, layers, materials)
         if isinstance(obj.Geometry, r3.InstanceReference):
