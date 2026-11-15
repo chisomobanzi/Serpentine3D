@@ -2693,24 +2693,34 @@ class Viewport(QOpenGLWidget):
         for prog in (self._mesh_prog, self._line_prog, self._thick_prog,
                      self._point_prog):
             self._set_clip_uniforms(prog, clips)
-        translucent = mode == "ghosted" or any(
-            (o.material or {}).get("opacity", 1.0) < 1.0 for o in objects)
-        if translucent:
-            # translucency composits correctly back-to-front
+        # What is see-through composits correctly drawn back-to-front, over
+        # everything opaque: in a ghosted frame that is the lot, otherwise
+        # only the objects with an opacity, drawn last. The opaque ones keep
+        # their order, and so can still share draw calls.
+        if mode == "ghosted":
+            see_through, objects = objects, []
+        else:
+            see_through = [o for o in objects
+                           if (o.material or {}).get("opacity", 1.0) < 1.0]
+            if see_through:
+                objects = [o for o in objects
+                           if (o.material or {}).get("opacity", 1.0) >= 1.0]
+        if see_through:
             eye = np.asarray(self.camera.position, float)
-            centres, valid = self._centres_for(objects)
+            centres, valid = self._centres_for(see_through)
             order = _back_to_front(centres, valid, eye)
-            objects = [objects[i] for i in order]
+            see_through = [see_through[i] for i in order]
         if mode == "rendered":
             # before culling: an object above the frustum can still stamp a
             # shadow that is inside it
-            self._draw_ground_shadow(mvp, objects)
+            self._draw_ground_shadow(mvp, objects + see_through)
         # Clipping planes re-express themselves around anchored objects as
-        # the loop goes, translucency needs its order and rendered mode has
-        # its materials, so those frames draw an object at a time.
-        if not (translucent or clips or mode == "rendered"):
+        # the loop goes, and rendered mode has its materials, so those
+        # frames draw an object at a time.
+        if not (clips or mode == "rendered"):
             objects = self._batched(objects, locked_layers, mode,
                                     light_background)
+        objects = objects + see_through
         objects = self._cull(mvp, objects)
         max_level = self._cloud_budget(
             [o for o in objects if not isinstance(o, _Batch)])

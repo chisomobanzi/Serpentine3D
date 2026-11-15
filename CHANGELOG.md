@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- **A see-through object no longer slows the whole view down.** One
+  object with an opacity sent every other object in the frame back to
+  being drawn one at a time, so the draw-call sharing of 0.12.5 never
+  started. Opaque objects now share draw calls as usual and the
+  see-through ones are drawn after them, back to front. A 522 MB film set
+  with one see-through surface among ten thousand objects went from 136
+  ms a frame to 88 ms on an RTX 5070, and lines that run past the
+  surface are no longer darkened by meshes drawn over them out of turn.
 - **A dimension inside a scaled block says what the block says.** A Rhino
   or DXF block placed at 1/25 or at 2 showed its dimensions at 1/25 or
   twice their value; Rhino and AutoCAD show the block's own measurement,
