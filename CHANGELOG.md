@@ -30,6 +30,15 @@
   beside it still point at the right place. The lock is a box in the
   detail's Properties as well as the `detaillock` command, and a locked
   detail's View and Scale are greyed there.
+- **A detail's corners snap** (#129). Dragging a corner grip, or dragging
+  anything on a sheet, now lands on object snaps the way a picked point
+  does, with the same snap marker, so a frame can be lined up with
+  another or with the page exactly. A dragged item is grabbed by the snap
+  under the press, so its end can be dropped on a corner. Scale, Scale1D,
+  Scale2D, Move, Copy, Rotate and Mirror on a picked sheet item take their
+  points on the paper throughout: a click inside a frame no longer steps
+  into the detail and hands the command a point in the model, so a
+  frame's corners can be the base and reference points.
 - **Curves and edges are drawn smooth (#168).** A curve is drawn as short
   straight pieces, and each could turn 14 degrees from the next, so a gentle
   curve showed its corners once zoomed in. Now each turns at most 1 degree:

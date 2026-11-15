@@ -55,7 +55,9 @@ detail at its scale.
 
 Double-click a detail to *enter* it (pan/zoom acts on the model);
 click outside to leave. Selected details show corner grips for
-resizing; drag the body to move it.
+resizing; drag the body to move it. A dragged corner or frame lands on
+object snaps, marked as a picked point is, so frames line up exactly with
+each other and with the page.
 
 Inside a detail, `top`, `front`, `isometric`, `perspective` and the other
 views turn the detail, as do the views in the pane's title menu. On bare

@@ -278,10 +278,13 @@ class LayoutView:
     def note_snap(self, sx: float, sy: float, snaps,
                   radius_px: float = 12.0):
         """Shared paper snap query (name retained for existing callers)."""
+        return self._snaps().pick(sx, sy, snaps, radius_px)
+
+    def _snaps(self):
         if not hasattr(self, "_paper_snaps"):
             from .paper_snaps import PaperSnaps
             self._paper_snaps = PaperSnaps(self)
-        return self._paper_snaps.pick(sx, sy, snaps, radius_px)
+        return self._paper_snaps
 
     def _paper_mvp(self) -> np.ndarray:
         """Ortho MVP mapping paper mm -> clip space."""
@@ -1443,7 +1446,9 @@ class LayoutView:
                     self._drag_checkpoint = "resize detail"
                     self._drag = ("resize", [c for _, c in self.corners],
                                   [("detail", det)])
-                    self._drag_last = (px, py)
+                    # the grip's own corner, so that wherever it is dropped
+                    # is where the corner goes, snap and all
+                    self._drag_last = (gx, gy)
                     return True
         self.corners = []           # anything but a grip is a coarser pick
         from ..core.layout import annotation_at, paper_object_at
@@ -1463,7 +1468,9 @@ class LayoutView:
                 self._press_hit = None if add else hit
                 self._drag_checkpoint = "move sheet item"
                 self._drag = ("move", -1, list(self.selected))
-                self._drag_last = (px, py)
+                # grabbed by a snap when there is one under the press, so an
+                # end taken hold of can be dropped on a corner
+                self._drag_last = self._point_at(sx, sy)
             return True
         # Empty paper: sweep a band out of it.
         if not add:
@@ -1478,10 +1485,11 @@ class LayoutView:
             return True
         if self._drag is None:
             return False
-        px, py = self.screen_to_paper(sx, sy)
+        mode, corners, picks = self._drag
+        self._snaps().leave_out = {obj.id for _kind, obj in picks}
+        px, py = self._point_at(sx, sy)
         dx = px - self._drag_last[0]
         dy = py - self._drag_last[1]
-        mode, corners, picks = self._drag
         if self._drag_checkpoint is not None:
             self.vp.window_checkpoint(self._drag_checkpoint)
             self._drag_checkpoint = None
@@ -1575,6 +1583,18 @@ class LayoutView:
         self._drag_checkpoint = None
         self._press_hit = None
         self._press_corner = None
+        self._snaps().leave_out = set()
+        self.vp._active_snap = None
+
+    def dragging(self) -> bool:
+        """A frame, grip or sheet item is being dragged right now."""
+        return self._drag is not None and self._drag_moved
+
+    def _point_at(self, sx: float, sy: float) -> tuple:
+        """Where a drag is on the paper: the point a pick there would give,
+        snapped as one would be and marked the same way (#129)."""
+        x, y, _z = self.vp.world_point_at(sx, sy)
+        return float(x), float(y)
 
     def move_corners(self, dx: float, dy: float) -> int:
         """Shift every picked corner by paper millimetres.

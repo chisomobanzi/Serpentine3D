@@ -1371,6 +1371,8 @@ class MainWindow(QMainWindow):
             # command asked for, so the registry's answer travels with it.
             active = self.processor.active
             space = active.space if active is not None else "model"
+            if self.ctx.paper_points:
+                space = "paper"
             for vp in self.all_viewports():
                 vp.set_point_mode(True)
                 vp.snap_base = base

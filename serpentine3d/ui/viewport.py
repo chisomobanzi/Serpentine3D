@@ -3611,13 +3611,21 @@ class Viewport(QOpenGLWidget):
             out[i, :2] = detail_project(entered, p)
         return out
 
+    def _snap_to_draw(self):
+        """The snap to mark: the one under a point being picked, or under a
+        grip or sheet item being dragged, which lands where a pick would."""
+        if self.point_mode or (self.space != "model"
+                               and self.layout_view.dragging()):
+            return self._active_snap
+        return None
+
     def _draw_preview(self, mvp):
         pts = self._preview_data
         markers = self._marker_points
         if self.space != "model" and self._drawing_through() is not None:
             pts = self._on_paper(pts) if len(pts) else pts
             markers = [self._on_paper([m])[0] for m in markers]
-        snap = self._active_snap if self.point_mode else None
+        snap = self._snap_to_draw()
         # An elevator standing before the first point has no leg drawn
         # against it, so without the axis itself on screen Ctrl looks like
         # it did nothing at all.
@@ -3659,10 +3667,15 @@ class Viewport(QOpenGLWidget):
                 else:
                     at = np.asarray(snap[0], float)
                 axes = (np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]))
+                # Wider than a detail's corner grip, which is painted over
+                # the top of it: a marker the grip's size was hidden by the
+                # grip it landed on, so a snapped corner looked unsnapped.
+                reach = size * 1.8
             else:
                 at = np.asarray(snap[0], float)
                 axes = self.camera.right_up()
-            segs = _snap_marker(snap[1], at, *axes, size * 0.95)
+                reach = size * 0.95
+            segs = _snap_marker(snap[1], at, *axes, reach)
             self._preview.update(rebased(segs, self._frame_anchor))
             self._draw_lines(self._preview, mvp,
                              _snap_marker_color(self.space), 2.0)
