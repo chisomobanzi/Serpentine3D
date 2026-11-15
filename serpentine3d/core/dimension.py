@@ -33,6 +33,11 @@ STYLE_DEFAULTS = {
     "extension_offset": None,   # gap between a point and its extension line
     "extension_beyond": None,   # how far it runs past the dimension line
     "text_gap": None,        # between the dimension line and the text
+    # Rhino's alternate units as it wrote them, with what set them off
+    # ("\n" below the line, " " beside it), and the measurement they were
+    # worked out for: shown while that is still what it measures.
+    "alternate": "",
+    "alternate_for": 0.0,
 }
 
 
@@ -166,9 +171,13 @@ class DimensionShape(TopoDS_Compound):
         """What its text says: the measurement, or what was typed over it,
         where "<>" in what was typed stands for the measurement."""
         typed = self._style["text"]
-        if not typed:
-            return self.measurement_text
-        return typed.replace("<>", self.measurement_text)
+        said = (typed.replace("<>", self.measurement_text) if typed
+                else self.measurement_text)
+        alternate = self._style["alternate"]
+        if alternate and abs(self.measured - self._style["alternate_for"]) \
+                <= 0.5 * 10 ** -int(self._style["decimals"]):
+            said += alternate
+        return said
 
     # --- drawing ------------------------------------------------------------
 
@@ -331,8 +340,13 @@ class DimensionShape(TopoDS_Compound):
     # --- saving -------------------------------------------------------------
 
     def to_bytes(self):
+        # without alternate units it is written as 0.13.0 wrote it, which
+        # refuses a style key it does not know
+        style = {k: v for k, v in self._style.items()
+                 if k not in ("alternate", "alternate_for")
+                 or self._style["alternate"]}
         header = json.dumps(dict(p1=self._p1, p2=self._p2, at=self._at,
-                                 u=self._u, n=self._n, style=self._style),
+                                 u=self._u, n=self._n, style=style),
                             ensure_ascii=False).encode("utf-8")
         return DIMENSION_TAG + struct.pack("<I", len(header)) + header
 
@@ -363,6 +377,8 @@ def _style(values: dict) -> dict:
     style["decimals"] = max(0, min(8, int(style["decimals"])))
     style["suffix"] = str(style["suffix"]).strip()      # set off by a space
     style["text"] = str(style["text"])
+    style["alternate"] = str(style["alternate"] or "")
+    style["alternate_for"] = float(style["alternate_for"] or 0.0)
     style["font_family"] = str(style["font_family"] or "sans")
     if style["arrow"] not in ARROWS:
         style["arrow"] = "arrow"

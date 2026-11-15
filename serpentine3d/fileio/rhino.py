@@ -1524,8 +1524,20 @@ def instance_to_objects(geo, instance_name: str, instance_meta: dict,
                 # A transform OCCT will not perform is better skipped than
                 # allowed to put the piece in the wrong place.
                 continue
-            out.append((name, placed, meta))
+            out.append((name, _says_what_it_said(shape, placed), meta))
     return out
+
+
+def _says_what_it_said(shape, placed):
+    """`placed`, and for a dimension, still saying what it said in its
+    block. Rhino shows a dimension in a block with the block's own
+    measurement however the block is scaled, so a sheet placed at 1/25
+    reads 910 rather than 36.4."""
+    from ..core.dimension import DimensionShape
+    if not isinstance(placed, DimensionShape) or not placed.measured:
+        return placed
+    return placed.edited(length_factor=placed.length_factor
+                         * shape.measured / placed.measured)
 
 
 # The hatch pattern table of the file being read, by pattern index, for the
@@ -1646,7 +1658,6 @@ def dimension_to_shape(geo, styles: dict):
     """A Rhino linear (rotated or aligned) dimension as a model dimension,
     in its style's look, saying what it said in Rhino; None for any other
     kind, which is left out as it always was."""
-    import re
     from ..core.dimension import DimensionShape
     kind = str(geo.AnnotationType).rsplit(".", 1)[-1]
     if kind not in ("Rotated", "Aligned"):
@@ -1661,28 +1672,45 @@ def dimension_to_shape(geo, styles: dict):
     y = np.array([plane.YAxis.X, plane.YAxis.Y, plane.YAxis.Z])
     style = dict(styles.get(str(geo.DimensionStyleId), {}))
     measured = abs(x2) * style.get("length_factor", 1.0)
-    # its text is how the style wrote the number, and anything around it:
-    # the decimals and suffix it was written with, or words typed over it
-    said = str(geo.PlainText or "").strip()
-    for match in re.finditer(r"-?\d+(?:[.,](\d+))?", said):
-        if abs(float(match.group(0).replace(",", ".")) - measured) <= \
-                0.5 * 10 ** -len(match.group(1) or ""):
-            style["decimals"] = len(match.group(1) or "")
-            before, after = said[:match.start()], said[match.end():]
-            if before:
-                style["text"] = before + "<>" + after
-            else:
-                style["suffix"] = after
-            break
-    else:
-        if said:
-            style["text"] = said
+    style.update(_written_look(str(geo.PlainText or ""), measured))
     try:
         return DimensionShape(tuple(o), tuple(o + x * x2 + y * y2),
                               tuple(o + x * xl + y * yl), direction=tuple(x),
                               normal=tuple(np.cross(x, y)), **style)
     except geometry.GeometryError:
         return None
+
+
+def _written_look(said: str, measured: float) -> dict:
+    """What a dimension's text, as Rhino wrote it, says about its look: the
+    decimals and suffix the number was written with, words typed around it,
+    and the alternate units Rhino added in brackets, below the line or
+    beside it. Text that is not the measurement is kept as typed."""
+    import re
+    said = said.replace("\r\n", "\n").strip()
+    look = {}
+    main, alternate = said, ""
+    bracketed = re.match(r"(?s)^(.*?)(\s*)(\[[^\[\]]*\])\s*$", said)
+    if bracketed and bracketed.group(1).strip():
+        main = bracketed.group(1).strip()
+        alternate = ("\n" if "\n" in bracketed.group(2) else " ") \
+            + bracketed.group(3)
+    for match in re.finditer(r"-?\d+(?:[.,](\d+))?", main):
+        if abs(float(match.group(0).replace(",", ".")) - measured) <= \
+                0.5 * 10 ** -len(match.group(1) or ""):
+            look["decimals"] = len(match.group(1) or "")
+            before, after = main[:match.start()], main[match.end():]
+            if before:
+                look["text"] = before + "<>" + after
+            else:
+                look["suffix"] = after
+            if alternate:
+                look["alternate"] = alternate
+                look["alternate_for"] = measured
+            return look
+    if said:
+        look["text"] = said
+    return look
 
 
 def hatch_to_shapes(geo, patterns: dict) -> list:

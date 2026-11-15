@@ -591,6 +591,28 @@ def test_a_dimension_inside_a_block_is_a_dimension_where_the_block_is(tmp_path):
     assert obj.shape.measured == pytest.approx(10.0)
 
 
+def test_a_dimension_in_a_scaled_block_says_what_the_block_says(tmp_path):
+    """The file draws a block's dimension with the block's own measurement
+    however the reference scales it, as AutoCAD and Rhino show it."""
+    def build(doc):
+        block = doc.blocks.new("DIMMED")
+        block.add_linear_dim(base=(0, 10), p1=(0, 0), p2=(40, 0),
+                             override={"dimdec": 2, "dimzin": 0}).render()
+        msp = doc.modelspace()
+        msp.add_blockref("DIMMED", (100, 0),
+                         dxfattribs={"xscale": 2, "yscale": 2})
+        msp.add_blockref("DIMMED", (0, 100),
+                         dxfattribs={"xscale": 0.04, "yscale": 0.04,
+                                     "rotation": 90})
+
+    dims = sorted((o.shape for o in _dims(_imported(tmp_path, build))),
+                  key=lambda d: d.p1[0])
+    assert [d.label for d in dims] == ["40.00", "40.00"]
+    lengths = sorted(math.dist(d.p1, d.p2) for d in dims)
+    assert lengths == [pytest.approx(1.6), pytest.approx(80.0)], \
+        "drawn where and as big as the block puts it"
+
+
 def test_other_dimensions_come_in_as_they_are_drawn(tmp_path):
     from serpentine3d.core.hatch import HatchShape
 

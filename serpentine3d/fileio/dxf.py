@@ -499,6 +499,18 @@ def _dimension_of(e):
         ocs = OCS(tuple(normal))
         direction = np.asarray(tuple(ocs.to_wcs(
             (math.cos(turn), math.sin(turn), 0.0))), float)
+    # The file draws a dimension in a block with the block's measurement
+    # however the reference scales it: what scaling stretched along the
+    # direction measured, the length factor takes back out.
+    length_factor = float(get("dimlfac", 1.0) or 1.0)
+    placing = getattr(e, "s3d_placed_by", None)
+    if placing is not None:
+        unit = direction / (np.linalg.norm(direction) or 1.0)
+        back = placing.copy()
+        back.inverse()
+        stretch = np.linalg.norm(tuple(back.transform_direction(tuple(unit))))
+        if stretch > 1e-12:
+            length_factor *= stretch
     post = str(get("dimpost", "") or "")
     prefix, _, suffix = post.partition("<>") if "<>" in post else ("", "", "")
     typed = str(e.dxf.get("text", "") or "")
@@ -521,7 +533,7 @@ def _dimension_of(e):
         decimals=int(get("dimdec", 2)), suffix=suffix, text=typed,
         trailing_zeros=not int(get("dimzin", 0) or 0) & 8,
         font_family=_dim_font(e, str(get("dimtxsty", "Standard"))),
-        length_factor=float(get("dimlfac", 1.0) or 1.0),
+        length_factor=length_factor,
         extension_offset=float(get("dimexo", 0.625)) * scale,
         extension_beyond=float(get("dimexe", 1.25)) * scale,
         text_gap=abs(float(get("dimgap", 0.625))) * scale)
@@ -841,12 +853,17 @@ def _exploded(insert, look: _Look, looks: _Looks, depth: int = 0):
             pieces = list(insert.virtual_entities())
         except Exception:                                  # noqa: BLE001
             return
+    placing = insert.matrix44() if insert.dxftype() == "INSERT" else None
     for piece in pieces:
         piece_look = looks.of(piece, look)
         if piece.dxftype() == "INSERT" or (piece.dxftype() in _DIMENSIONS
                                            and not _is_linear(piece)):
             yield from _exploded(piece, piece_look, looks, depth + 1)
         else:
+            if placing is not None and piece.dxftype() in _DIMENSIONS:
+                # a nested reference comes already placed in the world, so
+                # this is the whole way from the block to the drawing
+                piece.s3d_placed_by = placing
             yield piece, piece_look
     # a reference's attributes, its tag values, are its own text, already
     # where the reference put them

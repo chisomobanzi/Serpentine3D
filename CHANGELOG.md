@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A dimension inside a scaled block says what the block says.** A Rhino
+  or DXF block placed at 1/25 or at 2 showed its dimensions at 1/25 or
+  twice their value; Rhino and AutoCAD show the block's own measurement,
+  and so does Serpentine3D now.
+- **Rhino's alternate units come in under a number that still measures.**
+  A dimension written as 910 with [2'-11 3/4"] below it came in as fixed
+  typed text, so its number never followed an edit. Now 910 measures and
+  the bracketed units stay until the measurement changes, when they would
+  no longer be true. A drawing with one needs 0.13.1 to open; 0.13.0
+  would fail partway through reading it.
+
 ## 0.13.0 (2026-11-15)
 
 ### Added

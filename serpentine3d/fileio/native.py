@@ -21,7 +21,7 @@ from ..core.layers import (DEFAULT_CUT_LINE_WIDTH, DEFAULT_SCREEN_WIDTH,
 
 # The newest version this reader understands. Anything newer is refused
 # with the version it asks for, never a traceback.
-FORMAT_VERSION = 9
+FORMAT_VERSION = 10
 # What a document with none of the version-3 kinds is written as.
 PLAIN_VERSION = 2
 # The Serpentine3D release a version-3 file asks its reader to be.
@@ -251,6 +251,14 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
                    for note in lay.notes)):
         doc["version"] = 9
         doc["requires"] = "0.13.0"
+    # 0.13.0 reads a dimension's look through a fixed list and fails partway
+    # into the load on a key it has never seen, as Rhino's alternate units.
+    in_blocks = [shape for bd in scene.block_defs.values()
+                 for shape in bd["shapes"]]
+    if any(isinstance(shape, DimensionShape) and shape.style["alternate"]
+           for shape in new_shapes + in_blocks):
+        doc["version"] = 10
+        doc["requires"] = "0.13.1"
     _write_container(doc, path, thumbnail, blobs)
 
 
