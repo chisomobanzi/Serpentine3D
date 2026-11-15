@@ -100,3 +100,50 @@ def test_a_note_can_have_a_background_too(window):
     backed = annotation_bounds("note", note)
     assert backed[0] == pytest.approx(plain[0] - 2.)
     assert backed[3] == pytest.approx(plain[3] + 2.)
+
+
+# -- the file -----------------------------------------------------------------
+
+def _saved(scene, tmp_path):
+    import json
+    import zipfile
+
+    from serpentine3d.fileio import native
+    path = str(tmp_path / "masked.serp")
+    native.save_scene(scene, path)
+    with zipfile.ZipFile(path) as z:
+        return json.loads(z.read("document.json")), path
+
+
+def _note(**look):
+    lay = Layout(name="Sheet")
+    lay.notes.append(TextNote(text="NOTE", x=20, y=20, height=4, **look))
+    return lay
+
+
+@pytest.mark.parametrize("where", ["model", "sheet"])
+def test_a_drawing_with_a_text_background_asks_for_the_release_that_keeps_it(
+        tmp_path, monkeypatch, where):
+    """0.12.5 opens such a drawing and drops the background without a word,
+    so a save there loses it: the file asks for 0.13.0."""
+    from serpentine3d.core.scene import Scene
+    from serpentine3d.fileio import native
+    scene = Scene()
+    if where == "model":
+        scene.add(TextShape("MASK", 5.0).with_background(True))
+    else:
+        scene.layouts.append(_note(background=True))
+    doc, path = _saved(scene, tmp_path)
+    assert (doc["version"], doc["requires"]) == (9, "0.13.0")
+    monkeypatch.setattr(native, "FORMAT_VERSION", 8)
+    with pytest.raises(ValueError, match=r"0\.13\.0"):
+        native.load_scene(Scene(), path)
+
+
+def test_text_without_a_background_is_written_as_before(tmp_path):
+    from serpentine3d.core.scene import Scene
+    scene = Scene()
+    scene.add(TextShape("PLAIN", 5.0))
+    scene.layouts.append(_note())
+    doc, _path = _saved(scene, tmp_path)
+    assert doc["version"] <= 8 and doc.get("requires") != "0.13.0"
