@@ -225,8 +225,8 @@ Commands that need a file open a filtered chooser by default. Append
 | `group` | Group objects and keep them selected. |
 | `insert` | Insert |
 | `linetype` (`lt`, `setlinetype`) | Set the dash style of selected objects (Continuous/Dashed/…/ByLayer). |
-| `lock` | Lock |
-| `lockother` | Lock everything except what you picked, as Rhino's LockOther does. |
+| `lock` | Lock what is picked, in the model or on a sheet: still drawn and snapped to, but not pickable. |
+| `lockother` | Lock everything except what you picked, as Rhino's LockOther does (on a sheet, the rest of that sheet). |
 | `matchprops` (`matchproperties`) | Copy an object's layer, colour, material, print width and hatch. |
 | `meshtobrep` | Convert mesh objects into exact BREP shells (slow for big meshes). |
 | `pointcloud` (`pc`) | Point clouds: `info` says what a scan holds; `subsample` keeps an |
@@ -237,7 +237,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `sendtoback` (`sb`) | Draw the selected objects behind overlapping ones. |
 | `setusertext` (`setattributeusertext`) | Set a key of user text on the selected objects, as Rhino's SetUserText does. |
 | `ungroup` | Ungroup objects and keep them selected. |
-| `unlockall` (`unlock`) | Unlockall |
+| `unlockall` (`unlock`) | Unlock every locked object and every locked sheet item. |
 | `what` | Report details of the selected objects. |
 
 ## Selection

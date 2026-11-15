@@ -61,15 +61,25 @@ each other and with the page.
 
 Inside a detail, `top`, `front`, `isometric`, `perspective` and the other
 views turn the detail, as do the views in the pane's title menu. On bare
-paper they turn the one detail you have picked. A locked detail keeps its
-view.
+paper they turn the one detail you have picked. A detail whose view is
+locked keeps it.
 
-**Locking a detail** keeps its view and scale: panning, zooming, named
+**Locking a detail's view** keeps its view and scale: panning, zooming, named
 views and scale changes leave it as it is, so you can step in to fix a line
 without nudging the drawing. Tick **Lock** in the detail's Properties, or run
 `detaillock` inside it. The frame is not locked: it still moves, resizes and
 deletes like anything on the sheet, and cropping it shows more or less of the
-model without shifting what is already drawn.
+model without shifting what is already drawn. The frame label says
+`[view locked]`.
+
+**Locking sheet items** works as it does in the model: pick a frame, a
+border, a note, a dimension, a leader or a hatch on the sheet and run `lock`
+(++ctrl+l++). It stays drawn and you can still snap to it, but a click or a
+band no longer picks it, so it cannot be moved or deleted by accident. On
+screen it is drawn faded; it prints as it always did. A locked detail can
+still be double-clicked into. `lockother` locks the rest of the sheet, and
+`unlockall` (++ctrl+shift+l++) unlocks everything, in the model and on every
+sheet, though not a detail's view lock.
 
 Anything picked on a sheet also gets a gumball: an X arrow, a Y arrow
 and a pad that takes both at once. Drag a handle to move everything

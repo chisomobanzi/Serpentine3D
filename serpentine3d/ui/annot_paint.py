@@ -22,6 +22,8 @@ HATCH_INK = QColor(70, 72, 80)
 # see-through read as a tint rather than a hatch. A cut's own edges are
 # drawn after it, so a poched wall still sits behind them.
 SOLID_FILL = QColor(HATCH_INK)
+# A locked annotation on screen, as a locked object in the model goes grey.
+LOCKED_OPACITY = 0.4
 
 
 def style_of(scene, name: str) -> dict:
@@ -380,21 +382,27 @@ def draw_revision_table(painter, to_dev, k, layout):
 
 
 def draw_all(painter, to_dev, k, layout, scene=None, sheet_index=1,
-             sheet_count=1):
-    """Every annotation for one layout, in drawing order."""
+             sheet_count=1, faded=False):
+    """Every annotation for one layout, in drawing order.
+
+    `faded` draws what `lock` has locked faded out, which the screen wants
+    and a print does not: on paper a locked note is a note like any other.
+    """
     resolve_associative(layout)
-    for hatch in layout.hatches:
-        draw_hatch(painter, to_dev, k, hatch, scene)
-    for note in layout.notes:
-        draw_note(painter, to_dev, k, note, scene)
-    for leader in layout.leaders:
-        draw_leader(painter, to_dev, k, leader, scene)
-    for dim in layout.dims:
-        draw_lin_dim(painter, to_dev, k, dim, scene)
-    for dim in layout.rdims:
-        draw_radial_dim(painter, to_dev, k, dim, scene)
-    for dim in layout.adims:
-        draw_angular_dim(painter, to_dev, k, dim, scene)
+    for draw, pool in ((draw_hatch, layout.hatches),
+                       (draw_note, layout.notes),
+                       (draw_leader, layout.leaders),
+                       (draw_lin_dim, layout.dims),
+                       (draw_radial_dim, layout.rdims),
+                       (draw_angular_dim, layout.adims)):
+        for item in pool:
+            if faded and item.item_locked:
+                painter.save()
+                painter.setOpacity(LOCKED_OPACITY)
+                draw(painter, to_dev, k, item, scene)
+                painter.restore()
+            else:
+                draw(painter, to_dev, k, item, scene)
     draw_title_block(painter, to_dev, k, layout, sheet_index, sheet_count,
                      scene)
     draw_revision_table(painter, to_dev, k, layout)

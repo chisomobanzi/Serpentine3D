@@ -26,8 +26,47 @@ def cmd_ungroup(ctx):
     ctx.echo(f"Ungrouped {n} object(s).")
 
 
-@command("lock")
+def _sheet_items(lay):
+    """Everything a sheet holds, as (kind, item)."""
+    from ..core.layout import sheet_pools
+    return [(kind, item) for kind, pool in sheet_pools(lay).items()
+            for item in pool]
+
+
+def _sheet_picks(ctx, lv, what: str):
+    """What is picked on the sheet, or None after saying how to pick it."""
+    lv._prune()
+    if not lv.selected:
+        ctx.echo(f"Nothing picked on the sheet: click {what} first.")
+        return None
+    return list(lv.selected)
+
+
+def _picks_changed(ctx, lv):
+    ctx.scene.notify("layouts")
+    lv.vp.layoutSelectionChanged.emit()
+
+
+@command("lock", space="any")
 def cmd_lock(ctx):
+    """Lock what is picked: still drawn and snapped to, but not pickable.
+
+    On a sheet that is what is picked there, the way move and delete take
+    it, which a model pick cannot reach. A detail's frame locked this way is
+    not its view: that lock is `detaillock`'s (#130).
+    """
+    lv = ctx.sheet_view()
+    if lv is not None:
+        picks = _sheet_picks(ctx, lv, "what to lock")
+        if picks is None:
+            return
+        for _kind, item in picks:
+            item.item_locked = True
+        lv.selected, lv.corners = [], []
+        _picks_changed(ctx, lv)
+        ctx.echo(f"Locked {len(picks)} sheet item(s): still drawn, but "
+                 "they cannot be picked. 'unlockall' releases them.")
+        return
     objs = yield SelectReq("Select objects to lock")
     ctx.scene.update_many([o.id for o in objs], locked=True)
     ctx.selection.clear()
@@ -35,7 +74,7 @@ def cmd_lock(ctx):
              "'unlockall' releases them.")
 
 
-@command("lockother")
+@command("lockother", space="any")
 def cmd_lockother(ctx):
     """Lock everything except what you picked, as Rhino's LockOther does.
 
@@ -44,8 +83,24 @@ def cmd_lockother(ctx):
     you picking it, which is what you actually wanted when the thing you
     keep catching is a background curve you have no intention of moving.
 
-    What you picked stays picked, so you can get straight on with it.
+    What you picked stays picked, so you can get straight on with it. On a
+    sheet it is the rest of that sheet that is locked.
     """
+    lv = ctx.sheet_view()
+    if lv is not None:
+        picks = _sheet_picks(ctx, lv, "what to leave unlocked")
+        if picks is None:
+            return
+        keep = {id(item) for _kind, item in picks}
+        n = 0
+        for _kind, item in _sheet_items(lv.layout):
+            if id(item) not in keep and not item.item_locked:
+                item.item_locked = True
+                n += 1
+        _picks_changed(ctx, lv)
+        ctx.echo(f"Locked {n} sheet item(s); {len(picks)} left to work on. "
+                 "'unlockall' releases them.")
+        return
     objs = yield SelectReq("Select objects to leave unlocked")
     keep = {o.id for o in objs}
     n = ctx.scene.update_many([o.id for o in ctx.scene.all()
@@ -60,9 +115,23 @@ def cmd_lockother(ctx):
 
 @command("unlockall", aliases=("unlock",))
 def cmd_unlockall(ctx):
-    n = ctx.scene.update_many([o.id for o in ctx.scene.all() if o.locked],
+    """Unlock every locked object, and every locked item on every sheet,
+    whichever space it is run from. A detail's view lock is not one of
+    them: that is `detaillock`'s."""
+    scene = ctx.scene
+    held = [item for lay in scene.layouts
+            for _kind, item in _sheet_items(lay) if item.item_locked]
+    with scene.batched():
+        n = scene.update_many([o.id for o in scene.all() if o.locked],
                               locked=False)
-    ctx.echo(f"Unlocked {n} object(s).")
+        for item in held:
+            item.item_locked = False
+        if held:
+            scene.notify("layouts")
+    said = [f"{n} object(s)"] if n or not held else []
+    if held:
+        said.append(f"{len(held)} sheet item(s)")
+    ctx.echo(f"Unlocked {' and '.join(said)}.")
     yield from ()
 
 

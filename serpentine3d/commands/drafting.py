@@ -1352,7 +1352,8 @@ def cmd_annotedit(ctx):
         yield  # pragma: no cover
     from ..core.layout import annotation_at
     p = yield PointReq("Pick an annotation")
-    hit = annotation_at(lay, p[0], p[1], tol=3.0, scene=ctx.scene)
+    hit = annotation_at(lay, p[0], p[1], tol=3.0, scene=ctx.scene,
+                        locked=False)
     if hit is None:
         ctx.echo("Nothing there. Click on a note, dimension, leader or "
                  "hatch.")

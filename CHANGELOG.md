@@ -39,6 +39,16 @@
   points on the paper throughout: a click inside a frame no longer steps
   into the detail and hands the command a point in the model, so a
   frame's corners can be the base and reference points.
+- **Lock works on sheets.** `lock` (Ctrl+L) on anything picked on a sheet
+  (a detail frame, paper geometry, a note, a dimension, a leader or a
+  hatch) used to sit at a model "Select objects" prompt no click on paper
+  could answer, and nothing on a sheet could be locked at all. Now a
+  locked sheet item is still drawn and snapped to, but a click or a band
+  passes over it to whatever is underneath, as in the model and in Rhino.
+  It is drawn faded on screen and prints as before. `lockother` locks the
+  rest of the sheet, and `unlockall` unlocks the model and every sheet. A
+  detail's frame lock is separate from its view lock, whose label now
+  reads `[view locked]`; a locked detail can still be double-clicked into.
 - **Curves and edges are drawn smooth (#168).** A curve is drawn as short
   straight pieces, and each could turn 14 degrees from the next, so a gentle
   curve showed its corners once zoomed in. Now each turns at most 1 degree:

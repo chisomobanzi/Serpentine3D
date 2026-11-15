@@ -38,6 +38,17 @@ ZOOM_PAD = 1.05                         # air around what a zoom was asked for
 MODES_3D = ("wireframe", "shaded", "ghosted")
 
 
+# How far a locked sheet item's ink goes towards the paper, on screen only,
+# as a locked object in the model goes grey: it is there, but not for picking.
+LOCKED_FADE = 0.6
+
+
+def _faded(color) -> tuple:
+    """`color` faded towards the paper, for a locked sheet item."""
+    return (*(c + (p - c) * LOCKED_FADE
+              for c, p in zip(color[:3], PAPER_COLOR)), color[3])
+
+
 def _cut_ink(color) -> tuple:
     """The (r, g, b, a) a cut line draws in on screen: its section's
     colour, or with none the ink a cut has always been outlined in."""
@@ -528,7 +539,8 @@ class LayoutView:
         """
         if any(k == "object" and o is obj for k, o in self.selected):
             return (*theme.SELECTION_COLOR, 1.0)
-        return (*obj.color, 1.0) if obj.color else LINE_VISIBLE
+        ink = (*obj.color, 1.0) if obj.color else LINE_VISIBLE
+        return _faded(ink) if obj.item_locked else ink
 
     def _point_mark_size(self) -> float:
         """Half the width of a point's cross, in paper millimetres.
@@ -609,6 +621,8 @@ class LayoutView:
         entered = detail.id == self.entered_detail
         if detail.show_border or entered:
             color = BORDER_ACTIVE if entered else BORDER_COLOR
+            if detail.item_locked and not entered:
+                color = _faded(color)
             self._stroke_rect(paper_mvp, detail.x, detail.y, detail.w,
                               detail.h, color, width=2.2 if entered else 1.2)
 
@@ -905,7 +919,8 @@ class LayoutView:
             painter.setFont(QFont("sans", max(int(2.6 * self.px_per_mm), 7)))
             label = detail.scale_text(self.vp.scene.units)
             if detail.locked:
-                label += "  [locked]"
+                # its view: the frame's own lock is shown by its fading
+                label += "  [view locked]"
             painter.drawText(int(sx), int(sy) - 2, label)
         self._paint_selection(painter)
         from . import annot_paint
@@ -918,7 +933,8 @@ class LayoutView:
             painter,
             lambda x, y: self.paper_to_screen(x, y),
             self.px_per_mm, lay, scene,
-            sheet_index=idx, sheet_count=max(len(scene.layouts), 1))
+            sheet_index=idx, sheet_count=max(len(scene.layouts), 1),
+            faded=True)
         if self._ghost_note is not None:
             painter.save()
             painter.setOpacity(.55)
@@ -1144,7 +1160,8 @@ class LayoutView:
 
     def _prune(self):
         """Forget anything no longer on the sheet — undo and delete both
-        take objects out from under a selection."""
+        take objects out from under a selection — or locked, which cannot
+        be picked."""
         lay = self.layout
         if lay is None:
             self.selected = []
@@ -1152,7 +1169,7 @@ class LayoutView:
             return
         pools = self._pools(lay)
         self.selected = [(k, o) for k, o in self.selected
-                         if o in pools.get(k, ())]
+                         if o in pools.get(k, ()) and not o.item_locked]
         # A corner is a grip on a lone detail, so it cannot outlive that.
         lone = (self.selected[0][1]
                 if len(self.selected) == 1 and self.selected[0][0] == "detail"
@@ -1319,7 +1336,7 @@ class LayoutView:
             return None
         px, py = self.screen_to_paper(sx, sy)
         from ..core.layout import annotation_at
-        hit = annotation_at(lay, px, py, scene=self.vp.scene)
+        hit = annotation_at(lay, px, py, scene=self.vp.scene, locked=False)
         if hit is not None and hit[0] == "note":
             self.selected = [hit]
             self.corners = []
@@ -1455,12 +1472,14 @@ class LayoutView:
         # In paint order, topmost first: annotations sit over the geometry, the
         # geometry sits over the detail frames it is drawn across.
         hit = annotation_at(lay, px, py, tol=max(tol, 2.0),
-                            scene=self.vp.scene)
+                            scene=self.vp.scene, locked=False)
         if hit is None:
-            obj = paper_object_at(lay, px, py, tol=max(tol, 2.0))
+            obj = paper_object_at(lay, px, py, tol=max(tol, 2.0),
+                                  locked=False)
             hit = ("object", obj) if obj is not None else None
         if hit is None:
-            det = lay.detail_at(px, py)
+            det = next((d for d in reversed(lay.details)
+                        if d.contains(px, py) and not d.item_locked), None)
             hit = ("detail", det) if det is not None else None
         if hit is not None:
             self._take(hit, add)
@@ -1530,6 +1549,8 @@ class LayoutView:
         out = []
         for kind, pool in self._pools(lay).items():
             for obj in pool:
+                if obj.item_locked:
+                    continue
                 if kind == "object" and crossing:
                     # Its ink, not its box: a window band can stay with the box
                     # (enclosing the box is enclosing every point in it), but a

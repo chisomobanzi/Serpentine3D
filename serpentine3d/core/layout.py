@@ -71,7 +71,10 @@ class DetailView:
     scale_denom: float = 10.0               # model units to the paper mm
     perspective_distance: float = 60.0      # camera distance when perspective
     display_mode: str = "wireframe"         # wireframe|shaded|hidden|technical
-    locked: bool = False
+    locked: bool = False                    # its view and scale (#130)
+    # Locked as an item by `lock`: drawn and snapped to, but never picked.
+    # Every sheet item has one, and it has nothing to do with `locked`.
+    item_locked: bool = False
     show_border: bool = True
     show_label: bool = True
     section_offset: float | None = None   # cut plane distance from target
@@ -124,6 +127,7 @@ class TextNote:
     # reaching `margin` cap heights past it on every side.
     background: bool = False
     margin: float = 0.25
+    item_locked: bool = False  # by `lock` (see DetailView)
 
 
 @dataclass
@@ -144,6 +148,7 @@ class LinearDim:
     m2: list | None = None
     # drawn on bare paper, so it measures the paper and not the model
     measures_paper: bool = False
+    item_locked: bool = False  # by `lock` (see DetailView)
 
 
 @dataclass
@@ -153,6 +158,7 @@ class Leader:
     text: str = ""
     height: float = 3.5
     style: str = ""
+    item_locked: bool = False  # by `lock` (see DetailView)
 
 
 # Every fill the app has of its own, in the order they are offered. A
@@ -213,6 +219,7 @@ class Hatch:
     angle: float = 45.0
     spacing: float = 3.0                         # mm
     color: list | None = None                    # [r, g, b] 0..1; None: ink
+    item_locked: bool = False  # by `lock` (see DetailView)
 
 
 @dataclass
@@ -227,6 +234,7 @@ class RadialDim:
     text: str = ""
     style: str = ""
     measures_paper: bool = False
+    item_locked: bool = False  # by `lock` (see DetailView)
 
 
 def measured_text(dim, paper_length: float, scene=None) -> str:
@@ -253,6 +261,7 @@ class AngularDim:
     x2: float = 0.0
     y2: float = 0.0
     radius: float = 15.0   # arc placement radius, mm
+    item_locked: bool = False  # by `lock` (see DetailView)
 
 
 @dataclass
@@ -273,6 +282,7 @@ class PaperObject:
     color: tuple | None = None           # None -> the sheet's default ink
     linetype: str = "Continuous"
     lineweight: float = 0.25             # millimetres, as on a drawing
+    item_locked: bool = False            # by `lock` (see DetailView)
     _plines: tuple | None = field(default=None, repr=False, compare=False)
     _pts: tuple | None = field(default=None, repr=False, compare=False)
 
@@ -832,16 +842,20 @@ def _dist_seg(px, py, a, b) -> float:
 
 
 def annotation_at(layout, px: float, py: float, tol: float = 2.0,
-                  scene=None):
+                  scene=None, locked: bool = True):
     """Topmost annotation near a paper point -> (kind, obj) or None.
 
     Kinds: note, leader, dim, rdim, adim, hatch (dims before hatches so
-    outlines don't shadow them)."""
-    for note in reversed(layout.notes):
+    outlines don't shadow them). `locked=False` passes over what `lock`
+    has locked, as a pick must: what is under it is found instead."""
+    def topmost(pool):
+        return [o for o in reversed(pool) if locked or not o.item_locked]
+
+    for note in topmost(layout.notes):
         x0, y0, x1, y1 = annotation_bounds("note", note, scene)
         if x0 - tol <= px <= x1 + tol and y0 - tol <= py <= y1 + tol:
             return ("note", note)
-    for dim in reversed(layout.dims):
+    for dim in topmost(layout.dims):
         import numpy as np
         a = np.array([dim.x1, dim.y1])
         b = np.array([dim.x2, dim.y2])
@@ -853,34 +867,37 @@ def annotation_at(layout, px: float, py: float, tol: float = 2.0,
         if _dist_seg(px, py, a + nvec * dim.offset,
                      b + nvec * dim.offset) <= tol:
             return ("dim", dim)
-    for rd in reversed(layout.rdims):
+    for rd in topmost(layout.rdims):
         if _dist_seg(px, py, (rd.cx, rd.cy), (rd.px, rd.py)) <= tol:
             return ("rdim", rd)
-    for ad in reversed(layout.adims):
+    for ad in topmost(layout.adims):
         import math as _m
         r = _m.hypot(px - ad.vx, py - ad.vy)
         if abs(r - ad.radius) <= tol * 1.5:
             return ("adim", ad)
-    for leader in reversed(layout.leaders):
+    for leader in topmost(layout.leaders):
         pts = leader.points
         for a, b in zip(pts[:-1], pts[1:]):
             if _dist_seg(px, py, a, b) <= tol:
                 return ("leader", leader)
-    for hatch in reversed(layout.hatches):
+    for hatch in topmost(layout.hatches):
         if _point_in_poly(px, py, hatch.points):
             return ("hatch", hatch)
     return None
 
 
-def paper_object_at(layout, px: float, py: float, tol: float = 2.0):
+def paper_object_at(layout, px: float, py: float, tol: float = 2.0,
+                    locked: bool = True):
     """Topmost paper geometry near a paper point -> PaperObject or None.
 
     Picked by its ink, the way a curve is picked in the model: what a border
     encloses is the rest of the sheet, and a click in the middle of the page
-    means the page.
+    means the page. `locked=False` passes over what `lock` has locked.
     """
     from .picture import PictureShape
     for obj in reversed(layout.objects):        # drawn last, so on top
+        if obj.item_locked and not locked:
+            continue
         # A picture has visible ink throughout its textured triangles.  Its
         # rectangular outline remains useful for snaps and trimmed edges, but
         # making that thin outline the only pick target is unlike clicking any
@@ -1599,6 +1616,7 @@ def _paper_object_to_json(obj) -> dict:
         "id": obj.id, "name": obj.name,
         "color": list(obj.color) if obj.color else None,
         "linetype": obj.linetype, "lineweight": obj.lineweight,
+        "item_locked": obj.item_locked,
         "brep": base64.b64encode(
             geometry.shape_to_bytes(obj.shape)).decode("ascii"),
     }
@@ -1613,6 +1631,7 @@ def _paper_object_from_json(od: dict) -> PaperObject:
         color=tuple(od["color"]) if od.get("color") else None,
         linetype=od.get("linetype", "Continuous"),
         lineweight=float(od.get("lineweight", 0.25)),
+        item_locked=bool(od.get("item_locked", False)),
         shape=geometry.shape_from_bytes(base64.b64decode(od["brep"])))
 
 
