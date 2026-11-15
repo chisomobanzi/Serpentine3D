@@ -155,9 +155,13 @@ def test_the_gumball_moves_onto_the_pieces_a_split_made(env):
 def test_an_ordinary_command_still_lets_go_when_it_is_done(env):
     """Picking objects to tell a command which ones is a pick it spends."""
     scene, sel, proc = env
-    box = _box(scene)
-    sel.set([box.id])
-    proc.run("explode")
+    # Not explode (#143 leaves its pieces selected) nor a transform (it
+    # keeps what it moves): dupborder acts on the pick and is done with it.
+    srf = scene.add(g.extrude(g.make_line((0, 0, 0), (10, 0, 0)),
+                              (0.0, 0.0, 1.0), 10.0))
+    sel.set([srf.id])
+    proc.run("dupborder")
+    assert len(scene.all()) == 2, "it made the border"
     assert sel.ids == []
 
 

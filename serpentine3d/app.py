@@ -992,8 +992,7 @@ class MainWindow(QMainWindow):
         bar.setMovable(False)
         groups = [
             [("Line", "line"), ("Polyline", "polyline"), ("Curve", "curve"),
-             ("Circle", "circle"), ("Arc", "arc"), ("Rectangle", "rectangle"),
-             ("Text", "text")],
+             ("Circle", "circle"), ("Arc", "arc"), ("Rectangle", "rectangle")],
             [("Extrude", "extrude"), ("Revolve", "revolve"),
              ("Loft", "loft"), ("Planar surface", "planarsrf"),
              ("Sweep 1 rail", "sweep1"), ("Sweep 2 rails", "sweep2")],
@@ -1009,7 +1008,7 @@ class MainWindow(QMainWindow):
             [("Join", "join"), ("Explode", "explode"),
              ("Control points", "pointson"), ("Delete", "delete")],
         ]
-        # One widget rather than thirty-three actions: a toolbar hides the
+        # One widget rather than thirty-two actions: a toolbar hides the
         # actions it has no room for behind a chevron, where the palette
         # sizes the tools to the height it has and keeps them all in sight.
         bar.addWidget(tool_strip(groups, self.run_command, bar))

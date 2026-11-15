@@ -434,7 +434,10 @@ def cmd_exportpdf(ctx):
 
 # -------------------------------------------------------------- annotations
 
-@command("text", aliases=("note",), space="paper")
+# textobject and textcurves were the model's text commands before 0.13.0:
+# scripts and session journals from then still run under them.
+@command("text", aliases=("note", "textobject", "textcurves"),
+         space="paper")
 def cmd_text(ctx):
     """Place text: a note on a sheet, editable lettering in the model."""
     lay = _active_layout(ctx)

@@ -126,10 +126,13 @@ class Replayer:
         after = self.events[i + 2] if i + 2 < len(self.events) else {}
         after_value = after.get("v") if after.get("ev") == "val" else None
         anchor_first = isinstance(value, dict) and "p" in value
-        # The inline form is an anchor followed by the editor's data.
+        # The inline form is an anchor followed by the editor's data. Model
+        # text from before 0.13.0 (textobject) asked for its string first
+        # otherwise, so for it a point first is enough to tell.
         self.ctx.replay_text_inline = (
-            name == "text" and anchor_first
-            and isinstance(after_value, dict) and "data" in after_value)
+            (name in ("textobject", "textcurves") and anchor_first)
+            or (name == "text" and anchor_first
+                and isinstance(after_value, dict) and "data" in after_value))
         self.proc.run(name)
 
     def _ev_val(self, e, i):
