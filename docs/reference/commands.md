@@ -143,6 +143,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `exportdxf` | Export the active layout sheet (or the model) to DXF. |
 | `exportpdf` (`pdf`) | Exportpdf |
 | `exportsvg` | Exportsvg |
+| `hideindetail` | Inside a detail, hide the objects you pick in that detail only, as Rhino's HideInDetail does. |
 | `hatch` | Fill a region with a pattern, on a sheet or in the model, starting from its layer's hatch. Curves that cross ask which of the regions they make to fill (All, or Alt+A, for every one). The popup shows the hatch it would make while it is open. |
 | `hatchpatterns` (`loadpat`) | Load installs the hatch patterns in a .pat file, offered in every drawing from then on; Delete takes one off again. A drawing saves the patterns it uses. |
 | `layout` | Layout |
@@ -152,6 +153,8 @@ Commands that need a file open a filtered chooser by default. Append
 | `revision` | Add a row to this sheet's revision table (drawn by the title block). |
 | `scalebar` | Scalebar |
 | `sheetindex` | Place an index of all sheets as a note on the current layout. |
+| `showindetail` | Inside a detail, show every object it has hidden. |
+| `showselectedindetail` | Inside a detail, show the objects you pick of those it has hidden. |
 | `text` (`note`) | Text |
 | `titleblock` | Titleblock |
 
@@ -167,7 +170,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `fillet` | Round the corner between two curves, or edges of a selected solid/surface. Pick each curve near the corner you mean. Radius and Trim stay on the prompt and can be changed between the picks (a typed number is the radius, `t` flips Trim), and both are remembered until the program is started again. Radius 0 gives a sharp corner: the curves are cut back, or carried out, to the point they cross at. |
 | `filletcorners` | Round every corner of a polyline at once with one radius — straight and arc pieces both round. |
 | `flip` | Turn curves round and surfaces inside out, as Rhino's Flip does. |
-| `hide` | Hide |
+| `hide` | Hide the objects you pick, in the model and in every detail. |
 | `insertknot` (`insertcontrolpoint`) | Add a control point to a curve without moving the curve. |
 | `join` (`j`) | Join |
 | `layer` | Layer |
@@ -182,7 +185,8 @@ Commands that need a file open a filtered chooser by default. Append
 | `rename` | Rename |
 | `selall` (`sa`) | Selall |
 | `selnone` (`sn`) | Selnone |
-| `show` (`unhide`) | Show |
+| `show` (`unhide`) | Show every hidden object. |
+| `showselected` (`unhideselected`) | Show the hidden objects you pick, with them on show while you choose, as Rhino's ShowSelected does. |
 | `smooth` | Relax a curve's control points toward their neighbours. |
 | `split` | Split |
 | `trim` (`tr`) | Cut objects with the cutters and take away the part clicked. |
