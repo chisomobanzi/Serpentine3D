@@ -233,10 +233,13 @@ def save_scene(scene, path: str, thumbnail: bytes | None = None):
             or doc["hatch_patterns"] or _hatching_0121_loses(scene)):
         doc["version"] = 8
         doc["requires"] = "0.12.2"
-    # A release before model dimensions cannot read one, and refuses the
-    # whole file with it.
+    # Version 9 (0.13.0): a release before it refuses a model dimension and
+    # the whole file with it, and drops what a detail hides of its own when
+    # it rebuilds the detail, so a save there would lose that silently.
     from ..core.dimension import DimensionShape
-    if any(isinstance(shape, DimensionShape) for shape in new_shapes):
+    if (any(isinstance(shape, DimensionShape) for shape in new_shapes)
+            or any(d.hidden_objects for lay in scene.layouts
+                   for d in lay.details)):
         doc["version"] = 9
         doc["requires"] = "0.13.0"
     # A release before text backgrounds opens a drawing with one and drops
@@ -768,6 +771,13 @@ def _load_doc(scene, doc: dict, blobs=None):
                             for oid in record.get("inputs", [])]
         if "output" in record:
             record["output"] = object_id_map.get(record["output"], record["output"])
+    # So must what a detail hides of its own, or it all comes back.
+    for layout in scene.layouts:
+        for detail in layout.details:
+            if detail.hidden_objects:
+                detail.hidden_objects = [object_id_map[oid] for oid
+                                         in detail.hidden_objects
+                                         if oid in object_id_map]
 
     scene.trajectories = list(doc.get("trajectories", []))
     scene.session = doc.get("session") or None
