@@ -564,7 +564,8 @@ _OSNAP_KINDS = ("End", "Point", "Mid", "Center", "Quad", "Int", "AppInt", "Perp"
 def cmd_osnap(ctx):
     """Toggle one object-snap type (or All = the master switch) —
     scriptable, e.g. bind a key to 'osnap mid toggle'."""
-    kind = yield OptionReq("Snap type", options=["All", *_OSNAP_KINDS],
+    kind = yield OptionReq("Snap type",
+                           options=["All", *_OSNAP_KINDS, "Project"],
                            default="All")
     action = yield OptionReq("Action", options=["Toggle", "On", "Off"],
                              default="Toggle")
@@ -577,6 +578,11 @@ def cmd_osnap(ctx):
             cfg.set("osnaps", "enabled", vp.snaps.enabled)
         state = "on" if vp.snaps.enabled else "off"
         ctx.echo(f"Object snaps {state}.")
+    elif kind == "Project":
+        vp.snaps.project_enabled = (not vp.snaps.project_enabled if action == "Toggle"
+                            else action == "On")
+        ctx.echo(f"Project {'on' if vp.snaps.project_enabled else 'off'} "
+                 f"(Z {vp.snaps.project_z:g}).")
     else:
         key = kind.lower()
         # what is running, not what is on disk: the config holds what the
