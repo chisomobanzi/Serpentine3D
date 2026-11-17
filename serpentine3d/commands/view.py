@@ -28,38 +28,43 @@ def _redraw_all(ctx):
         ctx.viewport.update()
 
 
+def _turn(ctx, name: str, said: str | None = None):
+    """Turn the pane to a named view and say so. On a sheet the pane turns a
+    detail, or explains why it cannot, and that is what gets said (#131)."""
+    on_sheet = _vp(ctx).go_to_view(name)
+    if on_sheet is not None:
+        ctx.echo(on_sheet)
+    elif said is not None:
+        ctx.echo(said)
+
+
 @command("top", mutates=False)
 def cmd_top(ctx):
-    _vp(ctx).go_to_view("top")
-    ctx.echo("Top view.")
+    _turn(ctx, "top", "Top view.")
     yield from ()
 
 
 @command("front", mutates=False)
 def cmd_front(ctx):
-    _vp(ctx).go_to_view("front")
-    ctx.echo("Front view.")
+    _turn(ctx, "front", "Front view.")
     yield from ()
 
 
 @command("right", mutates=False)
 def cmd_right(ctx):
-    _vp(ctx).go_to_view("right")
-    ctx.echo("Right view.")
+    _turn(ctx, "right", "Right view.")
     yield from ()
 
 
 @command("isometric", aliases=("iso",), mutates=False)
 def cmd_isometric(ctx):
-    _vp(ctx).go_to_view("isometric")
-    ctx.echo("Isometric view.")
+    _turn(ctx, "isometric", "Isometric view.")
     yield from ()
 
 
 @command("perspective", aliases=("persp",), mutates=False)
 def cmd_persp(ctx):
-    _vp(ctx).go_to_view("perspective")
-    ctx.echo("Perspective view.")
+    _turn(ctx, "perspective", "Perspective view.")
     yield from ()
 
 
@@ -122,19 +127,19 @@ def cmd_ghosted(ctx):
 
 @command("back", mutates=False)
 def cmd_back(ctx):
-    _vp(ctx).go_to_view("back")
+    _turn(ctx, "back")
     yield from ()
 
 
 @command("left", mutates=False)
 def cmd_left(ctx):
-    _vp(ctx).go_to_view("left")
+    _turn(ctx, "left")
     yield from ()
 
 
 @command("bottom", mutates=False)
 def cmd_bottom(ctx):
-    _vp(ctx).go_to_view("bottom")
+    _turn(ctx, "bottom")
     yield from ()
 
 

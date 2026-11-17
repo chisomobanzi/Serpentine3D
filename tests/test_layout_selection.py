@@ -192,14 +192,15 @@ def test_delete_removes_every_selected_detail(sheet):
     assert lv.selected == []
 
 
-def test_a_locked_detail_is_selectable_but_does_not_move(sheet):
+def test_a_locked_detail_is_dragged_like_any_frame(sheet):
+    """The lock keeps a detail's view, not its frame (#130)."""
     _, lv, lay = sheet
     lay.details[0].locked = True
     _press(lv, 85, 60)
     _drag_to(lv, 120, 90)
     lv.release_drag()
     assert lv.selected == [("detail", lay.details[0])]
-    assert lay.details[0].x == pytest.approx(A["x"])
+    assert lay.details[0].x == pytest.approx(A["x"] + 35)
 
 
 def test_the_status_bar_counts_what_is_picked_on_the_sheet(sheet):

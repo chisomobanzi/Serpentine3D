@@ -98,15 +98,10 @@ class PaperGumball:
         return bool(self._picks())
 
     def _picks(self) -> list:
-        """What of the selection a handle could actually move.
-
-        A locked detail is the one thing on a sheet that is picked but does
-        not travel, and a gumball standing on nothing but locked details would
-        be a set of arrows that do nothing when you pull them.
-        """
+        """What of the selection a handle moves: all of it. A locked detail
+        too, since its lock keeps its view, not its frame (#130)."""
         self.lv._prune()
-        return [(k, o) for k, o in self.lv.selected
-                if k != "detail" or not o.locked]
+        return list(self.lv.selected)
 
     def anchor(self):
         """The middle of everything picked, in paper millimetres."""
@@ -144,8 +139,7 @@ class PaperGumball:
 
         Everything a sheet holds can be turned (#36): what cannot itself
         take an angle is placed, a note orbiting and staying level, a frame
-        moving at its own size. Only a locked frame stays, and `_picks`
-        has already left it out.
+        moving at its own size.
         """
         return bool(self._picks())
 

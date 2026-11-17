@@ -38,6 +38,17 @@ ZOOM_PAD = 1.05                         # air around what a zoom was asked for
 MODES_3D = ("wireframe", "shaded", "ghosted")
 
 
+# How far a locked sheet item's ink goes towards the paper, on screen only,
+# as a locked object in the model goes grey: it is there, but not for picking.
+LOCKED_FADE = 0.6
+
+
+def _faded(color) -> tuple:
+    """`color` faded towards the paper, for a locked sheet item."""
+    return (*(c + (p - c) * LOCKED_FADE
+              for c, p in zip(color[:3], PAPER_COLOR)), color[3])
+
+
 def _cut_ink(color) -> tuple:
     """The (r, g, b, a) a cut line draws in on screen: its section's
     colour, or with none the ink a cut has always been outlined in."""
@@ -278,10 +289,13 @@ class LayoutView:
     def note_snap(self, sx: float, sy: float, snaps,
                   radius_px: float = 12.0):
         """Shared paper snap query (name retained for existing callers)."""
+        return self._snaps().pick(sx, sy, snaps, radius_px)
+
+    def _snaps(self):
         if not hasattr(self, "_paper_snaps"):
             from .paper_snaps import PaperSnaps
             self._paper_snaps = PaperSnaps(self)
-        return self._paper_snaps.pick(sx, sy, snaps, radius_px)
+        return self._paper_snaps
 
     def _paper_mvp(self) -> np.ndarray:
         """Ortho MVP mapping paper mm -> clip space."""
@@ -404,6 +418,41 @@ class LayoutView:
         self.vp.update()
         return ok
 
+    def view_target(self):
+        """The detail a named view turns: the one you are inside, else the
+        one detail picked on the sheet, else None.
+
+        The sheet itself has no camera, and the pane's model camera is out
+        of sight behind it, so there is nothing else for Top or Perspective
+        to mean here (#131). Two picked details are not a choice between
+        them, as in Properties.
+        """
+        det = self._entered()
+        if det is not None:
+            return det
+        self._prune()
+        picked = [o for k, o in self.selected if k == "detail"]
+        return picked[0] if len(self.selected) == len(picked) == 1 else None
+
+    def go_to_view(self, name: str) -> str:
+        """Turn `view_target` to a named view, one undo step as in
+        Properties, and say what happened for the command line."""
+        from ..core.layout import detail_aimed_at
+        det = self.view_target()
+        label = name.capitalize()
+        if det is None:
+            return "Double-click a detail, or pick one, to turn its view."
+        if det.locked:
+            return ("The detail is locked, so its view stays. "
+                    "Run detaillock to unlock it.")
+        fields = detail_aimed_at(det, name, self.vp.scene.bbox())
+        if fields:
+            self.vp.window_checkpoint("detail view")
+            for key, value in fields.items():
+                setattr(det, key, value)
+            self.vp.scene.notify("layouts")
+        return f"{label} view in the detail."
+
     def _zoom_detail_rect(self, det, x0: float, y0: float,
                           x1: float, y1: float) -> bool:
         """Aim and scale a detail so that piece of its paper fills the frame.
@@ -490,7 +539,8 @@ class LayoutView:
         """
         if any(k == "object" and o is obj for k, o in self.selected):
             return (*theme.SELECTION_COLOR, 1.0)
-        return (*obj.color, 1.0) if obj.color else LINE_VISIBLE
+        ink = (*obj.color, 1.0) if obj.color else LINE_VISIBLE
+        return _faded(ink) if obj.item_locked else ink
 
     def _point_mark_size(self) -> float:
         """Half the width of a point's cross, in paper millimetres.
@@ -571,6 +621,8 @@ class LayoutView:
         entered = detail.id == self.entered_detail
         if detail.show_border or entered:
             color = BORDER_ACTIVE if entered else BORDER_COLOR
+            if detail.item_locked and not entered:
+                color = _faded(color)
             self._stroke_rect(paper_mvp, detail.x, detail.y, detail.w,
                               detail.h, color, width=2.2 if entered else 1.2)
 
@@ -867,7 +919,8 @@ class LayoutView:
             painter.setFont(QFont("sans", max(int(2.6 * self.px_per_mm), 7)))
             label = detail.scale_text(self.vp.scene.units)
             if detail.locked:
-                label += "  [locked]"
+                # its view: the frame's own lock is shown by its fading
+                label += "  [view locked]"
             painter.drawText(int(sx), int(sy) - 2, label)
         self._paint_selection(painter)
         from . import annot_paint
@@ -880,7 +933,8 @@ class LayoutView:
             painter,
             lambda x, y: self.paper_to_screen(x, y),
             self.px_per_mm, lay, scene,
-            sheet_index=idx, sheet_count=max(len(scene.layouts), 1))
+            sheet_index=idx, sheet_count=max(len(scene.layouts), 1),
+            faded=True)
         if self._ghost_note is not None:
             painter.save()
             painter.setOpacity(.55)
@@ -1106,7 +1160,8 @@ class LayoutView:
 
     def _prune(self):
         """Forget anything no longer on the sheet — undo and delete both
-        take objects out from under a selection."""
+        take objects out from under a selection — or locked, which cannot
+        be picked."""
         lay = self.layout
         if lay is None:
             self.selected = []
@@ -1114,7 +1169,7 @@ class LayoutView:
             return
         pools = self._pools(lay)
         self.selected = [(k, o) for k, o in self.selected
-                         if o in pools.get(k, ())]
+                         if o in pools.get(k, ()) and not o.item_locked]
         # A corner is a grip on a lone detail, so it cannot outlive that.
         lone = (self.selected[0][1]
                 if len(self.selected) == 1 and self.selected[0][0] == "detail"
@@ -1281,7 +1336,7 @@ class LayoutView:
             return None
         px, py = self.screen_to_paper(sx, sy)
         from ..core.layout import annotation_at
-        hit = annotation_at(lay, px, py, scene=self.vp.scene)
+        hit = annotation_at(lay, px, py, scene=self.vp.scene, locked=False)
         if hit is not None and hit[0] == "note":
             self.selected = [hit]
             self.corners = []
@@ -1402,35 +1457,39 @@ class LayoutView:
             for i, (gx, gy) in enumerate(self._corners(det)):
                 if abs(px - gx) <= tol and abs(py - gy) <= tol:
                     self._take_corner((det, i), add)
-                    if det.locked or (det, i) not in self.corners:
+                    if (det, i) not in self.corners:
                         return True
                     self._press_corner = None if add else (det, i)
                     self._drag_checkpoint = "resize detail"
                     self._drag = ("resize", [c for _, c in self.corners],
                                   [("detail", det)])
-                    self._drag_last = (px, py)
+                    # the grip's own corner, so that wherever it is dropped
+                    # is where the corner goes, snap and all
+                    self._drag_last = (gx, gy)
                     return True
         self.corners = []           # anything but a grip is a coarser pick
         from ..core.layout import annotation_at, paper_object_at
         # In paint order, topmost first: annotations sit over the geometry, the
         # geometry sits over the detail frames it is drawn across.
         hit = annotation_at(lay, px, py, tol=max(tol, 2.0),
-                            scene=self.vp.scene)
+                            scene=self.vp.scene, locked=False)
         if hit is None:
-            obj = paper_object_at(lay, px, py, tol=max(tol, 2.0))
+            obj = paper_object_at(lay, px, py, tol=max(tol, 2.0),
+                                  locked=False)
             hit = ("object", obj) if obj is not None else None
         if hit is None:
-            det = lay.detail_at(px, py)
+            det = next((d for d in reversed(lay.details)
+                        if d.contains(px, py) and not d.item_locked), None)
             hit = ("detail", det) if det is not None else None
         if hit is not None:
             self._take(hit, add)
-            movable = [(k, o) for k, o in self.selected
-                       if k != "detail" or not o.locked]
-            if movable and hit in self.selected:
+            if hit in self.selected:
                 self._press_hit = None if add else hit
                 self._drag_checkpoint = "move sheet item"
-                self._drag = ("move", -1, movable)
-                self._drag_last = (px, py)
+                self._drag = ("move", -1, list(self.selected))
+                # grabbed by a snap when there is one under the press, so an
+                # end taken hold of can be dropped on a corner
+                self._drag_last = self._point_at(sx, sy)
             return True
         # Empty paper: sweep a band out of it.
         if not add:
@@ -1445,10 +1504,11 @@ class LayoutView:
             return True
         if self._drag is None:
             return False
-        px, py = self.screen_to_paper(sx, sy)
+        mode, corners, picks = self._drag
+        self._snaps().leave_out = {obj.id for _kind, obj in picks}
+        px, py = self._point_at(sx, sy)
         dx = px - self._drag_last[0]
         dy = py - self._drag_last[1]
-        mode, corners, picks = self._drag
         if self._drag_checkpoint is not None:
             self.vp.window_checkpoint(self._drag_checkpoint)
             self._drag_checkpoint = None
@@ -1489,6 +1549,8 @@ class LayoutView:
         out = []
         for kind, pool in self._pools(lay).items():
             for obj in pool:
+                if obj.item_locked:
+                    continue
                 if kind == "object" and crossing:
                     # Its ink, not its box: a window band can stay with the box
                     # (enclosing the box is enclosing every point in it), but a
@@ -1542,6 +1604,18 @@ class LayoutView:
         self._drag_checkpoint = None
         self._press_hit = None
         self._press_corner = None
+        self._snaps().leave_out = set()
+        self.vp._active_snap = None
+
+    def dragging(self) -> bool:
+        """A frame, grip or sheet item is being dragged right now."""
+        return self._drag is not None and self._drag_moved
+
+    def _point_at(self, sx: float, sy: float) -> tuple:
+        """Where a drag is on the paper: the point a pick there would give,
+        snapped as one would be and marked the same way (#129)."""
+        x, y, _z = self.vp.world_point_at(sx, sy)
+        return float(x), float(y)
 
     def move_corners(self, dx: float, dy: float) -> int:
         """Shift every picked corner by paper millimetres.
@@ -1553,8 +1627,6 @@ class LayoutView:
         if not self.corners:
             return 0
         det = self.corners[0][0]
-        if det.locked:
-            return 0
         from ..core.layout import nudge_detail_corners
         nudge_detail_corners(det, [i for _, i in self.corners], dx, dy)
         self._hlr_cache.pop(det.id, None)
@@ -1568,8 +1640,6 @@ class LayoutView:
         moved = 0
         for kind, obj in self.selected:
             if kind == "detail":
-                if obj.locked:
-                    continue
                 obj.x += dx
                 obj.y += dy
                 self._hlr_cache.pop(obj.id, None)
@@ -1585,11 +1655,10 @@ class LayoutView:
     def copy_selected(self, dx: float, dy: float) -> int:
         """Duplicate every picked sheet item, the copy offset by millimetres.
 
-        It is the copy that moves and the original that is left alone, which
-        is what lets a locked frame be copied: the lock is about the frame not
-        being disturbed, and it is not. It also leaves the picked items still
-        picked, so a second copy is measured from the same place as the first
-        instead of walking away from it.
+        It is the copy that moves and the original that is left alone. It
+        also leaves the picked items still picked, so a second copy is
+        measured from the same place as the first instead of walking away
+        from it.
         """
         lay = self.layout
         self._prune()

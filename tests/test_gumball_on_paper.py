@@ -185,12 +185,12 @@ def test_a_command_asking_for_a_point_hides_it(sheet):
     assert not lv.gumball.active()
 
 
-def test_a_locked_detail_offers_nothing_to_hold(sheet):
-    """A lock is the whole reason a detail is not dragged by its ink. It
-    should not gain a set of arrows that would move it anyway."""
+def test_a_locked_detail_is_held_like_any_frame(sheet):
+    """A lock keeps a detail's view, not its frame (#130), so a locked
+    detail gets the arrows any frame does."""
     _w, lv, det, _note = sheet
     det.locked = True
-    assert not lv.gumball.active()
+    assert lv.gumball.active()
 
 
 def test_the_viewport_hands_a_press_to_whichever_is_live(sheet):
@@ -318,14 +318,15 @@ def test_dragging_on_does_not_move_it_twice(sheet):
     assert det.x == pytest.approx(x0 + 10.0)
 
 
-def test_a_locked_detail_in_the_handful_stays_put(sheet):
+def test_a_locked_detail_in_the_handful_travels_with_it(sheet):
     _w, lv, det, note = sheet
     det.locked = True
     lv.selected = [("detail", det), ("note", note)]
-    x0, nx0 = det.x, note.x
+    x0, nx0, scale = det.x, note.x, det.scale_denom
     _drag(lv, ("move", 0), 20.0, 0.0)
-    assert det.x == pytest.approx(x0)
+    assert det.x == pytest.approx(x0 + 20.0)
     assert note.x == pytest.approx(nx0 + 20.0)
+    assert det.scale_denom == scale
 
 
 @pytest.mark.parametrize(
@@ -1041,13 +1042,14 @@ def test_alt_shift_on_the_pad_scales_copies_and_leaves_the_originals(sheet):
     assert copy_dim.offset == pytest.approx(dim.offset * 2)
 
 
-def test_shift_on_the_pad_leaves_a_locked_detail_where_it_is(sheet):
+def test_shift_on_the_pad_scales_a_locked_frame_but_not_its_view(sheet):
     det, note, _dim, _hatch = _mixed_pick(sheet)
     _w, lv, _det, _note = sheet
     det.locked = True
-    frame = (det.x, det.y, det.w, det.h)
+    w0, h0, scale = det.w, det.h, det.scale_denom
     height = note.height
     gb, _label = _shift_pad(lv, 2.0)
     gb.end_drag()
-    assert (det.x, det.y, det.w, det.h) == frame
+    assert (det.w, det.h) == pytest.approx((w0 * 2, h0 * 2))
+    assert det.scale_denom == scale
     assert note.height == pytest.approx(height * 2)

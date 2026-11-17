@@ -120,6 +120,17 @@ def test_the_ghost_shows_the_view_and_the_scale_you_chose(sheet):
     assert ghost.scale_text("mm") == "1:20"
 
 
+def test_a_detail_can_be_placed_isometric(sheet):
+    """The pane's menu and the `isometric` command offer it, so placing a
+    detail does too."""
+    _w, proc, _lay = sheet
+    _to_frame(proc, view="Isometric")
+    ghost = proc.preview_for((120.0, 100.0, 0.0))
+    assert (ghost.azimuth, ghost.elevation) == pytest.approx(
+        STANDARD_VIEWS["isometric"])
+    assert ghost.perspective is False
+
+
 def test_the_ghost_looks_at_the_model(sheet):
     """An empty frame previews nothing, so it aims where the model is."""
     _w, proc, _lay = sheet

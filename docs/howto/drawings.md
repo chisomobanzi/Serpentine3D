@@ -32,7 +32,7 @@ side by side. Rhino makes you leave model space to look at a sheet.
 | `detail` | drag a new detail view onto the sheet |
 | `detailscale` | set the scale (accepts `1:50`, `2:1`, `1/4" = 1'-0"`, `1" = 20'`) |
 | `detailmode` | wireframe / shaded / hidden / technical linework |
-| `detaillock` | freeze a detail's camera |
+| `detaillock` | lock or unlock a detail's view and scale |
 | `detailsection` | live section cut with hatching |
 
 Run `detail` and click two opposite corners on the sheet. The model appears
@@ -55,14 +55,38 @@ detail at its scale.
 
 Double-click a detail to *enter* it (pan/zoom acts on the model);
 click outside to leave. Selected details show corner grips for
-resizing; drag the body to move it.
+resizing; drag the body to move it. A dragged corner or frame lands on
+object snaps, marked as a picked point is, so frames line up exactly with
+each other and with the page.
+
+Inside a detail, `top`, `front`, `isometric`, `perspective` and the other
+views turn the detail, as do the views in the pane's title menu. On bare
+paper they turn the one detail you have picked. A detail whose view is
+locked keeps it.
+
+**Locking a detail's view** keeps its view and scale: panning, zooming, named
+views and scale changes leave it as it is, so you can step in to fix a line
+without nudging the drawing. Tick **Lock** in the detail's Properties, or run
+`detaillock` inside it. The frame is not locked: it still moves, resizes and
+deletes like anything on the sheet, and cropping it shows more or less of the
+model without shifting what is already drawn. The frame label says
+`[view locked]`.
+
+**Locking sheet items** works as it does in the model: pick a frame, a
+border, a note, a dimension, a leader or a hatch on the sheet and run `lock`
+(++ctrl+l++). It stays drawn and you can still snap to it, but a click or a
+band no longer picks it, so it cannot be moved or deleted by accident. On
+screen it is drawn faded; it prints as it always did. A locked detail can
+still be double-clicked into. `lockother` locks the rest of the sheet, and
+`unlockall` (++ctrl+shift+l++) unlocks everything, in the model and on every
+sheet, though not a detail's view lock.
 
 Anything picked on a sheet also gets a gumball: an X arrow, a Y arrow
 and a pad that takes both at once. Drag a handle to move everything
 picked, or type a distance to move it exactly that far. Hold Alt while
 dragging an arrow or the pad to move a duplicate. Hold Shift while dragging
 the pad on selected text to scale it uniformly about its visible centre.
-Locked details stay where they are. Step into a detail and the gumball goes
+Step into a detail and the gumball goes
 back to holding the model objects inside it. There, or in model space,
 Shift-drag a plane pad to scale equally along its two coloured axes while
 leaving the axis normal to the pad unchanged. Alt+Shift makes and scales a

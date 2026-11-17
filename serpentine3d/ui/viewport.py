@@ -3611,13 +3611,21 @@ class Viewport(QOpenGLWidget):
             out[i, :2] = detail_project(entered, p)
         return out
 
+    def _snap_to_draw(self):
+        """The snap to mark: the one under a point being picked, or under a
+        grip or sheet item being dragged, which lands where a pick would."""
+        if self.point_mode or (self.space != "model"
+                               and self.layout_view.dragging()):
+            return self._active_snap
+        return None
+
     def _draw_preview(self, mvp):
         pts = self._preview_data
         markers = self._marker_points
         if self.space != "model" and self._drawing_through() is not None:
             pts = self._on_paper(pts) if len(pts) else pts
             markers = [self._on_paper([m])[0] for m in markers]
-        snap = self._active_snap if self.point_mode else None
+        snap = self._snap_to_draw()
         # An elevator standing before the first point has no leg drawn
         # against it, so without the axis itself on screen Ctrl looks like
         # it did nothing at all.
@@ -3659,10 +3667,15 @@ class Viewport(QOpenGLWidget):
                 else:
                     at = np.asarray(snap[0], float)
                 axes = (np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]))
+                # Wider than a detail's corner grip, which is painted over
+                # the top of it: a marker the grip's size was hidden by the
+                # grip it landed on, so a snapped corner looked unsnapped.
+                reach = size * 1.8
             else:
                 at = np.asarray(snap[0], float)
                 axes = self.camera.right_up()
-            segs = _snap_marker(snap[1], at, *axes, size * 0.95)
+                reach = size * 0.95
+            segs = _snap_marker(snap[1], at, *axes, reach)
             self._preview.update(rebased(segs, self._frame_anchor))
             self._draw_lines(self._preview, mvp,
                              _snap_marker_color(self.space), 2.0)
@@ -5843,9 +5856,18 @@ class Viewport(QOpenGLWidget):
             start, end, eased(t))
         self.update()
 
-    def go_to_view(self, name: str):
-        """A named view, turned to. `set_view` is the same view, arrived at."""
+    def go_to_view(self, name: str) -> str | None:
+        """A named view, turned to. `set_view` is the same view, arrived at.
+
+        On a sheet the camera turned is a detail's, as with zooming, and what
+        happened comes back to be said: the model camera is out of sight
+        there, so turning it looked like nothing at all (#131).
+        """
+        lv = self._zooms_the_sheet()
+        if lv is not None:
+            return lv.go_to_view(name)
         self.fly_to(STANDARD_VIEWS[name], name)
+        return None
 
     def land_flight(self):
         """Get there now, so the next thing you do happens in that view."""

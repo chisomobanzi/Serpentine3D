@@ -608,6 +608,15 @@ class MainWindow(QMainWindow):
             act.triggered.connect(lambda _checked=False: fn())
             return act
 
+        # On a sheet the views turn a detail, the one you are in or the one
+        # picked, so they tick its view, and with none to turn or one locked
+        # there is nothing for them to do (#131).
+        current, turnable = vp._view_name, True
+        if vp.space != "model":
+            from .core.layout import detail_view_name
+            det = vp.layout_view.view_target()
+            current = (detail_view_name(det) or "").lower() if det else None
+            turnable = det is not None and not det.locked
         # All eight, in opposing pairs. Back, Left and Bottom have no
         # function key and are not in the View menu; this is where they live.
         for label, name in (("Perspective", "perspective"),
@@ -615,8 +624,8 @@ class MainWindow(QMainWindow):
                             ("Top", "top"), ("Bottom", "bottom"),
                             ("Front", "front"), ("Back", "back"),
                             ("Right", "right"), ("Left", "left")):
-            toggle(label, vp._view_name == name,
-                   lambda n=name: vp.go_to_view(n))
+            toggle(label, current == name,
+                   lambda n=name: vp.go_to_view(n)).setEnabled(turnable)
         menu.addSeparator()
         for mode in vp.DISPLAY_MODES:
             toggle(mode.capitalize(), vp.display_mode == mode,
@@ -1362,6 +1371,8 @@ class MainWindow(QMainWindow):
             # command asked for, so the registry's answer travels with it.
             active = self.processor.active
             space = active.space if active is not None else "model"
+            if self.ctx.paper_points:
+                space = "paper"
             for vp in self.all_viewports():
                 vp.set_point_mode(True)
                 vp.snap_base = base

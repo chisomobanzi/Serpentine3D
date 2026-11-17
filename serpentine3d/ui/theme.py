@@ -316,6 +316,7 @@ QComboBox {
     border-radius: 4px;
     padding: 4px 8px;
 }
+QComboBox:disabled, QLineEdit:disabled { color: #6b6c72; border-color: #2e2f34; }
 QComboBox QAbstractItemView {
     background: #2e2f34;
     selection-background-color: #4a3f28;
