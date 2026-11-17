@@ -232,3 +232,38 @@ def test_a_small_round_is_left_alone_until_it_shows():
     near_the_round = (399.4, 0.6, 100)
     assert refine.plan(rounded, base, _view(near_the_round, 60.0)) == {}
     assert refine.plan(rounded, base, _view(near_the_round, 0.5))
+
+
+def test_right_up_close_one_face_asks_for_a_bounded_mesh():
+    # A whole face is meshed at the level its nearest point needs, and with
+    # the camera almost touching a sphere that was two million triangles:
+    # minutes of meshing for the corner of it in view. The budget caps it.
+    sphere = g.make_sphere((0, 0, 0), 20.0)
+    base = tessellate(sphere)
+    cam = _camera((0, 0, 20), 0.5, "perspective", elevation=60.0)
+    levels = refine.plan(sphere, base, refine.View.of(cam, 1600, 1000))
+    assert levels
+    assert len(base.triangles) * 2 ** levels[0] <= 300_000
+
+
+def _line_sag(segments, centre, radius) -> float:
+    """The furthest any segment's middle sinks inside a sphere."""
+    mids = segments.reshape(-1, 2, 3).mean(axis=1)
+    return float((radius - np.linalg.norm(mids - centre, axis=1)).max())
+
+
+def test_lines_on_a_finer_face_stay_in_front_of_it():
+    # Faces are drawn pushed back a hair so the lines on them win the depth
+    # test. That held while the mesh sagged far more than the lines did;
+    # a finer face sagged as much as its edges and more than its
+    # isocurves, so both broke up into dashes behind it.
+    sphere = g.make_sphere((0, 0, 0), 20.0)
+    base = tessellate(sphere)
+    fine = refine.refined(sphere, base, refine.plan(
+        sphere, base, _view((20, 0, 0), 1.0)))
+    face = _sag(fine, np.zeros(3), 20.0)
+    assert len(fine.iso_segments) and len(fine.edge_segments)
+    assert _line_sag(fine.iso_segments, np.zeros(3), 20.0) < face / 2
+    seam = fine.edge_segments[np.linalg.norm(
+        fine.edge_segments[:, 1] - fine.edge_segments[:, 0], axis=1) > 0]
+    assert _line_sag(seam, np.zeros(3), 20.0) < face / 2

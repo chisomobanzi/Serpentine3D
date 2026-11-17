@@ -37,12 +37,13 @@ from collections import OrderedDict
 from dataclasses import dataclass
 
 import numpy as np
+from OCP.IMeshTools import IMeshTools_MeshAlgoType, IMeshTools_Parameters
 
 from . import geometry, occ
 from .occ import BRepBuilderAPI_Copy, BRepMesh_IncrementalMesh
-from .tessellate import (DEFLECTION_FRACTION, FACE_ANGLE, MIN_DEFLECTION,
-                         DisplayMesh, _deflection_for, _edge_polyline,
-                         _face_mesh)
+from .tessellate import (_ISO_SAMPLES, DEFLECTION_FRACTION, FACE_ANGLE,
+                         MIN_DEFLECTION, DisplayMesh, _deflection_for,
+                         _edge_polyline, _face_isocurves, _face_mesh)
 
 # A face is meshed again once its mesh strays more than TRIGGER_PX pixels from
 # the surface, and then finely enough to stray less than TARGET_PX. At zoom
@@ -54,14 +55,23 @@ TARGET_PX = 1.0
 # object's size, finer than the float32 offsets a mesh is drawn from can hold.
 MAX_LEVEL = 11
 # The most triangles one object's finer faces may come to, by estimate. A
-# halved deflection about doubles a curved face's triangles.
-BUDGET = 2_000_000
+# halved deflection about doubles a curved face's triangles. A face is meshed
+# whole at the level its nearest point needs, so up close a big one asks for
+# far more than the corner of it in view; at two million a sphere took
+# minutes. This many mesh and read back in about a second.
+BUDGET = 250_000
 # Finer faces kept for reuse, counted in triangles, across every pane.
 KEPT_TRIANGLES = 4_000_000
 # Along an edge a mesh strays by its deflection or, where that is looser
 # than FACE_ANGLE allows, by this fraction of the edge's radius: one piece
 # spans at most FACE_ANGLE of arc.
 _ARC = 1.0 - math.cos(FACE_ANGLE / 2)
+# Faces are drawn pushed back a hair so the lines on them win the depth test,
+# which holds only while a line sags less than the face under it. A finer
+# face's edges are drawn LINE_LEAD levels finer still, and its isocurves
+# resampled to match, or they break into dashes behind it.
+LINE_LEAD = 2
+_MAX_ISO_SAMPLES = 4096
 
 
 @dataclass(frozen=True)
@@ -302,7 +312,8 @@ def plan(shape, base: DisplayMesh, view: View,
 
 def _piece(base: DisplayMesh, facts: _Facts, face: int, level: int):
     """One face meshed at `level`, as (vertices, normals, triangles,
-    curvature), or None if it will not mesh. Kept for the next ask."""
+    curvature, isocurve segments), or None if it will not mesh. Kept for
+    the next ask."""
     global _kept
     key = (base.uid, face, level)
     with _lock:
@@ -311,9 +322,22 @@ def _piece(base: DisplayMesh, facts: _Facts, face: int, level: int):
             return _pieces[key]
     copy = occ.to_face(BRepBuilderAPI_Copy(facts.faces[face], True,
                                            False).Shape())
-    BRepMesh_IncrementalMesh(copy, facts.deflection / 2 ** level, False,
-                             FACE_ANGLE, False)
+    BRepMesh_IncrementalMesh(copy, _parameters(facts.deflection / 2 ** level))
     piece = _face_mesh(copy)
+    if piece is not None:
+        # A chord's sag goes as the square of its length, so halving it
+        # LINE_LEAD + level times takes 2 ** ((level + LINE_LEAD) / 2) as
+        # many samples as the first mesh's isocurves had.
+        samples = min(_MAX_ISO_SAMPLES, int(math.ceil(
+            _ISO_SAMPLES * 2 ** ((level + LINE_LEAD) / 2))))
+        try:
+            runs = _face_isocurves(facts.faces[face], samples)
+        except Exception:                                   # noqa: BLE001
+            runs = []
+        isos = (np.concatenate([np.stack([r[:-1], r[1:]], axis=1)
+                                for r in runs]) if runs
+                else np.zeros((0, 2, 3)))
+        piece = (*piece, isos)
     with _lock:
         _pieces[key] = piece
         _kept += len(piece[2]) if piece is not None else 0
@@ -321,6 +345,19 @@ def _piece(base: DisplayMesh, facts: _Facts, face: int, level: int):
             _old, dropped = _pieces.popitem(last=False)
             _kept -= len(dropped[2]) if dropped is not None else 0
     return piece
+
+
+def _parameters(deflection: float) -> IMeshTools_Parameters:
+    """BRepMesh's settings for a finer face: tessellate's, but triangulated
+    by Delabella, which met the same deflection on a fine sphere in 0.58 s
+    where the default took 4.93."""
+    p = IMeshTools_Parameters()
+    p.Deflection = deflection
+    p.Angle = FACE_ANGLE
+    p.Relative = False
+    p.InParallel = False
+    p.MeshAlgo = IMeshTools_MeshAlgoType.IMeshTools_MeshAlgoType_Delabella
+    return p
 
 
 def _line(base: DisplayMesh, facts: _Facts, edge: int, level: int):
@@ -343,14 +380,18 @@ def refined(shape, base: DisplayMesh, levels: dict[int, int]) -> DisplayMesh:
     if not levels:
         return base
     facts = _facts_for(shape, base)
-    verts, norms, tris, curv, owners = [], [], [], [], []
+    verts, norms, tris, curv, owners, isos, iso_owners = ([], [], [], [],
+                                                          [], [], [])
     offset = len(base.local)
     done = []
     for face, level in sorted(levels.items()):
         piece = _piece(base, facts, face, level)
         if piece is None:
             continue
-        v, n, t, c = piece
+        v, n, t, c, iso = piece
+        if len(iso):
+            isos.append(iso)
+            iso_owners.append(np.full(len(iso), face, np.int32))
         verts.append(v)
         norms.append(n)
         tris.append(t.astype(np.int64) + offset)
@@ -364,7 +405,8 @@ def refined(shape, base: DisplayMesh, levels: dict[int, int]) -> DisplayMesh:
     edge_level: dict[int, int] = {}
     for face in done:
         for edge in facts.edges_of_face(face):
-            edge_level[edge] = max(edge_level.get(edge, 0), levels[face])
+            edge_level[edge] = max(edge_level.get(edge, 0),
+                                   levels[face] + LINE_LEAD)
     segments, segment_owners = [], []
     for edge, level in sorted(edge_level.items()):
         pts = _line(base, facts, edge, level)
@@ -393,6 +435,14 @@ def refined(shape, base: DisplayMesh, levels: dict[int, int]) -> DisplayMesh:
          *(base._offsets(s) for s in segments)]).astype(np.float32)
     out.edge_of_segment = np.concatenate(
         [base.edge_of_segment[kept], *segment_owners]).astype(np.int32)
-    out.local_isos = base.local_isos
+    if len(base.face_of_iso) == len(base.local_isos):
+        kept = ~np.isin(base.face_of_iso, done)
+        out.local_isos = np.concatenate(
+            [base.local_isos[kept],
+             *(base._offsets(i) for i in isos)]).astype(np.float32)
+        out.face_of_iso = np.concatenate(
+            [base.face_of_iso[kept], *iso_owners]).astype(np.int32)
+    else:
+        out.local_isos = base.local_isos
     out.local_points = base.local_points
     return out
