@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **The Windows installer is signed**, with a certificate from SignPath
+  Foundation, so Windows shows a verified publisher instead of an unknown one.
+  Every signature is approved by hand; the
+  [code signing policy](docs/code-signing-policy.md) says what is signed and
+  by whom. The installer also opens with a page on what Serpentine3D sends
+  anywhere (the update check, and the assistant once you set it up) and how
+  to turn the update check off.
+
 ## 0.13.1 (2026-11-17)
 
 ### Added
