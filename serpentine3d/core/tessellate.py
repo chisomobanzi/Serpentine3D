@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -423,10 +424,19 @@ def _smooth_normals(verts: np.ndarray, tris: np.ndarray) -> np.ndarray:
     return (normals / lens).astype(np.float32)
 
 
+# The most one drawn piece of a curve or edge turns from the next. At 14
+# degrees (0.25 rad) a gentle curve showed its kinks (#168), and 4 or 2
+# degrees still did when zoomed in. A curve is cheap to draw finely: a
+# 48,000-edge polysurface goes from 67k to 173k segments with no change in
+# the time to mesh it.
+CURVE_ANGLE = math.radians(1.0)
+
+
 def _edge_polyline(edge, deflection: float) -> np.ndarray | None:
     try:
         adaptor = occ.edge_adaptor(edge)
-        disc = GCPnts_TangentialDeflection(adaptor, 0.25, deflection, 2)
+        disc = GCPnts_TangentialDeflection(adaptor, CURVE_ANGLE, deflection,
+                                           2)
         n = disc.NbPoints()
         if n < 2:
             return None
