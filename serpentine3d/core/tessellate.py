@@ -230,10 +230,18 @@ class DisplayMesh:
         return self._bounds
 
 
+# A shape is meshed to stray at most this fraction of its diagonal, and never
+# less than MIN_DEFLECTION. core/refine.py works out the same for many boxes.
+DEFLECTION_FRACTION = 0.002
+MIN_DEFLECTION = 1e-4
+# The most a face's mesh turns between one facet and the next, in radians.
+FACE_ANGLE = 0.35
+
+
 def _deflection_for(shape) -> float:
     (mn, mx) = geometry.bbox(shape)
     diag = float(np.linalg.norm(np.subtract(mx, mn)))
-    return max(diag * 0.002, 1e-4)
+    return max(diag * DEFLECTION_FRACTION, MIN_DEFLECTION)
 
 
 def default_deflection(shape) -> float:
@@ -608,7 +616,7 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
     if isinstance(shape, TextShape) and outline is not None:
         shape = shape.fill()
     if geometry.shape_kind(shape) != "curve":
-        BRepMesh_IncrementalMesh(shape, deflection, False, 0.35, True)
+        BRepMesh_IncrementalMesh(shape, deflection, False, FACE_ANGLE, True)
 
     all_verts, all_norms, all_tris, all_curv, isos = [], [], [], [], []
     tri_face_ids = []
