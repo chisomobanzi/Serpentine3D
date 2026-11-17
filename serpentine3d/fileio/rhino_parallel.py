@@ -640,7 +640,8 @@ def _assemble(messages, report, opening: str = "", path: str = "",
     # opens the file once rather than once an object.
     owed = sum(1 for _, parts in rows
                for _, _, shapes in parts for s in shapes if _is_deferred(s))
-    pending = rhino_module().PendingFile(path, owed) if owed else None
+    pending = (rhino_module().PendingFile(path, owed, objects=total)
+               if owed else None)
 
     out, counter = [], 0
     for _, parts in rows:

@@ -198,7 +198,8 @@ def _reporting(items, report, lo: float, hi: float):
         yield item
 
 
-def _r3_mesh_to_shape(mesh: r3.Mesh, as_mesh: bool = True, report=None):
+def _r3_mesh_to_shape(mesh: r3.Mesh, as_mesh: bool = True, report=None,
+                      arrays=None):
     """A Rhino mesh as a MeshShape (or a sewn shell).
 
     rhino3dm exposes no bulk accessor, so vertices and faces are both read one
@@ -214,15 +215,22 @@ def _r3_mesh_to_shape(mesh: r3.Mesh, as_mesh: bool = True, report=None):
     it at all, so the bar costs nothing.
     """
     report = report or Progress()
-    verts = np.array([[v.X, v.Y, v.Z]
-                      for v in _reporting(mesh.Vertices, report, 0.0, 0.7)],
-                     float)
-    tris = []
-    for f in _reporting(mesh.Faces, report, 0.7, 0.95):
-        a, b, c, d = f
-        tris.append((a, b, c))
-        if d != c:
-            tris.append((a, c, d))
+    if arrays is not None and len(arrays[0]) == len(mesh.Vertices) \
+            and len(arrays[1]) == len(mesh.Faces):
+        # read from the file in one go (rhino_mesh_records); counts that
+        # disagree mean they are some other mesh's, and are not used
+        if as_mesh:
+            return _mesh_shape(*arrays)
+        verts, tris = arrays[0], _split_quads(arrays[1])
+    else:
+        verts = np.array([[v.X, v.Y, v.Z] for v in
+                          _reporting(mesh.Vertices, report, 0.0, 0.7)], float)
+        tris = []
+        for f in _reporting(mesh.Faces, report, 0.7, 0.95):
+            a, b, c, d = f
+            tris.append((a, b, c))
+            if d != c:
+                tris.append((a, c, d))
     if as_mesh:
         from ..core.mesh import MeshShape
         # The file carries Rhino's own vertex normals, smoothed to whatever
@@ -235,6 +243,24 @@ def _r3_mesh_to_shape(mesh: r3.Mesh, as_mesh: bool = True, report=None):
         # edges the modeller made hard.
         return MeshShape(verts, np.asarray(tris, np.uint32))
     return _shell_from_triangles(verts, tris)
+
+
+def _mesh_shape(verts: np.ndarray, quads: np.ndarray):
+    """A MeshShape from a mesh's vertices and its (M, 4) faces."""
+    from ..core.mesh import MeshShape
+    return MeshShape(verts, _split_quads(quads).astype(np.uint32))
+
+
+def _split_quads(quads: np.ndarray) -> np.ndarray:
+    """(M, 4) faces as triangles: each as (a, b, c), and a quad's other
+    half (a, c, d) straight after it, the order the face loop gives."""
+    second = quads[:, 3] != quads[:, 2]
+    rows = np.arange(len(quads)) + np.concatenate(
+        ([0], np.cumsum(second)[:-1])).astype(np.int64)
+    tris = np.empty((len(quads) + int(second.sum()), 3), np.int64)
+    tris[rows] = quads[:, :3]
+    tris[rows[second] + 1] = quads[second][:, [0, 2, 3]]
+    return tris
 
 
 # -------------------------------------------------------------------- breps
@@ -1820,11 +1846,22 @@ class PendingFile:
     the scene goes; that is the same memory the eager import held all along.
     """
 
-    def __init__(self, path: str, owed: int):
+    def __init__(self, path: str, owed: int, objects: int | None = None):
         self.path = path
+        # how many objects the import counted in the file, which a mesh's
+        # own record is only trusted to agree with by index if the file
+        # still holds that many (`_deferred_from_file`)
+        self.objects = objects
         self._owed = owed
         self._model = None
         self._lock = threading.Lock()
+
+    def settled(self):
+        """One object owed has been read without the model."""
+        with self._lock:
+            self._owed -= 1
+            if self._owed <= 0:
+                self._model = None
 
     def geometry(self, index: int):
         """The object at `index`, reading the file if this is the first ask.
@@ -1845,14 +1882,33 @@ class PendingFile:
         return geo
 
 
+def _put_off(geo, patterns, path: str, index: int) -> list:
+    """What an object an import put off converts to, now something asks,
+    typically a first save. A mesh is read from the file in one go rather
+    than a vertex at a time: 13 million of them took two minutes."""
+    if isinstance(geo, r3.Mesh):
+        from .rhino_mesh_records import mesh_arrays_at
+        return [_r3_mesh_to_shape(geo, arrays=mesh_arrays_at(path, index))]
+    return object_to_shapes(geo, patterns=patterns)
+
+
 def _deferred_from_file(pending: PendingFile, index: int, kind: str):
     def build():
+        if kind == "mesh" and pending.objects is not None:
+            # its own record is all a mesh needs, not the whole file read
+            # again by rhino3dm: nine seconds of a film set's first save
+            from .rhino_mesh_records import mesh_arrays_at, object_count
+            if object_count(pending.path) == pending.objects:
+                arrays = mesh_arrays_at(pending.path, index)
+                if arrays is not None:
+                    pending.settled()
+                    return [_mesh_shape(*arrays)]
         geo = pending.geometry(index)
         if geo is None:
             return []
         patterns = (read_hatch_patterns(pending.path)
                     if isinstance(geo, r3.Hatch) else None)
-        return object_to_shapes(geo, patterns=patterns)
+        return _put_off(geo, patterns, pending.path, index)
 
     return DeferredShape(build, kind=kind)
 
@@ -1952,7 +2008,8 @@ def import_3dm(path: str, progress=None, units: str = "mm",
             counter += 1
             name = attrs.Name or f"3dm object {counter:02d}"
             out.append((name, DeferredShape(
-                lambda g=geo, p=patterns: object_to_shapes(g, patterns=p),
+                lambda g=geo, p=patterns, i=index:
+                    _put_off(g, p, path, i),
                 kind=file_kind(geo)), meta))
             continue
         for shape in object_to_shapes(geo, step):

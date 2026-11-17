@@ -14,6 +14,12 @@
 
 ### Fixed
 
+- **The first save after opening a big Rhino file is four times faster.**
+  Meshes on hidden layers are read when something first needs them, a
+  save included, and rhino3dm hands a mesh over a vertex at a time: a film
+  set's 13 million hidden vertices took two minutes to save. They are now
+  read from the file in one go, exactly as before, and the save takes 30
+  seconds.
 - **A see-through object no longer slows the whole view down.** One
   object with an opacity sent every other object in the frame back to
   being drawn one at a time, so the draw-call sharing of 0.12.5 never
