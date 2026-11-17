@@ -130,3 +130,24 @@ def test_a_click_reads_the_mesh_the_pane_draws(pane, monkeypatch):
                         lambda obj: read.append(obj.id) or real(obj))
     vp.pick_hits(400, 300)
     assert ball.id in read
+
+
+def test_a_settled_camera_does_not_measure_every_object_again(pane):
+    # Ten thousand objects is a fifth of a second of boxes, each time the
+    # camera stops. They only move when the drawing does.
+    vp, scene = pane
+    ball = scene.add(g.make_sphere((0, 0, 0), 20.0), name="Ball")
+    _look(vp, (20, 0, 0), 1.0)
+    _settle(vp)
+    measured = []
+    type(ball).bbox, real = (lambda self: measured.append(self.id)
+                             or real(self)), type(ball).bbox
+    try:
+        _look(vp, (20, 1, 0), 1.0)
+        _settle(vp)
+        assert measured == []
+        scene.add(g.make_sphere((0, 100, 0), 5.0), name="Another")
+        _settle(vp)
+        assert ball.id in measured
+    finally:
+        type(ball).bbox = real
