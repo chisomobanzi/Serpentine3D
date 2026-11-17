@@ -2416,6 +2416,8 @@ class Viewport(QOpenGLWidget):
         """Everything the reconcile below reads, so it can be skipped when
         none of it has moved. A temporary pick moves no scene revision.
         See `_sync_gpu`."""
+        # The finer meshes' epoch stays last: refine_view keys its own cache
+        # on the rest, and _sync_gpu reads the linetypes as key[2].
         return (self.scene.revision, self._tess_epoch,
                 self._layer_linetypes(), self._visible_layers(),
                 self.scene.showing_only, self._refine.epoch)

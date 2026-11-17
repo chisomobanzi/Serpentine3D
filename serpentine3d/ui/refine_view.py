@@ -40,6 +40,7 @@ class PaneRefiner:
         self._camera_key = None
         self._generation = 0
         self._asked: dict[str, int] = {}    # object id -> generation in flight
+        self._boxes = None              # (key, objects, their boxes)
         self._timer = QTimer(viewport)
         self._timer.setSingleShot(True)
         self._timer.setInterval(SETTLE_MS)
@@ -77,12 +78,10 @@ class PaneRefiner:
         if width < 2 or height < 2:
             return
         view = refine.View.of(vp.camera, width, height)
-        objects = [obj for obj in vp.scene.drawable_objects()
-                   if self._refinable(obj)]
+        objects, boxes, deflections = self._candidates()
         wanted = []
         if objects:
-            boxes = np.array([obj.bbox() for obj in objects], float)
-            strays = refine.strays(boxes, refine.deflections(boxes), view)
+            strays = refine.strays(boxes, deflections, view)
             order = np.argsort(-strays)
             wanted = [objects[i] for i in order[:MAX_OBJECTS]
                       if strays[i] > refine.TRIGGER_PX]
@@ -99,6 +98,21 @@ class PaneRefiner:
         self._generation += 1
         for obj in wanted:
             self._ask(obj, view, self._generation)
+
+    def _candidates(self) -> tuple:
+        """(objects that could be meshed finer, their boxes, the deflections
+        they were meshed at), kept until the drawing changes. Read off ten
+        thousand objects each time the camera stopped, they took a fifth of
+        a second of the UI thread."""
+        vp = self._vp
+        key = vp._gpu_sync_key()[:-1]       # all of it but our own epoch
+        if self._boxes is None or self._boxes[0] != key:
+            objects = [obj for obj in vp.scene.drawable_objects()
+                       if self._refinable(obj)]
+            boxes = np.array([obj.bbox() for obj in objects],
+                             float).reshape(-1, 2, 3)
+            self._boxes = (key, objects, boxes, refine.deflections(boxes))
+        return self._boxes[1:]
 
     def _ask(self, obj, view, generation: int) -> None:
         self._asked[obj.id] = generation
