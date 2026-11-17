@@ -2,7 +2,8 @@
 
 SignPath enforces both at signing time, and without them the shipped binary
 shows blank in file Properties and Task Manager. The resource is generated
-from serpentine3d.__version__ so it cannot drift from the release.
+from the version in pyproject.toml so it cannot drift from the release
+(test_release keeps serpentine3d.__version__ equal to that).
 """
 import ast
 import importlib.util

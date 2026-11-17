@@ -80,7 +80,7 @@ https://github.com/user-attachments/assets/837002ba-7780-49d3-b966-71d6469ba884
 | **macOS** | [Serpentine3D-0.13.0-arm64.dmg](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.13.0-arm64.dmg) | 268&nbsp;MB | Apple Silicon, macOS 14 or newer. Unsigned for now: right-click the app and choose **Open**. |
 
 Each build carries the OpenCASCADE kernel and its own Python, and needs a GPU
-with OpenGL 3.3. Headless use works anywhere. [Release notes](https://github.com/chisomobanzi/Serpentine3D/releases/latest)
+with OpenGL 3.3. Headless use works anywhere. [Release notes](https://github.com/chisomobanzi/Serpentine3D/releases/latest) · [Code signing policy](docs/code-signing-policy.md)
 
 ## Script it
 

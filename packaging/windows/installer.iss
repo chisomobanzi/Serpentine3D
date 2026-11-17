@@ -3,21 +3,43 @@
 ;   ISCC.exe installer.iss
 
 #define AppName "Serpentine3D"
-#define AppVersion "0.13.0"
 #define AppPublisher "Chisomo Banzi"
 #define AppURL "https://github.com/chisomobanzi/Serpentine3D"
+
+; The version is not written here. make_version_info.py puts the one in
+; pyproject.toml into serp3d.exe, and the installer reads it back out, so
+; the installer, the app and the SignPath signing request cannot disagree.
+#define AppExe AddBackslash(SourcePath) + "dist\serp3d\serp3d.exe"
+#if !FileExists(AppExe)
+  #error Build serp3d.exe with PyInstaller before compiling the installer
+#endif
+#define AppVersion GetFileProductVersionString(AppExe)
+#if AppVersion == ""
+  #error serp3d.exe carries no ProductVersion; see make_version_info.py
+#endif
 
 [Setup]
 AppId={{7E1D0A4C-52F3-4B7E-9C0D-2B54E6A9D311}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
+VersionInfoVersion={#AppVersion}
+VersionInfoTextVersion={#AppVersion}
+VersionInfoProductName={#AppName}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoCompany={#AppPublisher}
+VersionInfoDescription={#AppName} Setup
+VersionInfoCopyright=MIT Licensed. Copyright (c) {#AppPublisher}.
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}/issues
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 UninstallDisplayIcon={app}\serp3d.exe
 LicenseFile=..\..\LICENSE
+; SignPath Foundation's terms: anything sent to a system the user did not
+; choose (the update check) must be described during installation
+InfoBeforeFile=privacy.txt
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputBaseFilename=Serpentine3D-Setup-x86_64

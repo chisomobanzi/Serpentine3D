@@ -1,9 +1,11 @@
 """One version number, written in nine places.
 
-Nothing computes the version from `__version__`: the Inno script, the
-PyInstaller spec, the dmg builder and three sets of download links each
-carry their own copy, because none of them can import Python at the time
-they need it. So a release is a hand edit across nine files, and the ones
+Nothing computes the version from `__version__`: the macOS PyInstaller
+spec, the dmg builder and three sets of download links each carry their own
+copy, because none of them can import Python at the time they need it. (The
+Windows build is the exception: its exe takes the version from
+pyproject.toml and the Inno script reads it back out of that exe.) So a
+release is a hand edit across nine files, and the ones
 that go wrong are the quiet ones — a splash screen still claiming the last
 version, or a download link pointing at a `.dmg` the new release does not
 contain, which reads as a 404 to whoever clicks it.
@@ -31,7 +33,6 @@ DECLARED = {
         rf'(?:^\s*version|CFBundleShortVersionString"|CFBundleVersion")'
         rf'\s*[=:]\s*"{V}"',
     "packaging/macos/build-dmg.sh": rf'^VERSION="{V}"',
-    "packaging/windows/installer.iss": rf'#define AppVersion "{V}"',
     # the lock pins the project's own version alongside its dependencies,
     # and CI installs with --locked, so a bump that skips it fails the
     # build rather than shipping something wrong — but it fails it on the

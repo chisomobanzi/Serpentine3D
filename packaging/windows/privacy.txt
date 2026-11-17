@@ -1,0 +1,17 @@
+Serpentine3D and your privacy
+
+Serpentine3D has no telemetry, analytics or crash reporting. Your models stay on your computer.
+
+Update check (on unless you turn it off)
+Each time Serpentine3D starts, it asks api.github.com whether a newer release exists. The request carries no information about you or your work, but GitHub sees your IP address (GitHub's privacy statement: https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
+To turn it off, clear "Check GitHub for updates on startup" on the next pages. You can change it later in Settings > Updates.
+
+AI assistant (off until you set it up)
+If you connect a provider (Anthropic, OpenAI, a ChatGPT account through Codex, or a local or custom server) and press Send, your prompts and a description of the scene are sent to that provider, and a viewport screenshot when the assistant asks for one. Nothing is sent until you do this. That provider's privacy policy applies.
+
+Local connections
+Serpentine3D listens on 127.0.0.1 (this computer only) so scripts and assistants you run can drive it. Set SERP3D_NO_RPC=1 to turn this off.
+
+Settings and API keys are stored in plain text in %USERPROFILE%\.config\serpentine3d. Uninstalling Serpentine3D leaves them in place; delete that folder to remove them.
+
+Full policy: https://chisomobanzi.github.io/Serpentine3D/docs/code-signing-policy/

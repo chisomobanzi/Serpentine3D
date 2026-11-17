@@ -3,6 +3,13 @@ name: Build Windows installer
 # Builds the PyInstaller bundle + Inno Setup installer on a Windows runner.
 # - workflow_dispatch: build and expose the .exe as a downloadable artifact.
 # - release published: also attach the .exe straight to that release.
+#
+# The installer is signed through SignPath (see packaging/windows/signpath/
+# and docs/code-signing-policy.md). Signing needs the SIGNPATH_API_TOKEN
+# secret and the SIGNPATH_ORGANIZATION_ID variable; without them (a fork, or
+# before SignPath is set up) the build still runs and ships unsigned, with a
+# warning. SIGNPATH_SIGNING_POLICY_SLUG picks the policy, test-signing unless
+# set. Every signing request waits for a manual approval in SignPath.
 on:
   workflow_dispatch:
   release:
@@ -10,10 +17,13 @@ on:
 
 permissions:
   contents: write        # attach the asset to the release
+  actions: read          # SignPath downloads the unsigned artifact with this token
 
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      SIGNPATH_ENABLED: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +50,69 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen     # headless runner: no display for the selftest
         run: powershell -ExecutionPolicy Bypass -File build-installer.ps1 -Python python
+
+      - name: Read the version from pyproject.toml
+        id: version
+        run: |
+          $version = python packaging/windows/make_version_info.py --version
+          if ($LASTEXITCODE -ne 0 -or -not $version) { throw "Could not read the version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      # A release whose draft already carries an installer keeps that one
+      # (see "Attach to release"), so signing this build would spend a
+      # manual approval on a file nobody uses.
+      - name: Check the release for a prepared installer
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $prepared = 'false'
+          if ('${{ github.event_name }}' -eq 'release') {
+            $assets = gh release view "${{ github.event.release.tag_name }}" --json assets --jq '.assets[].name'
+            if ($LASTEXITCODE -ne 0) { throw "Could not inspect release assets" }
+            if ($assets -contains 'Serpentine3D-Setup-x86_64.exe') { $prepared = 'true' }
+          }
+          "prepared=$prepared" >> $env:GITHUB_OUTPUT
+
+      - name: Note an unsigned build
+        if: env.SIGNPATH_ENABLED != 'true'
+        run: Write-Host "::warning::SignPath is not configured (SIGNPATH_API_TOKEN secret or SIGNPATH_ORGANIZATION_ID variable missing); the installer is unsigned."
+
+      - name: Upload unsigned installer for signing
+        id: upload-unsigned
+        if: env.SIGNPATH_ENABLED == 'true' && steps.release.outputs.prepared != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Serpentine3D-Setup-x86_64-unsigned
+          path: packaging/windows/Output/Serpentine3D-Setup-x86_64.exe
+          if-no-files-found: error
+
+      - name: Sign installer with SignPath
+        if: env.SIGNPATH_ENABLED == 'true' && steps.release.outputs.prepared != 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: Serpentine3D
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'test-signing' }}
+          artifact-configuration-slug: windows-installer
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          parameters: |
+            version: ${{ toJSON(steps.version.outputs.version) }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 7200   # room for the manual approval
+          output-artifact-directory: packaging/windows/Output/signed
+
+      - name: Use the signed installer
+        if: env.SIGNPATH_ENABLED == 'true' && steps.release.outputs.prepared != 'true'
+        run: |
+          $signed = "packaging/windows/Output/signed/Serpentine3D-Setup-x86_64.exe"
+          $sig = Get-AuthenticodeSignature $signed
+          # a test-signing certificate is not trusted, so check that a
+          # signature is there rather than that Windows trusts it
+          if (-not $sig.SignerCertificate) { throw "SignPath returned an unsigned installer" }
+          Write-Host "Signed by $($sig.SignerCertificate.Subject) ($($sig.Status))"
+          Copy-Item $signed packaging/windows/Output/Serpentine3D-Setup-x86_64.exe -Force
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
