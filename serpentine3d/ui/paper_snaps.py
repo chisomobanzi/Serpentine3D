@@ -17,6 +17,9 @@ class PaperSnaps(SnapIndex):
         self.revision = 0
         self._objects = {}
         self._features = {}
+        # The ids of sheet items being dragged, which are no place to drop
+        # themselves: a corner would find the corner it is moving.
+        self.leave_out: set = set()
         super().__init__(self)
 
     def project(self, points, width, height):
@@ -98,6 +101,9 @@ class PaperSnaps(SnapIndex):
             for dim in lay.adims:
                 lines("adim", dim)
 
+        # a hatch's loops are keyed "<id>:<n>"
+        current = {key: entry for key, entry in current.items()
+                   if key.split(":")[0] not in self.leave_out}
         if (previous.keys() != current.keys() or
                 any(previous.get(key) is not entry for key, entry in current.items())):
             self.revision += 1

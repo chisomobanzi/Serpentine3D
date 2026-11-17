@@ -13,7 +13,8 @@ a detail's frame (keeping its drawing scale, so a 1:50 detail stays 1:50
 and shows more or less of the model), and annotations by their points,
 with text height, dimension offset and hatch spacing following a uniform
 scale. A one-way stretch moves text and dimensions without distorting
-them. A locked detail stays where it is, as it does for move.
+them. A locked detail scales like any frame: its lock keeps its view,
+drawing scale included, not its frame (#130).
 """
 
 from __future__ import annotations
@@ -120,7 +121,7 @@ def test_a_detail_frame_scales_and_keeps_its_drawing_scale(sheet):
     assert det.scale_denom == 50.0, "a 1:50 detail stays 1:50"
 
 
-def test_a_locked_detail_stays_and_says_so(sheet):
+def test_a_locked_detail_frame_scales_and_keeps_its_drawing_scale(sheet):
     w, lv, lay, said = sheet
     det = lay.details[0]
     det.locked = True
@@ -129,9 +130,10 @@ def test_a_locked_detail_stays_and_says_so(sheet):
 
     _run(w, "scale", "0,0", "2")
 
-    assert (det.x, det.y, det.w, det.h) == (20.0, 30.0, 100.0, 60.0)
+    assert (det.x, det.y, det.w, det.h) == pytest.approx((40, 60, 200, 120))
+    assert det.scale_denom == 50.0
     assert _box(rule) == (20.0, 20.0, 60.0, 40.0)
-    assert "locked" in said[-1].lower(), said
+    assert "locked" not in said[-1].lower(), said
 
 
 def test_a_dimension_scales_with_its_points(sheet):

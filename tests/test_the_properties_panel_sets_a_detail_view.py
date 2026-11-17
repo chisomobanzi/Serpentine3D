@@ -13,7 +13,8 @@ from tests.test_the_properties_panel_sets_a_detail_scale import (
     sheet, _items, _pick, _scale_combo,
 )
 
-VIEWS = ["Top", "Front", "Right", "Left", "Back", "Bottom", "Perspective"]
+VIEWS = ["Top", "Front", "Right", "Left", "Back", "Bottom", "Isometric",
+         "Perspective"]
 
 
 def _view_combo(panel):

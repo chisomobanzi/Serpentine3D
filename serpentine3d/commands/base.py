@@ -343,6 +343,10 @@ class CommandContext:
         self.replay_cplane = None
         self.replay_aim = None
         self.replay_space = None
+        # Set once a command has chosen the sheet's own items (`sheet_view`):
+        # every point it asks for after that is on the paper, wherever the
+        # click lands (#129).
+        self.paper_points = False
 
     def held_control_points(self) -> dict:
         """{obj_id: [index, ...]} — the control points the selection holds.
@@ -575,11 +579,18 @@ class CommandContext:
         that went looking for model objects there would wait for ever.
 
         None for the headless stub viewport, which has no sheet to pick on.
+
+        A command that gets the sheet is working on paper from then on, so
+        its points stay paper points: a click inside a frame it is scaling
+        is a corner to scale from, not a way into the model (#129).
         """
         if not self.on_bare_paper():
             return None
         lv = getattr(self.viewport, "layout_view", None)
-        return lv if hasattr(lv, "delete_selected") else None
+        if not hasattr(lv, "delete_selected"):
+            return None
+        self.paper_points = True
+        return lv
 
     def add(self, shape, name: str | None = None):
         """Put a new shape where the command is drawing it.
@@ -904,6 +915,7 @@ class CommandProcessor:
             self._start_revision = self.ctx.scene.revision
             self.ctx.history.checkpoint(cd.name)
         self.gen = cd.fn(self.ctx)
+        self.ctx.paper_points = False
         self.ctx.result_ids = []
         self.ctx.result_subobjects = []
         self._select_buffer = []

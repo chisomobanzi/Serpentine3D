@@ -12,8 +12,8 @@ note moves to where its mirror image would be, the way AutoCAD and Rhino
 treat text by default, rather than coming out backwards. A dimension stays
 on the mirrored side of what it measures, a hatch's lines turn with it,
 and a detail frame moves to its mirrored place (a view of the model cannot
-itself be mirrored). A locked detail stays where it is, as for move and
-scale, unless the original is kept, when it is the copy that goes.
+itself be mirrored). A locked detail moves like any other: its lock keeps
+its view, not its frame (#130).
 """
 
 from __future__ import annotations
@@ -114,7 +114,7 @@ def test_a_mixed_pick_all_mirrors(sheet):
     assert det.scale_denom == 50.0
 
 
-def test_a_locked_detail_stays_unless_the_original_is_kept(sheet):
+def test_a_locked_detail_is_mirrored_like_any_frame(sheet):
     w, lv, lay, said = sheet
     det = lay.details[0]
     det.locked = True
@@ -122,16 +122,17 @@ def test_a_locked_detail_stays_unless_the_original_is_kept(sheet):
 
     _run(w, "mirror", *UP_X50, "No")
 
-    assert (det.x, det.y) == (20.0, 30.0)
-    assert "locked" in said[-1].lower(), said
+    assert (det.x, det.y) == pytest.approx((-20.0, 30.0))
+    assert det.scale_denom == 50.0 and det.locked
+    assert "Mirrored 1" in said[-1] and "locked" not in said[-1].lower(), said
 
     lv.selected = [("detail", det)]
     _run(w, "mirror", *UP_X50, "Yes")
 
-    assert len(lay.details) == 2, "the copy is the one that goes"
+    assert len(lay.details) == 2
     copy = next(d for d in lay.details if d is not det)
-    assert (copy.x, copy.y) == pytest.approx((-20.0, 30.0))
-    assert (det.x, det.y) == (20.0, 30.0)
+    assert (copy.x, copy.y) == pytest.approx((20.0, 30.0))
+    assert copy.locked
 
 
 def test_nothing_picked_says_so_and_does_not_wait(sheet):

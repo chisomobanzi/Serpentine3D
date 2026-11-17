@@ -7,9 +7,9 @@ import numpy as np
 from ..core import clipping
 from ..core import geometry as g
 from ..core.layout import (
-    PAPER_SIZES, DetailView, Layout, LinearDim, TextNote, annotation_style,
-    default_note_height, format_scale, hatch_patterns_of, parse_scale,
-    pattern_label, pattern_named, unique_layout_name,
+    DETAIL_VIEWS, PAPER_SIZES, DetailView, Layout, LinearDim, TextNote,
+    annotation_style, default_note_height, format_scale, hatch_patterns_of,
+    parse_scale, pattern_label, pattern_named, unique_layout_name,
 )
 from ..utils.units import TO_MM, format_paper_size, paper_units
 # a detail view named "front" should look where the front view looks
@@ -214,9 +214,7 @@ def cmd_detail(ctx):
             preview_fn=_frame_to if c1 is not None else None)
         if isinstance(value, str) and value == "View":
             view = yield OptionReq(
-                "View direction",
-                options=["Top", "Front", "Right", "Left", "Back", "Bottom",
-                         "Perspective"], default=view)
+                "View direction", options=list(DETAIL_VIEWS), default=view)
             detail.azimuth, detail.elevation = _VIEW_ANGLES[view.lower()]
             detail.perspective = view == "Perspective"
         elif isinstance(value, str) and value == "Scale":
@@ -262,6 +260,10 @@ def cmd_detailscale(ctx):
         ctx.echo("Enter a detail first (double-click it).")
         return
         yield  # pragma: no cover
+    if detail.locked:
+        ctx.echo("The detail is locked, so its scale stays. "
+                 "Run detaillock to unlock it.")
+        return
     units = ctx.scene.units
     text = yield TextReq("New scale (e.g. 1:20)",
                          default=detail.scale_text(units))
@@ -294,6 +296,7 @@ def cmd_detailmode(ctx):
 
 @command("detaillock")
 def cmd_detaillock(ctx):
+    """Lock or unlock a detail's view and scale; its frame still moves."""
     lay, detail = _entered_or_only_detail(ctx)
     if detail is None:
         ctx.echo("Enter a detail first (double-click it).")
@@ -1349,7 +1352,8 @@ def cmd_annotedit(ctx):
         yield  # pragma: no cover
     from ..core.layout import annotation_at
     p = yield PointReq("Pick an annotation")
-    hit = annotation_at(lay, p[0], p[1], tol=3.0, scene=ctx.scene)
+    hit = annotation_at(lay, p[0], p[1], tol=3.0, scene=ctx.scene,
+                        locked=False)
     if hit is None:
         ctx.echo("Nothing there. Click on a note, dimension, leader or "
                  "hatch.")

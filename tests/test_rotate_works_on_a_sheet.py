@@ -9,8 +9,8 @@ What cannot turn is placed rather than bent. A note is always drawn
 level, so it orbits the pivot and keeps reading level, its middle landing
 where the turned text's middle would be; a detail frame likewise moves to
 its turned place at its own size. Dimensions, leaders and hatches turn
-properly, a hatch's lines with them. A locked detail stays put and says
-so, as for move, scale and mirror.
+properly, a hatch's lines with them. A locked detail turns with the rest:
+its lock keeps its view, not its frame (#130).
 """
 
 from __future__ import annotations
@@ -151,16 +151,19 @@ def test_a_detail_frame_moves_to_its_turned_place_at_its_own_size(sheet):
     assert det.scale_denom == 50.0
 
 
-def test_a_locked_detail_stays_and_says_so(sheet):
+def test_a_locked_detail_turns_with_the_rest(sheet):
     w, lv, lay, said = sheet
     det = lay.details[0]
     det.locked = True
+    centre = (det.x + det.w / 2, det.y + det.h / 2)
     lv.selected = [("detail", det), ("object", lay.objects[0])]
 
     _run(w, "rotate", "0,0", "90")
 
-    assert (det.x, det.y) == (20.0, 30.0)
-    assert "Rotated 1" in said[-1] and "locked" in said[-1].lower(), said
+    assert (det.x + det.w / 2, det.y + det.h / 2) == pytest.approx(
+        _turn(centre, 90))
+    assert det.scale_denom == 50.0
+    assert "Rotated 2" in said[-1] and "locked" not in said[-1].lower(), said
 
 
 def test_the_angle_can_be_dragged_with_reference_points(sheet):
