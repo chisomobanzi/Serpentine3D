@@ -14,6 +14,12 @@
 
 ### Fixed
 
+- **Curves and edges are drawn smooth (#168).** A curve is drawn as short
+  straight pieces, and each could turn 14 degrees from the next, so a gentle
+  curve showed its corners once zoomed in. Now each turns at most 1 degree:
+  a 60 mm curve goes from 9 pieces to 75, a circle from 30 to 360. The curve
+  itself was always exact; only its picture changes. A 48,000-edge model
+  draws 173,000 pieces instead of 67,000 and takes no longer to open.
 - **The first save after opening a big Rhino file is four times faster.**
   Meshes on hidden layers are read when something first needs them, a
   save included, and rhino3dm hands a mesh over a vertex at a time: a film
