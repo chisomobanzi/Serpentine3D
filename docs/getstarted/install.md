@@ -8,7 +8,7 @@ to install.
 | Platform | Download |
 |---|---|
 | **Linux** | [`Serpentine3D-x86_64.AppImage`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-x86_64.AppImage) — `chmod +x` and run |
-| **Windows** | [`Serpentine3D-Setup-x86_64.exe`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) — installer |
+| **Windows** | [`Serpentine3D-Setup-x86_64.exe`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-Setup-x86_64.exe) — installer ([Code signing policy](../code-signing-policy.md)) |
 | **macOS** (Apple Silicon, macOS 14 or newer) | [`Serpentine3D-arm64.dmg`](https://github.com/chisomobanzi/Serpentine3D/releases/latest/download/Serpentine3D-0.13.1-arm64.dmg) — drag to Applications |
 
 The GUI needs a GPU with OpenGL 3.3 drivers (any normal desktop). Headless

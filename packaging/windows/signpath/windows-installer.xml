@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "windows-installer" for project Serpentine3D.
+
+  The build uploads the installer with actions/upload-artifact, which wraps
+  it in a zip, so the root is a zip-file holding the one exe. Only the
+  installer is signed: the files it carries are mostly Python, Qt, OCP and
+  VTK binaries, which SignPath Foundation does not allow us to sign.
+
+  The metadata restrictions are a Foundation requirement. The workflow passes
+  the version from pyproject.toml as the "version" parameter, so a request
+  whose installer reports a different version is rejected.
+
+  This file is the source of truth: paste it into the SignPath project
+  (Artifact configurations > windows-installer) whenever it changes.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="Serpentine3D-Setup-x86_64.exe"
+             product-name="Serpentine3D"
+             product-version="${version}"
+             company-name="Chisomo Banzi">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
