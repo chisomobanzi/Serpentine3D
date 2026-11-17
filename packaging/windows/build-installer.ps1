@@ -36,5 +36,22 @@ if (-not (Test-Path $iscc)) { throw "Inno Setup 6 not found - install from jrsof
 & $iscc installer.iss
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
+# ISCC leaves Inno's 60-space placeholders after every version string, and
+# SignPath compares ProductName and the rest exactly (see trim_version_info.py)
+& $Python trim_version_info.py ".\Output\Serpentine3D-Setup-x86_64.exe"
+if ($LASTEXITCODE -ne 0) { throw "Could not trim the installer's version strings" }
+
+# Read them back the way Windows does, so a wrong name fails here rather
+# than as a rejected signing request
+$version = & $Python make_version_info.py --version
+if ($LASTEXITCODE -ne 0 -or -not $version) { throw "Could not read the version" }
+$info = (Get-Item ".\Output\Serpentine3D-Setup-x86_64.exe").VersionInfo
+if ($info.ProductName -cne 'Serpentine3D' -or
+    $info.CompanyName -cne 'Chisomo Banzi' -or
+    $info.ProductVersion -cne $version) {
+    throw ("Installer version info is not exact: ProductName='{0}' CompanyName='{1}' ProductVersion='{2}' (expected '{3}')" -f
+        $info.ProductName, $info.CompanyName, $info.ProductVersion, $version)
+}
+
 $out = Get-Item ".\Output\Serpentine3D-Setup-x86_64.exe"
 Write-Host ("INSTALLER OK: {0} ({1:N0} MB)" -f $out.FullName, ($out.Length / 1MB))
