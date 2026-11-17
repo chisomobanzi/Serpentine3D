@@ -77,6 +77,9 @@ class DisplayMesh:
         default_factory=lambda: np.zeros(0, np.int32))
     face_of_triangle: np.ndarray = field(
         default_factory=lambda: np.zeros(0, np.int32))
+    # isocurve segment -> face index, for redrawing one face's (core/refine)
+    face_of_iso: np.ndarray = field(
+        default_factory=lambda: np.zeros(0, np.int32))
     # free-standing point objects (vertex shapes): (N, 3)
     local_points: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 3), np.float32))
@@ -537,8 +540,9 @@ def _normals_agree(surf, tol: float = 1e-6) -> bool:
     return first is not None
 
 
-def _face_isocurves(face) -> list[np.ndarray]:
-    """Isoparametric polylines on a curved face, clipped to its trims.
+def _face_isocurves(face, samples: int = _ISO_SAMPLES) -> list[np.ndarray]:
+    """Isoparametric polylines on a curved face, clipped to its trims,
+    `samples` pieces from one side of the face to the other.
 
     A flat face gets none. Its isocurves would be straight lines lying
     in the plane of the edges already drawn around them, so they add
@@ -562,8 +566,8 @@ def _face_isocurves(face) -> list[np.ndarray]:
     for direction in ("u", "v"):
         for frac in _ISO_FRACTIONS:
             run = []
-            for i in range(_ISO_SAMPLES + 1):
-                t = i / _ISO_SAMPLES
+            for i in range(samples + 1):
+                t = i / samples
                 if direction == "u":
                     u = u0 + (u1 - u0) * frac
                     v = v0 + (v1 - v0) * t
@@ -619,6 +623,7 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         BRepMesh_IncrementalMesh(shape, deflection, False, FACE_ANGLE, True)
 
     all_verts, all_norms, all_tris, all_curv, isos = [], [], [], [], []
+    iso_face_ids = []
     tri_face_ids = []
     offset = 0
     face_index = -1
@@ -640,6 +645,8 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         try:
             for pts in _face_isocurves(face):
                 isos.append(np.stack([pts[:-1], pts[1:]], axis=1))
+                iso_face_ids.append(np.full(len(pts) - 1, face_index,
+                                            np.int32))
         except Exception:
             pass
 
@@ -669,4 +676,6 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         mesh.face_of_triangle = np.concatenate(tri_face_ids)
     if segments:
         mesh.edge_of_segment = np.concatenate(seg_edge_ids)
+    if isos:
+        mesh.face_of_iso = np.concatenate(iso_face_ids)
     return mesh
