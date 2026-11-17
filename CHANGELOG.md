@@ -20,6 +20,15 @@
   a 60 mm curve goes from 9 pieces to 75, a circle from 30 to 360. The curve
   itself was always exact; only its picture changes. A 48,000-edge model
   draws 173,000 pieces instead of 67,000 and takes no longer to open.
+- **Zoomed in, a curved surface stays smooth too (#168).** A surface is
+  drawn from a mesh made once, at 0.2% of its object's size, so far
+  enough in its shaded outline turned into a polygon and stood out past
+  the edge drawn beside it. A view that has stopped moving now meshes the
+  faces it is looking at again, finely enough that none strays more than a
+  pixel, and lets them go when you zoom back out. Only faces that would
+  look different are redone: a flat face with straight edges never is, nor
+  a small round already meshed finer than it needs. Only that view pays
+  for it; the other views, exports and prints keep the mesh they had.
 - **The first save after opening a big Rhino file is four times faster.**
   Meshes on hidden layers are read when something first needs them, a
   save included, and rhino3dm hands a mesh over a vertex at a time: a film
