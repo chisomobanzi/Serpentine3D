@@ -228,8 +228,12 @@ def test_the_installer_takes_its_version_from_the_exe_it_packs():
     """pyproject -> serp3d.exe's resource -> the installer: one number."""
     iss = ISS.read_text()
     assert not re.search(r'#define AppVersion "', iss), "no hand-written version"
+    # GetStringFileInfo is an ISPP built-in in every Inno Setup 6 release.
+    # The GetFileProductVersionString helper only exists in newer ones, and
+    # the runner's Inno Setup 6.7.1 failed on it ("Undeclared identifier").
     assert re.search(
-        r'#define AppVersion GetFileProductVersionString\(AppExe\)', iss)
+        r'#define AppVersion GetStringFileInfo\(AppExe, "ProductVersion"\)',
+        iss)
     assert re.search(r'#define AppExe .*"dist\\serp3d\\serp3d\.exe"', iss)
     assert '#if AppVersion == ""' in iss and "#error" in iss
 

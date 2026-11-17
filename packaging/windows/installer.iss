@@ -13,7 +13,9 @@
 #if !FileExists(AppExe)
   #error Build serp3d.exe with PyInstaller before compiling the installer
 #endif
-#define AppVersion GetFileProductVersionString(AppExe)
+; GetStringFileInfo, not the GetFileProductVersionString helper: that one
+; only exists in newer Inno Setup releases than the runner's 6.7.1.
+#define AppVersion GetStringFileInfo(AppExe, "ProductVersion")
 #if AppVersion == ""
   #error serp3d.exe carries no ProductVersion; see make_version_info.py
 #endif
