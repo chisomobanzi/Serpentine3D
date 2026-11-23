@@ -12,6 +12,16 @@
   anywhere (the update check, and the assistant once you set it up) and how
   to turn the update check off.
 
+### Fixed
+
+- **A face pushed on a surface stays on it** (#176). Push/pull adds to a
+  solid or carves into it, and a surface has no inside: pushing a face in
+  carved away the face itself, so three flat surfaces joined into one lost
+  the face held on the Gumball, and pulling one out failed. On a surface
+  the face is now carried out on new walls either way, and the rest of
+  the surface is left as it was, from the Gumball's arrow or extrusion
+  square and from `pushpull`.
+
 ## 0.13.1 (2026-11-17)
 
 ### Added

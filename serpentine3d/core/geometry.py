@@ -1844,7 +1844,9 @@ def face_point_normal(face):
 
 def push_pull(shape, face_index: int, distance: float) -> TopoDS_Shape:
     """SketchUp-style push/pull: extrude a planar face of a solid outward
-    (positive) or carve it inward (negative)."""
+    (positive) or carve it inward (negative). A surface has no inside to
+    add to or carve from, so there the face is carried out on new walls
+    either way (#176)."""
     faces = faces_of(shape)
     if not (0 <= face_index < len(faces)):
         raise GeometryError("Face index out of range")
@@ -1856,12 +1858,50 @@ def push_pull(shape, face_index: int, distance: float) -> TopoDS_Shape:
     vec = gp_Vec(n[0], n[1], n[2]).Multiplied(abs(d))
     if d < 0:
         vec = gp_Vec(-n[0], -n[1], -n[2]).Multiplied(abs(d))
-    prism = BRepPrimAPI_MakePrism(face, vec).Shape()
+    prism = BRepPrimAPI_MakePrism(face, vec)
+    if shape_kind(shape) == "surface":
+        return _carried_on_walls(shape, face, prism)
     if d > 0:
-        result = boolean_union(shape, prism)
+        result = boolean_union(shape, prism.Shape())
     else:
-        result = boolean_difference(shape, prism)
+        # Carving takes whatever lies on the prism, and the face itself does:
+        # only a solid has the inside that puts it back.
+        result = boolean_difference(shape, prism.Shape())
     return unwrap_compound(result)
+
+
+def _carried_on_walls(shape, face, prism) -> TopoDS_Shape:
+    """`shape` with `face` swapped for the far end of `prism`, the walls
+    between the two joining it to the old outline, facing as before."""
+    from OCP.BRepCheck import BRepCheck_Analyzer
+    from OCP.ShapeFix import ShapeFix_Shell
+    from .occ import BRepBuilderAPI_Sewing
+    near, far = prism.FirstShape(), prism.LastShape()
+    walls = [f for f in faces_of(prism.Shape())
+             if not f.IsSame(near) and not f.IsSame(far)]
+    kept = [f for f in faces_of(shape) if not f.IsSame(face)]
+    sew = BRepBuilderAPI_Sewing(tight())
+    for f in kept + walls + faces_of(far):
+        sew.Add(f)
+    sew.Perform()
+    out = unwrap_compound(sew.SewedShape())
+    if out.ShapeType() == occ.SHELL:
+        fix = ShapeFix_Shell(occ.to_shell(out))
+        fix.Perform()
+        out = unwrap_compound(fix.Shape())
+    if (out.IsNull() or len(faces_of(out)) != len(kept) + len(walls) + 1
+            or len(joined_pieces(out)) != len(joined_pieces(shape))
+            or not BRepCheck_Analyzer(out).IsValid()):
+        raise GeometryError("The face could not be carried out on walls")
+    # Sewing settles which way the faces turn, and can settle on the other
+    # way round from the surface it was given.
+    there = centroid(far)
+    moved = next(f for f in faces_of(out)
+                 if math.dist(centroid(f), there) < tol())
+    n, m = face_normal(face), face_normal(moved)
+    if n[0] * m[0] + n[1] * m[1] + n[2] * m[2] < 0:
+        out = out.Reversed()
+    return out
 
 
 def offset_faces(shape, offsets: dict) -> TopoDS_Shape:
