@@ -1820,6 +1820,170 @@ def face_normal(face) -> Point:
     return n
 
 
+def _flat_freeform(face) -> bool:
+    """A NURBS or Bezier face that lies flat, as Edge Surface makes from
+    curves in one plane."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    from OCP.GeomLib import GeomLib_IsPlanarSurface
+    if BRepAdaptor_Surface(face).GetType() not in (
+            GeomAbs_SurfaceType.GeomAbs_BSplineSurface,
+            GeomAbs_SurfaceType.GeomAbs_BezierSurface):
+        return False
+    return GeomLib_IsPlanarSurface(
+        BRep_Tool.Surface_s(occ.to_face(face)), tol()).IsPlanar()
+
+
+def _fresh_edge(edge):
+    """A new edge on the same 3D curve as `edge`, carrying no curves on
+    any surface: a straight one as a line, since Edge Surface hands back
+    even its straight sides as NURBS curves, and the offset kernel faults
+    on a face of those rather than failing."""
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_Orientation
+    from OCP.TopExp import TopExp
+    edge = occ.to_edge(edge.Oriented(TopAbs_Orientation.TopAbs_FORWARD))
+    a = pnt_tuple(BRep_Tool.Pnt_s(TopExp.FirstVertex_s(edge)))
+    b = pnt_tuple(BRep_Tool.Pnt_s(TopExp.LastVertex_s(edge)))
+    span = math.dist(a, b)
+    curve = occ.edge_adaptor(edge)
+    t0, t1 = curve.FirstParameter(), curve.LastParameter()
+    if span > tol():
+        straight = True
+        for k in range(1, 8):
+            p = pnt_tuple(curve.Value(t0 + (t1 - t0) * k / 8))
+            s = sum((p[i] - a[i]) * (b[i] - a[i]) for i in range(3)) / span
+            foot = tuple(a[i] + (b[i] - a[i]) * s / span for i in range(3))
+            if not 0 <= s <= span or math.dist(p, foot) > tol():
+                straight = False
+                break
+        if straight:
+            return BRepBuilderAPI_MakeEdge(_pnt(a), _pnt(b)).Edge()
+    first, last = BRep_Tool.Range_s(edge)
+    return BRepBuilderAPI_MakeEdge(BRep_Tool.Curve_s(edge, first, last),
+                                   first, last).Edge()
+
+
+def as_plane(face):
+    """`face` as a plane over the same outline, facing the same way, when
+    it lies flat on some other surface; `face` itself when it is a plane.
+    The new face is built on new edges and shares none, so put it back
+    among others by sewing (see `flat_faces_as_planes`). A side shrunk to
+    a point, as Edge Surface leaves on a triangle, is dropped: a plane
+    needs no such side. GeometryError when the face is curved."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    from OCP.ShapeFix import ShapeFix_Face
+    from OCP.TopAbs import TopAbs_Orientation
+    from OCP.gp import gp_Dir, gp_Pln
+    face = occ.to_face(face)
+    if (BRepAdaptor_Surface(face).GetType()
+            == GeomAbs_SurfaceType.GeomAbs_Plane):
+        return face
+    if not _flat_freeform(face):
+        raise GeometryError("Face is not flat")
+    normal = face_point_normal(face)[1]
+    forward = occ.to_face(face.Oriented(TopAbs_Orientation.TopAbs_FORWARD))
+    if face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED:
+        normal = tuple(-v for v in normal)       # the surface's own way
+
+    def rewired(wire):
+        mk = BRepBuilderAPI_MakeWire()
+        walk = BRepTools_WireExplorer(wire, forward)
+        while walk.More():
+            edge = walk.Current()
+            if not BRep_Tool.Degenerated_s(edge):
+                mk.Add(occ.to_edge(_fresh_edge(edge).Oriented(
+                    edge.Orientation())))
+            walk.Next()
+        if not mk.IsDone():
+            raise GeometryError("The flat face's edges do not close")
+        return mk.Wire()
+
+    outer = BRepTools.OuterWire_s(forward)
+    mk = BRepBuilderAPI_MakeFace(
+        gp_Pln(_pnt(centroid(face)), gp_Dir(*normal)), rewired(outer), True)
+    exp = TopExp_Explorer(forward, occ.WIRE)
+    while exp.More():
+        wire = occ.to_wire(exp.Current())
+        if not wire.IsSame(outer):
+            mk.Add(rewired(wire))
+        exp.Next()
+    if not mk.IsDone():
+        raise GeometryError("The flat face could not be rebuilt as a plane")
+    fix = ShapeFix_Face(mk.Face())
+    fix.Perform()
+    return occ.to_face(fix.Face().Oriented(face.Orientation()))
+
+
+_flattened = (None, None)       # the last shape flattened, and what it gave
+
+
+def _count(shape, kind) -> int:
+    n, exp = 0, TopExp_Explorer(shape, kind)
+    while exp.More():
+        n, _ = n + 1, exp.Next()
+    return n
+
+
+def flat_faces_as_planes(shape):
+    """`shape` with each flat NURBS or Bezier face rebuilt as a plane over
+    the same outline (see `as_plane`), sewn back in, every face keeping
+    its place in the order; `shape` itself when there is no such face, or
+    when the rebuilt shape would not hold together.
+
+    A Gumball drag asks again on every mouse move with the same shape, so
+    the last answer is kept."""
+    global _flattened
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepCheck import BRepCheck_Analyzer
+    from OCP.BRepLib import BRepLib
+    from OCP.TopoDS import TopoDS_Shell
+    from .occ import BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Sewing
+    if _flattened[0] is not None and shape.IsEqual(_flattened[0]):
+        return _flattened[1]
+    faces = faces_of(shape)
+    if not any(_flat_freeform(f) for f in faces):
+        return shape
+    out = shape
+    st = shape.ShapeType()
+    try:
+        if st == occ.FACE:
+            out = as_plane(shape)
+        elif st == occ.SHELL or (st == occ.SOLID
+                                 and _count(shape, occ.SHELL) == 1):
+            planes = [as_plane(f) if _flat_freeform(f) else f for f in faces]
+            sew = BRepBuilderAPI_Sewing(tight())
+            for f in planes:
+                sew.Add(f)
+            sew.Perform()
+            shell, builder = TopoDS_Shell(), BRep_Builder()
+            builder.MakeShell(shell)
+            for f in planes:
+                builder.Add(shell, sew.Modified(f))
+            n, m = (face_point_normal(f)[1]
+                    for f in (faces[0], faces_of(shell)[0]))
+            if sum(a * b for a, b in zip(n, m)) < 0:
+                shell = occ.to_shell(shell.Reversed())
+            out = shell
+            if st == occ.SOLID:
+                mk = BRepBuilderAPI_MakeSolid(shell)
+                out = mk.Solid()
+                BRepLib.OrientClosedSolid_s(out)
+    except GeometryError:
+        out = shape
+    if out is not shape and (
+            len(faces_of(out)) != len(faces)
+            or len(joined_pieces(out)) != len(joined_pieces(shape))
+            or not BRepCheck_Analyzer(out).IsValid()):
+        out = shape
+    _flattened = (shape, out)
+    return out
+
+
 def face_point_normal(face):
     """A representative surface point and outward unit normal on `face`,
     sampled at its mid-parameter — works for curved faces too (where the
@@ -1847,6 +2011,7 @@ def push_pull(shape, face_index: int, distance: float) -> TopoDS_Shape:
     (positive) or carve it inward (negative). A surface has no inside to
     add to or carve from, so there the face is carried out on new walls
     either way (#176)."""
+    shape = flat_faces_as_planes(shape)     # a flat Edge Surface is a plane
     faces = faces_of(shape)
     if not (0 <= face_index < len(faces)):
         raise GeometryError("Face index out of range")
@@ -2006,6 +2171,7 @@ def offset_face(shape, face_index: int, distance: float) -> TopoDS_Shape:
     of its translated outline.  Curved faces retain the surface-offset
     behaviour used to grow, for example, a cylinder's wall.
     """
+    shape = flat_faces_as_planes(shape)     # a flat Edge Surface is a plane
     faces = faces_of(shape)
     if not (0 <= face_index < len(faces)):
         raise GeometryError("Face index out of range")
@@ -2220,6 +2386,7 @@ def tilt_face(shape, face_index: int, point: Point, axis: Point,
     `axis`, which must lie in the face.  Its outline turns rigidly and the
     faces beside it adapt to keep hold of those edges.  A draft angle, a lid
     propped open, a wall leaned back: all this."""
+    shape = flat_faces_as_planes(shape)     # a flat Edge Surface is a plane
     faces = faces_of(shape)
     if not (0 <= face_index < len(faces)):
         raise GeometryError("Face index out of range")
@@ -2540,6 +2707,7 @@ def slide_face(shape, face_index: int, delta: Point) -> TopoDS_Shape:
     faces beside it lean to keep hold of its edges, so a box shears. The
     part of `delta` along the normal is refused rather than dropped: that
     is a move, and the arrow along the normal does it."""
+    shape = flat_faces_as_planes(shape)     # a flat Edge Surface is a plane
     faces = faces_of(shape)
     if not (0 <= face_index < len(faces)):
         raise GeometryError("Face index out of range")
@@ -2559,6 +2727,7 @@ def scale_face(shape, face_index: int, factor: float,
     """Scale a planar face of a solid about its own centre, within its own
     plane, every way or along `axis` only; the faces beside it lean to keep
     hold of its edges, so a box tapers to a frustum or flares."""
+    shape = flat_faces_as_planes(shape)     # a flat Edge Surface is a plane
     faces = faces_of(shape)
     if not (0 <= face_index < len(faces)):
         raise GeometryError("Face index out of range")

@@ -43,7 +43,16 @@ def _close(a, b, tol=1e-6):
 
 def _looks(face):
     """Where a face is, which way it faces and how big it is."""
-    return g.centroid(face), g.face_normal(face), g.surface_area(face)
+    return g.centroid(face), g.face_point_normal(face)[1], g.surface_area(face)
+
+
+def _sides(face):
+    """A face's edges that have a length: an Edge Surface triangle has a
+    fourth, shrunk to a point, that no wall stands on."""
+    from OCP.BRep import BRep_Tool
+    from serpentine3d.core import occ
+    return [e for e in g.edges_of(face)
+            if not BRep_Tool.Degenerated_s(occ.to_edge(e))]
 
 
 def _has(shape, centre, normal, area):
@@ -59,8 +68,7 @@ def _check_carried(before, after, index, distance):
     for i, face in enumerate(faces):
         if i != index:
             assert _has(after, *_looks(face)), f"face {i} was lost or turned"
-    edges = len(g.edges_of(faces[index]))
-    assert len(g.faces_of(after)) == len(faces) + edges
+    assert len(g.faces_of(after)) == len(faces) + len(_sides(faces[index]))
     assert g.shape_kind(after) == "surface"
     assert len(g.joined_pieces(after)) == 1
 

@@ -407,6 +407,9 @@ class Gumball:
                 return None
             face = flist[fidx]
             try:
+                # Flat is where a face lies, not what it was made on: an
+                # Edge Surface triangle in one plane is held as flat.
+                face = g.as_plane(face)
                 axis = np.asarray(g.face_normal(face), float)   # planar
                 centroid = np.asarray(g.centroid(face), float)
                 planar = True

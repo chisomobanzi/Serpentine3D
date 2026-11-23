@@ -21,6 +21,13 @@
   the face is now carried out on new walls either way, and the rest of
   the surface is left as it was, from the Gumball's arrow or extrusion
   square and from `pushpull`.
+- **A flat face made by Edge Surface moves like any flat face** (#176).
+  Edge Surface makes a triangle as a freeform patch with one side shrunk
+  to a point, so a flat one counted as curved: the Gumball gave it only
+  the offset arrow, and the offset refuses such a face. Now a face is
+  flat by where it lies. A flat freeform face is rebuilt as a plane over
+  the same outline when it is pushed, pulled, slid, tilted or tapered,
+  and the Gumball holds it as flat, with every handle a flat face has.
 
 ## 0.13.1 (2026-11-17)
 
