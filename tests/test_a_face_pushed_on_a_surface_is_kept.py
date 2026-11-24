@@ -102,12 +102,13 @@ def test_the_floor_of_an_open_box_is_carried_out_on_walls():
                    distance)
 
 
-@pytest.mark.parametrize("grow", [False, True])
 @pytest.mark.parametrize("distance", [-D, D])
-def test_the_gumball_keeps_the_face_it_drags(distance, grow):
+def test_the_gumballs_extrusion_square_keeps_the_face_it_drags(distance):
+    # the arrow moves the face and the rest follow it instead: see
+    # test_a_moved_face_takes_its_neighbours_with_it
     from serpentine3d.ui.gumball import Gumball
     shape = _flat_three()
-    after = Gumball._face_moved(shape, 0, distance, True, grow)
+    after = Gumball._face_moved(shape, 0, distance, True, True)
     _check_carried(shape, after, 0, distance)
 
 

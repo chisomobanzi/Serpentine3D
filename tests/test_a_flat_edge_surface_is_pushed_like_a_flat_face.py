@@ -104,12 +104,12 @@ def test_a_face_of_flat_edge_surfaces_is_carried_on_walls(index, distance):
     _check_carried(shape, g.push_pull(shape, index, distance), index, distance)
 
 
-@pytest.mark.parametrize("grow", [False, True])
 @pytest.mark.parametrize("distance", [-D, D])
-def test_the_gumball_moves_a_flat_edge_surface_face(distance, grow):
+def test_the_gumballs_extrusion_square_carries_a_flat_edge_surface_face(
+        distance):
     from serpentine3d.ui.gumball import Gumball
     shape = _flat_three()
-    after = Gumball._face_moved(shape, 0, distance, True, grow)
+    after = Gumball._face_moved(shape, 0, distance, True, True)
     _check_carried(shape, after, 0, distance)
 
 
@@ -122,10 +122,10 @@ def test_a_held_flat_edge_surface_face_gets_a_flat_faces_gumball():
     assert ("ext", 2) in gb.handles()
 
 
-@pytest.mark.parametrize("handle", [("move", 2), ("ext", 2)])
-def test_dragging_a_held_flat_edge_surface_face_back_keeps_every_face(handle):
+def test_dragging_the_square_on_a_held_flat_edge_surface_face_keeps_it():
     # Lying on the ground, where the test camera's sideways look can take
-    # hold of the arrow out of them.
+    # hold of the square out of them. The arrow: see
+    # test_a_moved_face_takes_its_neighbours_with_it
     shape = g.join_surfaces([
         _edge_triangle((0, 0, 0), (0, 30, 0), (60, 30, 0)),
         _edge_triangle((0, 0, 0), (60, 30, 0), (100, 30, 0)),
@@ -136,7 +136,7 @@ def test_dragging_a_held_flat_edge_surface_face_back_keeps_every_face(handle):
     _, axes = gb.anchor_and_axes()
     toward = float(np.sign(np.dot(axes[2], normal)))
 
-    assert gb.begin_drag(handle, 10.0, 10.0, NONE)
+    assert gb.begin_drag(("ext", 2), 10.0, 10.0, NONE)
     gb.apply_scalar(-D * toward)
     gb.end_drag()
 

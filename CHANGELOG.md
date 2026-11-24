@@ -19,8 +19,19 @@
   carved away the face itself, so three flat surfaces joined into one lost
   the face held on the Gumball, and pulling one out failed. On a surface
   the face is now carried out on new walls either way, and the rest of
-  the surface is left as it was, from the Gumball's arrow or extrusion
-  square and from `pushpull`.
+  the surface is left as it was, from the Gumball's extrusion square and
+  from `pushpull`.
+- **The Gumball's arrows move a face on a surface, and the faces beside
+  it follow** (#176). Where the faces beside a held face could not stretch
+  to meet it (any surface, or a flat face next to the one held), the
+  arrow fell back to push/pull and built walls, just as the extrusion
+  square does. Now the face's corners move and every face sharing one
+  is rebuilt through where they went, the way a mesh modeller moves a
+  face: flat if it can be, and on a surface a quad that cannot stay flat
+  twists through its four corners. A held edge, and faces and edges held
+  together, move the same way on a surface, and sliding a face along
+  itself now works there too. A solid's faces all stay flat, and moves a
+  solid refused before it still refuses.
 - **A flat face made by Edge Surface moves like any flat face** (#176).
   Edge Surface makes a triangle as a freeform patch with one side shrunk
   to a point, so a flat one counted as curved: the Gumball gave it only

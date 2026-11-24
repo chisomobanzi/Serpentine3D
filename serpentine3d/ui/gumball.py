@@ -1931,13 +1931,15 @@ class Gumball:
 
     @staticmethod
     def _face_moved(orig, fidx, value, planar, grow):
-        """The solid with one face carried `value` along its normal.
+        """The shape with one face carried `value` along its normal.
 
         Growing puts new walls under the face on its old outline. Moving
         lets the faces beside it stretch to meet it instead, so a chamfer
         stays a chamfer and a leaning wall keeps leaning; when the kernel
-        cannot manage that for a flat face, new walls are still better
-        than nothing. A curved face only knows how to offset.
+        cannot manage that for a flat face, as on a surface or beside a
+        face lying flat next to it, the faces beside it follow its corners
+        the way a mesh modeller's would. Only a solid falls back to new
+        walls after that. A curved face only knows how to offset.
         """
         if not planar:
             return g.offset_face(orig, fidx, value)
@@ -1946,6 +1948,15 @@ class Gumball:
         try:
             return g.offset_face(orig, fidx, value)
         except g.GeometryError:
+            pass
+        normal = g.face_point_normal(g.faces_of(orig)[fidx])[1]
+        try:
+            return g.move_face(orig, fidx, tuple(v * value for v in normal))
+        except g.GeometryError:
+            # the arrow builds no walls on a surface (#176): that is the
+            # square's job; a solid keeps its old way out
+            if g.shape_kind(orig) != "solid":
+                raise
             return g.push_pull(orig, fidx, value)
 
     def _face_slid(self, orig, fidx, delta):

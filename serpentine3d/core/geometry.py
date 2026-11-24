@@ -1835,6 +1835,34 @@ def _flat_freeform(face) -> bool:
         BRep_Tool.Surface_s(occ.to_face(face)), tol()).IsPlanar()
 
 
+def _ends(edge):
+    """An edge's first and last points, the way its curve runs."""
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_Orientation
+    from OCP.TopExp import TopExp
+    edge = occ.to_edge(edge.Oriented(TopAbs_Orientation.TopAbs_FORWARD))
+    return (pnt_tuple(BRep_Tool.Pnt_s(TopExp.FirstVertex_s(edge))),
+            pnt_tuple(BRep_Tool.Pnt_s(TopExp.LastVertex_s(edge))))
+
+
+def _straight(edge) -> bool:
+    """Whether `edge` runs straight from end to end, whatever curve it is
+    made on."""
+    a, b = _ends(edge)
+    span = math.dist(a, b)
+    if span <= tol():
+        return False
+    curve = occ.edge_adaptor(occ.to_edge(edge))
+    t0, t1 = curve.FirstParameter(), curve.LastParameter()
+    for k in range(1, 8):
+        p = pnt_tuple(curve.Value(t0 + (t1 - t0) * k / 8))
+        s = sum((p[i] - a[i]) * (b[i] - a[i]) for i in range(3)) / span
+        foot = tuple(a[i] + (b[i] - a[i]) * s / span for i in range(3))
+        if not 0 <= s <= span or math.dist(p, foot) > tol():
+            return False
+    return True
+
+
 def _fresh_edge(edge):
     """A new edge on the same 3D curve as `edge`, carrying no curves on
     any surface: a straight one as a line, since Edge Surface hands back
@@ -1842,24 +1870,10 @@ def _fresh_edge(edge):
     on a face of those rather than failing."""
     from OCP.BRep import BRep_Tool
     from OCP.TopAbs import TopAbs_Orientation
-    from OCP.TopExp import TopExp
     edge = occ.to_edge(edge.Oriented(TopAbs_Orientation.TopAbs_FORWARD))
-    a = pnt_tuple(BRep_Tool.Pnt_s(TopExp.FirstVertex_s(edge)))
-    b = pnt_tuple(BRep_Tool.Pnt_s(TopExp.LastVertex_s(edge)))
-    span = math.dist(a, b)
-    curve = occ.edge_adaptor(edge)
-    t0, t1 = curve.FirstParameter(), curve.LastParameter()
-    if span > tol():
-        straight = True
-        for k in range(1, 8):
-            p = pnt_tuple(curve.Value(t0 + (t1 - t0) * k / 8))
-            s = sum((p[i] - a[i]) * (b[i] - a[i]) for i in range(3)) / span
-            foot = tuple(a[i] + (b[i] - a[i]) * s / span for i in range(3))
-            if not 0 <= s <= span or math.dist(p, foot) > tol():
-                straight = False
-                break
-        if straight:
-            return BRepBuilderAPI_MakeEdge(_pnt(a), _pnt(b)).Edge()
+    if _straight(edge):
+        a, b = _ends(edge)
+        return BRepBuilderAPI_MakeEdge(_pnt(a), _pnt(b)).Edge()
     first, last = BRep_Tool.Range_s(edge)
     return BRepBuilderAPI_MakeEdge(BRep_Tool.Curve_s(edge, first, last),
                                    first, last).Edge()
@@ -1938,50 +1952,301 @@ def flat_faces_as_planes(shape):
     A Gumball drag asks again on every mouse move with the same shape, so
     the last answer is kept."""
     global _flattened
-    from OCP.BRep import BRep_Builder
-    from OCP.BRepCheck import BRepCheck_Analyzer
-    from OCP.BRepLib import BRepLib
-    from OCP.TopoDS import TopoDS_Shell
-    from .occ import BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Sewing
     if _flattened[0] is not None and shape.IsEqual(_flattened[0]):
         return _flattened[1]
     faces = faces_of(shape)
     if not any(_flat_freeform(f) for f in faces):
         return shape
     out = shape
-    st = shape.ShapeType()
     try:
-        if st == occ.FACE:
+        if shape.ShapeType() == occ.FACE:
             out = as_plane(shape)
-        elif st == occ.SHELL or (st == occ.SOLID
-                                 and _count(shape, occ.SHELL) == 1):
-            planes = [as_plane(f) if _flat_freeform(f) else f for f in faces]
-            sew = BRepBuilderAPI_Sewing(tight())
-            for f in planes:
-                sew.Add(f)
-            sew.Perform()
-            shell, builder = TopoDS_Shell(), BRep_Builder()
-            builder.MakeShell(shell)
-            for f in planes:
-                builder.Add(shell, sew.Modified(f))
-            n, m = (face_point_normal(f)[1]
-                    for f in (faces[0], faces_of(shell)[0]))
-            if sum(a * b for a, b in zip(n, m)) < 0:
-                shell = occ.to_shell(shell.Reversed())
-            out = shell
-            if st == occ.SOLID:
-                mk = BRepBuilderAPI_MakeSolid(shell)
-                out = mk.Solid()
-                BRepLib.OrientClosedSolid_s(out)
+            if not BRepCheck_Analyzer(out).IsValid():
+                out = shape
+        else:
+            out = _sewn_in_order(
+                shape, [as_plane(f) if _flat_freeform(f) else f
+                        for f in faces], 0)
     except GeometryError:
-        out = shape
-    if out is not shape and (
-            len(faces_of(out)) != len(faces)
-            or len(joined_pieces(out)) != len(joined_pieces(shape))
-            or not BRepCheck_Analyzer(out).IsValid()):
         out = shape
     _flattened = (shape, out)
     return out
+
+
+def _sewn_in_order(shape, faces, ref: int):
+    """`faces` sewn into what `shape` is, a surface or a solid, each face
+    keeping its place in the order and `faces[ref]` facing the way it
+    does now. GeometryError unless they hold together as `shape` did: as
+    many faces, in as many pieces, valid, and closed if it was a solid."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepLib import BRepLib
+    from OCP.TopoDS import TopoDS_Shell
+    from .occ import BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Sewing
+    st = shape.ShapeType()
+    if st == occ.FACE and len(faces) == 1:
+        if not BRepCheck_Analyzer(faces[0]).IsValid():
+            raise GeometryError("The face would not hold together")
+        return faces[0]
+    if not (st == occ.SHELL or (st == occ.SOLID
+                                and _count(shape, occ.SHELL) == 1)):
+        raise GeometryError("Only one surface or one solid can be rebuilt")
+    sew = BRepBuilderAPI_Sewing(tight())
+    for f in faces:
+        sew.Add(f)
+    sew.Perform()
+    shell, builder = TopoDS_Shell(), BRep_Builder()
+    builder.MakeShell(shell)
+    for f in faces:
+        builder.Add(shell, sew.Modified(f))
+    n, m = (face_point_normal(f)[1] for f in (faces[ref], faces_of(shell)[ref]))
+    if sum(a * b for a, b in zip(n, m)) < 0:
+        shell = occ.to_shell(shell.Reversed())
+    out = shell
+    if st == occ.SOLID:
+        if not BRep_Tool.IsClosed_s(shell):
+            raise GeometryError("The solid would not close")
+        out = BRepBuilderAPI_MakeSolid(shell).Solid()
+        BRepLib.OrientClosedSolid_s(out)
+    if (len(faces_of(out)) != len(faces)
+            or len(joined_pieces(out)) != len(joined_pieces(shape))
+            or not BRepCheck_Analyzer(out).IsValid()):
+        raise GeometryError("The faces would not hold together")
+    return out
+
+
+def _corner_points(shape) -> list:
+    """Every corner of `shape`, once."""
+    from OCP.BRep import BRep_Tool
+    out = []
+    exp = TopExp_Explorer(shape, occ.VERTEX)
+    while exp.More():
+        p = pnt_tuple(BRep_Tool.Pnt_s(occ.to_vertex(exp.Current())))
+        if not any(math.dist(p, q) <= tol() for q in out):
+            out.append(p)
+        exp.Next()
+    return out
+
+
+def _newell(points):
+    """The normal a loop of corners winds about, as long as its area."""
+    n = [0.0, 0.0, 0.0]
+    for p, q in zip(points, points[1:] + points[:1]):
+        n[0] += (p[1] - q[1]) * (p[2] + q[2])
+        n[1] += (p[2] - q[2]) * (p[0] + q[0])
+        n[2] += (p[0] - q[0]) * (p[1] + q[1])
+    return tuple(n)
+
+
+def _twisted_quad(face) -> bool:
+    """Whether `face` is the patch through four corners that
+    `_face_following` leaves where a quad cannot stay flat: it follows
+    its corners again the same way."""
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    surf = BRepAdaptor_Surface(occ.to_face(face))
+    if surf.GetType() not in (GeomAbs_SurfaceType.GeomAbs_BezierSurface,
+                              GeomAbs_SurfaceType.GeomAbs_BSplineSurface):
+        return False
+    if (surf.UDegree(), surf.VDegree(), surf.NbUPoles(),
+            surf.NbVPoles()) != (1, 1, 2, 2):
+        return False
+    sides = edges_of(face)
+    return (_count(face, occ.WIRE) == 1 and len(sides) == 4
+            and all(_straight(e) for e in sides))
+
+
+def _face_following(face, moving, d, twist: bool):
+    """`face` rebuilt through where its corners go when those among
+    `moving` are carried by `d` and the rest stay: an edge between two
+    that go is carried with them, one between two that stay is kept, and
+    one between a corner that goes and one that stays must be straight,
+    and is drawn again between them. `face` must be flat, or a twisted
+    quad this left before. It comes back a plane if its new outline lies
+    in one, and otherwise, if `twist` and it has four sides and no holes,
+    the twisted patch through its four corners; anything else is
+    refused."""
+    import numpy as np
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepTools import BRepTools, BRepTools_WireExplorer
+    from OCP.Geom import Geom_BezierSurface
+    from OCP.ShapeFix import ShapeFix_Face
+    from OCP.TColgp import TColgp_Array2OfPnt
+    from OCP.TopAbs import TopAbs_Orientation
+    from OCP.gp import gp_Pln
+    try:
+        n, _ = _planar_frame(face)
+    except GeometryError:
+        if not _twisted_quad(face):
+            raise GeometryError(
+                "A curved face beside it would have to bend") from None
+        n = face_point_normal(face)[1]
+    reversed_ = face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED
+    if reversed_:
+        n = tuple(-v for v in n)                # the surface's own way
+    forward = occ.to_face(face.Oriented(TopAbs_Orientation.TopAbs_FORWARD))
+    shift = gp_Trsf()
+    shift.SetTranslation(gp_Vec(*d))
+
+    def goes(p):
+        return any(math.dist(p, q) <= tol() for q in moving)
+
+    def rewired(wire):
+        """The wire drawn again, its corners where they go, and those
+        corners in order round it."""
+        mk, corners, sides = BRepBuilderAPI_MakeWire(), [], []
+        walk = BRepTools_WireExplorer(wire, forward)
+        while walk.More():
+            edge = occ.to_edge(walk.Current())
+            walk.Next()
+            if BRep_Tool.Degenerated_s(edge):
+                continue
+            a, b = _ends(edge)
+            if goes(a) and goes(b):
+                new = BRepBuilderAPI_Transform(_fresh_edge(edge), shift,
+                                               True).Shape()
+            elif goes(a) or goes(b):
+                if not _straight(edge):
+                    raise GeometryError(
+                        "A curved edge beside it would have to bend")
+                a, b = (tuple(p[k] + d[k] for k in range(3)) if goes(p)
+                        else p for p in (a, b))
+                new = BRepBuilderAPI_MakeEdge(_pnt(a), _pnt(b)).Edge()
+            else:
+                new = _fresh_edge(edge)
+            new = occ.to_edge(new.Oriented(edge.Orientation()))
+            mk.Add(new)
+            sides.append(new)
+            first, last = _ends(new)
+            corners.append(first if edge.Orientation()
+                           == TopAbs_Orientation.TopAbs_FORWARD else last)
+        if not mk.IsDone():
+            raise GeometryError("The edges of a face beside it do not close")
+        return mk.Wire(), corners, sides
+
+    outer = BRepTools.OuterWire_s(forward)
+    wires = [rewired(outer)]
+    exp = TopExp_Explorer(forward, occ.WIRE)
+    while exp.More():
+        wire = occ.to_wire(exp.Current())
+        if not wire.IsSame(outer):
+            wires.append(rewired(wire))
+        exp.Next()
+
+    # which way the new outline winds, as the old one did about `n`
+    before = []
+    walk = BRepTools_WireExplorer(outer, forward)
+    while walk.More():
+        if not BRep_Tool.Degenerated_s(occ.to_edge(walk.Current())):
+            before.append(pnt_tuple(BRep_Tool.Pnt_s(walk.CurrentVertex())))
+        walk.Next()
+    sense = 1.0 if sum(a * b for a, b in zip(_newell(before), n)) >= 0 \
+        else -1.0
+    toward = np.asarray(_newell(wires[0][1]), float) * sense
+
+    pts = []
+    for _, _, sides in wires:
+        for side in sides:
+            curve = occ.edge_adaptor(side)
+            t0, t1 = curve.FirstParameter(), curve.LastParameter()
+            pts.extend(pnt_tuple(curve.Value(t0 + (t1 - t0) * k / 4))
+                       for k in range(5))
+    pts = np.asarray(pts, float)
+    centre = pts.mean(axis=0)
+    normal = np.linalg.svd(pts - centre)[2][-1]
+    if float(np.dot(normal, toward)) < 0:
+        normal = -normal
+    if float(np.abs((pts - centre) @ normal).max()) <= tol():
+        mk = BRepBuilderAPI_MakeFace(
+            gp_Pln(_pnt(tuple(centre)), gp_Dir(*normal)), wires[0][0], True)
+        for wire, _, _ in wires[1:]:
+            mk.Add(wire)
+        if not mk.IsDone():
+            raise GeometryError("A face beside it could not be rebuilt")
+        fix = ShapeFix_Face(mk.Face())
+        fix.Perform()
+        return occ.to_face(fix.Face().Oriented(face.Orientation()))
+
+    corners = wires[0][1]
+    if not twist or len(wires) > 1 or len(corners) != 4 \
+            or not all(_straight(s) for s in wires[0][2]):
+        raise GeometryError("Moving it would bend a face beside it")
+    poles = TColgp_Array2OfPnt(1, 2, 1, 2)
+    for (i, j), p in zip(((1, 1), (2, 1), (2, 2), (1, 2)), corners):
+        poles.SetValue(i, j, _pnt(p))
+    patch = Geom_BezierSurface(poles)
+    mk = BRepBuilderAPI_MakeFace(patch, tight())
+    if not mk.IsDone():
+        raise GeometryError("A face beside it could not be rebuilt")
+    built = mk.Face()
+    p, du, dv = gp_Pnt(), gp_Vec(), gp_Vec()
+    patch.D1(0.5, 0.5, p, du, dv)
+    across = du.Crossed(dv)
+    away = (across.X() * toward[0] + across.Y() * toward[1]
+            + across.Z() * toward[2]) < 0
+    return occ.to_face(built.Reversed() if away != reversed_ else built)
+
+
+def _with_corners_moved(shape, moving, delta) -> TopoDS_Shape:
+    """`shape` with the corners at the points `moving` carried by `delta`,
+    the way a mesh modeller moves them: a face all of whose corners go is
+    carried whole, a face none of whose corners go stays, and a face in
+    between is rebuilt through where its corners went (see
+    `_face_following`).
+
+    This is the mesh modeller's rule done corner by corner, for where the
+    kernel's draft cannot do it: on a surface, whose open edges have no
+    face beyond them to lean, and beside a face lying flat next to the
+    one moved, which no draft can turn to meet it (#176).
+
+    A surface may be left with a face twisted through four corners, as a
+    mesh modeller leaves a quad; a solid's faces all stay flat, or the
+    move is refused, and so is one that runs a solid into itself."""
+    d = tuple(float(v) for v in delta)
+    solid = shape_kind(shape) == "solid"
+    _unit(d)                                  # "Distance is zero"
+    shift = gp_Trsf()
+    shift.SetTranslation(gp_Vec(*d))
+    out, whole, ref = [], 0, None
+    for i, f in enumerate(faces_of(shape)):
+        going = [any(math.dist(p, q) <= tol() for q in moving)
+                 for p in _corner_points(f)]
+        if not any(going):
+            out.append(f)
+        elif all(going):
+            out.append(occ.to_face(
+                BRepBuilderAPI_Transform(f, shift, True).Shape()))
+            whole += 1
+        else:
+            out.append(_face_following(f, moving, d, not solid))
+            continue
+        if ref is None:
+            ref = i                 # a face that keeps its shape, to face by
+    if whole == len(out):
+        return translate(shape, d)
+    try:
+        result = _sewn_in_order(shape, out, 0 if ref is None else ref)
+    except GeometryError:
+        raise
+    except Exception as e:                    # the kernel's own complaints
+        raise GeometryError("The faces beside it could not follow") from e
+    if solid:
+        from OCP.BRepAlgoAPI import BRepAlgoAPI_Check
+        if not BRepAlgoAPI_Check(result, True, True).IsValid():
+            raise GeometryError("Moving it that far runs the solid into "
+                                "itself")
+    return result
+
+
+def move_face(shape, face_index: int, delta: Point) -> TopoDS_Shape:
+    """Move a face of a surface or solid by `delta`, any way at all, the
+    faces beside it following its corners (see `_with_corners_moved`).
+    The Gumball's arrows do this where the kernel's draft cannot (#176)."""
+    shape = flat_faces_as_planes(shape)     # a flat Edge Surface is a plane
+    faces = faces_of(shape)
+    if not (0 <= face_index < len(faces)):
+        raise GeometryError("Face index out of range")
+    return _with_corners_moved(shape, _corner_points(faces[face_index]),
+                               delta)
 
 
 def face_point_normal(face):
@@ -2458,14 +2723,45 @@ def _face_hinge(face, mid, edge_dir):
 
 
 def move_edge(shape, edge_index: int, delta: Point) -> TopoDS_Shape:
-    """Move a straight edge of a solid by `delta`. Each of the two planar
-    faces it sits between turns about its own far side until it holds the
-    edge's new line, so the faces beside them stretch or trim to suit.
-    Lift the top-front edge of a box and the top tilts while the front just
-    gets taller; push it outward and it is the front that leans.
+    """Move a straight edge of a solid or surface by `delta`. Each of the
+    two planar faces it sits between turns about its own far side until it
+    holds the edge's new line, so the faces beside them stretch or trim to
+    suit. Lift the top-front edge of a box and the top tilts while the
+    front just gets taller; push it outward and it is the front that leans.
+    On a surface, where they cannot turn that way, the faces on its
+    corners follow them instead (see `_with_corners_moved`).
 
     A move along the edge's own line is refused: the line is the same line
     and nothing would change."""
+    from OCP.BRep import BRep_Tool
+    try:
+        return _edge_drafted(shape, edge_index, delta)
+    except GeometryError:
+        if shape_kind(shape) == "solid":
+            raise
+        edge = edges_of(shape)[edge_index]    # in range, or it raised that
+        if BRep_Tool.Degenerated_s(occ.to_edge(edge)):
+            raise
+        if _along_itself(edge, delta):
+            raise GeometryError("Distance is zero") from None
+    # corners are where they are, however the faces are rebuilt
+    return _with_corners_moved(flat_faces_as_planes(shape),
+                               _corner_points(edge), delta)
+
+
+def _along_itself(edge, delta) -> bool:
+    """Whether `delta` runs along a straight `edge`'s own line."""
+    if not _straight(edge):
+        return False
+    a, b = _ends(edge)
+    e = _unit(tuple(b[k] - a[k] for k in range(3)))
+    along = sum(delta[k] * e[k] for k in range(3))
+    return math.dist(tuple(delta[k] - along * e[k] for k in range(3)),
+                     (0, 0, 0)) < tight()
+
+
+def _edge_drafted(shape, edge_index: int, delta: Point) -> TopoDS_Shape:
+    """`move_edge` by turning the two faces on the edge."""
     edges = edges_of(shape)
     if not (0 <= edge_index < len(edges)):
         raise GeometryError("Edge index out of range")
@@ -2520,8 +2816,33 @@ def move_parts(shape, faces, edges, delta: Point) -> TopoDS_Shape:
     pushed straight and left with a kink.
 
     With one face or one edge held this is what push, slide and move_edge
-    already did; with every face held it is a translation.
+    already did; with every face held it is a translation. On a surface,
+    where the faces in between cannot lean that way, they are rebuilt
+    through the moving corners instead (see `_with_corners_moved`).
     """
+    try:
+        return _parts_drafted(shape, faces, edges, delta)
+    except GeometryError:
+        if shape_kind(shape) == "solid":
+            raise
+        flist, elist = faces_of(shape), edges_of(shape)
+        if (not faces and not edges
+                or any(not 0 <= int(i) < len(flist) for i in faces)
+                or any(not 0 <= int(i) < len(elist) for i in edges)
+                or not faces and all(_along_itself(elist[int(i)], delta)
+                                     for i in edges)):
+            raise
+    moving = []
+    for part in ([flist[int(i)] for i in faces]
+                 + [elist[int(i)] for i in edges]):
+        moving += [p for p in _corner_points(part)
+                   if not any(math.dist(p, q) <= tol() for q in moving)]
+    return _with_corners_moved(flat_faces_as_planes(shape), moving, delta)
+
+
+def _parts_drafted(shape, faces, edges, delta: Point) -> TopoDS_Shape:
+    """`move_parts` by leaning the faces in between with the kernel's
+    draft, and offsetting the held ones."""
     from OCP.BRep import BRep_Tool
     d = tuple(float(v) for v in delta)
     _unit(d)                                  # "Distance is zero"
@@ -2703,10 +3024,12 @@ def _refit_outline(shape, face_index: int, moved) -> TopoDS_Shape:
 
 
 def slide_face(shape, face_index: int, delta: Point) -> TopoDS_Shape:
-    """Slide a planar face of a solid within its own plane by `delta`; the
-    faces beside it lean to keep hold of its edges, so a box shears. The
-    part of `delta` along the normal is refused rather than dropped: that
-    is a move, and the arrow along the normal does it."""
+    """Slide a planar face of a solid or surface within its own plane by
+    `delta`; the faces beside it lean to keep hold of its edges, so a box
+    shears. On a surface, where they cannot lean that way, they follow
+    its corners (see `_with_corners_moved`). The part of `delta` along the
+    normal is refused rather than dropped: that is a move, and the arrow
+    along the normal does it."""
     shape = flat_faces_as_planes(shape)     # a flat Edge Surface is a plane
     faces = faces_of(shape)
     if not (0 <= face_index < len(faces)):
@@ -2718,8 +3041,13 @@ def slide_face(shape, face_index: int, delta: Point) -> TopoDS_Shape:
         raise GeometryError("A face slides within its own plane; the arrow "
                             "along the normal moves it out of it")
     _unit(d)                                  # "Distance is zero" for nothing
-    return _refit_outline(shape, face_index,
-                          lambda p: tuple(a + b for a, b in zip(p, d)))
+    try:
+        return _refit_outline(shape, face_index,
+                              lambda p: tuple(a + b for a, b in zip(p, d)))
+    except GeometryError:
+        if shape_kind(shape) == "solid":
+            raise
+    return _with_corners_moved(shape, _corner_points(faces[face_index]), d)
 
 
 def scale_face(shape, face_index: int, factor: float,
