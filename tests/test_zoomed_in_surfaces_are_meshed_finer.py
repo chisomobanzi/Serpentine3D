@@ -267,3 +267,33 @@ def test_lines_on_a_finer_face_stay_in_front_of_it():
     seam = fine.edge_segments[np.linalg.norm(
         fine.edge_segments[:, 1] - fine.edge_segments[:, 0], axis=1) > 0]
     assert _line_sag(seam, np.zeros(3), 20.0) < face / 2
+
+
+def test_a_finer_faces_isocurves_reach_its_finer_triangles():
+    # An isocurve point carries the way to the triangle under it, so the
+    # pane can draw it in front of the face where the surface dips away
+    # (#168). Meshed finer, the triangles under it are new ones.
+    rail1 = g.make_interp_curve([(0, 0, 0), (16, 1, 3), (34, 0, 0)])
+    rail2 = g.make_interp_curve([(2, 36, 4), (14, 34, 11), (26, 27, 6)])
+    profile = g.make_interp_curve([(0, 0, 0), (-3, 18, -9), (2, 36, 4)])
+    trough = g.sweep2(profile, rail1, rail2)
+    base = tessellate(trough)
+    levels = refine.plan(trough, base, _view((10, 18, 0), 2.0,
+                                             elevation=89.0))
+    assert levels
+
+    fine = refine.refined(trough, base, levels)
+
+    assert np.asarray(fine.iso_lift).shape == np.asarray(
+        fine.iso_segments).shape
+    lifted = (np.asarray(fine.iso_segments, float)
+              + np.asarray(fine.iso_lift, float)).reshape(-1, 3)
+    v = np.asarray(fine.vertices, float)
+    a, b, c = (v[fine.triangles[:, k]] for k in range(3))
+    n = np.cross(b - a, c - a)
+    n /= np.linalg.norm(n, axis=1, keepdims=True)
+    for p in lifted[::7]:
+        assert np.abs(np.einsum("ij,ij->i", p - a, n)).min() < 1e-4
+    # and the finer triangles sit nearer the surface, so the lifts shrink
+    assert (np.linalg.norm(fine.iso_lift, axis=-1).max()
+            < np.linalg.norm(base.iso_lift, axis=-1).max())

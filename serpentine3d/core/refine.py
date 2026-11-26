@@ -43,7 +43,7 @@ from . import geometry, occ
 from .occ import BRepBuilderAPI_Copy, BRepMesh_IncrementalMesh
 from .tessellate import (_ISO_SAMPLES, DEFLECTION_FRACTION, FACE_ANGLE,
                          MIN_DEFLECTION, DisplayMesh, _deflection_for,
-                         _edge_polyline, _face_isocurves, _face_mesh)
+                         _edge_polyline, _face_mesh, _iso_lifts, _iso_runs)
 
 # A face is meshed again once its mesh strays more than TRIGGER_PX pixels from
 # the surface, and then finely enough to stray less than TARGET_PX. At zoom
@@ -312,8 +312,8 @@ def plan(shape, base: DisplayMesh, view: View,
 
 def _piece(base: DisplayMesh, facts: _Facts, face: int, level: int):
     """One face meshed at `level`, as (vertices, normals, triangles,
-    curvature, isocurve segments), or None if it will not mesh. Kept for
-    the next ask."""
+    curvature, isocurve segments, their lifts onto these triangles), or
+    None if it will not mesh. Kept for the next ask."""
     global _kept
     key = (base.uid, face, level)
     with _lock:
@@ -331,13 +331,15 @@ def _piece(base: DisplayMesh, facts: _Facts, face: int, level: int):
         samples = min(_MAX_ISO_SAMPLES, int(math.ceil(
             _ISO_SAMPLES * 2 ** ((level + LINE_LEAD) / 2))))
         try:
-            runs = _face_isocurves(facts.faces[face], samples)
+            runs = _iso_runs(copy, samples)
+            lifts = _iso_lifts(copy, piece, runs)
         except Exception:                                   # noqa: BLE001
-            runs = []
-        isos = (np.concatenate([np.stack([r[:-1], r[1:]], axis=1)
-                                for r in runs]) if runs
-                else np.zeros((0, 2, 3)))
-        piece = (*piece, isos)
+            runs, lifts = [], []
+        isos, lift = ((np.concatenate([np.stack([r[:-1], r[1:]], axis=1)
+                                       for r in rs]) if rs
+                       else np.zeros((0, 2, 3)))
+                      for rs in ([r[0] for r in runs], lifts))
+        piece = (*piece, isos, lift)
     with _lock:
         _pieces[key] = piece
         _kept += len(piece[2]) if piece is not None else 0
@@ -382,15 +384,17 @@ def refined(shape, base: DisplayMesh, levels: dict[int, int]) -> DisplayMesh:
     facts = _facts_for(shape, base)
     verts, norms, tris, curv, owners, isos, iso_owners = ([], [], [], [],
                                                           [], [], [])
+    lifts = []
     offset = len(base.local)
     done = []
     for face, level in sorted(levels.items()):
         piece = _piece(base, facts, face, level)
         if piece is None:
             continue
-        v, n, t, c, iso = piece
+        v, n, t, c, iso, lift = piece
         if len(iso):
             isos.append(iso)
+            lifts.append(lift)
             iso_owners.append(np.full(len(iso), face, np.int32))
         verts.append(v)
         norms.append(n)
@@ -442,7 +446,12 @@ def refined(shape, base: DisplayMesh, levels: dict[int, int]) -> DisplayMesh:
              *(base._offsets(i) for i in isos)]).astype(np.float32)
         out.face_of_iso = np.concatenate(
             [base.face_of_iso[kept], *iso_owners]).astype(np.int32)
+        held = (base.iso_lift if len(base.iso_lift) == len(base.local_isos)
+                else np.zeros(base.local_isos.shape, np.float32))
+        out.iso_lift = np.concatenate(
+            [held[kept], *lifts]).astype(np.float32)
     else:
         out.local_isos = base.local_isos
+        out.iso_lift = base.iso_lift
     out.local_points = base.local_points
     return out
