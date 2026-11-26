@@ -24,13 +24,25 @@ jobs:
       - name: Install
         run: uv sync --extra dev --locked --python 3.12
       - name: Unit tests
+        timeout-minutes: 20
         env:
           QT_QPA_PLATFORM: offscreen
         # -n auto: the tests are independent and each one brings its own
         # settings, journal and autosave directories, so they run one per
         # core. Memory is the limit, not cores: each worker can pass 2 GB,
-        # which the standard runner's four cores and 16 GB hold.
-        run: uv run pytest tests/ -q -n auto --ignore=tests/e2e_dod.py
+        # and now and then the four together outgrow the runner's 16 GB.
+        # With swap on, the runner then swaps until GitHub loses touch with
+        # it, and the job sits for 45 minutes and ends with no log. With
+        # swap off the kernel kills a test worker at once, these processes
+        # before the runner's own, and pytest names the test it was on.
+        run: |
+          sudo swapoff -a
+          echo 500 > /proc/self/oom_score_adj
+          free -m
+          uv run pytest tests/ -q -n auto --ignore=tests/e2e_dod.py
+      - name: What ran out of memory
+        if: failure()
+        run: sudo dmesg | grep -iE "out of memory|killed process" || true
 
   headless-smoke:
     runs-on: ubuntu-latest
