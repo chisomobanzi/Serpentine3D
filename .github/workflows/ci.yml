@@ -35,11 +35,14 @@ jobs:
         # the job sits for 45 minutes and ends with no log. So the tests run
         # in a memory group of their own, capped below the runner's memory:
         # there they can only squeeze each other, the runner keeps going,
-        # and the step's timeout and log still work.
+        # and the step's timeout and log still work. A worker that outgrows
+        # the group is killed alone (OOMPolicy=continue; systemd's default
+        # stops the whole group), so pytest names the test it was running.
         run: |
           ( while sleep 5; do free -m | awk '/^Mem:/ {m = $3} /^Swap:/ {s = $3} END {print m, s}'; done > "$RUNNER_TEMP/memory.log" ) &
           sudo -E env "PATH=$PATH" systemd-run --scope --quiet \
             --uid="$(id -u)" --gid="$(id -g)" -p MemoryMax=14G \
+            -p OOMPolicy=continue \
             uv run pytest tests/ -q -n auto --ignore=tests/e2e_dod.py
       - name: Memory the tests used
         if: always()
