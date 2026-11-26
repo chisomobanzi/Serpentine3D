@@ -70,6 +70,32 @@ def _qapp():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def _windows_go_with_their_test(_qapp):
+    """The app's windows a test leaves behind are deleted after it.
+
+    A MainWindow is never freed on its own: its menus, panes and tab row
+    are wired to lambdas that hold it, through connections Qt keeps where
+    Python's collector cannot see them. A CI worker builds hundreds, about
+    95 MB each, and one reached 6 GB and was killed for it.
+
+    Only the app's own classes, without a parent and off screen, and only
+    ones this test made: a window a module shares, made before the test,
+    stays for the next one.
+    """
+    from PySide6.QtCore import QEvent
+    before = set(_qapp.topLevelWidgets())
+    yield
+    # What showing it queued for "as soon as the loop runs" runs first, as
+    # it would in the app; until it has, those timers hold the window.
+    _qapp.processEvents()
+    for w in _qapp.topLevelWidgets():
+        if (w not in before and w.parent() is None and not w.isVisible()
+                and type(w).__module__.startswith("serpentine3d")):
+            w.deleteLater()
+    _qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 def _deploy_fonts():
     """The offscreen platform loads no system fonts on Windows: the font
     database comes up empty and every family query misses — the monospace
