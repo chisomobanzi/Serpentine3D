@@ -14,6 +14,14 @@
 
 ### Fixed
 
+- **A curved surface's isocurves are drawn whole** (#168). They were
+  broken into dashes wherever the surface dipped away from the eye, as a
+  Sweep2 surface does seen from above: the flat triangles a surface is
+  shaded with stand in front of the exact surface there, and hid the line
+  everywhere but near their corners. Each isocurve point now also knows
+  where the triangle under it is, and is drawn at whichever is nearer the
+  eye, so the line keeps the surface's shape and is never hidden by its
+  own face.
 - **A face pushed on a surface stays on it** (#176). Push/pull adds to a
   solid or carves into it, and a surface has no inside: pushing a face in
   carved away the face itself, so three flat surfaces joined into one lost
