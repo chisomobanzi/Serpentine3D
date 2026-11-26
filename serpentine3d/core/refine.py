@@ -47,10 +47,12 @@ from .tessellate import (_ISO_SAMPLES, DEFLECTION_FRACTION, FACE_ANGLE,
 
 # A face is meshed again once its mesh strays more than TRIGGER_PX pixels from
 # the surface, and then finely enough to stray less than TARGET_PX. At zoom
-# extents the first mesh strays one or two, so opening a file asks for
-# nothing.
-TRIGGER_PX = 3.0
-TARGET_PX = 1.0
+# extents the first mesh strays one or two, and an outline a pixel or more
+# off the curve shows its corners, so a round part is asked for even seen
+# whole: on Rhino's phone and disk brake samples, about three seconds in the
+# background and a few tens of thousands of triangles.
+TRIGGER_PX = 1.0
+TARGET_PX = 0.5
 # Each level halves the deflection. Eleven of them reach a millionth of the
 # object's size, finer than the float32 offsets a mesh is drawn from can hold.
 MAX_LEVEL = 11

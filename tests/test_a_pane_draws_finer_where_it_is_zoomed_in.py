@@ -88,7 +88,7 @@ def test_zoomed_back_out_the_pane_lets_go(pane):
     ball = scene.add(g.make_sphere((0, 0, 0), 20.0), name="Ball")
     _look(vp, (20, 0, 0), 1.0)
     _settle(vp)
-    _look(vp, (0, 0, 0), 30.0)
+    _look(vp, (0, 0, 0), 60.0)                  # strays under a pixel
     _settle(vp)
     assert vp._refine.shown(ball) is ball.mesh
     assert not vp._refine.meshes

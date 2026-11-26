@@ -72,10 +72,27 @@ def test_zoomed_in_a_sphere_strays_less_than_a_pixel():
     assert _sag(fine, np.zeros(3), 20.0) <= pixel
 
 
+def test_seen_whole_an_outline_that_shows_corners_is_meshed_finer():
+    # Seen whole, a sphere's first mesh strays a pixel or two from it. That
+    # was left alone, and its outline showed corners until zoomed well in.
+    sphere = g.make_sphere((0, 0, 0), 20.0)
+    base = tessellate(sphere)
+    view = _view((0, 0, 0), 25.0)               # 50 units over 600 pixels
+    pixel = 50.0 / H
+    assert _sag(base, np.zeros(3), 20.0) > pixel
+
+    levels = refine.plan(sphere, base, view)
+    assert levels
+    fine = refine.refined(sphere, base, levels)
+    # half a pixel, as near as BRepMesh meets a deflection
+    assert _sag(fine, np.zeros(3), 20.0) <= 0.55 * pixel
+
+
 def test_zoomed_out_nothing_is_meshed_again():
     sphere = g.make_sphere((0, 0, 0), 20.0)
     base = tessellate(sphere)
-    assert refine.plan(sphere, base, _view((0, 0, 0), 25.0)) == {}
+    # 120 units over 600 pixels: the first mesh strays under a pixel
+    assert refine.plan(sphere, base, _view((0, 0, 0), 60.0)) == {}
 
 
 def test_faces_out_of_view_keep_the_mesh_they_had():
@@ -124,14 +141,15 @@ def test_a_finer_face_still_faces_the_same_way():
     def facing(mesh, face):
         v = mesh.vertices[mesh.triangles[mesh.face_of_triangle == face]]
         n = np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0])
-        return n.sum(axis=0)
+        return n.sum(axis=0), np.linalg.norm(n, axis=1).sum()
 
     fine = refine.refined(cylinder, base, levels)
     for face in levels:
-        before, after = facing(base, face), facing(fine, face)
-        # the side's normals cancel round the circle; its winding still
-        # agrees with each base triangle's, checked through the shading
-        if np.linalg.norm(before) > 1e-6:
+        (before, area), (after, _) = facing(base, face), facing(fine, face)
+        # the side's normals cancel round the circle, to float noise; its
+        # winding still agrees with each base triangle's, checked through
+        # the shading
+        if np.linalg.norm(before) > 1e-3 * area:
             assert np.dot(before, after) > 0
     tri = fine.triangles[fine.face_of_triangle == 0]
     v = fine.vertices[tri]
@@ -195,16 +213,17 @@ def test_the_original_shape_is_not_remeshed():
     assert len(again.triangles) == len(base.triangles)
 
 
-def test_zoom_extents_in_perspective_asks_for_nothing():
+def test_in_perspective_a_round_face_is_measured_where_it_is_nearest():
     # A box's nearest corner stands well in front of a round face, so
-    # measured there a sphere seen whole looked three pixels out. It is
-    # measured at the nearest point of its mesh instead.
-    # Seen corner-on, filling about 60% of a pane 1000 pixels tall.
+    # measured there a sphere seen whole looked half again as far out as it
+    # is: here 1.3 pixels, where its mesh strays 0.84. It is measured at
+    # the nearest point of its mesh instead.
+    # Seen corner-on, filling most of a pane 200 pixels tall.
     sphere = g.make_sphere((0, 0, 0), 20.0)
     base = tessellate(sphere)
-    cam = _camera((0, 0, 0), 83.0, "perspective", elevation=35.26)
+    cam = _camera((0, 0, 0), 60.0, "perspective", elevation=35.26)
     cam.azimuth = math.radians(45.0)
-    assert refine.plan(sphere, base, refine.View.of(cam, 1600, 1000)) == {}
+    assert refine.plan(sphere, base, refine.View.of(cam, 320, 200)) == {}
 
 
 def test_a_flat_face_with_straight_edges_is_left_alone():
