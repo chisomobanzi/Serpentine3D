@@ -363,6 +363,37 @@ out vec4 frag;
 void main() { frag = uColor; }
 """
 
+# An isocurve's points lie on the exact surface, and each carries how far
+# it is, along the normal, to the plane of the flat triangle drawn there.
+# Where the surface dips away from the eye that triangle stands in front of
+# the point and hid the line in dashes (#168), so each point is drawn at
+# whichever end is nearer the eye: on the surface, or on its triangle,
+# which the face's push back lets the line win. Seen square on, the two
+# are the same spot on screen, so the line keeps the surface's shape. It
+# comes nearer again by the gap between them, so a piece of line crossing
+# from one triangle to the next keeps clear of the crease; nothing further
+# behind than that shows through.
+ISO_VERT = """
+#version 330 core
+layout(location=0) in vec3 pos;
+layout(location=1) in vec3 lift;
+uniform mat4 uMVP;
+uniform int uClipCount;
+uniform vec4 uClips[4];
+out float gl_ClipDistance[4];
+void main() {
+    vec4 on = uMVP * vec4(pos, 1.0);
+    vec4 up = uMVP * vec4(pos + lift, 1.0);
+    float zOn = on.z / on.w, zUp = up.z / up.w;
+    bool nearer = zUp < zOn;
+    vec3 p = nearer ? pos + lift : pos;
+    gl_Position = nearer ? up : on;
+    gl_Position.z -= abs(zUp - zOn) * gl_Position.w;
+    for (int i = 0; i < uClipCount; ++i)
+        gl_ClipDistance[i] = dot(uClips[i], vec4(p, 1.0));
+}
+"""
+
 # A scan's points: colour rides on the vertex, the size is pixels, and a
 # selected cloud is tinted towards the selection colour on the card rather
 # than recoloured point by point on the CPU.
@@ -511,6 +542,7 @@ def _dashed_edge_segments(mesh, pattern, scale):
 # Two shapes cover everything drawn: bare positions, and the seven-float
 # vertex the shaded and wide-line shaders both read.
 _POINT_ATTRS = ((0, 3, 0, 0),)
+_ISO_ATTRS = ((0, 3, 24, 0), (1, 3, 24, 12))      # position, then lift
 _WIDE_ATTRS = ((0, 3, 28, 0), (1, 3, 28, 12), (2, 1, 28, 24))
 
 # What can share a draw call. A mesh past the triangle limit keeps its own,
@@ -1067,7 +1099,11 @@ class _MeshBuffers:
             pts = (np.ascontiguousarray(mesh.local_isos, np.float32)
                    if mesh.far
                    else rebased(mesh.local_isos, self.anchor)).reshape(-1, 3)
-            self.iso_vbo = self._upload(GL.GL_ARRAY_BUFFER, pts)
+            lift = (mesh.iso_lift if len(mesh.iso_lift) == len(mesh.local_isos)
+                    else np.zeros(mesh.local_isos.shape, np.float32))
+            both = np.hstack([pts, np.asarray(lift, np.float32).reshape(-1, 3)])
+            self.iso_vbo = self._upload(GL.GL_ARRAY_BUFFER,
+                                        np.ascontiguousarray(both))
             self.iso_count = len(pts)
 
     def _upload(self, target, data) -> int:
@@ -1137,7 +1173,7 @@ class _GpuObject:
                                                 ebo=buf.thick_ebo)
             self.thick_count = buf.thick_count
         if buf.iso_count:
-            self.iso_vao = self._vertex_array(buf.iso_vbo, _POINT_ATTRS)
+            self.iso_vao = self._vertex_array(buf.iso_vbo, _ISO_ATTRS)
             self.iso_count = buf.iso_count
         GL.glBindVertexArray(0)
 
@@ -1460,7 +1496,7 @@ class Viewport(QOpenGLWidget):
         self._marker_points: list = []
         self._last_mouse = None
         self._mesh_prog = self._line_prog = self._bg_prog = 0
-        self._thick_prog = 0
+        self._thick_prog = self._iso_prog = 0
         self._point_prog = 0
         self._count_prog = self._cap_prog = 0     # section caps
         self._cap_quad = None
@@ -1525,6 +1561,7 @@ class Viewport(QOpenGLWidget):
         self._grid = None
         self._mesh_prog = _compile(MESH_VERT, MESH_FRAG)
         self._line_prog = _compile(LINE_VERT, LINE_FRAG)
+        self._iso_prog = _compile(ISO_VERT, LINE_FRAG)
         self._thick_prog = _compile(THICK_VERT, LINE_FRAG)
         self._point_prog = _compile(POINT_VERT, POINT_FRAG)
         self._bg_prog = _compile(BG_VERT, BG_FRAG)
@@ -2086,6 +2123,16 @@ class Viewport(QOpenGLWidget):
         self._use(self._line_prog)
         self._set_mvp(self._line_prog, mvp)
         self._set_color4(self._line_prog, color)
+
+    def _draw_isos(self, gpu, mvp, color):
+        """An object's isocurves, each point at the nearer of the surface
+        and the triangle under it (see ISO_VERT)."""
+        self._use(self._iso_prog)
+        self._set_mvp(self._iso_prog, mvp)
+        self._set_color4(self._iso_prog, color)
+        self._line_width(1.0)
+        GL.glBindVertexArray(gpu.iso_vao)
+        GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
 
     def _reset_gl_state(self):
         """Forget what the context is believed to hold.
@@ -2691,7 +2738,7 @@ class Viewport(QOpenGLWidget):
         for i in range(len(clips)):
             GL.glEnable(GL.GL_CLIP_DISTANCE0 + i)
         for prog in (self._mesh_prog, self._line_prog, self._thick_prog,
-                     self._point_prog):
+                     self._point_prog, self._iso_prog):
             self._set_clip_uniforms(prog, clips)
         # What is see-through composits correctly drawn back-to-front, over
         # everything opaque: in a ghosted frame that is the lot, otherwise
@@ -2771,7 +2818,8 @@ class Viewport(QOpenGLWidget):
                 # anchored object needs them re-expressed around its
                 # anchor, and the next unanchored one needs them back.
                 for prog in (self._mesh_prog, self._line_prog,
-                             self._thick_prog, self._point_prog):
+                             self._thick_prog, self._point_prog,
+                             self._iso_prog):
                     self._set_clip_uniforms(prog, oclips)
                 clips_dirty = gpu.anchor is not None
             selected = self._looks_selected(obj.id)
@@ -2943,7 +2991,8 @@ class Viewport(QOpenGLWidget):
                     GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(pts))
             if obj.clip_plane is not None and clips:
                 for prog in (self._mesh_prog, self._line_prog,
-                             self._thick_prog, self._point_prog):
+                             self._thick_prog, self._point_prog,
+                             self._iso_prog):
                     self._set_clip_uniforms(prog, oclips)
             if gpu.iso_count and show_isos:
                 if selected:
@@ -2953,10 +3002,7 @@ class Viewport(QOpenGLWidget):
                 else:
                     iso_color = (color[0] * 0.30, color[1] * 0.30,
                                  color[2] * 0.30, 0.8)
-                self._set_line_uniforms(omvp, iso_color)
-                self._line_width(1.0)
-                GL.glBindVertexArray(gpu.iso_vao)
-                GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
+                self._draw_isos(gpu, omvp, iso_color)
             if len(obj.mesh.points) and not obj.annotation:
                 self._draw_point_markers(omvp, obj.mesh.points,
                                          (*line_color, 1.0), selected,
@@ -3108,10 +3154,7 @@ class Viewport(QOpenGLWidget):
         if gpu.line_count and (show_edges or not gpu.tri_count):
             self._draw_edges(gpu, mvp, edge, width)
         if gpu.iso_count and show_isos:
-            self._set_line_uniforms(mvp, iso)
-            self._line_width(1.0)
-            GL.glBindVertexArray(gpu.iso_vao)
-            GL.glDrawArrays(GL.GL_LINES, 0, gpu.iso_count)
+            self._draw_isos(gpu, mvp, iso)
 
     def _draw_section_caps(self, mvp, view, clips, objects, locked_layers,
                            mode):
@@ -3338,7 +3381,7 @@ class Viewport(QOpenGLWidget):
         for i in range(len(clips)):
             GL.glDisable(GL.GL_CLIP_DISTANCE0 + i)
         for prog in (self._mesh_prog, self._line_prog, self._thick_prog,
-                     self._point_prog):
+                     self._point_prog, self._iso_prog):
             self._set_clip_uniforms(prog, [])
 
     # ------------------------------------------------------------ point clouds

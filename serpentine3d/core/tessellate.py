@@ -69,6 +69,11 @@ class DisplayMesh:
     # isoparametric curves on curved faces (display only, not pickable)
     local_isos: np.ndarray = field(
         default_factory=lambda: np.zeros((0, 2, 3), np.float32))
+    # from each isocurve point to the plane of the triangle drawn under it,
+    # along that triangle's normal: a pane draws the point at whichever end
+    # is nearer the eye, so the line never sinks behind its face (#168)
+    iso_lift: np.ndarray = field(
+        default_factory=lambda: np.zeros((0, 2, 3), np.float32))
     # signed mean curvature per vertex (for curvature analysis display)
     curvature: np.ndarray = field(
         default_factory=lambda: np.zeros(0, np.float32))
@@ -267,6 +272,11 @@ def merged(meshes) -> DisplayMesh:
         parts = [getattr(m, name) for m in meshes if len(getattr(m, name))]
         if parts:
             setattr(mesh, name, np.concatenate(parts))
+    lifts = [m.iso_lift if len(m.iso_lift) == len(m.local_isos)
+             else np.zeros(m.local_isos.shape, np.float32)
+             for m in meshes if len(m.local_isos)]
+    if lifts:
+        mesh.iso_lift = np.concatenate(lifts)
     return mesh
 
 
@@ -536,6 +546,12 @@ def _face_isocurves(face) -> list[np.ndarray]:
     in the plane of the edges already drawn around them, so they add
     nothing to read and plenty to look at.
     """
+    return [run[0] for run in _iso_runs(face)]
+
+
+def _iso_runs(face) -> list[tuple]:
+    """`_face_isocurves`, each polyline with the parameter along it at
+    each point, which parameter is held (0 for u, 1 for v), and at what."""
     from ..core.occ import (
         BRepAdaptor_Surface, BRepTopAdaptor_FClass2d, TopAbs_State, gp_Pnt2d,
     )
@@ -550,28 +566,107 @@ def _face_isocurves(face) -> list[np.ndarray]:
     classifier = BRepTopAdaptor_FClass2d(face, 1e-9)
     inside = (TopAbs_State.TopAbs_IN, TopAbs_State.TopAbs_ON)
 
-    polylines = []
-    for direction in ("u", "v"):
+    runs = []
+    for held, direction in enumerate(("u", "v")):
         for frac in _ISO_FRACTIONS:
-            run = []
+            at = (u0 + (u1 - u0) * frac if direction == "u"
+                  else v0 + (v1 - v0) * frac)
+            run, along = [], []
             for i in range(_ISO_SAMPLES + 1):
                 t = i / _ISO_SAMPLES
                 if direction == "u":
-                    u = u0 + (u1 - u0) * frac
+                    u = at
                     v = v0 + (v1 - v0) * t
                 else:
                     u = u0 + (u1 - u0) * t
-                    v = v0 + (v1 - v0) * frac
+                    v = at
                 if classifier.Perform(gp_Pnt2d(u, v)) in inside:
                     p = surf.Value(u, v)
                     run.append((p.X(), p.Y(), p.Z()))
+                    along.append(v if direction == "u" else u)
                 else:
                     if len(run) >= 2:
-                        polylines.append(np.asarray(run, float))
-                    run = []
+                        runs.append((np.asarray(run, float),
+                                     np.asarray(along), held, at))
+                    run, along = [], []
             if len(run) >= 2:
-                polylines.append(np.asarray(run, float))
-    return polylines
+                runs.append((np.asarray(run, float), np.asarray(along),
+                             held, at))
+    return runs
+
+
+def _iso_lifts(face, mesh: tuple, runs: list) -> list[np.ndarray]:
+    """For each of `runs` (see `_iso_runs`), the vector from each point to
+    the plane of the triangle of `mesh`, what `_face_mesh` gave for
+    `face`, that the point falls in: along that triangle's normal, so seen
+    face-on it moves the point only nearer or further. Zero where a point
+    falls in none, or `face` has no triangles to say."""
+    zero = [np.zeros_like(run[0]) for run in runs]
+    tri = occ.triangulation(face, TopLoc_Location())
+    if not runs or tri is None or not tri.HasUVNodes():
+        return zero
+    verts, tris = mesh[0], mesh[2]
+    n = tri.NbNodes()
+    if len(verts) != n:
+        return zero
+    uv = np.empty((n, 2), np.float64)
+    for i in range(1, n + 1):
+        q = tri.UVNode(i)
+        uv[i - 1] = (q.X(), q.Y())
+    a = verts[tris[:, 0]]
+    normals = np.cross(verts[tris[:, 1]] - a, verts[tris[:, 2]] - a)
+    size = np.linalg.norm(normals, axis=1, keepdims=True)
+    normals = np.divide(normals, size, out=np.zeros_like(normals),
+                        where=size > 0)
+    span = np.ptp(uv, axis=0)
+
+    out = []
+    for (pts, along, held, at), lift in zip(runs, zero):
+        rows, lo, hi = _crossed(uv[:, held], uv[:, 1 - held], tris, at,
+                                span[held] * 1e-9)
+        if len(rows):
+            # the triangle each point falls in: the last one the line
+            # enters before it, if it has not left it yet
+            order = np.argsort(lo)
+            k = order[np.maximum(np.searchsorted(lo[order], along,
+                                                 side="right") - 1, 0)]
+            slack = span[1 - held] * 1e-9
+            got = (along >= lo[k] - slack) & (along <= hi[k] + slack)
+            t = rows[k[got]]
+            nk = normals[t]
+            lift[got] = -np.einsum("ij,ij->i", pts[got] - a[t], nk)[:, None] * nk
+        out.append(lift)
+    return out
+
+
+def _crossed(level: np.ndarray, along: np.ndarray, tris: np.ndarray,
+             at: float, within: float = 0.0):
+    """The triangles of `tris` that the line on which `level`, a value at
+    each vertex, equals `at` passes through, and from where to where
+    along it, in `along`, another value at each vertex: (rows, lo, hi).
+
+    A corner `within` of the line is on it, and counts as above it, so a
+    line along an edge is taken by the triangle below it only, and one
+    that only touches a corner by none."""
+    d = level[tris] - at
+    d[np.abs(d) <= within] = 0.0
+    above = d >= 0
+    count = above.sum(axis=1)
+    rows = np.flatnonzero((count == 1) | (count == 2))
+    d, above, corners, count = d[rows], above[rows], tris[rows], count[rows]
+    # the corner alone on its side, and where the line crosses the two
+    # edges running from it
+    lone = np.where(count == 1, above.argmax(axis=1), above.argmin(axis=1))
+    each = np.arange(len(lone))
+    ends = []
+    for step in (1, 2):
+        other = (lone + step) % 3
+        t = d[each, lone] / (d[each, lone] - d[each, other])
+        p, q = corners[each, lone], corners[each, other]
+        ends.append(along[p] + (along[q] - along[p]) * t)
+    lo, hi = np.minimum(*ends), np.maximum(*ends)
+    passes = hi > lo                 # not only touching it at a corner
+    return rows[passes], lo[passes], hi[passes]
 
 
 def _hatch_outline(shape):
@@ -611,6 +706,7 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         BRepMesh_IncrementalMesh(shape, deflection, False, 0.35, True)
 
     all_verts, all_norms, all_tris, all_curv, isos = [], [], [], [], []
+    lifts = []
     tri_face_ids = []
     offset = 0
     face_index = -1
@@ -630,8 +726,11 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         tri_face_ids.append(np.full(len(tris), face_index, np.int32))
         offset += len(verts)
         try:
-            for pts in _face_isocurves(face):
+            runs = _iso_runs(face)
+            for run, lift in zip(runs, _iso_lifts(face, fm, runs)):
+                pts = run[0]
                 isos.append(np.stack([pts[:-1], pts[1:]], axis=1))
+                lifts.append(np.stack([lift[:-1], lift[1:]], axis=1))
         except Exception:
             pass
 
@@ -661,4 +760,6 @@ def tessellate(shape, deflection: float | None = None) -> DisplayMesh:
         mesh.face_of_triangle = np.concatenate(tri_face_ids)
     if segments:
         mesh.edge_of_segment = np.concatenate(seg_edge_ids)
+    if lifts:
+        mesh.iso_lift = np.concatenate(lifts).astype(np.float32)
     return mesh
