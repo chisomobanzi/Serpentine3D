@@ -22,6 +22,16 @@
   where the triangle under it is, and is drawn at whichever is nearer the
   eye, so the line keeps the surface's shape and is never hidden by its
   own face.
+- **A curved surface stays smooth, seen whole or zoomed in (#168).** A
+  surface is drawn from a mesh made once, at 0.2% of its object's size, so
+  its shaded outline was a polygon a pixel or more off the curve, with
+  corners you could see even seen whole. A view that has stopped moving
+  now meshes the faces it is looking at again, finely enough that none
+  strays more than half a pixel, and lets them go when you zoom back out.
+  Only faces that would look different are redone: a flat face with
+  straight edges never is, nor a small round already meshed finer than it
+  needs. Only that view pays for it; the other views, exports and prints
+  keep the mesh they had.
 - **A face pushed on a surface stays on it** (#176). Push/pull adds to a
   solid or carves into it, and a surface has no inside: pushing a face in
   carved away the face itself, so three flat surfaces joined into one lost

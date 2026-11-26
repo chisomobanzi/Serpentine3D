@@ -1360,6 +1360,7 @@ class Viewport(QOpenGLWidget):
     textEditRequested = Signal(str)          # editable model text, by id
     paperTextEditRequested = Signal(str)     # editable paper note, by id
     _tessDone = Signal()                    # a background mesh finished
+    _refineDone = Signal(object)            # a finer mesh, see refine_view
 
     def __init__(self, scene, selection, config=None, parent=None):
         super().__init__(parent)
@@ -1487,6 +1488,11 @@ class Viewport(QOpenGLWidget):
         self._centre_cache: dict[str, np.ndarray] = {}
         self._tessDone.connect(self._on_tess_done,
                                Qt.ConnectionType.QueuedConnection)
+        # finer meshes for what this pane is zoomed in on; see refine_view
+        from .refine_view import PaneRefiner
+        self._refine = PaneRefiner(self)
+        self._refineDone.connect(self._refine.install,
+                                 Qt.ConnectionType.QueuedConnection)
         self._preview: _LineBatch | None = None
         self._preview_data = np.zeros((0, 3))
         self._ghost = None                     # DisplayMesh of pending result
@@ -1738,6 +1744,7 @@ class Viewport(QOpenGLWidget):
             return
 
         self._refresh_camera_bounds()
+        self._refine.frame(w, h)
         view = self.camera.view_matrix()
         mvp64 = self.camera.proj_matrix(w, h) @ view
         self._frame_anchor = view_anchor(self.camera.target)
@@ -2409,9 +2416,11 @@ class Viewport(QOpenGLWidget):
         """Everything the reconcile below reads, so it can be skipped when
         none of it has moved. A temporary pick moves no scene revision.
         See `_sync_gpu`."""
+        # The finer meshes' epoch stays last: refine_view keys its own cache
+        # on the rest, and _sync_gpu reads the linetypes as key[2].
         return (self.scene.revision, self._tess_epoch,
                 self._layer_linetypes(), self._visible_layers(),
-                self.scene.showing_only)
+                self.scene.showing_only, self._refine.epoch)
 
     def _sync_gpu(self):
         """Reconcile the GPU cache against the scene: buffers for what is new,
@@ -2448,9 +2457,10 @@ class Viewport(QOpenGLWidget):
                     del self._gpu[obj.id]
                 continue
             self._tess_pending.pop(obj.id, None)
-            live_meshes.add(obj.mesh.uid)
+            mesh = self._refine.shown(obj)
+            live_meshes.add(mesh.uid)
             lt_name = self._effective_linetype(obj, layer_types)
-            if gpu is not None and (gpu.mesh_key != obj.mesh.uid
+            if gpu is not None and (gpu.mesh_key != mesh.uid
                                     or gpu.dash_key != lt_name):
                 gpu.release()
                 gpu = None
@@ -2458,9 +2468,9 @@ class Viewport(QOpenGLWidget):
             if gpu is None:
                 dash = ((_lt.pattern_for(lt_name), 1.0)
                         if lt_name != "Continuous" else None)
-                self._gpu[obj.id] = _GpuObject(obj.mesh, dash=dash,
+                self._gpu[obj.id] = _GpuObject(mesh, dash=dash,
                                                dash_key=lt_name)
-                self._warm_pick_index(obj.mesh)
+                self._warm_pick_index(mesh)
         for dead in set(self._gpu) - live:
             self._gpu[dead].release()
             del self._gpu[dead]
@@ -2960,10 +2970,13 @@ class Viewport(QOpenGLWidget):
             rebuilding = self.selection.rebuilding == obj.id
             subs = self.selection.subobjects_of(obj.id, "edge") \
                 if self.selection.subobjects and not rebuilding else []
-            if subs and len(obj.mesh.edge_of_segment):
-                mask = np.isin(obj.mesh.edge_of_segment, subs)
+            fsubs = self.selection.subobjects_of(obj.id, "face") \
+                if self.selection.subobjects and not rebuilding else []
+            shown = self._refine.shown(obj) if subs or fsubs else None
+            if subs and len(shown.edge_of_segment):
+                mask = np.isin(shown.edge_of_segment, subs)
                 if mask.any():
-                    segs = uploadable(obj.mesh, obj.mesh.local_edges[mask],
+                    segs = uploadable(shown, shown.local_edges[mask],
                                       gpu.anchor)
                     # Gold over a dark halo, the control-point markers'
                     # trick, through the screen-space quad shader: a
@@ -2976,13 +2989,11 @@ class Viewport(QOpenGLWidget):
                         segs, omvp, (*theme.SELECTION_COLOR, 1.0),
                         EDGE_PICK_PX)
                     GL.glEnable(GL.GL_DEPTH_TEST)
-            fsubs = self.selection.subobjects_of(obj.id, "face") \
-                if self.selection.subobjects and not rebuilding else []
-            if fsubs and len(obj.mesh.face_of_triangle):
-                mask = np.isin(obj.mesh.face_of_triangle, fsubs)
+            if fsubs and len(shown.face_of_triangle):
+                mask = np.isin(shown.face_of_triangle, fsubs)
                 if mask.any():
-                    tris = obj.mesh.triangles[mask]
-                    pts = uploadable(obj.mesh, obj.mesh.local[tris.ravel()],
+                    tris = shown.triangles[mask]
+                    pts = uploadable(shown, shown.local[tris.ravel()],
                                      gpu.anchor)
                     self._preview.update(pts)
                     self._set_line_uniforms(omvp,
@@ -3077,7 +3088,8 @@ class Viewport(QOpenGLWidget):
         key = tuple(gpu.mesh_key for _obj, gpu in run)
         batch = self._batches.get(key)
         if batch is None:
-            batch = _Batch([obj.mesh for obj, _gpu in run], key)
+            batch = _Batch([self._refine.shown(obj) for obj, _gpu in run],
+                           key)
             self._batches[key] = batch
             built.append(key)
         batch.look = look
@@ -5100,7 +5112,7 @@ class Viewport(QOpenGLWidget):
                       and self.selection.filter_allows(obj.kind)]
         for obj in self._pick_candidates(selectable, px - r, py - r,
                                          px + r, py + r, w, h):
-            mesh = obj.mesh
+            mesh = self._refine.shown(obj)
             depth = np.inf
             hit = False
             if mesh.is_cloud:
@@ -5237,7 +5249,7 @@ class Viewport(QOpenGLWidget):
         # is not known until all the objects have been looked at.
         found = []
         for obj in near_cursor:
-            mesh = obj.mesh
+            mesh = self._refine.shown(obj)
             if not len(mesh.local_edges):
                 continue
             segs, sub = self._near_segments(mesh, px - r, py - r,
@@ -5281,7 +5293,7 @@ class Viewport(QOpenGLWidget):
         best_t = np.inf
         if self._pick_mode() != "wireframe":
             for obj in near_cursor:         # same rect, already narrowed
-                mesh = obj.mesh
+                mesh = self._refine.shown(obj)
                 if not mesh.has_faces or not len(mesh.face_of_triangle):
                     continue
                 tris, sub = self._near_triangles(mesh, px - r, py - r,
