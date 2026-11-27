@@ -861,6 +861,9 @@ def cmd_zebra(ctx):
 def cmd_gumball(ctx):
     gb = _vp(ctx).gumball
     gb.set_enabled(not gb.enabled)
+    bar = getattr(getattr(ctx, "window", None), "osnap_bar", None)
+    if bar is not None:
+        bar.refresh()
     ctx.echo(f"Gumball {'on' if gb.enabled else 'off'}.")
     yield from ()
 
