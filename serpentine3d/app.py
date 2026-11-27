@@ -1020,7 +1020,12 @@ class MainWindow(QMainWindow):
         # One widget rather than thirty-two actions: a toolbar hides the
         # actions it has no room for behind a chevron, where the palette
         # sizes the tools to the height it has and keeps them all in sight.
-        bar.addWidget(tool_strip(groups, self.run_command, bar))
+        cols = int(self.cfg.get("window", "toolbar_columns", default=1) or 1)
+        strip = tool_strip(groups, self.run_command, bar, columns=cols)
+        bar.addWidget(strip)
+        pal = strip.widget()
+        if pal is not None:
+            pal.columnsChanged.connect(lambda _c: self._repaint_panes())
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, bar)
         self._tools_toolbar = bar
 
@@ -2477,6 +2482,10 @@ class MainWindow(QMainWindow):
 
     def _remember_window(self):
         self.command_workspace.save_settings()
+        from .ui.tool_palette import ToolPalette
+        pal = self._tools_toolbar.findChild(ToolPalette)
+        if pal is not None:
+            self.cfg.set("window", "toolbar_columns", pal.columns())
         self.cfg.set("window", "geometry",
                      bytes(self.saveGeometry().toBase64()).decode())
         self.cfg.set("window", "state",

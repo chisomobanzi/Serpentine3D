@@ -129,6 +129,7 @@ DEFAULTS = {
         # shipped — which opening in a single view did nothing to help.
         # A default only: anyone who leaves in a single view gets one back.
         "layout": "quad",
+        "toolbar_columns": 1,
     },
 }
 
