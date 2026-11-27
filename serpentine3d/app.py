@@ -1200,7 +1200,7 @@ class MainWindow(QMainWindow):
         # and replace its repeat target with the toggle.
         control = resolve(name)
         if (self.processor.busy and control is not None
-                and control.name in ("ortho", "gridsnap")):
+                and control.name in ("ortho", "gridsnap", "gumball")):
             for _ in control.fn(self.ctx):
                 pass
             self.osnap_bar.refresh()

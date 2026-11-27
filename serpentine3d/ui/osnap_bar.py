@@ -61,6 +61,12 @@ class OsnapBar(QWidget):
         self._ortho.setChecked(viewport.ortho)
         self._ortho.toggled.connect(self._ortho_toggled)
         layout.addWidget(self._ortho)
+        self._gumball = self._button(
+            "Gumball",
+            "Show the Gumball move/rotate/scale handles on what is picked")
+        self._gumball.setChecked(viewport.gumball.enabled)
+        self._gumball.toggled.connect(self._gumball_toggled)
+        layout.addWidget(self._gumball)
         layout.addStretch(1)
         # A type left set while snaps are off keeps its setting for when
         # they come back on, but must not look on: lit up as usual, the bar
@@ -112,6 +118,11 @@ class OsnapBar(QWidget):
         if self.config:
             self.config.set("ortho", on)
 
+    def _gumball_toggled(self, on: bool):
+        # The gumball saves its own switch (beside its alignment) and
+        # repaints every pane, so there is nothing more to do here.
+        self.viewport.gumball.set_enabled(on)
+
     def refresh(self):
         """Sync button states from viewport (after commands toggle them)."""
         self._master.setChecked(self.viewport.snaps.enabled)
@@ -120,3 +131,4 @@ class OsnapBar(QWidget):
             btn.setChecked(self.viewport.snaps.types.get(t, False))
         self._grid.setChecked(self.viewport.grid_snap)
         self._ortho.setChecked(self.viewport.ortho)
+        self._gumball.setChecked(self.viewport.gumball.enabled)
