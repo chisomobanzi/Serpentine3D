@@ -3181,6 +3181,15 @@ class MainWindow(QMainWindow):
             self.command_line.focus()
             self.command_line.input.insert(text)
             return
+        if (ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                and self.processor.busy):
+            # A click in a viewport gives it the keyboard, and picking is
+            # clicking: the Enter that ends the picking arrives here, not at
+            # the command line. It answers the prompt the same way, with
+            # whatever has been typed there.
+            self.command_line.submit_input()
+            ev.accept()
+            return
         if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             if not self.processor.busy and self.processor.last_command:
                 self.run_command(self.processor.last_command)
