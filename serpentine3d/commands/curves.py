@@ -5,6 +5,7 @@ import numpy as np
 from ..core import geometry as g
 from .base import (
     UNDO_POINT, IntReq, PointReq, SelectReq, command, frame_sides, quadrant)
+from .typed_measure import pick_radius
 
 
 def _back_at_the_start(p, pts) -> bool:
@@ -223,18 +224,7 @@ def cmd_circle(ctx):
         return g.make_circle(center, r, normal=normal) if r > 1e-9 else None
 
     xdir = tuple(ctx.cplane.xdir)
-    rp = yield PointReq("Radius (click, or type a number)",
-                        number_from=(center, xdir),
-                        rubber_from=center, preview_fn=_circle_to,
-                        extra_options=("Diameter",))
-    if rp == "Diameter":
-        # the click means the same thing either way — a point on the rim —
-        # but a typed number is now the width across rather than to the edge
-        rp = yield PointReq(
-            "Diameter (click, or type a number)",
-            number_from=lambda v: tuple(
-                c + (v / 2) * d for c, d in zip(center, xdir)),
-            rubber_from=center, preview_fn=_circle_to)
+    rp = yield from pick_radius(ctx, center, xdir, _circle_to)
     r = math.dist(center, rp)
     if r < 1e-9:
         ctx.echo("Zero radius — no circle created.")
@@ -259,9 +249,10 @@ def cmd_arc(ctx):
             return (g.make_circle(center, r, normal=normal)
                     if r > 1e-9 else None)
 
-        start = yield PointReq("Start of arc (click, or type the radius)",
-                               number_from=(center, tuple(ctx.cplane.xdir)),
-                               rubber_from=center, preview_fn=_ring_to)
+        start = yield from pick_radius(
+            ctx, center, tuple(ctx.cplane.xdir), _ring_to,
+            radius_prompt="Start of arc (click, or type the radius)",
+            diameter_prompt="Start of arc (click, or type the diameter)")
         if math.dist(center, start) < 1e-9:
             ctx.echo("Zero radius — no arc created.")
             return

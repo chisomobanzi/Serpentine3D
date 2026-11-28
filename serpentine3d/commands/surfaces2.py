@@ -6,6 +6,7 @@ from .base import (
     NumberReq, OptionReq, PointReq, SelectReq, TextReq, TextEditorReq,
     command, has_text_editor,
 )
+from .typed_measure import pick_radius
 
 
 @command("patch", aliases=("networksrf",))
@@ -82,9 +83,7 @@ def cmd_helix(ctx):
         r = math.dist(center, p)
         return g.make_circle(center, r, up) if r > 1e-9 else None
 
-    rp = yield PointReq("Radius (click, or type a number)",
-                        number_from=(center, tuple(cp.xdir)),
-                        rubber_from=center, preview_fn=_base_to)
+    rp = yield from pick_radius(ctx, center, tuple(cp.xdir), _base_to)
     radius = math.dist(center, rp)
     if radius < 1e-9:
         ctx.echo("Zero radius — no helix created.")
@@ -292,9 +291,11 @@ def cmd_pipe(ctx):
         except g.GeometryError:
             return None
 
-    rp = yield PointReq("Pipe radius (click, or type a number)",
-                        number_from=(base, side), rubber_from=base,
-                        choices={"Cap": ["Yes", "No"]}, preview_fn=_preview)
+    rp = yield from pick_radius(
+        ctx, base, side, _preview,
+        radius_prompt="Pipe radius (click, or type a number)",
+        diameter_prompt="Pipe diameter (click, or type a number)",
+        choices={"Cap": ["Yes", "No"]})
     radius = read(rp)
     if radius < 1e-9:
         ctx.echo("Zero radius — no pipe created.")

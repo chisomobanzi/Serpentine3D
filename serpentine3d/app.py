@@ -243,6 +243,7 @@ class MainWindow(QMainWindow):
         self.ctx.current_path = None
         self.processor = CommandProcessor(self.ctx)
         self._cursor_preview = None
+        self._last_cursor_world = None
         self._file_picker_open = False
         self._form_dialog_open = False
         self._offered_form = None
@@ -1307,18 +1308,45 @@ class MainWindow(QMainWindow):
             return self.processor.preview_for(req.default)
         return None
 
+    def _typed_constraint(self, cursor=None):
+        if (not self.processor.busy
+                or self.command_workspace.mode == "ai"):
+            return None
+        from .commands.typed_measure import resolve_typed_constraint
+        return resolve_typed_constraint(
+            self.processor.request,
+            self.command_line.input.text(),
+            self.ctx,
+            cursor=cursor,
+        )
+
     def _live_preview(self, text: str, *, use_cursor=False):
         req = self.processor.request
         # Typing supersedes the cursor, even when the text is invalid or
         # cleared. An option chip alone can reuse the current mouse point.
         if not use_cursor:
             self._cursor_preview = None
-        if req is not None and getattr(req, "preview_fn", None) and \
+        tc = None
+        if text.strip() and isinstance(req, PointReq):
+            from .commands.typed_measure import resolve_typed_constraint
+            tc = resolve_typed_constraint(
+                req, text, self.ctx, cursor=self._last_cursor_world)
+        if tc is not None:
+            shape = self.processor.preview_for(tc.preview_value)
+            if tc.rubber_point is not None:
+                self._refresh_rubber(tc.rubber_point)
+        elif req is not None and getattr(req, "preview_fn", None) and \
                 text.strip():
             shape = self.processor.preview_shape(text)
         elif (use_cursor and self._cursor_preview is not None
               and self._cursor_preview[0] is req):
             shape = self.processor.preview_for(self._cursor_preview[1])
+        elif (not text.strip() and self._last_cursor_world is not None
+              and isinstance(req, PointReq)):
+            self._refresh_rubber(self._last_cursor_world)
+            shape = (self.processor.preview_for(self._last_cursor_world)
+                     if getattr(req, "preview_fn", None)
+                     else self._standing_ghost())
         else:
             shape = self._standing_ghost()
         # every pane. A ghost is a shape in the world, not a picture belonging
@@ -1384,7 +1412,11 @@ class MainWindow(QMainWindow):
                 vp.picked_points = picked
                 vp.point_space = space
             self._refresh_rubber(None)
+            if self.command_line.input.text().strip():
+                self._live_preview(
+                    self.command_line.input.text(), use_cursor=True)
         else:
+            self._last_cursor_world = None
             for vp in self.all_viewports():
                 vp.set_point_mode(False)
                 vp.snap_base = None
@@ -1796,6 +1828,20 @@ class MainWindow(QMainWindow):
 
     def _on_point_picked(self, point):
         if isinstance(self.processor.request, PointReq):
+            self._last_cursor_world = point
+            tc = self._typed_constraint(cursor=point)
+            if tc is not None:
+                text = self.command_line.input.text().strip()
+                self.command_line.input.clear()
+                self.command_line.suggestions.hide()
+                if text:
+                    self.command_line._history.append(text)
+                    self.command_line._hist_pos = len(
+                        self.command_line._history)
+                if isinstance(tc.commit_value, tuple):
+                    self.ctx.last_point = tc.commit_value
+                self.processor.provide(tc.commit_value)
+                return
             self.ctx.last_point = point
             self.processor.provide(point)
 
@@ -1807,11 +1853,22 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _on_mouse_world(self, point):
+        self._last_cursor_world = point
+        req = self.processor.request
+        tc = self._typed_constraint(cursor=point)
+        if tc is not None:
+            if tc.rubber_point is not None:
+                self._refresh_rubber(tc.rubber_point, source=self.sender())
+            if isinstance(req, PointReq) and getattr(req, "preview_fn", None):
+                self._cursor_preview = (req, tc.preview_value)
+                ghost = self.processor.preview_for(tc.preview_value)
+                for vp in self.all_viewports():
+                    vp.set_ghost(ghost)
+            return
         # whichever pane the cursor is in, which is not the same as the one
         # last clicked in: the whole point of picking across panes is that
         # you can leave the one you started in without clicking on the way
         self._refresh_rubber(point, source=self.sender())
-        req = self.processor.request
         if isinstance(req, PointReq) and getattr(req, "preview_fn", None):
             self._cursor_preview = (req, point)
             # ghost of the pending result under the cursor, ~30Hz cap
@@ -3180,6 +3237,7 @@ class MainWindow(QMainWindow):
                 and not self.command_line.input.hasFocus()):
             self.command_line.focus()
             self.command_line.input.insert(text)
+            self._live_preview(self.command_line.input.text(), use_cursor=True)
             return
         if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             if not self.processor.busy and self.processor.last_command:
