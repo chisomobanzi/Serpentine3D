@@ -8,6 +8,7 @@ def _dist(a, b) -> float:
 
 from ..core import geometry as g
 from .base import PointReq, command, quadrant
+from .typed_measure import pick_radius
 
 
 @command("box")
@@ -174,9 +175,7 @@ def cmd_sphere(ctx):
         r = _dist(center, p)
         return g.make_sphere(center, r) if r > 1e-9 else None
 
-    rp = yield PointReq("Radius (click, or type a number)",
-                        number_from=(center, tuple(ctx.cplane.xdir)),
-                        rubber_from=center, preview_fn=_sphere_to)
+    rp = yield from pick_radius(ctx, center, tuple(ctx.cplane.xdir), _sphere_to)
     r = _dist(center, rp)
     if r < 1e-9:
         ctx.echo("Zero radius — no sphere created.")
@@ -199,9 +198,7 @@ def cmd_cylinder(ctx):
         r = _dist(base, p)
         return g.make_circle(base, r, up) if r > 1e-9 else None
 
-    rp = yield PointReq("Radius (click, or type a number)",
-                        number_from=(base, tuple(cp.xdir)),
-                        rubber_from=base, preview_fn=_circle_to)
+    rp = yield from pick_radius(ctx, base, tuple(cp.xdir), _circle_to)
     r = _dist(base, rp)
 
     def _cyl_to(p):
@@ -233,9 +230,10 @@ def cmd_cone(ctx):
         r = _dist(base, p)
         return g.make_circle(base, r, up) if r > 1e-9 else None
 
-    rp = yield PointReq("Base radius (click, or type a number)",
-                        number_from=(base, tuple(cp.xdir)),
-                        rubber_from=base, preview_fn=_circle_to)
+    rp = yield from pick_radius(
+        ctx, base, tuple(cp.xdir), _circle_to,
+        radius_prompt="Base radius (click, or type a number)",
+        diameter_prompt="Base diameter (click, or type a number)")
     r = _dist(base, rp)
 
     def _cone_to(p):
@@ -265,9 +263,10 @@ def cmd_torus(ctx):
         r = _dist(center, p)
         return g.make_circle(center, r, up) if r > 1e-9 else None
 
-    rp = yield PointReq("Major radius (click, or type a number)",
-                        number_from=(center, tuple(cp.xdir)),
-                        rubber_from=center, preview_fn=_ring_to)
+    rp = yield from pick_radius(
+        ctx, center, tuple(cp.xdir), _ring_to,
+        radius_prompt="Major radius (click, or type a number)",
+        diameter_prompt="Major diameter (click, or type a number)")
     r1 = _dist(center, rp)
     if r1 < 1e-9:
         ctx.echo("Zero major radius — no torus created.")
@@ -288,9 +287,10 @@ def cmd_torus(ctx):
         except g.GeometryError:
             return None
 
-    tp = yield PointReq("Minor (tube) radius (click, or type a number)",
-                        number_from=(ring, tuple(cp.xdir)),
-                        rubber_from=ring, preview_fn=_torus_to)
+    tp = yield from pick_radius(
+        ctx, ring, tuple(cp.xdir), _torus_to,
+        radius_prompt="Minor (tube) radius (click, or type a number)",
+        diameter_prompt="Minor (tube) diameter (click, or type a number)")
     shape = _torus_to(tp)
     if shape is None:
         ctx.echo("Tube radius must be greater than zero and smaller than the "
